@@ -15,6 +15,11 @@ What this does: appends the source to the `packages` array in
 { "packages": ["…", "../../develop/pi-ptc-subagents"] }
 ```
 
+Note the stored form: pi rewrites a local path **relative to the settings file's
+directory** — an absolute path you pass becomes a `../../…`-style entry, and
+`pi list` resolves it back to the absolute path. That is pi's normalization, not
+a different install method: the command is always `pi install <path>`.
+
 pi reads the package's `pi.extensions` manifest field (`./dist/index.js`), so on
 the **next pi startup** the extension loads with no further steps — `ptc_run_code`
 and `ptc_workflow` are simply there.
