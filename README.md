@@ -50,8 +50,8 @@ required — install it and the extension is on for the next pi startup.
 ```bash
 npm install
 npm run typecheck     # tsc --noEmit
-npm run lint          # oxlint
-npm run format        # oxfmt (writes); `npm run format:check` verifies
+npm run lint          # oxlint          (`npm run lint:fix` applies fixes)
+npm run fmt           # oxfmt (writes); `npm run fmt:check` verifies
 npm test              # node --test over tests/**/*.test.ts
 npm run build         # rolldown bundle + declaration emit
 ```
