@@ -10,11 +10,12 @@ import ptcSubagents, {
   runPtcProgram,
   WORKER_FRAME_KIND,
 } from "../src/index.ts";
+import { captureRegisteredTools } from "./helpers/ptc.ts";
 
 /**
- * A stub is enough here: T3 ships no tool registration, so the factory's contract with pi
- * is just "be a function pi can call with an ExtensionAPI" — which the parameter type
- * checks against pi's real declaration at compile time.
+ * A stub is enough here: the factory's contract with pi is just "register the PTC tools with the
+ * ExtensionAPI it is handed" — which the parameter type checks against pi's real declaration at
+ * compile time.
  */
 const stub = {
   registerTool: () => {},
@@ -25,6 +26,15 @@ test("the default export is the extension factory and runs without touching pi",
   assert.equal(typeof ptcSubagents, "function");
   assert.equal(ptcSubagents.length, 1, "the factory takes the ExtensionAPI parameter");
   assert.equal(ptcSubagents(stub), undefined);
+});
+
+test("the factory registers the PTC tools against the ExtensionAPI", () => {
+  const tools = captureRegisteredTools();
+  assert.deepEqual([...tools.keys()], ["ptc_run_code"]);
+  const tool = tools.get("ptc_run_code");
+  assert.equal(typeof tool?.execute, "function");
+  assert.equal(typeof tool?.description, "string");
+  assert.equal(typeof tool?.parameters, "object");
 });
 
 test("the factory module re-exports the machinery T4/T5 build on", () => {

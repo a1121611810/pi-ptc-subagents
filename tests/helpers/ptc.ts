@@ -6,6 +6,8 @@
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import ptcSubagents from "../../src/index.ts";
 import type { Binding, BindingTable } from "../../src/runtime/bindings.ts";
 
 /** Timeout applied to tests that spawn real workers, so a deadlock fails instead of hanging. */
@@ -23,6 +25,33 @@ export async function removeTempDir(dir: string): Promise<void> {
 /** A binding whose `execute` is the supplied function. */
 export function makeBinding(name: string, execute: Binding["execute"]): Binding {
   return { name, execute };
+}
+
+/**
+ * Run the extension factory against a recording stub and return the tools it registered,
+ * keyed by registered name. This is the registration path pi itself takes, so the definitions
+ * under test are the ones the model would actually call.
+ */
+export function captureRegisteredTools(): Map<string, ToolDefinition> {
+  const tools = new Map<string, ToolDefinition>();
+  const stub = {
+    registerTool: (tool: ToolDefinition) => {
+      tools.set(tool.name, tool);
+    },
+  } as unknown as ExtensionAPI;
+  ptcSubagents(stub);
+  return tools;
+}
+
+/**
+ * Minimal execution context for tool tests.
+ *
+ * The tool layer reads exactly one field — `cwd` (see `src/tools/common.ts`) — but the real
+ * parameter type is pi's `ExtensionContext`, so tests pass this narrowed object through a cast
+ * rather than fabricating a whole session.
+ */
+export function toolContext(cwd: string): ExtensionContext {
+  return { cwd } as unknown as ExtensionContext;
 }
 
 /** Build a binding table; keys become the `tools.<name>` namespace in the worker. */
