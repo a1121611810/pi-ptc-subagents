@@ -43,6 +43,7 @@ const initFrame = {
   surface: "run_code",
   code: "return 1;",
   bindings: ["read", "bash"],
+  bindingCandidates: ["read", "bash", "edit", "write"],
   maxItemsPerCall: DEFAULT_CONFIG.maxItemsPerCall,
   maxPendingCalls: DEFAULT_CONFIG.maxPendingCalls,
 };
@@ -85,6 +86,8 @@ test("init frame guard validates every field", () => {
   assert.equal(isPtcInitFrame({ ...initFrame, code: undefined }), false);
   assert.equal(isPtcInitFrame({ ...initFrame, bindings: ["read", 7] }), false);
   assert.equal(isPtcInitFrame({ ...initFrame, bindings: "read" }), false);
+  assert.equal(isPtcInitFrame({ ...initFrame, bindingCandidates: ["read", 7] }), false);
+  assert.equal(isPtcInitFrame({ ...initFrame, bindingCandidates: undefined }), false);
   assert.equal(isPtcInitFrame({ ...initFrame, maxItemsPerCall: Number.NaN }), false);
   assert.equal(isPtcInitFrame({ ...initFrame, maxPendingCalls: undefined }), false);
   assert.equal(isPtcInitFrame({ ...initFrame, maxPendingCalls: Number.POSITIVE_INFINITY }), false);

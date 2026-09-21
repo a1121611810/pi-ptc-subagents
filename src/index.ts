@@ -25,6 +25,9 @@ export { PTC_ERROR_KIND, PTC_LOG_LEVEL, HOST_FRAME_KIND, WORKER_FRAME_KIND } fro
 export type { PtcErrorKind, PtcErrorShape, PtcJsonValue } from "./runtime/protocol.ts";
 
 export default function ptcSubagents(pi: ExtensionAPI): void {
-  pi.registerTool(createPtcRunCodeTool());
-  pi.registerTool(createPtcWorkflowTool());
+  // Bindings mirror the session's enabled built-in tools (T7, #21): a session restricted
+  // with `--tools` / `--no-builtin-tools` must not be escapable through `tools.<name>` calls.
+  const getActiveToolNames = () => pi.getActiveTools();
+  pi.registerTool(createPtcRunCodeTool({ getActiveToolNames }));
+  pi.registerTool(createPtcWorkflowTool({ getActiveToolNames }));
 }

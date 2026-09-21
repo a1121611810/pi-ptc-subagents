@@ -15,6 +15,7 @@
  * "did the run fail" is one check in one place, shared by both tools.
  */
 import type { TextContent } from "@earendil-works/pi-ai";
+import { BUILTIN_BINDING_NAMES } from "../runtime/bindings.ts";
 import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { PtcRunOutcome } from "../runtime/dispatcher.ts";
 import type { PtcConfig, PtcSurface } from "../runtime/limits.ts";
@@ -30,6 +31,27 @@ export interface PtcToolOptions {
    * settings surface has somewhere to plug in.
    */
   config?: Partial<PtcConfig>;
+  /**
+   * The session's active tool names (`pi.getActiveTools()`), read once per execute.
+   *
+   * The shipped extension always provides this; omitting it means "no session context"
+   * (direct library use, or a hand-built test stub) and asserts the full built-in surface.
+   */
+  getActiveToolNames?: () => readonly string[];
+}
+
+/**
+ * Binding names for one run: the built-ins this session actually has enabled (T7, #21).
+ *
+ * A PTC program must never reach further than the session it runs in — a session started
+ * with `--tools read` or `--no-builtin-tools` must not be escapable through `tools.<name>`
+ * calls. Names outside the built-in factory set are ignored: only tools this package can
+ * build adapters for can be bound.
+ */
+export function resolveBindingNames(activeToolNames: readonly string[] | undefined): readonly string[] {
+  if (activeToolNames === undefined) return BUILTIN_BINDING_NAMES;
+  const active = new Set(activeToolNames);
+  return BUILTIN_BINDING_NAMES.filter((name) => active.has(name));
 }
 
 /** Tool name per worker surface — the names the model calls and reads in failure messages. */

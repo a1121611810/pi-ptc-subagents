@@ -37,6 +37,10 @@ required — install it and the extension is on for the next pi startup.
 
 - Installing this package grants it the same machine access as any pi
   extension: PTC programs run as **you**, with no OS-level sandbox (ADR-0007).
+- Bindings mirror the session's **enabled** built-in tools (`pi.getActiveTools()`):
+  a session started with `--tools …` / `--no-builtin-tools` can only reach those
+  tools from inside a PTC program (a default session has `read`, `bash`, `edit`,
+  `write` — enable more to bind more).
 - Tool calls made from inside a PTC program execute directly and **bypass**
   pi's `tool_call` hooks (permission gates, path guards) — see ADR-0005. Do not
   rely on those guards to constrain tool use while this extension is enabled.

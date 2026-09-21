@@ -20,7 +20,7 @@ import { Type } from "typebox";
 import { createBuiltinBindings } from "../runtime/bindings.ts";
 import { runPtcProgram } from "../runtime/dispatcher.ts";
 import { DEFAULT_CONFIG } from "../runtime/limits.ts";
-import { codeRunFailedError, renderToolResult, resolveToolCwd } from "./common.ts";
+import { codeRunFailedError, renderToolResult, resolveBindingNames, resolveToolCwd } from "./common.ts";
 import type { PtcToolOptions } from "./common.ts";
 
 const DESCRIPTION = [
@@ -29,10 +29,11 @@ const DESCRIPTION = [
   "advisory, the code runs type-stripped) — and `description`, a 5-10 word summary of what the",
   "program does.",
   "",
-  "Inside the program, call pi's tools as `tools.<name>(args)` — e.g. `await tools.read({ path:",
-  '"src/index.ts" })`, `await tools.bash({ command: "npm test" })`, `await tools.grep({ pattern:',
-  '"TODO" })`. edit, write, find and ls are bound the same way. A failed tool call rejects with an',
-  "error the program can catch; independent calls may overlap under `Promise.all`.",
+  "Inside the program, call this session's enabled built-in tools as `tools.<name>(args)` — e.g.",
+  '`await tools.read({ path: "src/index.ts" })` or `await tools.bash({ command: "npm test" })`.',
+  "The bound names mirror the session's active tools (a default session has `read`, `bash`, `edit`,",
+  "`write`); calling a name that is not bound rejects with an error the program can catch, and",
+  "independent calls may overlap under `Promise.all`.",
   "",
   "Only the program's return value and its `console.log` output come back. This surface has no",
   "helpers: `log` / `phase` / `parallel` / `pipeline` exist only in `ptc_workflow`.",
@@ -70,12 +71,13 @@ export function createPtcRunCodeTool(options: PtcToolOptions = {}) {
     parameters: PARAMETERS,
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const cwd = resolveToolCwd(ctx);
+      const names = resolveBindingNames(options.getActiveToolNames?.());
       const startedAt = Date.now();
       const outcome = await runPtcProgram({
         code: params.code,
         surface: "run_code",
         cwd,
-        bindings: createBuiltinBindings({ cwd }),
+        bindings: createBuiltinBindings({ cwd, names }),
         ...(params.timeoutMs === undefined ? {} : { timeoutMs: params.timeoutMs }),
         ...(signal === undefined ? {} : { signal }),
         ...(options.config === undefined ? {} : { config: options.config }),

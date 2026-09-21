@@ -27,7 +27,7 @@ import type { Static } from "typebox";
 import { createBuiltinBindings } from "../runtime/bindings.ts";
 import { runPtcProgram } from "../runtime/dispatcher.ts";
 import type { PtcRunOutcome } from "../runtime/dispatcher.ts";
-import { codeRunFailedError, renderToolResult, resolveToolCwd } from "./common.ts";
+import { codeRunFailedError, renderToolResult, resolveBindingNames, resolveToolCwd } from "./common.ts";
 import type { PtcToolOptions } from "./common.ts";
 
 const DESCRIPTION = [
@@ -41,9 +41,9 @@ const DESCRIPTION = [
   "concurrently, a failed item becoming `null`; `pipeline(items, ...stages)` chains stages per item",
   "with the same per-item `null` on failure. There is no `agent()` helper.",
   "",
-  "Tools are reachable as `tools.<name>(args)` exactly as in `ptc_run_code` (read, bash, edit,",
-  "write, grep, find, ls). What comes back is the script's return value, its `log`/`phase`",
-  "narration and its `console.log` output.",
+  "Tools are reachable as `tools.<name>(args)` exactly as in `ptc_run_code`, and the bound names",
+  "mirror the session's enabled tools. What comes back is the script's return value, its",
+  "`log`/`phase` narration and its `console.log` output.",
 ].join("\n");
 
 const PARAMETERS = Type.Object({
@@ -165,12 +165,13 @@ export function createPtcWorkflowTool(options: PtcToolOptions = {}) {
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       validateWorkflowArgs(params.args);
       const cwd = resolveToolCwd(ctx);
+      const names = resolveBindingNames(options.getActiveToolNames?.());
       const startedAt = Date.now();
       const outcome = await runPtcProgram({
         code: params.script,
         surface: "workflow",
         cwd,
-        bindings: createBuiltinBindings({ cwd }),
+        bindings: createBuiltinBindings({ cwd, names }),
         ...(params.args === undefined ? {} : { args: params.args }),
         ...(signal === undefined ? {} : { signal }),
         ...(options.config === undefined ? {} : { config: options.config }),

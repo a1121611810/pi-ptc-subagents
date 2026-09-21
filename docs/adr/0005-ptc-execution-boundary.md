@@ -25,3 +25,16 @@ F1–F4 hardening (from R3):
 
 - Tool descriptions must not imply PTC writes are gated by pi's permission pipeline.
 - **Reopen trigger**: pi ships `ExtensionAPI.dispatchTool` **and** `registerSubprocess(spec)` (argv / execArgv / env / cwd / stdio / resourceLimits) — then decisions 1 and 2 close together.
+
+## Addendum (2026-09-22) — the enablement dimension
+
+The bypass analysis above covered hooks and guards; it did not cover the session's
+**tool-enablement policy**. T7 (#21) closed that hole on the fixable side: bindings are now
+`BUILTIN_BINDING_NAMES ∩ pi.getActiveTools()`, so `--tools`, `--no-builtin-tools` and
+`--exclude-tools` are respected from inside PTC programs. A restricted session simply has
+fewer — possibly zero — bindings (a default session has `read`/`bash`/`edit`/`write`; enable
+`grep`/`find`/`ls` to bind them).
+
+The remaining bypass is unchanged: worker-driven tool calls still execute directly and are
+invisible to `pi.on('tool_call')`, `protected-paths`-style guards, and `permission-gate`
+until pi ships a dispatch surface (reopen trigger above).

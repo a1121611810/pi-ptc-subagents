@@ -483,9 +483,19 @@ export function workerMain(deps: WorkerMainDeps): void {
         : Number.POSITIVE_INFINITY;
 
     const tools: Record<string, (args: unknown) => Promise<unknown>> = {};
-    const bindingNames = Array.isArray(frame.bindings) ? frame.bindings : [];
-    for (const name of bindingNames) {
-      if (typeof name === "string") tools[name] = makeBinding(name);
+    const bindingNames = Array.isArray(frame.bindings)
+      ? frame.bindings.filter((name): name is string => typeof name === "string")
+      : [];
+    for (const name of bindingNames) tools[name] = makeBinding(name);
+    // Known-but-disabled tools (T7, #21): stub each with an actionable error instead of
+    // letting the program hit `tools.write is not a function`.
+    const available = bindingNames.join(", ") || "(none)";
+    const candidates = Array.isArray(frame.bindingCandidates) ? frame.bindingCandidates : [];
+    for (const name of candidates) {
+      if (typeof name !== "string" || tools[name]) continue;
+      tools[name] = async () => {
+        throw new ToolCallError(name, `no binding named "${name}" in this run; available bindings: ${available}`);
+      };
     }
     globals().tools = tools;
 

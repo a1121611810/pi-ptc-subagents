@@ -101,6 +101,12 @@ export interface PtcInitFrame {
   code: string;
   /** Binding names the worker may expose as `tools.<name>`; the keys of the host table. */
   bindings: readonly string[];
+  /**
+   * Names the host could have bound (its built-in factory set). Candidates absent from
+   * `bindings` get a throwing stub in the worker, so a disabled tool fails with an
+   * actionable error instead of `tools.x is not a function` (T7, #21).
+   */
+  bindingCandidates: readonly string[];
   maxItemsPerCall: number;
   /**
    * In-flight call ceiling the worker must maintain itself (ADR-0004).
@@ -229,6 +235,8 @@ export function isPtcInitFrame(value: unknown): value is PtcInitFrame {
     typeof value.code === "string" &&
     Array.isArray(value.bindings) &&
     value.bindings.every((name) => typeof name === "string") &&
+    Array.isArray(value.bindingCandidates) &&
+    value.bindingCandidates.every((name) => typeof name === "string") &&
     typeof value.maxItemsPerCall === "number" &&
     Number.isFinite(value.maxItemsPerCall) &&
     typeof value.maxPendingCalls === "number" &&

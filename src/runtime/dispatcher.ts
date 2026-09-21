@@ -16,7 +16,7 @@
 import { randomUUID } from "node:crypto";
 import { MessageChannel, Worker } from "node:worker_threads";
 import type { MessagePort } from "node:worker_threads";
-import type { BindingTable } from "./bindings.ts";
+import { BUILTIN_BINDING_NAMES, type BindingTable } from "./bindings.ts";
 import { createWorkerEnv, effectiveTimeoutMs, resolveConfig } from "./limits.ts";
 import type { PtcConfig, PtcSurface } from "./limits.ts";
 import {
@@ -179,6 +179,7 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
         surface: options.surface,
         code: options.code,
         bindings: [...options.bindings.keys()],
+        bindingCandidates: [...BUILTIN_BINDING_NAMES],
         maxItemsPerCall: config.maxItemsPerCall,
         maxPendingCalls: config.maxPendingCalls,
         ...(options.args === undefined ? {} : { args: options.args }),
@@ -256,7 +257,9 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
           callId: frame.callId,
           tool: frame.tool,
           ok: false,
-          message: `no binding named "${frame.tool}" in this run`,
+          message:
+            `no binding named "${frame.tool}" in this run; available bindings: ` +
+            ([...options.bindings.keys()].join(", ") || "(none)"),
         });
         return;
       }

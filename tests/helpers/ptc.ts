@@ -7,7 +7,7 @@ import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import ptcSubagents from "../../src/index.ts";
+import ptcSubagents, { BUILTIN_BINDING_NAMES } from "../../src/index.ts";
 import type { Binding, BindingTable } from "../../src/runtime/bindings.ts";
 
 /** Timeout applied to tests that spawn real workers, so a deadlock fails instead of hanging. */
@@ -31,6 +31,10 @@ export function makeBinding(name: string, execute: Binding["execute"]): Binding 
  * Run the extension factory against a recording stub and return the tools it registered,
  * keyed by registered name. This is the registration path pi itself takes, so the definitions
  * under test are the ones the model would actually call.
+ *
+ * The stub reports every built-in as active, so integration tests exercise the full surface;
+ * enablement-policy tests wire restricted `getActiveToolNames` getters into the factories
+ * directly instead.
  */
 export function captureRegisteredTools(): Map<string, ToolDefinition> {
   const tools = new Map<string, ToolDefinition>();
@@ -38,6 +42,7 @@ export function captureRegisteredTools(): Map<string, ToolDefinition> {
     registerTool: (tool: ToolDefinition) => {
       tools.set(tool.name, tool);
     },
+    getActiveTools: () => [...BUILTIN_BINDING_NAMES],
   } as unknown as ExtensionAPI;
   ptcSubagents(stub);
   return tools;
