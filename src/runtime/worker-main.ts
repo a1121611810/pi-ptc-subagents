@@ -23,6 +23,7 @@ import type { PtcCancelReason, PtcErrorKind, PtcJsonObject, PtcJsonValue, PtcLog
 /** The subset of `MessagePort`/`parentPort` the worker uses. */
 export interface WorkerMainPort {
   on(event: "message", listener: (value: unknown) => void): unknown;
+  on(event: "close", listener: () => void): unknown;
   postMessage(value: unknown): void;
 }
 
@@ -49,6 +50,10 @@ export function workerMain(deps: WorkerMainDeps): void {
   let started = false;
   let cancelled: PtcCancelReason | undefined;
   let nextCallId = 1;
+  /** Call frames posted and not yet answered; capped by `maxPendingCalls` (ADR-0004). */
+  let inFlightCalls = 0;
+  let maxPendingCalls = Number.POSITIVE_INFINITY;
+  const admissionWaiters: Array<{ resolve: () => void; reject: (error: unknown) => void }> = [];
   const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: unknown) => void }>();
 
   const globals = (): Record<string, unknown> => globalThis as unknown as Record<string, unknown>;
@@ -111,6 +116,65 @@ export function workerMain(deps: WorkerMainDeps): void {
     const error = new Error(reason === "timeout" ? "PTC run timed out" : "PTC run was cancelled");
     error.name = "AbortError";
     return error;
+  };
+
+  const closedError = (): Error => {
+    const error = new Error("the PTC control channel closed before the call completed");
+    error.name = "AbortError";
+    return error;
+  };
+
+  /* ------------------------------------------------------------------ */
+  /* call admission                                                      */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * Admission control for host binding calls.
+   *
+   * "Maximum simultaneous host binding calls" is the worker's invariant to keep: a call
+   * frame is only posted once fewer than `maxPendingCalls` are outstanding, so a wide
+   * `Promise.all` / `parallel()` burst queues here rather than arriving at the host in one
+   * tick. The host still counts arrivals as a backstop, but it must never see this budget
+   * exceeded by a well-behaved program.
+   *
+   * Waiting for a slot is cancel-aware: `cancel` and a closed control port reject waiters
+   * immediately, so an oversized burst unwinds at once instead of waiting out the grace
+   * window before the host terminates the worker.
+   */
+  const acquireCallSlot = async (): Promise<void> => {
+    if (inFlightCalls < maxPendingCalls) {
+      inFlightCalls += 1;
+      return;
+    }
+    await new Promise<void>((resolve, reject) => {
+      admissionWaiters.push({ resolve, reject });
+    });
+  };
+
+  const releaseCallSlot = (): void => {
+    const next = admissionWaiters.shift();
+    if (next) {
+      // Hand the slot over: `inFlightCalls` already accounts for it, so it stays put.
+      next.resolve();
+      return;
+    }
+    inFlightCalls -= 1;
+  };
+
+  const rejectAdmissionWaiters = (error: unknown): void => {
+    while (admissionWaiters.length > 0) {
+      const waiter = admissionWaiters.shift();
+      if (waiter) waiter.reject(error);
+    }
+  };
+
+  /** Settle every outstanding call and every admission wait, so nothing can hang. */
+  const flushPendingCalls = (error: Error): void => {
+    rejectAdmissionWaiters(error);
+    for (const [callId, entry] of pending) {
+      pending.delete(callId);
+      entry.reject(error);
+    }
   };
 
   /**
@@ -281,21 +345,33 @@ export function workerMain(deps: WorkerMainDeps): void {
     }
   };
 
-  /** `tools.<name>(args)` — a call frame plus a promise settled by a `call-result`. */
+  /**
+   * `tools.<name>(args)` — acquire an admission slot, post a call frame, and await the
+   * matching `call-result`.
+   *
+   * The slot is released on every exit path (settled, admission refused by `post`, cancel),
+   * which is what keeps a burst draining instead of deadlocking.
+   */
   const makeBinding = (name: string) => {
     return async (args: unknown): Promise<unknown> => {
       if (cancelled) throw abortError(cancelled);
-      const callId = nextCallId;
-      nextCallId += 1;
-      const promise = new Promise<unknown>((resolve, reject) => {
-        pending.set(callId, { resolve, reject });
-      });
-      const sent = post({ kind: workerFrame.call, callId, tool: name, args });
-      if (!sent) {
-        pending.delete(callId);
-        throw new ToolCallError(name, `${name}() could not be called: the arguments are not transferable or the run has ended`);
+      await acquireCallSlot();
+      try {
+        if (cancelled) throw abortError(cancelled);
+        const callId = nextCallId;
+        nextCallId += 1;
+        const promise = new Promise<unknown>((resolve, reject) => {
+          pending.set(callId, { resolve, reject });
+        });
+        const sent = post({ kind: workerFrame.call, callId, tool: name, args });
+        if (!sent) {
+          pending.delete(callId);
+          throw new ToolCallError(name, `${name}() could not be called: the arguments are not transferable or the run has ended`);
+        }
+        return await promise;
+      } finally {
+        releaseCallSlot();
       }
-      return await promise;
     };
   };
 
@@ -314,11 +390,7 @@ export function workerMain(deps: WorkerMainDeps): void {
 
   const cancelPending = (reason: PtcCancelReason): void => {
     cancelled = reason;
-    const error = abortError(reason);
-    for (const [callId, entry] of pending) {
-      pending.delete(callId);
-      entry.reject(error);
-    }
+    flushPendingCalls(abortError(reason));
   };
 
   /* ------------------------------------------------------------------ */
@@ -402,6 +474,14 @@ export function workerMain(deps: WorkerMainDeps): void {
     installFrozenEnv();
     installConsole();
 
+    // ADR-0004's ceiling, handed over per run. The host's init guard requires the field;
+    // the fallback only exists so a hand-built frame cannot silently wedge the surface
+    // (the host's arrival-counted backstop still catches a flood in that case).
+    maxPendingCalls =
+      typeof frame.maxPendingCalls === "number" && Number.isFinite(frame.maxPendingCalls) && frame.maxPendingCalls > 0
+        ? frame.maxPendingCalls
+        : Number.POSITIVE_INFINITY;
+
     const tools: Record<string, (args: unknown) => Promise<unknown>> = {};
     const bindingNames = Array.isArray(frame.bindings) ? frame.bindings : [];
     for (const name of bindingNames) {
@@ -445,6 +525,11 @@ export function workerMain(deps: WorkerMainDeps): void {
     if (typeof port !== "object" || port === null || typeof (port as WorkerMainPort).on !== "function") return;
     control = port as WorkerMainPort;
     control.on("message", handleHostFrame);
+    // The host is gone (it closed the control port, e.g. after terminating the run): no
+    // response can arrive any more, so stop waiting for one.
+    control.on("close", () => {
+      flushPendingCalls(closedError());
+    });
     installWarningCapture();
     post({ kind: workerFrame.ready });
   });

@@ -103,14 +103,66 @@ test("dispatch forwarding is capped at maxParallelSubCalls", options, async () =
   assert.equal(peak, DEFAULT_CONFIG.maxParallelSubCalls, "concurrency stays at the cap");
 });
 
-test("more than maxPendingCalls in flight is a protocol failure", options, async () => {
-  const bindings = makeBindings({ hold: async () => await new Promise(() => {}) });
+test("a wide fan-out queues inside the worker instead of failing the run", options, async () => {
+  const maxPendingCalls = 4;
+  const calls = maxPendingCalls * 5;
+  const bindings = makeBindings({ ping: async (args) => (args as { i: number }).i });
   const outcome = await run(
-    `await Promise.all(Array.from({ length: ${DEFAULT_CONFIG.maxPendingCalls + 1} }, () => tools.hold({}))); return 1;`,
-    { bindings, config: { graceMs: DEFAULT_CONFIG.graceMs / 30 } },
+    `const rs = await Promise.all(Array.from({ length: ${calls} }, (_, i) => tools.ping({ i }))); return rs.length;`,
+    { bindings, config: { maxPendingCalls } },
   );
-  assert.equal(outcome.error?.kind, "protocol");
-  assert.match(String(outcome.error?.message), /maxPendingCalls/);
+  assert.equal(outcome.error, undefined, "admission control must not fail a legitimate burst");
+  assert.equal(outcome.value, calls);
+});
+
+test("the worker keeps simultaneous host binding calls at or below maxPendingCalls", options, async () => {
+  const maxPendingCalls = 4;
+  let active = 0;
+  let peak = 0;
+  const bindings = makeBindings({
+    probe: async () => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 15));
+      active -= 1;
+      return null;
+    },
+  });
+  const outcome = await run(
+    `const rs = await Promise.all(Array.from({ length: ${maxPendingCalls * 5} }, () => tools.probe({}))); return rs.length;`,
+    { bindings, config: { maxPendingCalls } },
+  );
+  assert.equal(outcome.error, undefined);
+  assert.equal(outcome.value, maxPendingCalls * 5, "every call still runs");
+  assert.ok(peak <= maxPendingCalls, `observed ${peak} simultaneous calls, ceiling is ${maxPendingCalls}`);
+  assert.ok(peak > 1, `expected the burst to overlap, saw ${peak} concurrent call(s)`);
+});
+
+test("cancel while calls wait for admission rejects them without waiting out the grace window", options, async () => {
+  const graceMs = DEFAULT_CONFIG.graceMs;
+  const bindings = makeBindings({ hold: async () => await new Promise(() => {}) });
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), 80);
+  const started = Date.now();
+  const outcome = await run("await Promise.all(Array.from({ length: 5 }, () => tools.hold({}))); return 1;", {
+    bindings,
+    signal: controller.signal,
+    config: { maxPendingCalls: 1, graceMs },
+  });
+  const elapsed = Date.now() - started;
+  assert.equal(outcome.error?.kind, "abort");
+  assert.ok(elapsed < graceMs / 2, `cancel settled after ${elapsed}ms, i.e. it waited for the grace window`);
+});
+
+test("a workflow fan-out obeys the same admission budget", options, async () => {
+  const maxPendingCalls = 4;
+  const bindings = makeBindings({ step: async (args) => (args as { n: number }).n });
+  const outcome = await run(
+    `const out = await parallel(Array.from({ length: ${maxPendingCalls * 3} }, (_, n) => async () => tools.step({ n }))); return out.length;`,
+    { bindings, config: { maxPendingCalls }, surface: "workflow" },
+  );
+  assert.equal(outcome.error, undefined);
+  assert.equal(outcome.value, maxPendingCalls * 3);
 });
 
 test("a failing binding rejects the call with ToolCallError and keeps the run alive", options, async () => {

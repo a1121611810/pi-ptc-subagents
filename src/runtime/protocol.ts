@@ -102,6 +102,16 @@ export interface PtcInitFrame {
   /** Binding names the worker may expose as `tools.<name>`; the keys of the host table. */
   bindings: readonly string[];
   maxItemsPerCall: number;
+  /**
+   * In-flight call ceiling the worker must maintain itself (ADR-0004).
+   *
+   * The worker admits calls before posting them — a wide `Promise.all` / `parallel()`
+   * burst then queues inside the worker instead of arriving at the host all at once,
+   * which is what makes "maximum simultaneous host binding calls" a real invariant
+   * rather than an arrival-counted tripwire. The host keeps its own counting as a
+   * defense-in-depth backstop for a worker that ignores this field.
+   */
+  maxPendingCalls: number;
   /** Workflow surface only: value bound to the `args` global. */
   args?: unknown;
 }
@@ -220,7 +230,9 @@ export function isPtcInitFrame(value: unknown): value is PtcInitFrame {
     Array.isArray(value.bindings) &&
     value.bindings.every((name) => typeof name === "string") &&
     typeof value.maxItemsPerCall === "number" &&
-    Number.isFinite(value.maxItemsPerCall)
+    Number.isFinite(value.maxItemsPerCall) &&
+    typeof value.maxPendingCalls === "number" &&
+    Number.isFinite(value.maxPendingCalls)
   );
 }
 

@@ -24,6 +24,7 @@ import {
   WORKER_FRAME_KIND,
   workerProtocolSpec,
 } from "../src/runtime/protocol.ts";
+import { DEFAULT_CONFIG } from "../src/runtime/limits.ts";
 
 function withPort(): { frame: unknown; close: () => void } {
   const channel = new MessageChannel();
@@ -42,7 +43,8 @@ const initFrame = {
   surface: "run_code",
   code: "return 1;",
   bindings: ["read", "bash"],
-  maxItemsPerCall: 4_096,
+  maxItemsPerCall: DEFAULT_CONFIG.maxItemsPerCall,
+  maxPendingCalls: DEFAULT_CONFIG.maxPendingCalls,
 };
 
 test("frame kind tables are closed sets of unique strings", () => {
@@ -84,6 +86,8 @@ test("init frame guard validates every field", () => {
   assert.equal(isPtcInitFrame({ ...initFrame, bindings: ["read", 7] }), false);
   assert.equal(isPtcInitFrame({ ...initFrame, bindings: "read" }), false);
   assert.equal(isPtcInitFrame({ ...initFrame, maxItemsPerCall: Number.NaN }), false);
+  assert.equal(isPtcInitFrame({ ...initFrame, maxPendingCalls: undefined }), false);
+  assert.equal(isPtcInitFrame({ ...initFrame, maxPendingCalls: Number.POSITIVE_INFINITY }), false);
   assert.equal(isPtcInitFrame({ ...initFrame, kind: HOST_FRAME_KIND.cancel }), false);
   assert.equal(isPtcInitFrame(null), false);
 });

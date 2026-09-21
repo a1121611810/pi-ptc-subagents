@@ -180,6 +180,7 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
         code: options.code,
         bindings: [...options.bindings.keys()],
         maxItemsPerCall: config.maxItemsPerCall,
+        maxPendingCalls: config.maxPendingCalls,
         ...(options.args === undefined ? {} : { args: options.args }),
       };
       if (!isPtcHostFrame(frame)) {
@@ -233,6 +234,12 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
     const handleCall = (frame: PtcCallFrame): void => {
       pendingCalls += 1;
       if (pendingCalls > config.maxPendingCalls) {
+        // Defense in depth only. The shipped worker admits calls before posting them
+        // (`maxPendingCalls` travels in the init frame), so a normal program — including a
+        // wide `Promise.all` or `parallel()` fan-out — never reaches this branch: the burst
+        // queues in the worker, and arrivals here stay at or below the ceiling. This fires
+        // only for a worker that ignores its admission budget, which is why it fails the
+        // run instead of throttling.
         fail(PTC_ERROR_KIND.protocol, `more than maxPendingCalls (${config.maxPendingCalls}) binding calls in flight`);
         return;
       }
