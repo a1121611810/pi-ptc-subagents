@@ -22,8 +22,9 @@
  *   structured clone on its way to the worker.
  */
 import { defineTool } from "@earendil-works/pi-coding-agent";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import type { Static } from "typebox";
+import type { Static, TArray, TObject, TOptional, TRecord, TString, TUnknown } from "typebox";
 import { createBuiltinBindings } from "../runtime/bindings.ts";
 import { runPtcProgram } from "../runtime/dispatcher.ts";
 import type { PtcRunOutcome } from "../runtime/dispatcher.ts";
@@ -33,7 +34,7 @@ import {
   resolveBindingNames,
   resolveToolCwd,
 } from "./common.ts";
-import type { PtcToolOptions } from "./common.ts";
+import type { PtcToolDetails, PtcToolOptions } from "./common.ts";
 
 const DESCRIPTION = [
   "Run a structured TypeScript workflow: a named plan that reports phases and narration as it",
@@ -51,7 +52,20 @@ const DESCRIPTION = [
   "`log`/`phase` narration and its `console.log` output.",
 ].join("\n");
 
-const PARAMETERS = Type.Object({
+/** Schema types written out explicitly for `isolatedDeclarations` (emit must not infer them). */
+type WorkflowPhaseSchema = TObject<{ name: TString }>;
+
+type WorkflowParameters = TObject<{
+  meta: TObject<{
+    name: TString;
+    description: TString;
+    phases: TOptional<TArray<WorkflowPhaseSchema>>;
+  }>;
+  script: TString;
+  args: TOptional<TRecord<string, TUnknown>>;
+}>;
+
+const PARAMETERS: WorkflowParameters = Type.Object({
   meta: Type.Object(
     {
       name: Type.String({ description: "Short workflow name, shown in the UI." }),
@@ -185,7 +199,9 @@ export function unlistedPhaseWarnings(
  * `args` is validated before `runPtcProgram` is called, so a malformed payload never spawns a
  * worker. Everything after dispatch is identical to `ptc_run_code`, plus the phase roll-up.
  */
-export function createPtcWorkflowTool(options: PtcToolOptions = {}) {
+export function createPtcWorkflowTool(
+  options: PtcToolOptions = {},
+): ToolDefinition<WorkflowParameters, PtcToolDetails> {
   return defineTool({
     name: "ptc_workflow",
     label: "PTC Workflow",

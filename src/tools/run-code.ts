@@ -16,7 +16,9 @@
  *   exactly as DSH's resolver does (R1 §3). The description names the default and the ceiling.
  */
 import { defineTool } from "@earendil-works/pi-coding-agent";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import type { TNumber, TOptional, TObject, TString } from "typebox";
 import { createBuiltinBindings } from "../runtime/bindings.ts";
 import { runPtcProgram } from "../runtime/dispatcher.ts";
 import { DEFAULT_CONFIG } from "../runtime/limits.ts";
@@ -26,7 +28,7 @@ import {
   resolveBindingNames,
   resolveToolCwd,
 } from "./common.ts";
-import type { PtcToolOptions } from "./common.ts";
+import type { PtcToolDetails, PtcToolOptions } from "./common.ts";
 
 const DESCRIPTION = [
   "Run a TypeScript program that composes pi's tools in one shot. Required arguments: `code` —",
@@ -44,7 +46,14 @@ const DESCRIPTION = [
   "helpers: `log` / `phase` / `parallel` / `pipeline` exist only in `ptc_workflow`.",
 ].join("\n");
 
-const PARAMETERS = Type.Object({
+/** Schema type written out explicitly for `isolatedDeclarations` (emit must not infer it). */
+type RunCodeParameters = TObject<{
+  code: TString;
+  description: TString;
+  timeoutMs: TOptional<TNumber>;
+}>;
+
+const PARAMETERS: RunCodeParameters = Type.Object({
   code: Type.String({
     description: "The program: the body of an async TypeScript function.",
   }),
@@ -68,7 +77,9 @@ const PARAMETERS = Type.Object({
  * Called once by the extension factory. Every run gets a fresh worker and a fresh binding table
  * built against the run's own cwd, so two concurrent calls cannot share state.
  */
-export function createPtcRunCodeTool(options: PtcToolOptions = {}) {
+export function createPtcRunCodeTool(
+  options: PtcToolOptions = {},
+): ToolDefinition<RunCodeParameters, PtcToolDetails> {
   return defineTool({
     name: "ptc_run_code",
     label: "PTC Run Code",

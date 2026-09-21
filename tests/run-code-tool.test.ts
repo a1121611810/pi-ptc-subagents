@@ -42,7 +42,7 @@ function textOf(result: { content: Array<{ type: string; text?: string }> }): st
  * whose call signature widens `details` back to `unknown`.
  */
 function call(
-  tool: ToolDefinition,
+  tool: ToolDefinition<any, any, any>,
   params: { code: string; description?: string; timeoutMs?: number },
   extra: { signal?: AbortSignal; cwd?: string } = {},
 ): Promise<AgentToolResult<PtcToolDetails>> {

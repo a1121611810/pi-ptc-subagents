@@ -28,7 +28,7 @@ test("resolveBindingNames intersects the active set with the built-in factories"
 });
 
 function executeTool(
-  tool: ToolDefinition,
+  tool: ToolDefinition<any, any, any>,
   code: string,
   cwd: string,
 ): Promise<AgentToolResult<PtcToolDetails>> {

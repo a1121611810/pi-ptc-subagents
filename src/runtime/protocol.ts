@@ -16,15 +16,16 @@ import { MessagePort } from "node:worker_threads";
 import type { PtcSurface } from "./limits.ts";
 
 /** host → worker */
-export const HOST_FRAME_KIND = Object.freeze({
+const HOST_FRAME_KIND_VALUES = {
   connect: "connect",
   init: "init",
   callResult: "call-result",
   cancel: "cancel",
-} as const);
+} as const;
+export const HOST_FRAME_KIND: typeof HOST_FRAME_KIND_VALUES = Object.freeze(HOST_FRAME_KIND_VALUES);
 
 /** worker → host */
-export const WORKER_FRAME_KIND = Object.freeze({
+const WORKER_FRAME_KIND_VALUES = {
   ready: "ready",
   call: "call",
   log: "log",
@@ -32,18 +33,21 @@ export const WORKER_FRAME_KIND = Object.freeze({
   phase: "phase",
   result: "result",
   error: "error",
-} as const);
+} as const;
+export const WORKER_FRAME_KIND: typeof WORKER_FRAME_KIND_VALUES =
+  Object.freeze(WORKER_FRAME_KIND_VALUES);
 
-export const PTC_LOG_LEVEL = Object.freeze({
+const PTC_LOG_LEVEL_VALUES = {
   log: "log",
   info: "info",
   warn: "warn",
   error: "error",
   debug: "debug",
-} as const);
+} as const;
+export const PTC_LOG_LEVEL: typeof PTC_LOG_LEVEL_VALUES = Object.freeze(PTC_LOG_LEVEL_VALUES);
 export type PtcLogLevel = (typeof PTC_LOG_LEVEL)[keyof typeof PTC_LOG_LEVEL];
 
-export const PTC_ERROR_KIND = Object.freeze({
+const PTC_ERROR_KIND_VALUES = {
   /** Program parse error or thrown exception (includes `ReferenceError` from a helper that does not exist on this surface). */
   exception: "exception",
   /** Elapsed deadline expiry. */
@@ -58,7 +62,8 @@ export const PTC_ERROR_KIND = Object.freeze({
   invalidOutput: "invalid-output",
   /** Oversized outer result; collected logs are retained. */
   outputLimit: "output-limit",
-} as const);
+} as const;
+export const PTC_ERROR_KIND: typeof PTC_ERROR_KIND_VALUES = Object.freeze(PTC_ERROR_KIND_VALUES);
 export type PtcErrorKind = (typeof PTC_ERROR_KIND)[keyof typeof PTC_ERROR_KIND];
 
 export type PtcCancelReason = "timeout" | "abort";

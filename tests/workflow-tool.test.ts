@@ -27,7 +27,7 @@ function textOf(result: { content: Array<{ type: string; text?: string }> }): st
 
 /** Call the tool exactly as pi's agent loop does, with `cwd` as the only meaningful context field. */
 function call(
-  tool: ToolDefinition,
+  tool: ToolDefinition<any, any, any>,
   params: { meta?: unknown; script: string; args?: unknown },
   extra: { signal?: AbortSignal; cwd?: string } = {},
 ): Promise<AgentToolResult<PtcToolDetails>> {
