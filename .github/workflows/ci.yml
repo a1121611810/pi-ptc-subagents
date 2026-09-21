@@ -7,7 +7,10 @@ on:
   push:
     branches: [main]
 
-permissions: {}
+# `checkout` needs read access to this private repository (the docs' samples
+# assume a public repo where `permissions: {}` is enough).
+permissions:
+  contents: read
 
 jobs:
   format:
