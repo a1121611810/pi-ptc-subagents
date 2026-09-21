@@ -11,8 +11,10 @@
     "programmatic-tool-calling"
   ],
   "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     }
   },
@@ -30,14 +32,14 @@
     ]
   },
   "scripts": {
-    "build": "rolldown -c rolldown.config.ts",
+    "build": "rolldown -c rolldown.config.ts && tsc -p tsconfig.build.json && node scripts/fix-dts-extensions.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node scripts/test.mjs",
     "prepublishOnly": "npm run typecheck && npm run test && npm run build"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.86.0",
     "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": ">=0.86.0",
     "typebox": "*"
   },
   "peerDependenciesMeta": {
