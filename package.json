@@ -1,0 +1,25 @@
+{
+  "name": "pi-ptc-subagents",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/a1121611810/pi-ptc-subagents.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/a1121611810/pi-ptc-subagents/issues"
+  },
+  "homepage": "https://github.com/a1121611810/pi-ptc-subagents#readme",
+  "devDependencies": {
+    "rolldown": "^1.2.9"
+  }
+}
