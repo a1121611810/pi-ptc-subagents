@@ -50,43 +50,51 @@ function textOf(result: AgentToolResult<PtcToolDetails>): string {
     .join("\n");
 }
 
-test("a restricted session can only reach its active tools", { timeout: RUN_TIMEOUT_MS }, async () => {
-  const dir = await makeTempDir();
-  try {
-    await writeFile(join(dir, "data.txt"), "policy-marker\n", "utf8");
-    const tool = createPtcRunCodeTool({ getActiveToolNames: () => ["read"] });
+test(
+  "a restricted session can only reach its active tools",
+  { timeout: RUN_TIMEOUT_MS },
+  async () => {
+    const dir = await makeTempDir();
+    try {
+      await writeFile(join(dir, "data.txt"), "policy-marker\n", "utf8");
+      const tool = createPtcRunCodeTool({ getActiveToolNames: () => ["read"] });
 
-    const allowed = await executeTool(
-      tool,
-      `const r = await tools.read({ path: "data.txt" }); return r.content.map((p) => p.text ?? "").join("").trim();`,
-      dir,
-    );
-    assert.equal(textOf(allowed), "policy-marker");
+      const allowed = await executeTool(
+        tool,
+        `const r = await tools.read({ path: "data.txt" }); return r.content.map((p) => p.text ?? "").join("").trim();`,
+        dir,
+      );
+      assert.equal(textOf(allowed), "policy-marker");
 
-    await assert.rejects(
-      executeTool(tool, `return await tools.write({ path: "x.txt", content: "nope" });`, dir),
-      /no binding named "write".*available bindings: read/,
-      "an unbound tool must reject with the available names",
-    );
-  } finally {
-    await removeTempDir(dir);
-  }
-});
+      await assert.rejects(
+        executeTool(tool, `return await tools.write({ path: "x.txt", content: "nope" });`, dir),
+        /no binding named "write".*available bindings: read/,
+        "an unbound tool must reject with the available names",
+      );
+    } finally {
+      await removeTempDir(dir);
+    }
+  },
+);
 
-test("an empty active set yields no bindings, yet Node and console still work", { timeout: RUN_TIMEOUT_MS }, async () => {
-  const dir = await makeTempDir();
-  try {
-    const tool = createPtcRunCodeTool({ getActiveToolNames: () => [] });
+test(
+  "an empty active set yields no bindings, yet Node and console still work",
+  { timeout: RUN_TIMEOUT_MS },
+  async () => {
+    const dir = await makeTempDir();
+    try {
+      const tool = createPtcRunCodeTool({ getActiveToolNames: () => [] });
 
-    await assert.rejects(
-      executeTool(tool, `return await tools.read({ path: "data.txt" });`, dir),
-      /available bindings: \(none\)/,
-    );
+      await assert.rejects(
+        executeTool(tool, `return await tools.read({ path: "data.txt" });`, dir),
+        /available bindings: \(none\)/,
+      );
 
-    const bare = await executeTool(tool, `console.log("no-tools"); return 40 + 2;`, dir);
-    assert.equal(bare.details.result, 42, "the program still runs without bindings");
-    assert.match(textOf(bare), /no-tools/);
-  } finally {
-    await removeTempDir(dir);
-  }
-});
+      const bare = await executeTool(tool, `console.log("no-tools"); return 40 + 2;`, dir);
+      assert.equal(bare.details.result, 42, "the program still runs without bindings");
+      assert.match(textOf(bare), /no-tools/);
+    } finally {
+      await removeTempDir(dir);
+    }
+  },
+);

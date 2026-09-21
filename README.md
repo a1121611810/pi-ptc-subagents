@@ -45,6 +45,20 @@ required — install it and the extension is on for the next pi startup.
   pi's `tool_call` hooks (permission gates, path guards) — see ADR-0005. Do not
   rely on those guards to constrain tool use while this extension is enabled.
 
+## Development
+
+```bash
+npm install
+npm run typecheck     # tsc --noEmit
+npm run lint          # oxlint
+npm run format        # oxfmt (writes); `npm run format:check` verifies
+npm test              # node --test over tests/**/*.test.ts
+npm run build         # rolldown bundle + declaration emit
+```
+
+Tooling: [oxc](https://oxc.rs) — `oxlint` + `oxfmt` (official defaults) — alongside
+`rolldown` (also oxc-powered) and TypeScript 7.
+
 ## License
 
 Apache-2.0

@@ -108,7 +108,11 @@ export function resolveConfig(overrides: Partial<PtcConfig> = {}): PtcConfig {
  * DSH semantics (R1 §3): `0` does not disable the deadline, it falls back to the
  * default; anything larger is clamped to `maxTimeoutMs`.
  */
-export function effectiveTimeoutMs(requested: number | undefined, config: PtcConfig = DEFAULT_CONFIG): number {
-  if (requested === undefined || !Number.isFinite(requested) || requested <= 0) return config.timeoutMs;
+export function effectiveTimeoutMs(
+  requested: number | undefined,
+  config: PtcConfig = DEFAULT_CONFIG,
+): number {
+  if (requested === undefined || !Number.isFinite(requested) || requested <= 0)
+    return config.timeoutMs;
   return Math.min(requested, config.maxTimeoutMs);
 }

@@ -6,7 +6,11 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { AgentToolResult, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type {
+  AgentToolResult,
+  ExtensionContext,
+  ToolDefinition,
+} from "@earendil-works/pi-coding-agent";
 import type { PtcToolDetails } from "../src/tools/common.ts";
 import { createPtcWorkflowTool } from "../src/tools/workflow.ts";
 import { captureRegisteredTools, RUN_TIMEOUT_MS, toolContext } from "./helpers/ptc.ts";
@@ -50,16 +54,29 @@ test("the extension factory registers ptc_workflow with the documented parameter
   assert.deepEqual(parameters.required, ["meta", "script"]);
   assert.deepEqual(Object.keys(parameters.properties ?? {}), ["meta", "script", "args"]);
   assert.deepEqual(parameters.properties?.meta?.required, ["name", "description"]);
-  assert.deepEqual(Object.keys(parameters.properties?.meta?.properties ?? {}), ["name", "description", "phases"]);
+  assert.deepEqual(Object.keys(parameters.properties?.meta?.properties ?? {}), [
+    "name",
+    "description",
+    "phases",
+  ]);
 });
 
 test("the description lists the four helpers and says there is no agent()", () => {
   const description = captureRegisteredTools().get("ptc_workflow")?.description ?? "";
-  for (const helper of ["log(message)", "phase(title)", "parallel(thunks)", "pipeline(items, ...stages)"]) {
+  for (const helper of [
+    "log(message)",
+    "phase(title)",
+    "parallel(thunks)",
+    "pipeline(items, ...stages)",
+  ]) {
     assert.ok(description.includes(helper), `description must document ${helper}`);
   }
   assert.match(description, /There is no `agent\(\)` helper\./);
-  assert.match(description, /tools\.<name>\(args\)/, "states the binding form shared with ptc_run_code");
+  assert.match(
+    description,
+    /tools\.<name>\(args\)/,
+    "states the binding form shared with ptc_run_code",
+  );
   assert.match(description, /`meta\.phases`/);
   assert.match(description, /`args`/);
 });
@@ -117,29 +134,47 @@ test("non-plain-JSON args are rejected before the run is dispatched", async () =
   );
 });
 
-test("log/phase narration and console output are rendered above the return value", options, async () => {
-  const result = await call(createPtcWorkflowTool(), {
-    meta: { name: "phased", description: "phase roll-up", phases: [{ name: "Research" }, { name: "Write" }] },
-    script: 'log("narrating"); phase("Research"); console.log("printed"); phase("Write"); return { done: true };',
-  });
-  assert.equal(textOf(result), 'Phases: Research → Write\nnarrating\nprinted\n{\n  "done": true\n}');
-  assert.deepEqual(result.details.phases, ["Research", "Write"]);
-  assert.deepEqual(result.details.narrations, ["narrating"]);
-  assert.deepEqual(result.details.logs, ["printed"]);
-  assert.deepEqual(result.details.warnings, []);
-});
+test(
+  "log/phase narration and console output are rendered above the return value",
+  options,
+  async () => {
+    const result = await call(createPtcWorkflowTool(), {
+      meta: {
+        name: "phased",
+        description: "phase roll-up",
+        phases: [{ name: "Research" }, { name: "Write" }],
+      },
+      script:
+        'log("narrating"); phase("Research"); console.log("printed"); phase("Write"); return { done: true };',
+    });
+    assert.equal(
+      textOf(result),
+      'Phases: Research → Write\nnarrating\nprinted\n{\n  "done": true\n}',
+    );
+    assert.deepEqual(result.details.phases, ["Research", "Write"]);
+    assert.deepEqual(result.details.narrations, ["narrating"]);
+    assert.deepEqual(result.details.logs, ["printed"]);
+    assert.deepEqual(result.details.warnings, []);
+  },
+);
 
-test("a phase title outside meta.phases warns once instead of failing the run", options, async () => {
-  const result = await call(createPtcWorkflowTool(), {
-    meta: { name: "drift", description: "plan drift", phases: [{ name: "Research" }] },
-    script: 'phase("Research"); phase("Publish"); phase("Publish"); return "kept";',
-  });
-  assert.equal(
-    textOf(result),
-    'Phases: Research → Publish → Publish\nkept\nWarning: phase "Publish" is not listed in meta.phases (declared: Research)',
-  );
-  assert.deepEqual(result.details.warnings, ['phase "Publish" is not listed in meta.phases (declared: Research)']);
-});
+test(
+  "a phase title outside meta.phases warns once instead of failing the run",
+  options,
+  async () => {
+    const result = await call(createPtcWorkflowTool(), {
+      meta: { name: "drift", description: "plan drift", phases: [{ name: "Research" }] },
+      script: 'phase("Research"); phase("Publish"); phase("Publish"); return "kept";',
+    });
+    assert.equal(
+      textOf(result),
+      'Phases: Research → Publish → Publish\nkept\nWarning: phase "Publish" is not listed in meta.phases (declared: Research)',
+    );
+    assert.deepEqual(result.details.warnings, [
+      'phase "Publish" is not listed in meta.phases (declared: Research)',
+    ]);
+  },
+);
 
 test("without meta.phases there is no declared plan, so phase() never warns", options, async () => {
   const result = await call(createPtcWorkflowTool(), {
@@ -158,39 +193,51 @@ test("parallel() maps a failed item to null and keeps its siblings", options, as
   assert.deepEqual(result.details.result, ["a", null, 3]);
 });
 
-test("pipeline() threads items through stages with the same per-item null on failure", options, async () => {
-  const result = await call(createPtcWorkflowTool(), {
-    script:
-      'const out = await pipeline([2, 4, 6], async (n) => n * 10, async (n, item) => { if (item === 4) throw new Error("skip"); return n + item; }); return out;',
-  });
-  assert.deepEqual(result.details.result, [22, null, 66]);
-});
+test(
+  "pipeline() threads items through stages with the same per-item null on failure",
+  options,
+  async () => {
+    const result = await call(createPtcWorkflowTool(), {
+      script:
+        'const out = await pipeline([2, 4, 6], async (n) => n * 10, async (n, item) => { if (item === 4) throw new Error("skip"); return n + item; }); return out;',
+    });
+    assert.deepEqual(result.details.result, [22, null, 66]);
+  },
+);
 
 test("scripts are type-stripped on this surface too", options, async () => {
   const result = await call(createPtcWorkflowTool(), {
-    script: "const total: number = 40 + 2;\nconst label = (value: number): string => `total=${value}`;\nreturn label(total);",
+    script:
+      "const total: number = 40 + 2;\nconst label = (value: number): string => `total=${value}`;\nreturn label(total);",
   });
   assert.equal(textOf(result), "total=42");
 });
 
 test("the workflow surface binds all seven built-in tools", options, async () => {
-  const result = await call(createPtcWorkflowTool(), { script: "return Object.keys(tools).sort();" });
+  const result = await call(createPtcWorkflowTool(), {
+    script: "return Object.keys(tools).sort();",
+  });
   assert.deepEqual(result.details.result, ["bash", "edit", "find", "grep", "ls", "read", "write"]);
 });
 
-test("a failing workflow throws R1's failure message with phase and narration in the captured output", options, async () => {
-  await assert.rejects(
-    call(createPtcWorkflowTool(), {
-      meta: { name: "failing", description: "fails mid-run", phases: [{ name: "Research" }] },
-      script: 'phase("Research"); log("narrating"); console.log("printed"); throw new Error("boom");',
-    }),
-    (error: Error) => {
-      assert.equal(error.name, "CodeRunFailedError");
-      assert.equal(
-        error.message,
-        "code run failed (exception): boom\nCaptured output:\n[phase] Research\n[log] narrating\nprinted",
-      );
-      return true;
-    },
-  );
-});
+test(
+  "a failing workflow throws R1's failure message with phase and narration in the captured output",
+  options,
+  async () => {
+    await assert.rejects(
+      call(createPtcWorkflowTool(), {
+        meta: { name: "failing", description: "fails mid-run", phases: [{ name: "Research" }] },
+        script:
+          'phase("Research"); log("narrating"); console.log("printed"); throw new Error("boom");',
+      }),
+      (error: Error) => {
+        assert.equal(error.name, "CodeRunFailedError");
+        assert.equal(
+          error.message,
+          "code run failed (exception): boom\nCaptured output:\n[phase] Research\n[log] narrating\nprinted",
+        );
+        return true;
+      },
+    );
+  },
+);

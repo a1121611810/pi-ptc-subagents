@@ -23,10 +23,17 @@ test("resolveConfig returns the frozen defaults when nothing is overridden", () 
 
 test("resolveConfig applies overrides and rejects invalid ones", () => {
   assert.equal(resolveConfig({ maxOutputBytes: 1024 }).maxOutputBytes, 1024);
-  assert.equal(resolveConfig({ maxOutputBytes: 1024 }).maxPendingCalls, DEFAULT_CONFIG.maxPendingCalls);
+  assert.equal(
+    resolveConfig({ maxOutputBytes: 1024 }).maxPendingCalls,
+    DEFAULT_CONFIG.maxPendingCalls,
+  );
 
   for (const invalid of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
-    assert.throws(() => resolveConfig({ graceMs: invalid }), TypeError, `graceMs=${String(invalid)} must be rejected`);
+    assert.throws(
+      () => resolveConfig({ graceMs: invalid }),
+      TypeError,
+      `graceMs=${String(invalid)} must be rejected`,
+    );
   }
   assert.throws(() => resolveConfig({ graceMs: "soon" as unknown as number }), TypeError);
   // Unknown keys are ignored rather than silently merged.
@@ -57,7 +64,11 @@ test("createWorkerEnv keeps only allow-listed names (F1)", () => {
 
 test("effectiveTimeoutMs falls back to the default and clamps to the ceiling", () => {
   assert.equal(effectiveTimeoutMs(undefined), DEFAULT_CONFIG.timeoutMs);
-  assert.equal(effectiveTimeoutMs(0), DEFAULT_CONFIG.timeoutMs, "0 does not disable the deadline (DSH behaviour)");
+  assert.equal(
+    effectiveTimeoutMs(0),
+    DEFAULT_CONFIG.timeoutMs,
+    "0 does not disable the deadline (DSH behaviour)",
+  );
   assert.equal(effectiveTimeoutMs(Number.NaN), DEFAULT_CONFIG.timeoutMs);
   assert.equal(effectiveTimeoutMs(1_000), 1_000);
   assert.equal(effectiveTimeoutMs(DEFAULT_CONFIG.maxTimeoutMs * 10), DEFAULT_CONFIG.maxTimeoutMs);

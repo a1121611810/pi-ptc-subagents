@@ -18,7 +18,14 @@
  * are erased from both the dev (type-stripping) and bundled (`rolldown`) forms of the
  * function, which is what makes `toString()` output valid plain JavaScript in both.
  */
-import type { PtcCancelReason, PtcErrorKind, PtcJsonObject, PtcJsonValue, PtcLogLevel, WorkerProtocolSpec } from "./protocol.ts";
+import type {
+  PtcCancelReason,
+  PtcErrorKind,
+  PtcJsonObject,
+  PtcJsonValue,
+  PtcLogLevel,
+  WorkerProtocolSpec,
+} from "./protocol.ts";
 
 /** The subset of `MessagePort`/`parentPort` the worker uses. */
 export interface WorkerMainPort {
@@ -54,7 +61,10 @@ export function workerMain(deps: WorkerMainDeps): void {
   let inFlightCalls = 0;
   let maxPendingCalls = Number.POSITIVE_INFINITY;
   const admissionWaiters: Array<{ resolve: () => void; reject: (error: unknown) => void }> = [];
-  const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: unknown) => void }>();
+  const pending = new Map<
+    number,
+    { resolve: (value: unknown) => void; reject: (error: unknown) => void }
+  >();
 
   const globals = (): Record<string, unknown> => globalThis as unknown as Record<string, unknown>;
 
@@ -67,7 +77,8 @@ export function workerMain(deps: WorkerMainDeps): void {
     }
   }
 
-  const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+  const messageOf = (error: unknown): string =>
+    error instanceof Error ? error.message : String(error);
 
   /**
    * Trim a stack down to what a reader can act on.
@@ -109,7 +120,11 @@ export function workerMain(deps: WorkerMainDeps): void {
   };
 
   const postError = (kind: PtcErrorKind, message: string, stack?: string): void => {
-    post(stack === undefined ? { kind: workerFrame.error, error: { kind, message } } : { kind: workerFrame.error, error: { kind, message, stack } });
+    post(
+      stack === undefined
+        ? { kind: workerFrame.error, error: { kind, message } }
+        : { kind: workerFrame.error, error: { kind, message, stack } },
+    );
   };
 
   const abortError = (reason: PtcCancelReason): Error => {
@@ -208,21 +223,33 @@ export function workerMain(deps: WorkerMainDeps): void {
    * being silently lossy through the transport. `undefined` follows `JSON.stringify`:
    * object properties are dropped, array slots become `null`.
    */
-  const toJsonValue = (value: unknown): { ok: true; value: PtcJsonValue | undefined } | { ok: false; reason: string } => {
+  const toJsonValue = (
+    value: unknown,
+  ): { ok: true; value: PtcJsonValue | undefined } | { ok: false; reason: string } => {
     const seen = new Set<object>();
 
-    const walk = (candidate: unknown, path: string): { ok: true; value: PtcJsonValue | undefined } | { ok: false; reason: string } => {
+    const walk = (
+      candidate: unknown,
+      path: string,
+    ): { ok: true; value: PtcJsonValue | undefined } | { ok: false; reason: string } => {
       if (candidate === null) return { ok: true, value: null };
-      if (typeof candidate === "string" || typeof candidate === "boolean") return { ok: true, value: candidate };
+      if (typeof candidate === "string" || typeof candidate === "boolean")
+        return { ok: true, value: candidate };
       if (typeof candidate === "undefined") return { ok: true, value: undefined };
       if (typeof candidate === "number") {
         if (!Number.isFinite(candidate)) {
-          return { ok: false, reason: `${path} is ${String(candidate)}, which is not representable as JSON` };
+          return {
+            ok: false,
+            reason: `${path} is ${String(candidate)}, which is not representable as JSON`,
+          };
         }
         return { ok: true, value: candidate };
       }
       if (typeof candidate !== "object") {
-        return { ok: false, reason: `${path} is ${describeValue(candidate)}; results must be lossless JSON` };
+        return {
+          ok: false,
+          reason: `${path} is ${describeValue(candidate)}; results must be lossless JSON`,
+        };
       }
 
       if (Array.isArray(candidate)) {
@@ -241,7 +268,8 @@ export function workerMain(deps: WorkerMainDeps): void {
       const prototype = Object.getPrototypeOf(candidate);
       if (prototype !== Object.prototype && prototype !== null) {
         const ctor = (candidate as { constructor?: { name?: string } }).constructor;
-        const name = ctor && typeof ctor.name === "string" && ctor.name.length > 0 ? ctor.name : "an object";
+        const name =
+          ctor && typeof ctor.name === "string" && ctor.name.length > 0 ? ctor.name : "an object";
         return { ok: false, reason: `${path} is a ${name}; results must be plain JSON objects` };
       }
       if (seen.has(candidate)) return { ok: false, reason: `${path} is a circular reference` };
@@ -260,7 +288,13 @@ export function workerMain(deps: WorkerMainDeps): void {
   };
 
   const formatArgs = (args: readonly unknown[]): string =>
-    args.map((arg) => (typeof arg === "string" ? arg : deps.inspect(arg, { depth: 4, breakLength: Infinity, colors: false }))).join(" ");
+    args
+      .map((arg) =>
+        typeof arg === "string"
+          ? arg
+          : deps.inspect(arg, { depth: 4, breakLength: Infinity, colors: false }),
+      )
+      .join(" ");
 
   /**
    * Capture `console` instead of letting worker stdio reach the host terminal.
@@ -293,13 +327,18 @@ export function workerMain(deps: WorkerMainDeps): void {
    * every run's logs.
    */
   const installWarningCapture = (): void => {
-    if (typeof process.removeAllListeners !== "function" || typeof process.on !== "function") return;
+    if (typeof process.removeAllListeners !== "function" || typeof process.on !== "function")
+      return;
     process.removeAllListeners("warning");
     process.on("warning", (warning: unknown) => {
-      const record = typeof warning === "object" && warning !== null ? (warning as Record<string, unknown>) : undefined;
+      const record =
+        typeof warning === "object" && warning !== null
+          ? (warning as Record<string, unknown>)
+          : undefined;
       const name = record && typeof record.name === "string" ? record.name : "Warning";
       if (name === "ExperimentalWarning") return;
-      const detail = record && typeof record.message === "string" ? record.message : String(warning);
+      const detail =
+        record && typeof record.message === "string" ? record.message : String(warning);
       postLog(logLevel.warn, `${name}: ${detail}`);
     });
   };
@@ -329,7 +368,11 @@ export function workerMain(deps: WorkerMainDeps): void {
     try {
       program = compileProgram(code);
     } catch (error) {
-      postError(errorKind.exception, `program failed to compile: ${messageOf(error)}`, stackOf(error));
+      postError(
+        errorKind.exception,
+        `program failed to compile: ${messageOf(error)}`,
+        stackOf(error),
+      );
       return;
     }
     try {
@@ -339,7 +382,11 @@ export function workerMain(deps: WorkerMainDeps): void {
         postError(errorKind.invalidOutput, normalized.reason);
         return;
       }
-      post(normalized.value === undefined ? { kind: workerFrame.result } : { kind: workerFrame.result, value: normalized.value });
+      post(
+        normalized.value === undefined
+          ? { kind: workerFrame.result }
+          : { kind: workerFrame.result, value: normalized.value },
+      );
     } catch (error) {
       postError(cancelled ?? errorKind.exception, messageOf(error), stackOf(error));
     }
@@ -366,7 +413,10 @@ export function workerMain(deps: WorkerMainDeps): void {
         const sent = post({ kind: workerFrame.call, callId, tool: name, args });
         if (!sent) {
           pending.delete(callId);
-          throw new ToolCallError(name, `${name}() could not be called: the arguments are not transferable or the run has ended`);
+          throw new ToolCallError(
+            name,
+            `${name}() could not be called: the arguments are not transferable or the run has ended`,
+          );
         }
         return await promise;
       } finally {
@@ -385,7 +435,12 @@ export function workerMain(deps: WorkerMainDeps): void {
       entry.resolve(frame.value);
       return;
     }
-    entry.reject(new ToolCallError(typeof frame.tool === "string" ? frame.tool : "unknown", typeof frame.message === "string" ? frame.message : "binding call failed"));
+    entry.reject(
+      new ToolCallError(
+        typeof frame.tool === "string" ? frame.tool : "unknown",
+        typeof frame.message === "string" ? frame.message : "binding call failed",
+      ),
+    );
   };
 
   const cancelPending = (reason: PtcCancelReason): void => {
@@ -399,7 +454,9 @@ export function workerMain(deps: WorkerMainDeps): void {
 
   const assertItemCount = (helper: string, count: number, maxItemsPerCall: number): void => {
     if (count > maxItemsPerCall) {
-      throw new RangeError(`${helper}() received ${count} items, exceeding maxItemsPerCall (${maxItemsPerCall})`);
+      throw new RangeError(
+        `${helper}() received ${count} items, exceeding maxItemsPerCall (${maxItemsPerCall})`,
+      );
     }
   };
 
@@ -408,23 +465,30 @@ export function workerMain(deps: WorkerMainDeps): void {
     target.args = args === undefined ? null : args;
 
     target.log = (message: unknown): void => {
-      if (typeof message !== "string") throw new TypeError(`log(message) expects a string, received ${describeValue(message)}`);
+      if (typeof message !== "string")
+        throw new TypeError(`log(message) expects a string, received ${describeValue(message)}`);
       post({ kind: workerFrame.narration, message });
     };
 
     target.phase = (title: unknown): void => {
-      if (typeof title !== "string") throw new TypeError(`phase(title) expects a string, received ${describeValue(title)}`);
+      if (typeof title !== "string")
+        throw new TypeError(`phase(title) expects a string, received ${describeValue(title)}`);
       post({ kind: workerFrame.phase, title });
     };
 
     // parallel(thunks): all thunks start together; a rejected item becomes `null`
     // instead of failing the call (R1 §4).
     target.parallel = async (thunks: unknown): Promise<unknown[]> => {
-      if (!Array.isArray(thunks)) throw new TypeError(`parallel(thunks) expects an array of functions, received ${describeValue(thunks)}`);
+      if (!Array.isArray(thunks))
+        throw new TypeError(
+          `parallel(thunks) expects an array of functions, received ${describeValue(thunks)}`,
+        );
       assertItemCount("parallel", thunks.length, maxItemsPerCall);
       for (let index = 0; index < thunks.length; index += 1) {
         if (typeof thunks[index] !== "function") {
-          throw new TypeError(`parallel(thunks) expects functions; item ${index} is ${describeValue(thunks[index])}`);
+          throw new TypeError(
+            `parallel(thunks) expects functions; item ${index} is ${describeValue(thunks[index])}`,
+          );
         }
       }
       return await Promise.all(
@@ -441,15 +505,23 @@ export function workerMain(deps: WorkerMainDeps): void {
     // pipeline(items, ...stages): stages run per item with no cross-stage barrier; a
     // failing item becomes `null` while its siblings continue (R1 §4).
     target.pipeline = async (items: unknown, ...stages: unknown[]): Promise<unknown[]> => {
-      if (!Array.isArray(items)) throw new TypeError(`pipeline(items, ...stages) expects an array of items, received ${describeValue(items)}`);
+      if (!Array.isArray(items))
+        throw new TypeError(
+          `pipeline(items, ...stages) expects an array of items, received ${describeValue(items)}`,
+        );
       assertItemCount("pipeline", items.length, maxItemsPerCall);
-      if (stages.length === 0) throw new TypeError("pipeline(items, ...stages) requires at least one stage function");
+      if (stages.length === 0)
+        throw new TypeError("pipeline(items, ...stages) requires at least one stage function");
       for (let index = 0; index < stages.length; index += 1) {
         if (typeof stages[index] !== "function") {
-          throw new TypeError(`pipeline(items, ...stages) expects stage functions; stage ${index} is ${describeValue(stages[index])}`);
+          throw new TypeError(
+            `pipeline(items, ...stages) expects stage functions; stage ${index} is ${describeValue(stages[index])}`,
+          );
         }
       }
-      const stageFunctions = stages as Array<(previous: unknown, item: unknown, index: number) => unknown>;
+      const stageFunctions = stages as Array<
+        (previous: unknown, item: unknown, index: number) => unknown
+      >;
       return await Promise.all(
         (items as unknown[]).map(async (item, index) => {
           try {
@@ -478,7 +550,9 @@ export function workerMain(deps: WorkerMainDeps): void {
     // the fallback only exists so a hand-built frame cannot silently wedge the surface
     // (the host's arrival-counted backstop still catches a flood in that case).
     maxPendingCalls =
-      typeof frame.maxPendingCalls === "number" && Number.isFinite(frame.maxPendingCalls) && frame.maxPendingCalls > 0
+      typeof frame.maxPendingCalls === "number" &&
+      Number.isFinite(frame.maxPendingCalls) &&
+      frame.maxPendingCalls > 0
         ? frame.maxPendingCalls
         : Number.POSITIVE_INFINITY;
 
@@ -494,7 +568,10 @@ export function workerMain(deps: WorkerMainDeps): void {
     for (const name of candidates) {
       if (typeof name !== "string" || tools[name]) continue;
       tools[name] = async () => {
-        throw new ToolCallError(name, `no binding named "${name}" in this run; available bindings: ${available}`);
+        throw new ToolCallError(
+          name,
+          `no binding named "${name}" in this run; available bindings: ${available}`,
+        );
       };
     }
     globals().tools = tools;
@@ -532,7 +609,12 @@ export function workerMain(deps: WorkerMainDeps): void {
     const frame = value as Record<string, unknown>;
     if (frame.kind !== hostFrame.connect) return;
     const port = frame.port;
-    if (typeof port !== "object" || port === null || typeof (port as WorkerMainPort).on !== "function") return;
+    if (
+      typeof port !== "object" ||
+      port === null ||
+      typeof (port as WorkerMainPort).on !== "function"
+    )
+      return;
     control = port as WorkerMainPort;
     control.on("message", handleHostFrame);
     // The host is gone (it closed the control port, e.g. after terminating the run): no

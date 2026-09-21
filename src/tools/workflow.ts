@@ -27,7 +27,12 @@ import type { Static } from "typebox";
 import { createBuiltinBindings } from "../runtime/bindings.ts";
 import { runPtcProgram } from "../runtime/dispatcher.ts";
 import type { PtcRunOutcome } from "../runtime/dispatcher.ts";
-import { codeRunFailedError, renderToolResult, resolveBindingNames, resolveToolCwd } from "./common.ts";
+import {
+  codeRunFailedError,
+  renderToolResult,
+  resolveBindingNames,
+  resolveToolCwd,
+} from "./common.ts";
 import type { PtcToolOptions } from "./common.ts";
 
 const DESCRIPTION = [
@@ -52,9 +57,15 @@ const PARAMETERS = Type.Object({
       name: Type.String({ description: "Short workflow name, shown in the UI." }),
       description: Type.String({ description: "What this workflow does, in active voice." }),
       phases: Type.Optional(
-        Type.Array(Type.Object({ name: Type.String({ description: "Phase title, matched against phase(title) calls." }) }), {
-          description: "Ordered plan of the workflow's phases. phase() titles outside this list are reported as warnings.",
-        }),
+        Type.Array(
+          Type.Object({
+            name: Type.String({ description: "Phase title, matched against phase(title) calls." }),
+          }),
+          {
+            description:
+              "Ordered plan of the workflow's phases. phase() titles outside this list are reported as warnings.",
+          },
+        ),
       ),
     },
     { description: "Workflow metadata: what this run is and which phases it declares." },
@@ -90,11 +101,18 @@ function describeValue(value: unknown): string {
 export function validateWorkflowArgs(args: unknown): void {
   if (args === undefined) return;
   if (typeof args !== "object" || args === null || Array.isArray(args)) {
-    throw new TypeError(`ptc_workflow args must be a plain JSON object, received ${describeValue(args)}`);
+    throw new TypeError(
+      `ptc_workflow args must be a plain JSON object, received ${describeValue(args)}`,
+    );
   }
   for (const key of Object.keys(args)) {
-    const problem = findJsonProblem((args as Record<string, unknown>)[key], `args.${key}`, new Set());
-    if (problem !== undefined) throw new TypeError(`ptc_workflow args must be plain JSON: ${problem}`);
+    const problem = findJsonProblem(
+      (args as Record<string, unknown>)[key],
+      `args.${key}`,
+      new Set(),
+    );
+    if (problem !== undefined)
+      throw new TypeError(`ptc_workflow args must be plain JSON: ${problem}`);
   }
 }
 
@@ -103,7 +121,9 @@ function findJsonProblem(value: unknown, path: string, seen: Set<object>): strin
   if (value === null || typeof value === "string" || typeof value === "boolean") return undefined;
   if (typeof value === "undefined") return `${path} is undefined`;
   if (typeof value === "number") {
-    return Number.isFinite(value) ? undefined : `${path} is ${String(value)}, which is not representable as JSON`;
+    return Number.isFinite(value)
+      ? undefined
+      : `${path} is ${String(value)}, which is not representable as JSON`;
   }
   if (typeof value !== "object") return `${path} is ${describeValue(value)}`;
 
@@ -124,7 +144,11 @@ function findJsonProblem(value: unknown, path: string, seen: Set<object>): strin
       return `${path} is a ${typeof name === "string" && name.length > 0 ? name : "non-plain object"}, not plain JSON`;
     }
     for (const key of Object.keys(container)) {
-      const problem = findJsonProblem((container as Record<string, unknown>)[key], `${path}.${key}`, seen);
+      const problem = findJsonProblem(
+        (container as Record<string, unknown>)[key],
+        `${path}.${key}`,
+        seen,
+      );
       if (problem !== undefined) return problem;
     }
     return undefined;
@@ -137,7 +161,10 @@ function findJsonProblem(value: unknown, path: string, seen: Set<object>): strin
  * Collect the plan-drift warnings for one workflow run: distinct `phase()` titles the declared
  * `meta.phases` list does not mention, in first-seen order.
  */
-export function unlistedPhaseWarnings(outcome: PtcRunOutcome, declared: readonly string[] | undefined): string[] {
+export function unlistedPhaseWarnings(
+  outcome: PtcRunOutcome,
+  declared: readonly string[] | undefined,
+): string[] {
   if (declared === undefined || declared.length === 0) return [];
   const known = new Set(declared);
   const reported = new Set<string>();
@@ -145,7 +172,9 @@ export function unlistedPhaseWarnings(outcome: PtcRunOutcome, declared: readonly
   for (const title of outcome.phases) {
     if (known.has(title) || reported.has(title)) continue;
     reported.add(title);
-    warnings.push(`phase "${title}" is not listed in meta.phases (declared: ${[...known].join(", ")})`);
+    warnings.push(
+      `phase "${title}" is not listed in meta.phases (declared: ${[...known].join(", ")})`,
+    );
   }
   return warnings;
 }

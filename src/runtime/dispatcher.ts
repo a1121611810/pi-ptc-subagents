@@ -105,7 +105,12 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
   const phases: string[] = [];
 
   if (options.signal?.aborted) {
-    return { logs, narrations, phases, error: { kind: PTC_ERROR_KIND.abort, message: "run cancelled before start" } };
+    return {
+      logs,
+      narrations,
+      phases,
+      error: { kind: PTC_ERROR_KIND.abort, message: "run cancelled before start" },
+    };
   }
 
   return await new Promise<PtcRunOutcome>((resolve) => {
@@ -241,7 +246,10 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
         // queues in the worker, and arrivals here stay at or below the ceiling. This fires
         // only for a worker that ignores its admission budget, which is why it fails the
         // run instead of throttling.
-        fail(PTC_ERROR_KIND.protocol, `more than maxPendingCalls (${config.maxPendingCalls}) binding calls in flight`);
+        fail(
+          PTC_ERROR_KIND.protocol,
+          `more than maxPendingCalls (${config.maxPendingCalls}) binding calls in flight`,
+        );
         return;
       }
       void dispatchCall(frame).finally(() => {
@@ -269,8 +277,17 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
         return;
       }
       try {
-        const value = await binding.execute(frame.args, { signal: bindingAbort.signal, callId: frame.callId });
-        postCallResult({ kind: HOST_FRAME_KIND.callResult, callId: frame.callId, tool: frame.tool, ok: true, value });
+        const value = await binding.execute(frame.args, {
+          signal: bindingAbort.signal,
+          callId: frame.callId,
+        });
+        postCallResult({
+          kind: HOST_FRAME_KIND.callResult,
+          callId: frame.callId,
+          tool: frame.tool,
+          ok: true,
+          value,
+        });
       } catch (error) {
         postCallResult({
           kind: HOST_FRAME_KIND.callResult,
@@ -315,7 +332,10 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
         logs,
         narrations,
         phases,
-        error: { kind: cancelling === "timeout" ? PTC_ERROR_KIND.timeout : PTC_ERROR_KIND.abort, message: cancelMessage(cancelling) },
+        error: {
+          kind: cancelling === "timeout" ? PTC_ERROR_KIND.timeout : PTC_ERROR_KIND.abort,
+          message: cancelMessage(cancelling),
+        },
       };
     };
 
@@ -331,7 +351,10 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
         return;
       }
       if (bytes > config.maxMessageBytes) {
-        fail(PTC_ERROR_KIND.protocol, `control frame of ${bytes} bytes exceeds maxMessageBytes (${config.maxMessageBytes})`);
+        fail(
+          PTC_ERROR_KIND.protocol,
+          `control frame of ${bytes} bytes exceeds maxMessageBytes (${config.maxMessageBytes})`,
+        );
         return;
       }
 
@@ -353,7 +376,13 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
           return;
         case WORKER_FRAME_KIND.result:
           if (!accountOutput(bytes, "completion value")) return;
-          finish(settleTerminal(frame.value === undefined ? { logs, narrations, phases } : { logs, narrations, phases, value: frame.value }));
+          finish(
+            settleTerminal(
+              frame.value === undefined
+                ? { logs, narrations, phases }
+                : { logs, narrations, phases, value: frame.value },
+            ),
+          );
           return;
         case WORKER_FRAME_KIND.error:
           finish(settleTerminal({ logs, narrations, phases, error: frame.error }));
@@ -379,7 +408,10 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
       bindingAbort.abort();
       sendControl({ kind: HOST_FRAME_KIND.cancel, reason });
       graceTimer = setTimeout(() => {
-        fail(reason === "timeout" ? PTC_ERROR_KIND.timeout : PTC_ERROR_KIND.abort, cancelMessage(reason));
+        fail(
+          reason === "timeout" ? PTC_ERROR_KIND.timeout : PTC_ERROR_KIND.abort,
+          cancelMessage(reason),
+        );
       }, config.graceMs);
     }
 

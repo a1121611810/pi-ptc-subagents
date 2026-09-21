@@ -33,7 +33,11 @@ test("the factory registers both PTC tools against the ExtensionAPI", () => {
   assert.deepEqual([...tools.keys()], ["ptc_run_code", "ptc_workflow"]);
   for (const [name, tool] of tools) {
     assert.equal(typeof tool.execute, "function", `${name} must be executable`);
-    assert.equal(typeof tool.description, "string", `${name} must carry a model-facing description`);
+    assert.equal(
+      typeof tool.description,
+      "string",
+      `${name} must carry a model-facing description`,
+    );
     assert.equal(typeof tool.parameters, "object", `${name} must carry a typebox schema`);
   }
 });

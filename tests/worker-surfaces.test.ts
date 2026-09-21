@@ -12,7 +12,9 @@ const runWorkflow = (code: string, extra: Partial<Parameters<typeof runPtcProgra
 const options = { timeout: RUN_TIMEOUT_MS };
 
 test("run_code resolves the program's return value as lossless JSON", options, async () => {
-  const outcome = await runCode('return { nested: [1, "two", null, true], deep: { a: { b: 2 } } };');
+  const outcome = await runCode(
+    'return { nested: [1, "two", null, true], deep: { a: { b: 2 } } };',
+  );
   assert.equal(outcome.error, undefined);
   assert.deepEqual(outcome.value, { nested: [1, "two", null, true], deep: { a: { b: 2 } } });
 });
@@ -24,7 +26,9 @@ test("run_code reports no value when the program returns nothing", options, asyn
 });
 
 test("run_code strips TypeScript annotations", options, async () => {
-  const outcome = await runCode("const x: number = 41;\nconst f = (v: number): number => v + 1;\nreturn f(x);");
+  const outcome = await runCode(
+    "const x: number = 41;\nconst f = (v: number): number => v + 1;\nreturn f(x);",
+  );
   assert.equal(outcome.error, undefined);
   assert.equal(outcome.value, 42);
 });
@@ -58,12 +62,16 @@ test("run_code surface exposes tools and Node only — no helpers", options, asy
   });
 });
 
-test("calling a helper that the surface does not have is a plain ReferenceError", options, async () => {
-  const outcome = await runCode('log("nope");');
-  assert.equal(outcome.error?.kind, "exception");
-  assert.match(String(outcome.error?.message), /log is not defined/);
-  assert.equal(outcome.value, undefined);
-});
+test(
+  "calling a helper that the surface does not have is a plain ReferenceError",
+  options,
+  async () => {
+    const outcome = await runCode('log("nope");');
+    assert.equal(outcome.error?.kind, "exception");
+    assert.match(String(outcome.error?.message), /log is not defined/);
+    assert.equal(outcome.value, undefined);
+  },
+);
 
 test("workflow surface installs the helper globals and binds args", options, async () => {
   const outcome = await runWorkflow(
@@ -83,7 +91,9 @@ test("workflow surface installs the helper globals and binds args", options, asy
 });
 
 test("workflow log() and phase() emit frames instead of console output", options, async () => {
-  const outcome = await runWorkflow('log("step one"); phase("Research"); console.log("printed"); phase("Write");');
+  const outcome = await runWorkflow(
+    'log("step one"); phase("Research"); console.log("printed"); phase("Write");',
+  );
   assert.equal(outcome.error, undefined);
   assert.deepEqual(outcome.narrations, ["step one"]);
   assert.deepEqual(outcome.phases, ["Research", "Write"]);
@@ -100,13 +110,17 @@ test("workflow log/phase validate their argument", options, async () => {
   assert.match(String(badPhase.error?.message), /phase\(title\) expects a string/);
 });
 
-test("parallel() runs thunks concurrently and maps per-item failures to null", options, async () => {
-  const outcome = await runWorkflow(
-    'const out = await parallel([async () => { await new Promise((r) => setTimeout(r, 5)); return "a"; }, async () => { throw new Error("boom"); }, async () => 3]); return out;',
-  );
-  assert.equal(outcome.error, undefined);
-  assert.deepEqual(outcome.value, ["a", null, 3]);
-});
+test(
+  "parallel() runs thunks concurrently and maps per-item failures to null",
+  options,
+  async () => {
+    const outcome = await runWorkflow(
+      'const out = await parallel([async () => { await new Promise((r) => setTimeout(r, 5)); return "a"; }, async () => { throw new Error("boom"); }, async () => 3]); return out;',
+    );
+    assert.equal(outcome.error, undefined);
+    assert.deepEqual(outcome.value, ["a", null, 3]);
+  },
+);
 
 test("parallel() validates its argument shape", options, async () => {
   const notArray = await runWorkflow('await parallel("nope");');
@@ -115,7 +129,10 @@ test("parallel() validates its argument shape", options, async () => {
 
   const notFunctions = await runWorkflow("await parallel([1]);");
   assert.equal(notFunctions.error?.kind, "exception");
-  assert.match(String(notFunctions.error?.message), /parallel\(thunks\) expects functions; item 0 is a number/);
+  assert.match(
+    String(notFunctions.error?.message),
+    /parallel\(thunks\) expects functions; item 0 is a number/,
+  );
 });
 
 test("parallel() enforces maxItemsPerCall", options, async () => {
@@ -127,21 +144,25 @@ test("parallel() enforces maxItemsPerCall", options, async () => {
   assert.match(String(outcome.error?.message), new RegExp(String(DEFAULT_CONFIG.maxItemsPerCall)));
 });
 
-test("pipeline() threads each item through every stage without a cross-stage barrier", options, async () => {
-  const outcome = await runWorkflow(
-    [
-      "const items = [1, 2, 3];",
-      "const out = await pipeline(",
-      "  items,",
-      "  async (prev, item, index) => `${index}:${prev}:${item}`,",
-      '  async (prev) => prev + "!",',
-      ");",
-      "return out;",
-    ].join("\n"),
-  );
-  assert.equal(outcome.error, undefined);
-  assert.deepEqual(outcome.value, ["0:1:1!", "1:2:2!", "2:3:3!"]);
-});
+test(
+  "pipeline() threads each item through every stage without a cross-stage barrier",
+  options,
+  async () => {
+    const outcome = await runWorkflow(
+      [
+        "const items = [1, 2, 3];",
+        "const out = await pipeline(",
+        "  items,",
+        "  async (prev, item, index) => `${index}:${prev}:${item}`,",
+        '  async (prev) => prev + "!",',
+        ");",
+        "return out;",
+      ].join("\n"),
+    );
+    assert.equal(outcome.error, undefined);
+    assert.deepEqual(outcome.value, ["0:1:1!", "1:2:2!", "2:3:3!"]);
+  },
+);
 
 test("pipeline() turns a failing item into null and keeps siblings", options, async () => {
   const outcome = await runWorkflow(
@@ -181,7 +202,11 @@ test("a thrown program error carries a trimmed stack", options, async () => {
   assert.equal(outcome.error?.kind, "exception");
   assert.equal(outcome.error?.message, "exploded");
   assert.ok(outcome.error?.stack?.includes("exploded"), "stack keeps the message line");
-  assert.equal(outcome.error?.stack?.includes("data:text/javascript"), false, "worker bootstrap frames are dropped");
+  assert.equal(
+    outcome.error?.stack?.includes("data:text/javascript"),
+    false,
+    "worker bootstrap frames are dropped",
+  );
   assert.ok((outcome.error?.stack?.split("\n").length ?? 0) <= 6, "stack depth is capped");
 });
 

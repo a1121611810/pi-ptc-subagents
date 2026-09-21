@@ -2,14 +2,27 @@
   "name": "pi-ptc-subagents",
   "version": "0.1.0",
   "description": "DSH PTC mode (ptc_run_code + ptc_workflow) for pi",
-  "type": "module",
-  "license": "Apache-2.0",
   "keywords": [
-    "pi-package",
     "pi",
-    "ptc",
-    "programmatic-tool-calling"
+    "pi-package",
+    "programmatic-tool-calling",
+    "ptc"
   ],
+  "homepage": "https://github.com/a1121611810/pi-ptc-subagents#readme",
+  "bugs": {
+    "url": "https://github.com/a1121611810/pi-ptc-subagents/issues"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/a1121611810/pi-ptc-subagents.git"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -18,24 +31,24 @@
       "import": "./dist/index.js"
     }
   },
-  "files": [
-    "dist",
-    "README.md",
-    "LICENSE"
-  ],
-  "engines": {
-    "node": ">=22.19.0"
-  },
-  "pi": {
-    "extensions": [
-      "./dist/index.js"
-    ]
-  },
   "scripts": {
     "build": "rolldown -c rolldown.config.ts && tsc -p tsconfig.build.json && node scripts/fix-dts-extensions.mjs",
     "typecheck": "tsc --noEmit",
+    "lint": "oxlint",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
     "test": "node scripts/test.mjs",
-    "prepublishOnly": "npm run typecheck && npm run test && npm run build"
+    "prepublishOnly": "npm run typecheck && npm run lint && npm run format:check && npm run test && npm run build"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "^0.86.1",
+    "@earendil-works/pi-coding-agent": "^0.86.1",
+    "@types/node": "^22.0.0",
+    "oxfmt": "^0.70.0",
+    "oxlint": "^1.85.0",
+    "rolldown": "^1.2.9",
+    "typebox": "^1.3.34",
+    "typescript": "^7.0.2"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
@@ -53,20 +66,12 @@
       "optional": true
     }
   },
-  "devDependencies": {
-    "@earendil-works/pi-ai": "^0.86.1",
-    "@earendil-works/pi-coding-agent": "^0.86.1",
-    "@types/node": "^22.0.0",
-    "rolldown": "^1.2.9",
-    "typebox": "^1.3.34",
-    "typescript": "^7.0.2"
+  "engines": {
+    "node": ">=22.19.0"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/a1121611810/pi-ptc-subagents.git"
-  },
-  "bugs": {
-    "url": "https://github.com/a1121611810/pi-ptc-subagents/issues"
-  },
-  "homepage": "https://github.com/a1121611810/pi-ptc-subagents#readme"
+  "pi": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  }
 }

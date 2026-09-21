@@ -48,7 +48,9 @@ export interface PtcToolOptions {
  * calls. Names outside the built-in factory set are ignored: only tools this package can
  * build adapters for can be bound.
  */
-export function resolveBindingNames(activeToolNames: readonly string[] | undefined): readonly string[] {
+export function resolveBindingNames(
+  activeToolNames: readonly string[] | undefined,
+): readonly string[] {
   if (activeToolNames === undefined) return BUILTIN_BINDING_NAMES;
   const active = new Set(activeToolNames);
   return BUILTIN_BINDING_NAMES.filter((name) => active.has(name));
@@ -164,7 +166,10 @@ export function renderToolResult(input: {
   if (outcome.logs.length > 0) parts.push(outcome.logs.join("\n"));
   if (outcome.value !== undefined) parts.push(renderValue(outcome.value));
   for (const warning of warnings) parts.push(`Warning: ${warning}`);
-  const text = parts.length > 0 ? parts.join("\n") : `(${SURFACE_TOOL_NAME[surface]} completed with no output)`;
+  const text =
+    parts.length > 0
+      ? parts.join("\n")
+      : `(${SURFACE_TOOL_NAME[surface]} completed with no output)`;
   const content: TextContent[] = [{ type: "text", text }];
   return {
     content,

@@ -223,7 +223,9 @@ export function isPtcCancelReason(value: unknown): value is PtcCancelReason {
 }
 
 export function isPtcConnectFrame(value: unknown): value is PtcConnectFrame {
-  return isRecord(value) && value.kind === HOST_FRAME_KIND.connect && value.port instanceof MessagePort;
+  return (
+    isRecord(value) && value.kind === HOST_FRAME_KIND.connect && value.port instanceof MessagePort
+  );
 }
 
 export function isPtcInitFrame(value: unknown): value is PtcInitFrame {
@@ -252,11 +254,18 @@ export function isPtcCallResultFrame(value: unknown): value is PtcCallResultFram
 }
 
 export function isPtcCancelFrame(value: unknown): value is PtcCancelFrame {
-  return isRecord(value) && value.kind === HOST_FRAME_KIND.cancel && isPtcCancelReason(value.reason);
+  return (
+    isRecord(value) && value.kind === HOST_FRAME_KIND.cancel && isPtcCancelReason(value.reason)
+  );
 }
 
 export function isPtcHostFrame(value: unknown): value is PtcHostFrame {
-  return isPtcConnectFrame(value) || isPtcInitFrame(value) || isPtcCallResultFrame(value) || isPtcCancelFrame(value);
+  return (
+    isPtcConnectFrame(value) ||
+    isPtcInitFrame(value) ||
+    isPtcCallResultFrame(value) ||
+    isPtcCancelFrame(value)
+  );
 }
 
 export function isPtcReadyFrame(value: unknown): value is PtcReadyFrame {
@@ -275,15 +284,26 @@ export function isPtcCallFrame(value: unknown): value is PtcCallFrame {
 }
 
 export function isPtcLogFrame(value: unknown): value is PtcLogFrame {
-  return isRecord(value) && value.kind === WORKER_FRAME_KIND.log && isPtcLogLevel(value.level) && typeof value.text === "string";
+  return (
+    isRecord(value) &&
+    value.kind === WORKER_FRAME_KIND.log &&
+    isPtcLogLevel(value.level) &&
+    typeof value.text === "string"
+  );
 }
 
 export function isPtcNarrationFrame(value: unknown): value is PtcNarrationFrame {
-  return isRecord(value) && value.kind === WORKER_FRAME_KIND.narration && typeof value.message === "string";
+  return (
+    isRecord(value) &&
+    value.kind === WORKER_FRAME_KIND.narration &&
+    typeof value.message === "string"
+  );
 }
 
 export function isPtcPhaseFrame(value: unknown): value is PtcPhaseFrame {
-  return isRecord(value) && value.kind === WORKER_FRAME_KIND.phase && typeof value.title === "string";
+  return (
+    isRecord(value) && value.kind === WORKER_FRAME_KIND.phase && typeof value.title === "string"
+  );
 }
 
 export function isPtcResultFrame(value: unknown): value is PtcResultFrame {

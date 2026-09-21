@@ -6,7 +6,11 @@
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+  ToolDefinition,
+} from "@earendil-works/pi-coding-agent";
 import ptcSubagents, { BUILTIN_BINDING_NAMES } from "../../src/index.ts";
 import type { Binding, BindingTable } from "../../src/runtime/bindings.ts";
 
@@ -62,7 +66,8 @@ export function toolContext(cwd: string): ExtensionContext {
 /** Build a binding table; keys become the `tools.<name>` namespace in the worker. */
 export function makeBindings(entries: Record<string, Binding["execute"]>): BindingTable {
   const table = new Map<string, Binding>();
-  for (const [name, execute] of Object.entries(entries)) table.set(name, makeBinding(name, execute));
+  for (const [name, execute] of Object.entries(entries))
+    table.set(name, makeBinding(name, execute));
   return table;
 }
 

@@ -43,14 +43,15 @@ workflow-engine globals in DSH's `@deepseek-ai/dsh-workflow-ptc`; they do
 NOT appear in PTC `run_code`'s worker surface. Plain PTC `run_code`
 exposes only `tools.<name>(args)` + standard Node API + `console.log`. The
 pi-ptc worker split mirrors this:
+
 - **`ptc_run_code` worker** — bindings + Node + `console.log`; the
   script's async return value goes back to the model as the result;
   there is no `result()` helper in plain PTC.
 - **`ptc_workflow` worker** — bindings + Node + `console.log` PLUS
-  workflow helpers `log / phase / parallel / pipeline` (real in this map)
-  + `agent()` (stub only; full implementation is a future map per
-  destination grill Q3). The `result(value)` form in `ptc_workflow` is
-  the script's async return, materialized lossless-JSON.
+  workflow helpers `log / phase / parallel / pipeline` (real in this map).
+  There is no `agent()` (G1 #13 decision B — that seam is deferred to a
+  future map). The `result(value)` form in `ptc_workflow` is the script's
+  async return, materialized lossless-JSON.
 
 **run_code** — the model-facing tool name DSH exposes in PTC mode. The pi
 version exposes `ptc_run_code` to avoid collision with pi's hypothetical
@@ -66,4 +67,4 @@ future native `run_code`, plus a sidekick `ptc_workflow` for structured
 
 - **DSH preset / agent-preset** (Standard / PTC / Minimal / Creative) is a
   dsh-side concept. pi has no equivalent preset system today; this package
-  is *only* the PTC mode implementation, not a preset framework.
+  is _only_ the PTC mode implementation, not a preset framework.

@@ -20,7 +20,12 @@ import { Type } from "typebox";
 import { createBuiltinBindings } from "../runtime/bindings.ts";
 import { runPtcProgram } from "../runtime/dispatcher.ts";
 import { DEFAULT_CONFIG } from "../runtime/limits.ts";
-import { codeRunFailedError, renderToolResult, resolveBindingNames, resolveToolCwd } from "./common.ts";
+import {
+  codeRunFailedError,
+  renderToolResult,
+  resolveBindingNames,
+  resolveToolCwd,
+} from "./common.ts";
 import type { PtcToolOptions } from "./common.ts";
 
 const DESCRIPTION = [

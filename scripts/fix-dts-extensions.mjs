@@ -42,7 +42,9 @@ for (const file of files) {
 
 const leftovers = files.filter((file) => SPECIFIER.test(readFileSync(file, "utf8")));
 if (leftovers.length > 0) {
-  console.error(`fix-dts-extensions: relative .ts specifiers remain in:\n  ${leftovers.join("\n  ")}`);
+  console.error(
+    `fix-dts-extensions: relative .ts specifiers remain in:\n  ${leftovers.join("\n  ")}`,
+  );
   process.exit(1);
 }
 

@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
-import { BUILTIN_BINDING_NAMES, createBuiltinBindings, DEFAULT_BINDING_NAMES } from "../src/runtime/bindings.ts";
+import {
+  BUILTIN_BINDING_NAMES,
+  createBuiltinBindings,
+  DEFAULT_BINDING_NAMES,
+} from "../src/runtime/bindings.ts";
 import { makeTempDir, removeTempDir, RUN_TIMEOUT_MS } from "./helpers/ptc.ts";
 
 const options = { timeout: RUN_TIMEOUT_MS };
@@ -10,7 +14,10 @@ const call = { callId: 1 };
 
 test("bash is part of the default binding set on purpose", () => {
   assert.deepEqual([...DEFAULT_BINDING_NAMES], [...BUILTIN_BINDING_NAMES]);
-  assert.ok(DEFAULT_BINDING_NAMES.includes("bash"), "DSH's PTC preset keeps its shell tool mounted as a binding");
+  assert.ok(
+    DEFAULT_BINDING_NAMES.includes("bash"),
+    "DSH's PTC preset keeps its shell tool mounted as a binding",
+  );
   for (const name of ["read", "edit", "write", "grep", "find", "ls"]) {
     assert.ok(DEFAULT_BINDING_NAMES.includes(name as never), `${name} must be bindable`);
   }
@@ -31,7 +38,8 @@ test("createBuiltinBindings builds every built-in by default and honours an expl
 test("createBuiltinBindings rejects unknown binding names", () => {
   assert.throws(
     () => createBuiltinBindings({ cwd: process.cwd(), names: ["read", "teleport"] }),
-    (error: Error) => error instanceof TypeError && /unknown PTC binding "teleport"/.test(error.message),
+    (error: Error) =>
+      error instanceof TypeError && /unknown PTC binding "teleport"/.test(error.message),
   );
 });
 

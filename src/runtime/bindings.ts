@@ -28,7 +28,15 @@ import {
 import type { TSchema } from "typebox";
 
 /** pi's built-in tools that can be exposed as bindings, in native order. */
-export const BUILTIN_BINDING_NAMES = ["read", "bash", "edit", "write", "grep", "find", "ls"] as const;
+export const BUILTIN_BINDING_NAMES = [
+  "read",
+  "bash",
+  "edit",
+  "write",
+  "grep",
+  "find",
+  "ls",
+] as const;
 export type BuiltinBindingName = (typeof BUILTIN_BINDING_NAMES)[number];
 
 /**
@@ -108,7 +116,9 @@ export function createBuiltinBindings(options: CreateBuiltinBindingsOptions): Bi
   for (const name of names) {
     const factory = BUILTIN_TOOL_FACTORIES[name as BuiltinBindingName];
     if (!factory) {
-      throw new TypeError(`unknown PTC binding "${name}"; known bindings: ${BUILTIN_BINDING_NAMES.join(", ")}`);
+      throw new TypeError(
+        `unknown PTC binding "${name}"; known bindings: ${BUILTIN_BINDING_NAMES.join(", ")}`,
+      );
     }
     const tool = factory(options.cwd);
     table.set(name, {
@@ -122,10 +132,18 @@ export function createBuiltinBindings(options: CreateBuiltinBindingsOptions): Bi
           arguments: args,
         } as unknown as ToolCallLike;
         const validated = validateToolArguments(tool, toolCall);
-        const result = await tool.execute(toolCallId, validated as never, context.signal, undefined);
+        const result = await tool.execute(
+          toolCallId,
+          validated as never,
+          context.signal,
+          undefined,
+        );
         // What crosses the wire is the tool's model-facing payload: `usage` and
         // `terminate` are agent-loop plumbing with no meaning inside a PTC program.
-        return { content: result.content, details: result.details === undefined ? null : result.details };
+        return {
+          content: result.content,
+          details: result.details === undefined ? null : result.details,
+        };
       },
     });
   }
