@@ -28,13 +28,14 @@ test("the default export is the extension factory and runs without touching pi",
   assert.equal(ptcSubagents(stub), undefined);
 });
 
-test("the factory registers the PTC tools against the ExtensionAPI", () => {
+test("the factory registers both PTC tools against the ExtensionAPI", () => {
   const tools = captureRegisteredTools();
-  assert.deepEqual([...tools.keys()], ["ptc_run_code"]);
-  const tool = tools.get("ptc_run_code");
-  assert.equal(typeof tool?.execute, "function");
-  assert.equal(typeof tool?.description, "string");
-  assert.equal(typeof tool?.parameters, "object");
+  assert.deepEqual([...tools.keys()], ["ptc_run_code", "ptc_workflow"]);
+  for (const [name, tool] of tools) {
+    assert.equal(typeof tool.execute, "function", `${name} must be executable`);
+    assert.equal(typeof tool.description, "string", `${name} must carry a model-facing description`);
+    assert.equal(typeof tool.parameters, "object", `${name} must carry a typebox schema`);
+  }
 });
 
 test("the factory module re-exports the machinery T4/T5 build on", () => {

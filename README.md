@@ -6,10 +6,11 @@ and only the program's return value plus its logs come back to the model.
 
 ## Status
 
-Pre-1.0 baseline. The implementation is written clean-room from
+Pre-1.0, but functional: `ptc_run_code` and `ptc_workflow` are registered and run
+programs through the same tested worker machinery (dispatcher, wire protocol,
+budgets, built-in bindings). The implementation is written clean-room from
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) PTC
-behaviour (tracked as a wayfinder map in this repo's issues); the tools land
-progressively — `ptc_run_code` / `ptc_workflow` are not functional yet.
+behaviour (tracked as a wayfinder map in this repo's issues).
 
 ## Install
 
@@ -22,13 +23,15 @@ From a local checkout: `npm install && npm run build && pi install /abs/path/to/
 pi reads the `pi.extensions` manifest field, so no extra setup steps are
 required — install it and the extension is on for the next pi startup.
 
-## Tools (landing progressively)
+## Tools
 
 - `ptc_run_code` — run a JS/TS program that composes tool calls; the program
-  reaches tools as `tools.read(...)`, `tools.write(...)`, etc.; its return value
-  and `console.log` output are reported back.
-- `ptc_workflow` — structured variant with `meta` + `args`, plus the workflow
-  helpers (`log`, `phase`, `parallel`, `pipeline`).
+  reaches tools as `tools.read(...)`, `tools.write(...)`, etc. (all seven
+  built-ins, `bash` included); its return value and `console.log` output are
+  reported back.
+- `ptc_workflow` — structured variant with `meta` + plain-JSON `args`, plus the
+  workflow helpers (`log`, `phase`, `parallel`, `pipeline`). There is no
+  `agent()` helper on either surface.
 
 ## Trust posture (read me)
 

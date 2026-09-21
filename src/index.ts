@@ -26,4 +26,5 @@ export type { PtcErrorKind, PtcErrorShape, PtcJsonValue } from "./runtime/protoc
 
 export default function ptcSubagents(pi: ExtensionAPI): void {
   pi.registerTool(createPtcRunCodeTool());
+  pi.registerTool(createPtcWorkflowTool());
 }
