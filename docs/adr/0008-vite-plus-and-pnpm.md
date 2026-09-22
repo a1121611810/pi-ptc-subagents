@@ -61,3 +61,44 @@ Phase 2 ships when: the four `vp` tasks above produce byte-identical (or behavio
 - Phase 1: any of `pnpm install --frozen-lockfile` failing on a fresh checkout, CI's `cache: pnpm` not firing, or a peer-dep resolution change that shifts `dist/index.js`'s externalised modules. Revert: re-introduce `package-lock.json` from the prior commit, undo the CI `cache:`/`npm ci` lines.
 - Phase 2: `vp pack` produces a `dist/index.js` or `dist/index.d.ts` that differs from the rolldown artefact (size, sourcemap layout, externals list, or `exports` field reachability). Revert: keep `rolldown` in `devDependencies`, restore the prior `build` script, drop `vite-plus` from `devDependencies`. The phase-2 diff stays in git history so the revert is one commit.
 - `vp` upstream ships a breaking change to `vp pack`'s output shape: re-derive the `rolldown.config.ts` analogue inside `vp`'s config and revisit.
+
+## Addendum (2026-09-22) — Phase 2 outcome
+
+Phase 1 shipped at `98a6591` (CI green on `main`). Phase 2 was attempted the same day and the criterion in "Phases" failed for every candidate script. Findings, per task, with `vite-plus@0.3.3` as the toolchain under test:
+
+### Build — `vp pack` vs `rolldown -c rolldown.config.ts`
+
+`vp pack` is a tsdown wrapper. With a `vite.config.ts#pack` block mirroring the rolldown config (`entry: ["./src/index.ts"]`, `format: ["esm"]`, `sourcemap: true`, `dts: { sourcemap: true }`, `platform: "node"`, `external: [/^node:/, "@earendil-works/pi-coding-agent", "@earendil-works/pi-ai", "typebox"]`), and `output.entryFileNames: "[name].js"` to force `.js` extension, the resulting dist files are still named:
+
+```
+dist/index.mjs       54,832 B   (baseline: dist/index.js    54,831 B)
+dist/index.mjs.map  117,477 B   (baseline: dist/index.js.map 117,476 B)
+dist/index.d.mts     9,564 B    (baseline: dist/index.d.ts  9,563 B)
+dist/index.d.mts.map 1,085 B    (baseline: dist/index.d.ts.map 1,084 B)
+```
+
+tsdown's format → extension rule pins ESM to `.mjs` and DTS to `.d.mts`. The size delta is one byte per file (likely an artifact header). Either way, the **filenames diverge** from what `package.json#exports` / `main` / `types` point to (`./dist/index.js`, `./dist/index.d.ts`), which is a downstream-visible change. The ADR criterion was "produces the same output (`dist/index.js` + `dist/index.d.ts` for build)" — output filenames are part of "the same output." `vp pack` does not pass.
+
+A rename step (`mv dist/index.mjs dist/index.js && mv dist/index.d.mts dist/index.d.ts`) would close the gap, but that puts a post-step in front of `vp pack`, which defeats the point of replacing `rolldown -c`. **Build: not swapping.**
+
+### Lint — `vp lint` vs `oxlint`
+
+`vp lint` warns `note: You are running vp lint as a Vite+ built-in command` and proceeds. On the current codebase (clean) both exit 0 with no diagnostics, so the outputs are equivalent **today**. The criterion that bites is forward-looking: `vp toolchain` reports vp's bundled oxlint at `1.83.0`; `devDependencies` carries `oxlint@1.85.0` (chosen specifically for the `type-aware` lint commit `585cebb`). Migrating `lint` to `vp lint` would silently downgrade the lint to 1.83.0, losing type-aware diagnostics on future PRs. Same concern for `vp fmt` (`oxfmt@0.68.0` bundled vs `0.70.0` direct). **Lint + Fmt: not swapping** — version regression in capability is exactly the kind of "different output" the criterion catches.
+
+### Typecheck — `vp check --typecheck` vs `tsc --noEmit`
+
+`vp check --typecheck` invokes the project-local `tsc` against the same `tsconfig.json`. Same TypeScript version, same flags, same diagnostics. The swap would be safe. But it would also be unremarkable: `pnpm run typecheck` (`tsc --noEmit`) is already the simplest possible incantation, and routing it through `vp` adds one process for no behavioural benefit. **Typecheck: not swapping** — meets the criterion but offers no value.
+
+### Net outcome
+
+`vite-plus@0.3.3` is installed as a devDependency to keep the option open and to make the comparison reproducible from this commit. None of the `npm run` scripts change. CI does not invoke `vp`. The migration stopped at Phase 1.
+
+### Revisit criteria
+
+Re-attempt Phase 2 when **all** of these are true:
+
+1. `vite-plus`'s bundled oxlint reaches `>=1.85.0` (matches our direct version) — so `vp lint` is no longer a regression.
+2. `vite-plus`'s bundled oxfmt reaches `>=0.70.0` — same reason.
+3. tsdown (or vp's wrapper around it) exposes a stable option to write ESM with a `.js` extension **without** a post-step, **or** the project is willing to update `package.json#exports` / `main` / `types` to point at `.mjs` / `.d.mts`.
+
+Until then, `rolldown -c rolldown.config.ts`, `oxlint`, `oxfmt`, and `tsc --noEmit` stay as the direct entries — exactly the shape Phase 1 left them in.
