@@ -41,11 +41,13 @@
     "test": "pnpm exec vp test --run --coverage",
     "test:watch": "pnpm exec vp test",
     "test:ui": "pnpm exec vp test --ui",
+    "verify:dist": "node scripts/verify-dist-render.mjs",
     "prepublishOnly": "npm run typecheck && npm run lint && npm run fmt:check && npm run test && npm run build"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "^0.86.1",
     "@earendil-works/pi-coding-agent": "^0.86.1",
+    "@earendil-works/pi-tui": "^0.87.0",
     "@types/node": "^22.0.0",
     "@vitest/coverage-v8": "4.1.11",
     "oxfmt": "^0.70.0",
@@ -61,10 +63,14 @@
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": ">=0.86.0",
+    "@earendil-works/pi-tui": "*",
     "typebox": "*"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@earendil-works/pi-tui": {
       "optional": true
     },
     "@earendil-works/pi-ai": {
