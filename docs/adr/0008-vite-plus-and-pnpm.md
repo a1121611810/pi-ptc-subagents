@@ -86,7 +86,7 @@ dist/index.d.ts      9,563 B   (rolldown: 9,563 B)
 dist/index.d.ts.map  1,084 B   (rolldown: 1,084 B)
 ```
 
-`diff -q` against the rolldown baseline: all four files identical. Externals (`@earendil-works/*`, `typebox`, `node:*`) preserved. Full primary-source chain and reproducer captured in `docs/research/vp-pack-js-output.md`. **Build: criterion met.**
+`diff -q` against the rolldown baseline: all four files identical. Externals (`@earendil-works/*`, `typebox`, `node:*`) preserved — **except `@earendil-works/pi-tui`, which the claim glossed over**; see the addendum below. Full primary-source chain and reproducer captured in `docs/research/vp-pack-js-output.md`. **Build: criterion met.**
 
 ### Lint — `vp lint` vs `oxlint`
 
@@ -99,6 +99,39 @@ dist/index.d.ts.map  1,084 B   (rolldown: 1,084 B)
 ### Net outcome (post-second-attempt)
 
 `vite-plus@0.3.3` is installed as a devDependency. The build script switches to `pnpm exec vp pack`, driven by `vite.config.ts#pack` with the `outExtensions` callback above. `rolldown.config.ts` is removed (no longer the source of truth, and `vp pack` is now proven equivalent). Lint, fmt, and typecheck scripts stay direct (`oxlint`, `oxfmt`, `tsc --noEmit`) for the same version-regression reason as before.
+
+### Addendum (2026-09-22) — `@earendil-works/pi-tui` was being inlined
+
+The "externals preserved" claim above was written against a glob, not the list: `vite.config.ts`
+passed `@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai` and `typebox` to
+`deps.neverBundle`, and `@earendil-works/pi-tui` — a **devDependency** here, so externalised by
+nothing — was bundled into `dist/index.js` along with pi-tui's own `marked` and
+`get-east-asian-width`. tsdown said so on every build:
+
+```
+ℹ Hint: consider adding deps.onlyBundle option ...
+Detected dependencies in bundle: - marked - get-east-asian-width - @earendil-works/pi-tui
+```
+
+That is a correctness problem, not a size one. pi's extension loader _provides_ every
+`@earendil-works/*` package to extensions — Node mode through jiti aliases
+(`core/extensions/loader.js`), bundled/compiled mode through `VIRTUAL_MODULES`
+(`core/extensions/virtual-modules.js`, which maps `@earendil-works/pi-tui` to its own bundled copy).
+Shipping our own inlined copy means the extension renders with a _different_ pi-tui build than the host
+that calls it, pinned to whatever this repo's devDependency happened to be, and diverging silently as
+pi moves.
+
+Fix: `@earendil-works/pi-tui` joined `deps.neverBundle`, and the package declares it as an optional
+**peerDependency** (kept as a devDependency for types/build). Result:
+
+```
+dist/index.js   184.81 kB → 102.69 kB   (dist total 910.96 kB → 329.31 kB)
+gzip             55.44 kB →  32.10 kB
+```
+
+The hint is gone because nothing third-party remains inlined. Verified that the externalised import
+still resolves **inside a real pi**: `tests/tool-visibility.test.ts` loads `dist/index.js` into a
+headless pi (that is its `withDist` case) and passes.
 
 ### Revisit criteria for lint + fmt + typecheck
 

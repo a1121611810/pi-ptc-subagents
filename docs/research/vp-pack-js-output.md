@@ -364,6 +364,19 @@ pinning reported in ADR-0008 is overridden without a `mv`.
   preferable to the `"type": "module"` + `fixedExtension: false`
   route — the override is explicit.
 
+- **Correction (2026-09-22) — the `external` list in this note is short.** The
+  `vite.config.ts` snippet above lists `@earendil-works/pi-coding-agent`,
+  `@earendil-works/pi-ai`, `typebox` and `node:*` — but not
+  `@earendil-works/pi-tui`, so pi-tui (plus its `marked` and
+  `get-east-asian-width`) was inlined into `dist/index.js` for as long as that
+  configuration stood. tsdown's "Detected dependencies in bundle" hint was
+  reporting it on every build. The bundle therefore rendered with a _second_
+  copy of the TUI library instead of the one pi's extension loader hands to
+  extensions (`core/extensions/loader.js` aliases; `virtual-modules.js` in
+  bundled/compiled mode). Externalising it: `dist/index.js` 184.81 kB →
+  102.69 kB, dist total 910.96 kB → 329.31 kB. See ADR-0008's 2026-09-22
+  addendum.
+
 - **Caveat — DTS extension inference.** In
   `createChunkFilename` (`src/features/output.ts`), the DTS extension
   is only applied when the chunk name ends with `.d`. This is

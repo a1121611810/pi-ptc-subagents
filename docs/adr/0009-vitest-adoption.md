@@ -42,7 +42,7 @@ Full migration to Vitest 4 across all nine test files. Specifically:
 
 - **Side-by-side opt-in — Vitest available, but `pnpm test` still uses `node --test`.** Rejected. Two runners means two import surfaces (`from 'node:test'` vs `from 'vitest'`), two coverage configurations, and two sets of flags to remember. The split would also let `node --test` bypass the versioned Vitest CI runs, and a future transitive dep that requires Vitest internals could see the un-pinned version. The version-pinned direct devDep is only meaningful when Vitest is the sole runner.
 
-- **`vp test` without coverage config — adopt the runner, defer coverage.** Rejected. Coverage is part of the destination, not a follow-on: ADR-0008 §Addendum already lists coverage as a `vp toolchain`-adjacent concern, and Vitest's v8 provider is a one-line config. Deferring it would mean a second ADR-cycle to add it; doing it now is cheaper than later. Threshold *values* are deferred to `vitest/G1` because they depend on measured baseline, but the *gate itself* lands now.
+- **`vp test` without coverage config — adopt the runner, defer coverage.** Rejected. Coverage is part of the destination, not a follow-on: ADR-0008 §Addendum already lists coverage as a `vp toolchain`-adjacent concern, and Vitest's v8 provider is a one-line config. Deferring it would mean a second ADR-cycle to add it; doing it now is cheaper than later. Threshold _values_ are deferred to `vitest/G1` because they depend on measured baseline, but the _gate itself_ lands now.
 
 ## Reopen triggers
 
@@ -59,8 +59,8 @@ Single-commit revert. `git revert` of this ADR's commit (and the commits `vitest
 The chart session's first-pass ADR-0009 (commit `1f798b2`) recorded the Vitest version pin as `package.json#pnpm.overrides.vitest`. That location is a **no-op under pnpm 12.5.1** — pnpm 12 moved settings (including overrides) to `pnpm-workspace.yaml`; the `package.json#pnpm` block is silently ignored at install time (WARN: `"The 'pnpm' field in package.json is no longer read by pnpm"`). The `vitest/T6` follow-up fixed three things at once:
 
 1. **Removed the `pnpm.overrides` block** from `package.json`. The override was redundant once `vitest` was a direct devDep (added by `vitest/T4` so the test imports resolve under pnpm's strict `node_modules` layout), and it was a no-op even when redundant.
-3. **Updated this ADR's text** above: every `pnpm.overrides.vitest` reference is now `devDependencies.vitest`; the version pin's role is the same.
-4. **`vitest.config.ts` left out of `tsconfig.json#include`** (TS 7 `isolatedDeclarations` rejects `defineConfig({...})`'s return-type inference; vitest still reads the file at startup). Revisit if the export pattern is changed (e.g. `satisfies UserConfigExport`) or if `isolatedDeclarations` is dropped.
+2. **Updated this ADR's text** above: every `pnpm.overrides.vitest` reference is now `devDependencies.vitest`; the version pin's role is the same.
+3. **`vitest.config.ts` left out of `tsconfig.json#include`** (TS 7 `isolatedDeclarations` rejects `defineConfig({...})`'s return-type inference; vitest still reads the file at startup). Revisit if the export pattern is changed (e.g. `satisfies UserConfigExport`) or if `isolatedDeclarations` is dropped.
 
 Net effect: the migration is correct, the lockfile is unchanged (vitest@4.1.11 was already transitively pinned via `vite-plus@0.3.3`; the override was never doing anything), and `pnpm install` no longer emits the WARN.
 
