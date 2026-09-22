@@ -1,5 +1,4 @@
-import assert from "node:assert/strict";
-import { test } from "node:test";
+import { expect, test } from "vitest";
 import {
   createWorkerEnv,
   DEFAULT_CONFIG,
@@ -8,39 +7,32 @@ import {
   WORKER_ENV_ALLOW_LIST,
 } from "../src/runtime/limits.ts";
 
-void test("DEFAULT_CONFIG is frozen and every limit is a positive finite number", () => {
-  assert.equal(Object.isFrozen(DEFAULT_CONFIG), true);
+test("DEFAULT_CONFIG is frozen and every limit is a positive finite number", () => {
+  expect(Object.isFrozen(DEFAULT_CONFIG)).toBe(true);
   for (const [key, value] of Object.entries(DEFAULT_CONFIG)) {
-    assert.equal(typeof value, "number", `${key} must be a number`);
-    assert.ok(Number.isFinite(value) && value > 0, `${key} must be positive and finite`);
+    expect(typeof value).toBe("number");
+    expect(Number.isFinite(value) && value > 0).toBeTruthy();
   }
 });
 
-void test("resolveConfig returns the frozen defaults when nothing is overridden", () => {
-  assert.deepEqual(resolveConfig(), { ...DEFAULT_CONFIG });
-  assert.notEqual(resolveConfig(), DEFAULT_CONFIG, "callers must get their own copy");
+test("resolveConfig returns the frozen defaults when nothing is overridden", () => {
+  expect(resolveConfig()).toEqual({ ...DEFAULT_CONFIG });
+  expect(resolveConfig()).not.toBe(DEFAULT_CONFIG);
 });
 
-void test("resolveConfig applies overrides and rejects invalid ones", () => {
-  assert.equal(resolveConfig({ maxOutputBytes: 1024 }).maxOutputBytes, 1024);
-  assert.equal(
-    resolveConfig({ maxOutputBytes: 1024 }).maxPendingCalls,
-    DEFAULT_CONFIG.maxPendingCalls,
-  );
+test("resolveConfig applies overrides and rejects invalid ones", () => {
+  expect(resolveConfig({ maxOutputBytes: 1024 }).maxOutputBytes).toBe(1024);
+  expect(resolveConfig({ maxOutputBytes: 1024 }).maxPendingCalls).toBe(DEFAULT_CONFIG.maxPendingCalls);
 
   for (const invalid of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
-    assert.throws(
-      () => resolveConfig({ graceMs: invalid }),
-      TypeError,
-      `graceMs=${String(invalid)} must be rejected`,
-    );
+    expect(() => resolveConfig({ graceMs: invalid })).toThrow(TypeError);
   }
-  assert.throws(() => resolveConfig({ graceMs: "soon" as unknown as number }), TypeError);
+  expect(() => resolveConfig({ graceMs: "soon" as unknown as number })).toThrow(TypeError);
   // Unknown keys are ignored rather than silently merged.
-  assert.deepEqual(resolveConfig({ nope: 1 } as never), { ...DEFAULT_CONFIG });
+  expect(resolveConfig({ nope: 1 } as never)).toEqual({ ...DEFAULT_CONFIG });
 });
 
-void test("createWorkerEnv keeps only allow-listed names (F1)", () => {
+test("createWorkerEnv keeps only allow-listed names (F1)", () => {
   const source = {
     PATH: "/usr/bin",
     HOME: "/home/someone",
@@ -50,26 +42,22 @@ void test("createWorkerEnv keeps only allow-listed names (F1)", () => {
     PATHEXT: ".EXE",
   };
   const env = createWorkerEnv(source);
-  assert.deepEqual(Object.keys(env).sort(), ["PATH", "PATHEXT", "TEMP"]);
-  assert.equal(env.PATH, "/usr/bin");
+  expect(Object.keys(env).sort()).toEqual(["PATH", "PATHEXT", "TEMP"]);
+  expect(env.PATH).toBe("/usr/bin");
 
   for (const name of Object.keys(env)) {
-    assert.ok(WORKER_ENV_ALLOW_LIST.includes(name), `${name} is not on the allow-list`);
+    expect(WORKER_ENV_ALLOW_LIST).toContain(name);
   }
   for (const name of Object.keys(source)) {
     if (WORKER_ENV_ALLOW_LIST.includes(name) && name !== "TMP") continue;
-    assert.equal(name in env, false, `${name} must not reach the worker`);
+    expect(name in env).toBe(false);
   }
 });
 
-void test("effectiveTimeoutMs falls back to the default and clamps to the ceiling", () => {
-  assert.equal(effectiveTimeoutMs(undefined), DEFAULT_CONFIG.timeoutMs);
-  assert.equal(
-    effectiveTimeoutMs(0),
-    DEFAULT_CONFIG.timeoutMs,
-    "0 does not disable the deadline (DSH behaviour)",
-  );
-  assert.equal(effectiveTimeoutMs(Number.NaN), DEFAULT_CONFIG.timeoutMs);
-  assert.equal(effectiveTimeoutMs(1_000), 1_000);
-  assert.equal(effectiveTimeoutMs(DEFAULT_CONFIG.maxTimeoutMs * 10), DEFAULT_CONFIG.maxTimeoutMs);
+test("effectiveTimeoutMs falls back to the default and clamps to the ceiling", () => {
+  expect(effectiveTimeoutMs(undefined)).toBe(DEFAULT_CONFIG.timeoutMs);
+  expect(effectiveTimeoutMs(0)).toBe(DEFAULT_CONFIG.timeoutMs);
+  expect(effectiveTimeoutMs(Number.NaN)).toBe(DEFAULT_CONFIG.timeoutMs);
+  expect(effectiveTimeoutMs(1_000)).toBe(1_000);
+  expect(effectiveTimeoutMs(DEFAULT_CONFIG.maxTimeoutMs * 10)).toBe(DEFAULT_CONFIG.maxTimeoutMs);
 });

@@ -1,5 +1,4 @@
-import assert from "node:assert/strict";
-import { test } from "node:test";
+import { expect, test } from "vitest";
 import { MessageChannel } from "node:worker_threads";
 import {
   HOST_FRAME_KIND,
@@ -48,14 +47,14 @@ const initFrame = {
   maxPendingCalls: DEFAULT_CONFIG.maxPendingCalls,
 };
 
-void test("frame kind tables are closed sets of unique strings", () => {
+test("frame kind tables are closed sets of unique strings", () => {
   for (const table of [HOST_FRAME_KIND, WORKER_FRAME_KIND, PTC_ERROR_KIND, PTC_LOG_LEVEL]) {
     const values = Object.values(table);
-    assert.equal(new Set(values).size, values.length, "duplicate kind");
-    for (const value of values) assert.equal(typeof value, "string");
-    assert.equal(Object.isFrozen(table), true);
+    expect(new Set(values).size).toBe(values.length);
+    for (const value of values) expect(typeof value).toBe("string");
+    expect(Object.isFrozen(table)).toBe(true);
   }
-  assert.deepEqual(workerProtocolSpec(), {
+  expect(workerProtocolSpec()).toEqual({
     hostFrame: HOST_FRAME_KIND,
     workerFrame: WORKER_FRAME_KIND,
     logLevel: PTC_LOG_LEVEL,
@@ -63,42 +62,41 @@ void test("frame kind tables are closed sets of unique strings", () => {
   });
 });
 
-void test("connect frame guard requires a live MessagePort in the payload", () => {
+test("connect frame guard requires a live MessagePort in the payload", () => {
   const { frame, close } = withPort();
   try {
-    assert.equal(isPtcConnectFrame(frame), true);
-    assert.equal(isPtcHostFrame(frame), true);
+    expect(isPtcConnectFrame(frame)).toBe(true);
+    expect(isPtcHostFrame(frame)).toBe(true);
     // Transfer-list-only ports never reach `msg.ports`, so a payload without the port
     // must not validate: the worker would otherwise silently wait forever.
-    assert.equal(isPtcConnectFrame({ kind: HOST_FRAME_KIND.connect }), false);
-    assert.equal(isPtcConnectFrame({ kind: HOST_FRAME_KIND.connect, port: {} }), false);
-    assert.equal(
+    expect(isPtcConnectFrame({ kind: HOST_FRAME_KIND.connect })).toBe(false);
+    expect(isPtcConnectFrame({ kind: HOST_FRAME_KIND.connect, port: {} })).toBe(false);
+    expect(
       isPtcConnectFrame({ kind: "ready", port: (frame as { port: unknown }).port }),
-      false,
-    );
+    ).toBe(false);
   } finally {
     close();
   }
 });
 
-void test("init frame guard validates every field", () => {
-  assert.equal(isPtcInitFrame(initFrame), true);
-  assert.equal(isPtcInitFrame({ ...initFrame, args: { task: "x" } }), true);
-  assert.equal(isPtcInitFrame({ ...initFrame, runId: 1 }), false);
-  assert.equal(isPtcInitFrame({ ...initFrame, surface: "workflow_typo" }), false);
-  assert.equal(isPtcInitFrame({ ...initFrame, code: undefined }), false);
-  assert.equal(isPtcInitFrame({ ...initFrame, bindings: ["read", 7] }), false);
-  assert.equal(isPtcInitFrame({ ...initFrame, bindings: "read" }), false);
-  assert.equal(isPtcInitFrame({ ...initFrame, bindingCandidates: ["read", 7] }), false);
-  assert.equal(isPtcInitFrame({ ...initFrame, bindingCandidates: undefined }), false);
-  assert.equal(isPtcInitFrame({ ...initFrame, maxItemsPerCall: Number.NaN }), false);
-  assert.equal(isPtcInitFrame({ ...initFrame, maxPendingCalls: undefined }), false);
-  assert.equal(isPtcInitFrame({ ...initFrame, maxPendingCalls: Number.POSITIVE_INFINITY }), false);
-  assert.equal(isPtcInitFrame({ ...initFrame, kind: HOST_FRAME_KIND.cancel }), false);
-  assert.equal(isPtcInitFrame(null), false);
+test("init frame guard validates every field", () => {
+  expect(isPtcInitFrame(initFrame)).toBe(true);
+  expect(isPtcInitFrame({ ...initFrame, args: { task: "x" } })).toBe(true);
+  expect(isPtcInitFrame({ ...initFrame, runId: 1 })).toBe(false);
+  expect(isPtcInitFrame({ ...initFrame, surface: "workflow_typo" })).toBe(false);
+  expect(isPtcInitFrame({ ...initFrame, code: undefined })).toBe(false);
+  expect(isPtcInitFrame({ ...initFrame, bindings: ["read", 7] })).toBe(false);
+  expect(isPtcInitFrame({ ...initFrame, bindings: "read" })).toBe(false);
+  expect(isPtcInitFrame({ ...initFrame, bindingCandidates: ["read", 7] })).toBe(false);
+  expect(isPtcInitFrame({ ...initFrame, bindingCandidates: undefined })).toBe(false);
+  expect(isPtcInitFrame({ ...initFrame, maxItemsPerCall: Number.NaN })).toBe(false);
+  expect(isPtcInitFrame({ ...initFrame, maxPendingCalls: undefined })).toBe(false);
+  expect(isPtcInitFrame({ ...initFrame, maxPendingCalls: Number.POSITIVE_INFINITY })).toBe(false);
+  expect(isPtcInitFrame({ ...initFrame, kind: HOST_FRAME_KIND.cancel })).toBe(false);
+  expect(isPtcInitFrame(null)).toBe(false);
 });
 
-void test("call-result frame guard covers both arms", () => {
+test("call-result frame guard covers both arms", () => {
   const ok = {
     kind: HOST_FRAME_KIND.callResult,
     callId: 1,
@@ -106,16 +104,13 @@ void test("call-result frame guard covers both arms", () => {
     ok: true,
     value: { content: [] },
   };
-  assert.equal(isPtcCallResultFrame(ok), true);
-  assert.equal(
+  expect(isPtcCallResultFrame(ok)).toBe(true);
+  expect(
     isPtcCallResultFrame({ ...ok, value: undefined }),
-    true,
-    "an undefined value is still an explicit payload",
-  );
-  assert.equal(
+  ).toBe(true);
+  expect(
     isPtcCallResultFrame({ kind: HOST_FRAME_KIND.callResult, callId: 1, tool: "read", ok: true }),
-    false,
-  );
+  ).toBe(false);
 
   const failed = {
     kind: HOST_FRAME_KIND.callResult,
@@ -124,122 +119,110 @@ void test("call-result frame guard covers both arms", () => {
     ok: false,
     message: "boom",
   };
-  assert.equal(isPtcCallResultFrame(failed), true);
-  assert.equal(isPtcCallResultFrame({ ...failed, message: 7 }), false);
-  assert.equal(isPtcCallResultFrame({ ...failed, callId: 1.5 }), false);
-  assert.equal(isPtcCallResultFrame({ ...failed, ok: "false" }), false);
-  assert.equal(isPtcCallResultFrame({ ...failed, tool: undefined }), false);
+  expect(isPtcCallResultFrame(failed)).toBe(true);
+  expect(isPtcCallResultFrame({ ...failed, message: 7 })).toBe(false);
+  expect(isPtcCallResultFrame({ ...failed, callId: 1.5 })).toBe(false);
+  expect(isPtcCallResultFrame({ ...failed, ok: "false" })).toBe(false);
+  expect(isPtcCallResultFrame({ ...failed, tool: undefined })).toBe(false);
 });
 
-void test("cancel frame guard validates reason and kind", () => {
-  assert.equal(isPtcCancelFrame({ kind: HOST_FRAME_KIND.cancel, reason: "timeout" }), true);
-  assert.equal(isPtcCancelFrame({ kind: HOST_FRAME_KIND.cancel, reason: "abort" }), true);
-  assert.equal(isPtcCancelFrame({ kind: HOST_FRAME_KIND.cancel, reason: "stop" }), false);
-  assert.equal(isPtcCancelFrame({ kind: HOST_FRAME_KIND.cancel }), false);
-  assert.equal(isPtcCancelReason("abort"), true);
-  assert.equal(isPtcCancelReason("cancel"), false);
+test("cancel frame guard validates reason and kind", () => {
+  expect(isPtcCancelFrame({ kind: HOST_FRAME_KIND.cancel, reason: "timeout" })).toBe(true);
+  expect(isPtcCancelFrame({ kind: HOST_FRAME_KIND.cancel, reason: "abort" })).toBe(true);
+  expect(isPtcCancelFrame({ kind: HOST_FRAME_KIND.cancel, reason: "stop" })).toBe(false);
+  expect(isPtcCancelFrame({ kind: HOST_FRAME_KIND.cancel })).toBe(false);
+  expect(isPtcCancelReason("abort")).toBe(true);
+  expect(isPtcCancelReason("cancel")).toBe(false);
 });
 
-void test("host frame union rejects unknown kinds and non-frames", () => {
-  assert.equal(isPtcHostFrame({ kind: "nope" }), false);
-  assert.equal(isPtcHostFrame(undefined), false);
-  assert.equal(isPtcHostFrame([]), false);
-  assert.equal(isPtcHostFrame("connect"), false);
-  assert.equal(
+test("host frame union rejects unknown kinds and non-frames", () => {
+  expect(isPtcHostFrame({ kind: "nope" })).toBe(false);
+  expect(isPtcHostFrame(undefined)).toBe(false);
+  expect(isPtcHostFrame([])).toBe(false);
+  expect(isPtcHostFrame("connect")).toBe(false);
+  expect(
     isPtcHostFrame({ kind: WORKER_FRAME_KIND.ready }),
-    false,
-    "worker frames are not host frames",
-  );
+  ).toBe(false);
 });
 
-void test("ready frame guard", () => {
-  assert.equal(isPtcReadyFrame({ kind: WORKER_FRAME_KIND.ready }), true);
-  assert.equal(isPtcReadyFrame({ kind: WORKER_FRAME_KIND.ready, extra: 1 }), true);
-  assert.equal(isPtcReadyFrame({ kind: WORKER_FRAME_KIND.call }), false);
-  assert.equal(isPtcWorkerFrame({ kind: WORKER_FRAME_KIND.ready }), true);
+test("ready frame guard", () => {
+  expect(isPtcReadyFrame({ kind: WORKER_FRAME_KIND.ready })).toBe(true);
+  expect(isPtcReadyFrame({ kind: WORKER_FRAME_KIND.ready, extra: 1 })).toBe(true);
+  expect(isPtcReadyFrame({ kind: WORKER_FRAME_KIND.call })).toBe(false);
+  expect(isPtcWorkerFrame({ kind: WORKER_FRAME_KIND.ready })).toBe(true);
 });
 
-void test("call frame guard validates ids, names and payload presence", () => {
+test("call frame guard validates ids, names and payload presence", () => {
   const call = { kind: WORKER_FRAME_KIND.call, callId: 3, tool: "bash", args: { command: "ls" } };
-  assert.equal(isPtcCallFrame(call), true);
-  assert.equal(isPtcCallFrame({ ...call, args: undefined }), true);
-  assert.equal(isPtcCallFrame({ kind: WORKER_FRAME_KIND.call, callId: 3, tool: "bash" }), false);
-  assert.equal(isPtcCallFrame({ ...call, callId: 3.5 }), false);
-  assert.equal(isPtcCallFrame({ ...call, tool: "" }), false);
-  assert.equal(isPtcCallFrame({ ...call, tool: null }), false);
+  expect(isPtcCallFrame(call)).toBe(true);
+  expect(isPtcCallFrame({ ...call, args: undefined })).toBe(true);
+  expect(isPtcCallFrame({ kind: WORKER_FRAME_KIND.call, callId: 3, tool: "bash" })).toBe(false);
+  expect(isPtcCallFrame({ ...call, callId: 3.5 })).toBe(false);
+  expect(isPtcCallFrame({ ...call, tool: "" })).toBe(false);
+  expect(isPtcCallFrame({ ...call, tool: null })).toBe(false);
 });
 
-void test("log frame guard validates level and text", () => {
-  assert.equal(
+test("log frame guard validates level and text", () => {
+  expect(
     isPtcLogFrame({ kind: WORKER_FRAME_KIND.log, level: PTC_LOG_LEVEL.log, text: "hi" }),
-    true,
-  );
-  assert.equal(
+  ).toBe(true);
+  expect(
     isPtcLogFrame({ kind: WORKER_FRAME_KIND.log, level: PTC_LOG_LEVEL.error, text: "" }),
-    true,
-  );
-  assert.equal(isPtcLogFrame({ kind: WORKER_FRAME_KIND.log, level: "verbose", text: "hi" }), false);
-  assert.equal(isPtcLogFrame({ kind: WORKER_FRAME_KIND.log, text: "hi" }), false);
-  assert.equal(isPtcLogFrame({ kind: WORKER_FRAME_KIND.log, level: PTC_LOG_LEVEL.log }), false);
-  assert.equal(isPtcLogLevel("warn"), true);
-  assert.equal(isPtcLogLevel(undefined), false);
+  ).toBe(true);
+  expect(isPtcLogFrame({ kind: WORKER_FRAME_KIND.log, level: "verbose", text: "hi" })).toBe(false);
+  expect(isPtcLogFrame({ kind: WORKER_FRAME_KIND.log, text: "hi" })).toBe(false);
+  expect(isPtcLogFrame({ kind: WORKER_FRAME_KIND.log, level: PTC_LOG_LEVEL.log })).toBe(false);
+  expect(isPtcLogLevel("warn")).toBe(true);
+  expect(isPtcLogLevel(undefined)).toBe(false);
 });
 
-void test("narration and phase frame guards", () => {
-  assert.equal(
+test("narration and phase frame guards", () => {
+  expect(
     isPtcNarrationFrame({ kind: WORKER_FRAME_KIND.narration, message: "starting" }),
-    true,
-  );
-  assert.equal(isPtcNarrationFrame({ kind: WORKER_FRAME_KIND.narration, message: 1 }), false);
-  assert.equal(isPtcPhaseFrame({ kind: WORKER_FRAME_KIND.phase, title: "one" }), true);
-  assert.equal(isPtcPhaseFrame({ kind: WORKER_FRAME_KIND.phase }), false);
+  ).toBe(true);
+  expect(isPtcNarrationFrame({ kind: WORKER_FRAME_KIND.narration, message: 1 })).toBe(false);
+  expect(isPtcPhaseFrame({ kind: WORKER_FRAME_KIND.phase, title: "one" })).toBe(true);
+  expect(isPtcPhaseFrame({ kind: WORKER_FRAME_KIND.phase })).toBe(false);
 });
 
-void test("result frame guard allows an absent value but no other shape", () => {
-  assert.equal(isPtcResultFrame({ kind: WORKER_FRAME_KIND.result }), true);
-  assert.equal(isPtcResultFrame({ kind: WORKER_FRAME_KIND.result, value: { a: [1, 2] } }), true);
-  assert.equal(isPtcResultFrame({ kind: WORKER_FRAME_KIND.result, value: undefined }), true);
-  assert.equal(isPtcResultFrame({ kind: WORKER_FRAME_KIND.phase }), false);
+test("result frame guard allows an absent value but no other shape", () => {
+  expect(isPtcResultFrame({ kind: WORKER_FRAME_KIND.result })).toBe(true);
+  expect(isPtcResultFrame({ kind: WORKER_FRAME_KIND.result, value: { a: [1, 2] } })).toBe(true);
+  expect(isPtcResultFrame({ kind: WORKER_FRAME_KIND.result, value: undefined })).toBe(true);
+  expect(isPtcResultFrame({ kind: WORKER_FRAME_KIND.phase })).toBe(false);
 });
 
-void test("error frame guard validates the nested error shape", () => {
+test("error frame guard validates the nested error shape", () => {
   const base = {
     kind: WORKER_FRAME_KIND.error,
     error: { kind: PTC_ERROR_KIND.exception, message: "boom" },
   };
-  assert.equal(isPtcErrorFrame(base), true);
-  assert.equal(isPtcErrorFrame({ ...base, error: { ...base.error, stack: "at x" } }), true);
-  assert.equal(
+  expect(isPtcErrorFrame(base)).toBe(true);
+  expect(isPtcErrorFrame({ ...base, error: { ...base.error, stack: "at x" } })).toBe(true);
+  expect(
     isPtcErrorFrame({ kind: WORKER_FRAME_KIND.error, error: { kind: "kaboom", message: "x" } }),
-    false,
-  );
-  assert.equal(
+  ).toBe(false);
+  expect(
     isPtcErrorFrame({ kind: WORKER_FRAME_KIND.error, error: { kind: PTC_ERROR_KIND.exception } }),
-    false,
-  );
-  assert.equal(
+  ).toBe(false);
+  expect(
     isPtcErrorFrame({ kind: WORKER_FRAME_KIND.error, error: { ...base.error, stack: 7 } }),
-    false,
-  );
-  assert.equal(isPtcErrorFrame({ kind: WORKER_FRAME_KIND.error }), false);
-  assert.equal(isPtcErrorKind(PTC_ERROR_KIND.outputLimit), true);
-  assert.equal(
+  ).toBe(false);
+  expect(isPtcErrorFrame({ kind: WORKER_FRAME_KIND.error })).toBe(false);
+  expect(isPtcErrorKind(PTC_ERROR_KIND.outputLimit)).toBe(true);
+  expect(
     isPtcErrorKind("sandbox-unavailable"),
-    false,
-    "ADR-0007 ships no sandbox, so the kind is absent",
-  );
-  assert.equal(isPtcErrorKind("agent"), false, "there is no agent() helper (G1 #13 → B)");
+  ).toBe(false);
+  expect(isPtcErrorKind("agent")).toBe(false);
 });
 
-void test("worker frame union rejects unknown kinds and non-frames", () => {
-  assert.equal(isPtcWorkerFrame({ kind: "nope" }), false);
-  assert.equal(isPtcWorkerFrame(undefined), false);
-  assert.equal(isPtcWorkerFrame(42), false);
-  assert.equal(isPtcWorkerFrame([]), false);
-  assert.equal(isPtcWorkerFrame({} as unknown), false);
-  assert.equal(
+test("worker frame union rejects unknown kinds and non-frames", () => {
+  expect(isPtcWorkerFrame({ kind: "nope" })).toBe(false);
+  expect(isPtcWorkerFrame(undefined)).toBe(false);
+  expect(isPtcWorkerFrame(42)).toBe(false);
+  expect(isPtcWorkerFrame([])).toBe(false);
+  expect(isPtcWorkerFrame({} as unknown)).toBe(false);
+  expect(
     isPtcWorkerFrame({ kind: HOST_FRAME_KIND.init }),
-    false,
-    "host frames are not worker frames",
-  );
+  ).toBe(false);
 });

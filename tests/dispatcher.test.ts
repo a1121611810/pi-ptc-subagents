@@ -1,7 +1,6 @@
-import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { test } from "node:test";
+import { expect, test } from "vitest";
 import { createBuiltinBindings } from "../src/runtime/bindings.ts";
 import type { BindingTable } from "../src/runtime/bindings.ts";
 import { runPtcProgram } from "../src/runtime/dispatcher.ts";
@@ -15,7 +14,6 @@ import {
   RUN_TIMEOUT_MS,
 } from "./helpers/ptc.ts";
 
-const options = { timeout: RUN_TIMEOUT_MS };
 const empty = makeBindings({});
 const run = (
   code: string,
@@ -38,18 +36,17 @@ const run = (
     ...(extra.signal === undefined ? {} : { signal: extra.signal }),
   });
 
-void test(
+test(
   "end-to-end smoke: `return 40 + 2` resolves to 42 through the real dispatcher",
-  options,
   async () => {
     const outcome = await run("return 40 + 2;");
-    assert.deepEqual(outcome, { logs: [], narrations: [], phases: [], value: 42 });
+    expect(outcome).toEqual({ logs: [], narrations: [], phases: [], value: 42 });
   },
+  RUN_TIMEOUT_MS,
 );
 
-void test(
+test(
   "console output is collected in arrival order around binding calls",
-  options,
   async () => {
     const bindings = makeBindings({
       ping: async () => {
@@ -60,15 +57,15 @@ void test(
       'console.log("before"); const r = await tools.ping({}); console.log("after", r.pong); return 1;',
       { bindings },
     );
-    assert.equal(outcome.error, undefined);
-    assert.deepEqual(outcome.logs, ["before", "after true"]);
-    assert.equal(outcome.value, 1);
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.logs).toEqual(["before", "after true"]);
+    expect(outcome.value).toBe(1);
   },
+  RUN_TIMEOUT_MS,
 );
 
-void test(
+test(
   "bindings round-trip through the real worker against a temp-dir fixture",
-  options,
   async () => {
     const dir = await makeTempDir();
     try {
@@ -82,15 +79,16 @@ void test(
         ].join("\n"),
         { bindings, cwd: dir },
       );
-      assert.equal(outcome.error, undefined);
-      assert.deepEqual(outcome.value, { file: "content from the fixture\n", cwd: dir });
+      expect(outcome.error).toBeUndefined();
+      expect(outcome.value).toEqual({ file: "content from the fixture\n", cwd: dir });
     } finally {
       await removeTempDir(dir);
     }
   },
+  RUN_TIMEOUT_MS,
 );
 
-void test("independent binding calls overlap under Promise.all", options, async () => {
+test("independent binding calls overlap under Promise.all", async () => {
   const release = deferred<void>();
   let started = 0;
   const bindings = makeBindings({
@@ -114,14 +112,14 @@ void test("independent binding calls overlap under Promise.all", options, async 
   while (started < 3 && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
-  assert.equal(started, 3, "all three calls reached the host before any of them resolved");
+  expect(started).toBe(3);
   release.resolve(undefined);
   const outcome = await promise;
-  assert.equal(outcome.error, undefined);
-  assert.deepEqual(outcome.value, [3, 3, 3]);
-});
+  expect(outcome.error).toBeUndefined();
+  expect(outcome.value).toEqual([3, 3, 3]);
+}, RUN_TIMEOUT_MS);
 
-void test("dispatch forwarding is capped at maxParallelSubCalls", options, async () => {
+test("dispatch forwarding is capped at maxParallelSubCalls", async () => {
   let active = 0;
   let peak = 0;
   const bindings = makeBindings({
@@ -138,14 +136,13 @@ void test("dispatch forwarding is capped at maxParallelSubCalls", options, async
     `const rs = await Promise.all(Array.from({ length: ${count} }, (_, i) => tools.probe({ i }))); return rs.length;`,
     { bindings },
   );
-  assert.equal(outcome.error, undefined);
-  assert.equal(outcome.value, count, "every queued call still runs");
-  assert.equal(peak, DEFAULT_CONFIG.maxParallelSubCalls, "concurrency stays at the cap");
-});
+  expect(outcome.error).toBeUndefined();
+  expect(outcome.value).toBe(count);
+  expect(peak).toBe(DEFAULT_CONFIG.maxParallelSubCalls);
+}, RUN_TIMEOUT_MS);
 
-void test(
+test(
   "a wide fan-out queues inside the worker instead of failing the run",
-  options,
   async () => {
     const maxPendingCalls = 4;
     const calls = maxPendingCalls * 5;
@@ -154,14 +151,14 @@ void test(
       `const rs = await Promise.all(Array.from({ length: ${calls} }, (_, i) => tools.ping({ i }))); return rs.length;`,
       { bindings, config: { maxPendingCalls } },
     );
-    assert.equal(outcome.error, undefined, "admission control must not fail a legitimate burst");
-    assert.equal(outcome.value, calls);
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.value).toBe(calls);
   },
+  RUN_TIMEOUT_MS,
 );
 
-void test(
+test(
   "the worker keeps simultaneous host binding calls at or below maxPendingCalls",
-  options,
   async () => {
     const maxPendingCalls = 4;
     let active = 0;
@@ -179,19 +176,16 @@ void test(
       `const rs = await Promise.all(Array.from({ length: ${maxPendingCalls * 5} }, () => tools.probe({}))); return rs.length;`,
       { bindings, config: { maxPendingCalls } },
     );
-    assert.equal(outcome.error, undefined);
-    assert.equal(outcome.value, maxPendingCalls * 5, "every call still runs");
-    assert.ok(
-      peak <= maxPendingCalls,
-      `observed ${peak} simultaneous calls, ceiling is ${maxPendingCalls}`,
-    );
-    assert.ok(peak > 1, `expected the burst to overlap, saw ${peak} concurrent call(s)`);
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.value).toBe(maxPendingCalls * 5);
+    expect(peak).toBeLessThanOrEqual(maxPendingCalls);
+    expect(peak).toBeGreaterThan(1);
   },
+  RUN_TIMEOUT_MS,
 );
 
-void test(
+test(
   "cancel while calls wait for admission rejects them without waiting out the grace window",
-  options,
   async () => {
     const graceMs = DEFAULT_CONFIG.graceMs;
     const bindings = makeBindings({ hold: async () => await new Promise(() => {}) });
@@ -207,28 +201,25 @@ void test(
       },
     );
     const elapsed = Date.now() - started;
-    assert.equal(outcome.error?.kind, "abort");
-    assert.ok(
-      elapsed < graceMs / 2,
-      `cancel settled after ${elapsed}ms, i.e. it waited for the grace window`,
-    );
+    expect(outcome.error?.kind).toBe("abort");
+    expect(elapsed).toBeLessThan(graceMs / 2);
   },
+  RUN_TIMEOUT_MS,
 );
 
-void test("a workflow fan-out obeys the same admission budget", options, async () => {
+test("a workflow fan-out obeys the same admission budget", async () => {
   const maxPendingCalls = 4;
   const bindings = makeBindings({ step: async (args) => (args as { n: number }).n });
   const outcome = await run(
     `const out = await parallel(Array.from({ length: ${maxPendingCalls * 3} }, (_, n) => async () => tools.step({ n }))); return out.length;`,
     { bindings, config: { maxPendingCalls }, surface: "workflow" },
   );
-  assert.equal(outcome.error, undefined);
-  assert.equal(outcome.value, maxPendingCalls * 3);
-});
+  expect(outcome.error).toBeUndefined();
+  expect(outcome.value).toBe(maxPendingCalls * 3);
+}, RUN_TIMEOUT_MS);
 
-void test(
+test(
   "a failing binding rejects the call with ToolCallError and keeps the run alive",
-  options,
   async () => {
     const bindings = makeBindings({
       boom: async () => {
@@ -239,18 +230,18 @@ void test(
       "try { await tools.boom({}); } catch (error) { return { name: error.name, toolName: error.toolName, message: error.message }; }",
       { bindings },
     );
-    assert.equal(outcome.error, undefined);
-    assert.deepEqual(outcome.value, {
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.value).toEqual({
       name: "ToolCallError",
       toolName: "boom",
       message: "binding exploded",
     });
   },
+  RUN_TIMEOUT_MS,
 );
 
-void test(
+test(
   "a binding result that cannot be transferred fails the call instead of hanging",
-  options,
   async () => {
     const bindings = makeBindings({
       bogus: async () => {
@@ -261,69 +252,65 @@ void test(
       "try { await tools.bogus({}); return 'no error'; } catch (error) { return error.message; }",
       { bindings },
     );
-    assert.equal(outcome.error, undefined);
-    assert.ok(
+    expect(outcome.error).toBeUndefined();
+    expect(
       typeof outcome.value === "string" && outcome.value.includes("could not be transferred"),
-      `expected a string mentioning the transfer failure, got ${JSON.stringify(outcome.value)}`,
-    );
+    ).toBe(true);
   },
+  RUN_TIMEOUT_MS,
 );
 
-void test("worker crashes surface as worker-exit", options, async () => {
+test("worker crashes surface as worker-exit", async () => {
   const outcome = await run("process.exit(3);");
-  assert.equal(outcome.error?.kind, "worker-exit");
-  assert.match(String(outcome.error?.message), /exited with code 3/);
-});
+  expect(outcome.error?.kind).toBe("worker-exit");
+  expect(String(outcome.error?.message)).toMatch(/exited with code 3/);
+}, RUN_TIMEOUT_MS);
 
-void test("F1 — the worker environment is the allow-list and nothing else", options, async () => {
+test("F1 — the worker environment is the allow-list and nothing else", async () => {
   const outcome = await run("return Object.keys(process.env).sort();");
-  assert.equal(outcome.error, undefined);
+  expect(outcome.error).toBeUndefined();
   const workerKeys = outcome.value as string[];
-  assert.deepEqual(workerKeys, Object.keys(createWorkerEnv()).sort());
+  expect(workerKeys).toEqual(Object.keys(createWorkerEnv()).sort());
   for (const name of workerKeys) {
-    assert.ok(WORKER_ENV_ALLOW_LIST.includes(name), `${name} is not on the allow-list`);
+    expect(WORKER_ENV_ALLOW_LIST).toContain(name);
   }
   for (const name of Object.keys(process.env)) {
     if (WORKER_ENV_ALLOW_LIST.includes(name)) continue;
-    assert.equal(workerKeys.includes(name), false, `host-only ${name} leaked into the worker`);
+    expect(workerKeys.includes(name)).toBe(false);
   }
-});
+}, RUN_TIMEOUT_MS);
 
-void test("F2 — the worker heap is capped by resourceLimits", options, async () => {
+test("F2 — the worker heap is capped by resourceLimits", async () => {
   const outcome = await run(
     "return (await import('node:v8')).getHeapStatistics().heap_size_limit;",
   );
-  assert.equal(outcome.error, undefined);
+  expect(outcome.error).toBeUndefined();
   const limit = outcome.value as number;
   const capBytes = DEFAULT_CONFIG.maxOldGenerationSizeMb * 1024 * 1024;
-  assert.ok(limit > 0);
+  expect(limit).toBeGreaterThan(0);
   // The cap only covers the old generation, so the effective heap ceiling sits above it;
   // the generous 2x bound still fails loudly if `resourceLimits` stops being applied
   // (Node's default ceiling is multiple GiB on a normal host).
-  assert.ok(
-    limit < capBytes * 2,
-    `heap limit ${limit} is not capped by ${capBytes} old-generation bytes`,
-  );
-});
+  expect(limit).toBeLessThan(capBytes * 2);
+}, RUN_TIMEOUT_MS);
 
-void test(
+test(
   "F3 — the frozen per-run environment travels in workerData and is authoritative",
-  options,
   async () => {
     const outcome = await run("return (await import('node:worker_threads')).workerData;");
-    assert.equal(outcome.error, undefined);
+    expect(outcome.error).toBeUndefined();
     const data = outcome.value as { runId: string; env: Record<string, string> };
-    assert.equal(typeof data.runId, "string");
-    assert.deepEqual(data.env, createWorkerEnv());
-    assert.equal(
+    expect(typeof data.runId).toBe("string");
+    expect(data.env).toEqual(createWorkerEnv());
+    expect(
       Object.isFrozen(data.env),
-      false,
       "structured clone gives the worker its own copy of the record",
-    );
+    ).toBe(false);
   },
+  RUN_TIMEOUT_MS,
 );
 
-void test("F3 — a run id passed by the caller is the one the worker sees", options, async () => {
+test("F3 — a run id passed by the caller is the one the worker sees", async () => {
   const outcome = await runPtcProgram({
     code: "return (await import('node:worker_threads')).workerData.runId;",
     surface: "run_code",
@@ -331,10 +318,10 @@ void test("F3 — a run id passed by the caller is the one the worker sees", opt
     bindings: empty,
     runId: "run-abc",
   });
-  assert.equal(outcome.value, "run-abc");
-});
+  expect(outcome.value).toBe("run-abc");
+}, RUN_TIMEOUT_MS);
 
-void test("F4 — bindings run in the run's cwd, not the host process cwd", options, async () => {
+test("F4 — bindings run in the run's cwd, not the host process cwd", async () => {
   const dir = await makeTempDir();
   try {
     const bindings = createBuiltinBindings({ cwd: dir, names: ["bash", "read"] });
@@ -347,33 +334,32 @@ void test("F4 — bindings run in the run's cwd, not the host process cwd", opti
       ].join("\n"),
       { bindings, cwd: dir },
     );
-    assert.equal(outcome.error, undefined);
+    expect(outcome.error).toBeUndefined();
     const value = outcome.value as { pwd: string; marker: string; processCwd: string };
-    assert.equal(value.pwd, dir);
-    assert.equal(value.marker, "marker");
+    expect(value.pwd).toBe(dir);
+    expect(value.marker).toBe("marker");
     // A worker cannot chdir: the process cwd is shared, which is why `cwd` is carried in
     // the run config and applied by the tools instead (ADR-0005 F4).
-    assert.notEqual(value.processCwd, dir);
+    expect(value.processCwd).not.toBe(dir);
   } finally {
     await removeTempDir(dir);
   }
-});
+}, RUN_TIMEOUT_MS);
 
-void test("a run that outlives its deadline fails with timeout", options, async () => {
+test("a run that outlives its deadline fails with timeout", async () => {
   const timeoutMs = 150;
   const started = Date.now();
   const outcome = await run("await new Promise(() => {});", {
     timeoutMs,
     config: { graceMs: timeoutMs },
   });
-  assert.equal(outcome.error?.kind, "timeout");
-  assert.match(String(outcome.error?.message), new RegExp(String(timeoutMs)));
-  assert.ok(Date.now() - started < RUN_TIMEOUT_MS);
-});
+  expect(outcome.error?.kind).toBe("timeout");
+  expect(String(outcome.error?.message)).toMatch(new RegExp(String(timeoutMs)));
+  expect(Date.now() - started).toBeLessThan(RUN_TIMEOUT_MS);
+}, RUN_TIMEOUT_MS);
 
-void test(
+test(
   "aborting the caller's signal cancels the run and aborts in-flight bindings",
-  options,
   async () => {
     let bindingSawAbort = false;
     const bindings: BindingTable = makeBindings({
@@ -394,52 +380,53 @@ void test(
       signal: controller.signal,
       config: { graceMs: 500 },
     });
-    assert.equal(outcome.error?.kind, "abort");
-    assert.equal(bindingSawAbort, true, "the binding received the run's abort signal");
+    expect(outcome.error?.kind).toBe("abort");
+    expect(bindingSawAbort, "the binding received the run's abort signal").toBe(true);
   },
+  RUN_TIMEOUT_MS,
 );
 
-void test("cancelling an already-aborted signal never spawns work", options, async () => {
+test("cancelling an already-aborted signal never spawns work", async () => {
   const outcome = await run("return 1;", { signal: AbortSignal.abort() });
-  assert.equal(outcome.error?.kind, "abort");
-  assert.deepEqual(outcome.logs, []);
-});
+  expect(outcome.error?.kind).toBe("abort");
+  expect(outcome.logs).toEqual([]);
+}, RUN_TIMEOUT_MS);
 
-void test("the joint output budget covers logs and the completion value", options, async () => {
+test("the joint output budget covers logs and the completion value", async () => {
   const budget = Math.floor(DEFAULT_CONFIG.maxOutputBytes / 1024);
   const chunk = "x".repeat(Math.ceil(budget / 2));
   const outcome = await run(
     `console.log(${JSON.stringify(chunk)}); console.log(${JSON.stringify(chunk)}); console.log("third"); return 1;`,
     { config: { maxOutputBytes: budget } },
   );
-  assert.equal(outcome.error?.kind, "output-limit");
-  assert.equal(outcome.logs.length, 1, "the fitting log prefix is retained");
-  assert.equal(outcome.value, undefined);
-});
+  expect(outcome.error?.kind).toBe("output-limit");
+  expect(outcome.logs.length, "the fitting log prefix is retained").toBe(1);
+  expect(outcome.value).toBeUndefined();
+}, RUN_TIMEOUT_MS);
 
-void test("an oversized single control frame is a protocol failure", options, async () => {
+test("an oversized single control frame is a protocol failure", async () => {
   const maxMessageBytes = Math.floor(DEFAULT_CONFIG.maxMessageBytes / 1024);
   const oversized = "y".repeat(maxMessageBytes * 2);
   const outcome = await run(`console.log("z".repeat(${oversized.length})); return 1;`, {
     config: { maxMessageBytes },
   });
-  assert.equal(outcome.error?.kind, "protocol");
-  assert.match(String(outcome.error?.message), /maxMessageBytes/);
-});
+  expect(outcome.error?.kind).toBe("protocol");
+  expect(String(outcome.error?.message)).toMatch(/maxMessageBytes/);
+}, RUN_TIMEOUT_MS);
 
-void test("concurrent runs stay isolated from each other", options, async () => {
+test("concurrent runs stay isolated from each other", async () => {
   const bindings = makeBindings({ echo: async (args) => args });
   const [first, second] = await Promise.all([
     run('console.log("first"); await tools.echo({ tag: "a" }); return "a";', { bindings }),
     run('console.log("second"); await tools.echo({ tag: "b" }); return "b";', { bindings }),
   ]);
-  assert.equal(first.value, "a");
-  assert.equal(second.value, "b");
-  assert.deepEqual(first.logs, ["first"]);
-  assert.deepEqual(second.logs, ["second"]);
-});
+  expect(first.value).toBe("a");
+  expect(second.value).toBe("b");
+  expect(first.logs).toEqual(["first"]);
+  expect(second.logs).toEqual(["second"]);
+}, RUN_TIMEOUT_MS);
 
-void test("the workflow surface runs through the dispatcher end to end", options, async () => {
+test("the workflow surface runs through the dispatcher end to end", async () => {
   const bindings = makeBindings({ double: async (args) => (args as { n: number }).n * 2 });
   const outcome = await runPtcProgram({
     code: 'log("start"); phase("Compute"); const values = await parallel(args.items.map((n) => async () => tools.double({ n }))); return values;',
@@ -448,8 +435,8 @@ void test("the workflow surface runs through the dispatcher end to end", options
     bindings,
     args: { items: [1, 2, 3] },
   });
-  assert.equal(outcome.error, undefined);
-  assert.deepEqual(outcome.value, [2, 4, 6]);
-  assert.deepEqual(outcome.narrations, ["start"]);
-  assert.deepEqual(outcome.phases, ["Compute"]);
-});
+  expect(outcome.error).toBeUndefined();
+  expect(outcome.value).toEqual([2, 4, 6]);
+  expect(outcome.narrations).toEqual(["start"]);
+  expect(outcome.phases).toEqual(["Compute"]);
+}, RUN_TIMEOUT_MS);

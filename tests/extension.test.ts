@@ -1,5 +1,4 @@
-import assert from "node:assert/strict";
-import { test } from "node:test";
+import { expect, test } from "vitest";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import ptcSubagents, {
   createBuiltinBindings,
@@ -22,32 +21,28 @@ const stub = {
   on: () => () => {},
 } as unknown as ExtensionAPI;
 
-void test("the default export is the extension factory and runs without touching pi", () => {
-  assert.equal(typeof ptcSubagents, "function");
-  assert.equal(ptcSubagents.length, 1, "the factory takes the ExtensionAPI parameter");
-  assert.equal(ptcSubagents(stub), undefined);
+test("the default export is the extension factory and runs without touching pi", () => {
+  expect(typeof ptcSubagents).toBe("function");
+  expect(ptcSubagents.length).toBe(1);
+  expect(ptcSubagents(stub)).toBe(undefined);
 });
 
-void test("the factory registers both PTC tools against the ExtensionAPI", () => {
+test("the factory registers both PTC tools against the ExtensionAPI", () => {
   const tools = captureRegisteredTools();
-  assert.deepEqual([...tools.keys()], ["ptc_run_code", "ptc_workflow"]);
+  expect([...tools.keys()]).toEqual(["ptc_run_code", "ptc_workflow"]);
   for (const [name, tool] of tools) {
-    assert.equal(typeof tool.execute, "function", `${name} must be executable`);
-    assert.equal(
-      typeof tool.description,
-      "string",
-      `${name} must carry a model-facing description`,
-    );
-    assert.equal(typeof tool.parameters, "object", `${name} must carry a typebox schema`);
+    expect(typeof tool.execute).toBe("function");
+    expect(typeof tool.description).toBe("string");
+    expect(typeof tool.parameters).toBe("object");
   }
 });
 
-void test("the factory module re-exports the machinery T4/T5 build on", () => {
-  assert.equal(typeof runPtcProgram, "function");
-  assert.equal(typeof createBuiltinBindings, "function");
-  assert.equal(typeof createWorkerEnv, "function");
-  assert.equal(Object.isFrozen(DEFAULT_CONFIG), true);
-  assert.equal(HOST_FRAME_KIND.init, "init");
-  assert.equal(WORKER_FRAME_KIND.result, "result");
-  assert.equal(PTC_ERROR_KIND.workerExit, "worker-exit");
+test("the factory module re-exports the machinery T4/T5 build on", () => {
+  expect(typeof runPtcProgram).toBe("function");
+  expect(typeof createBuiltinBindings).toBe("function");
+  expect(typeof createWorkerEnv).toBe("function");
+  expect(Object.isFrozen(DEFAULT_CONFIG)).toBe(true);
+  expect(HOST_FRAME_KIND.init).toBe("init");
+  expect(WORKER_FRAME_KIND.result).toBe("result");
+  expect(PTC_ERROR_KIND.workerExit).toBe("worker-exit");
 });

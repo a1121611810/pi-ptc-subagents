@@ -1,5 +1,4 @@
-import assert from "node:assert/strict";
-import { test } from "node:test";
+import { expect, test } from "vitest";
 import { runPtcProgram } from "../src/runtime/dispatcher.ts";
 import { DEFAULT_CONFIG } from "../src/runtime/limits.ts";
 import { makeBindings, RUN_TIMEOUT_MS } from "./helpers/ptc.ts";
@@ -9,48 +8,47 @@ const runCode = (code: string, extra: Partial<Parameters<typeof runPtcProgram>[0
   runPtcProgram({ code, surface: "run_code", cwd: process.cwd(), bindings, ...extra });
 const runWorkflow = (code: string, extra: Partial<Parameters<typeof runPtcProgram>[0]> = {}) =>
   runPtcProgram({ code, surface: "workflow", cwd: process.cwd(), bindings, ...extra });
-const options = { timeout: RUN_TIMEOUT_MS };
 
-void test("run_code resolves the program's return value as lossless JSON", options, async () => {
+test("run_code resolves the program's return value as lossless JSON", async () => {
   const outcome = await runCode(
     'return { nested: [1, "two", null, true], deep: { a: { b: 2 } } };',
   );
-  assert.equal(outcome.error, undefined);
-  assert.deepEqual(outcome.value, { nested: [1, "two", null, true], deep: { a: { b: 2 } } });
-});
+  expect(outcome.error).toBeUndefined();
+  expect(outcome.value).toEqual({ nested: [1, "two", null, true], deep: { a: { b: 2 } } });
+}, RUN_TIMEOUT_MS);
 
-void test("run_code reports no value when the program returns nothing", options, async () => {
+test("run_code reports no value when the program returns nothing", async () => {
   const outcome = await runCode("const x = 1;");
-  assert.equal(outcome.error, undefined);
-  assert.equal("value" in outcome, false);
-});
+  expect(outcome.error).toBeUndefined();
+  expect("value" in outcome).toBe(false);
+}, RUN_TIMEOUT_MS);
 
-void test("run_code strips TypeScript annotations", options, async () => {
+test("run_code strips TypeScript annotations", async () => {
   const outcome = await runCode(
     "const x: number = 41;\nconst f = (v: number): number => v + 1;\nreturn f(x);",
   );
-  assert.equal(outcome.error, undefined);
-  assert.equal(outcome.value, 42);
-});
+  expect(outcome.error).toBeUndefined();
+  expect(outcome.value).toBe(42);
+}, RUN_TIMEOUT_MS);
 
-void test("run_code captures console output with level-agnostic formatting", options, async () => {
+test("run_code captures console output with level-agnostic formatting", async () => {
   const outcome = await runCode(
     'console.log("plain", 1, true); console.error("as error"); console.warn({ a: 1 }); console.log();',
   );
-  assert.equal(outcome.error, undefined);
-  assert.equal(outcome.logs.length, 4);
-  assert.equal(outcome.logs[0], "plain 1 true");
-  assert.equal(outcome.logs[1], "as error");
-  assert.match(String(outcome.logs[2]), /\{ a: 1 \}/);
-  assert.equal(outcome.logs[3], "");
-});
+  expect(outcome.error).toBeUndefined();
+  expect(outcome.logs.length).toBe(4);
+  expect(outcome.logs[0]).toBe("plain 1 true");
+  expect(outcome.logs[1]).toBe("as error");
+  expect(String(outcome.logs[2])).toMatch(/\{ a: 1 \}/);
+  expect(outcome.logs[3]).toBe("");
+}, RUN_TIMEOUT_MS);
 
-void test("run_code surface exposes tools and Node only — no helpers", options, async () => {
+test("run_code surface exposes tools and Node only — no helpers", async () => {
   const outcome = await runCode(
     "return { tools: typeof tools, log: typeof log, phase: typeof phase, parallel: typeof parallel, pipeline: typeof pipeline, agent: typeof agent, args: typeof args, require: typeof require };",
   );
-  assert.equal(outcome.error, undefined);
-  assert.deepEqual(outcome.value, {
+  expect(outcome.error).toBeUndefined();
+  expect(outcome.value).toEqual({
     tools: "object",
     log: "undefined",
     phase: "undefined",
@@ -60,26 +58,26 @@ void test("run_code surface exposes tools and Node only — no helpers", options
     args: "undefined",
     require: "undefined",
   });
-});
+}, RUN_TIMEOUT_MS);
 
-void test(
+test(
   "calling a helper that the surface does not have is a plain ReferenceError",
-  options,
   async () => {
     const outcome = await runCode('log("nope");');
-    assert.equal(outcome.error?.kind, "exception");
-    assert.match(String(outcome.error?.message), /log is not defined/);
-    assert.equal(outcome.value, undefined);
+    expect(outcome.error?.kind).toBe("exception");
+    expect(String(outcome.error?.message)).toMatch(/log is not defined/);
+    expect(outcome.value).toBeUndefined();
   },
+  RUN_TIMEOUT_MS,
 );
 
-void test("workflow surface installs the helper globals and binds args", options, async () => {
+test("workflow surface installs the helper globals and binds args", async () => {
   const outcome = await runWorkflow(
     "return { log: typeof log, phase: typeof phase, parallel: typeof parallel, pipeline: typeof pipeline, agent: typeof agent, args, tools: typeof tools };",
     { args: { task: "write the report" } },
   );
-  assert.equal(outcome.error, undefined);
-  assert.deepEqual(outcome.value, {
+  expect(outcome.error).toBeUndefined();
+  expect(outcome.value).toEqual({
     log: "function",
     phase: "function",
     parallel: "function",
@@ -88,65 +86,63 @@ void test("workflow surface installs the helper globals and binds args", options
     args: { task: "write the report" },
     tools: "object",
   });
-});
+}, RUN_TIMEOUT_MS);
 
-void test("workflow log() and phase() emit frames instead of console output", options, async () => {
+test("workflow log() and phase() emit frames instead of console output", async () => {
   const outcome = await runWorkflow(
     'log("step one"); phase("Research"); console.log("printed"); phase("Write");',
   );
-  assert.equal(outcome.error, undefined);
-  assert.deepEqual(outcome.narrations, ["step one"]);
-  assert.deepEqual(outcome.phases, ["Research", "Write"]);
-  assert.deepEqual(outcome.logs, ["printed"]);
-});
+  expect(outcome.error).toBeUndefined();
+  expect(outcome.narrations).toEqual(["step one"]);
+  expect(outcome.phases).toEqual(["Research", "Write"]);
+  expect(outcome.logs).toEqual(["printed"]);
+}, RUN_TIMEOUT_MS);
 
-void test("workflow log/phase validate their argument", options, async () => {
+test("workflow log/phase validate their argument", async () => {
   const badLog = await runWorkflow("log(42);");
-  assert.equal(badLog.error?.kind, "exception");
-  assert.match(String(badLog.error?.message), /log\(message\) expects a string/);
+  expect(badLog.error?.kind).toBe("exception");
+  expect(String(badLog.error?.message)).toMatch(/log\(message\) expects a string/);
 
   const badPhase = await runWorkflow("phase(null);");
-  assert.equal(badPhase.error?.kind, "exception");
-  assert.match(String(badPhase.error?.message), /phase\(title\) expects a string/);
-});
+  expect(badPhase.error?.kind).toBe("exception");
+  expect(String(badPhase.error?.message)).toMatch(/phase\(title\) expects a string/);
+}, RUN_TIMEOUT_MS);
 
-void test(
+test(
   "parallel() runs thunks concurrently and maps per-item failures to null",
-  options,
   async () => {
     const outcome = await runWorkflow(
       'const out = await parallel([async () => { await new Promise((r) => setTimeout(r, 5)); return "a"; }, async () => { throw new Error("boom"); }, async () => 3]); return out;',
     );
-    assert.equal(outcome.error, undefined);
-    assert.deepEqual(outcome.value, ["a", null, 3]);
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.value).toEqual(["a", null, 3]);
   },
+  RUN_TIMEOUT_MS,
 );
 
-void test("parallel() validates its argument shape", options, async () => {
+test("parallel() validates its argument shape", async () => {
   const notArray = await runWorkflow('await parallel("nope");');
-  assert.equal(notArray.error?.kind, "exception");
-  assert.match(String(notArray.error?.message), /parallel\(thunks\) expects an array/);
+  expect(notArray.error?.kind).toBe("exception");
+  expect(String(notArray.error?.message)).toMatch(/parallel\(thunks\) expects an array/);
 
   const notFunctions = await runWorkflow("await parallel([1]);");
-  assert.equal(notFunctions.error?.kind, "exception");
-  assert.match(
-    String(notFunctions.error?.message),
+  expect(notFunctions.error?.kind).toBe("exception");
+  expect(String(notFunctions.error?.message)).toMatch(
     /parallel\(thunks\) expects functions; item 0 is a number/,
   );
-});
+}, RUN_TIMEOUT_MS);
 
-void test("parallel() enforces maxItemsPerCall", options, async () => {
+test("parallel() enforces maxItemsPerCall", async () => {
   const outcome = await runWorkflow(
     `await parallel(Array.from({ length: ${DEFAULT_CONFIG.maxItemsPerCall + 1} }, () => async () => 1));`,
   );
-  assert.equal(outcome.error?.kind, "exception");
-  assert.match(String(outcome.error?.message), /maxItemsPerCall/);
-  assert.match(String(outcome.error?.message), new RegExp(String(DEFAULT_CONFIG.maxItemsPerCall)));
-});
+  expect(outcome.error?.kind).toBe("exception");
+  expect(String(outcome.error?.message)).toMatch(/maxItemsPerCall/);
+  expect(String(outcome.error?.message)).toMatch(new RegExp(String(DEFAULT_CONFIG.maxItemsPerCall)));
+}, RUN_TIMEOUT_MS);
 
-void test(
+test(
   "pipeline() threads each item through every stage without a cross-stage barrier",
-  options,
   async () => {
     const outcome = await runWorkflow(
       [
@@ -159,60 +155,59 @@ void test(
         "return out;",
       ].join("\n"),
     );
-    assert.equal(outcome.error, undefined);
-    assert.deepEqual(outcome.value, ["0:1:1!", "1:2:2!", "2:3:3!"]);
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.value).toEqual(["0:1:1!", "1:2:2!", "2:3:3!"]);
   },
+  RUN_TIMEOUT_MS,
 );
 
-void test("pipeline() turns a failing item into null and keeps siblings", options, async () => {
+test("pipeline() turns a failing item into null and keeps siblings", async () => {
   const outcome = await runWorkflow(
     "const out = await pipeline([1, 2, 3], async (prev, item) => { if (item === 2) throw new Error('boom'); return prev * 10; }); return out;",
   );
-  assert.equal(outcome.error, undefined);
-  assert.deepEqual(outcome.value, [10, null, 30]);
-});
+  expect(outcome.error).toBeUndefined();
+  expect(outcome.value).toEqual([10, null, 30]);
+}, RUN_TIMEOUT_MS);
 
-void test("pipeline() validates its arguments and enforces maxItemsPerCall", options, async () => {
+test("pipeline() validates its arguments and enforces maxItemsPerCall", async () => {
   const noStages = await runWorkflow("await pipeline([1, 2]);");
-  assert.match(String(noStages.error?.message), /requires at least one stage function/);
+  expect(String(noStages.error?.message)).toMatch(/requires at least one stage function/);
 
   const badStage = await runWorkflow("await pipeline([1], 'nope');");
-  assert.match(String(badStage.error?.message), /stage 0 is a string/);
+  expect(String(badStage.error?.message)).toMatch(/stage 0 is a string/);
 
   const tooMany = await runWorkflow(
     `await pipeline(Array.from({ length: ${DEFAULT_CONFIG.maxItemsPerCall + 1} }, (_, i) => i), async (v) => v);`,
   );
-  assert.match(String(tooMany.error?.message), /maxItemsPerCall/);
-});
+  expect(String(tooMany.error?.message)).toMatch(/maxItemsPerCall/);
+}, RUN_TIMEOUT_MS);
 
-void test("workflow surface has no agent() helper either", options, async () => {
+test("workflow surface has no agent() helper either", async () => {
   const outcome = await runWorkflow('agent("do something");');
-  assert.equal(outcome.error?.kind, "exception");
-  assert.match(String(outcome.error?.message), /agent is not defined/);
-});
+  expect(outcome.error?.kind).toBe("exception");
+  expect(String(outcome.error?.message)).toMatch(/agent is not defined/);
+}, RUN_TIMEOUT_MS);
 
-void test("a program that fails to compile reports an exception", options, async () => {
+test("a program that fails to compile reports an exception", async () => {
   const outcome = await runCode("return ((((;");
-  assert.equal(outcome.error?.kind, "exception");
-  assert.match(String(outcome.error?.message), /failed to compile/);
-});
+  expect(outcome.error?.kind).toBe("exception");
+  expect(String(outcome.error?.message)).toMatch(/failed to compile/);
+}, RUN_TIMEOUT_MS);
 
-void test("a thrown program error carries a trimmed stack", options, async () => {
+test("a thrown program error carries a trimmed stack", async () => {
   const outcome = await runCode('throw new Error("exploded");');
-  assert.equal(outcome.error?.kind, "exception");
-  assert.equal(outcome.error?.message, "exploded");
-  assert.ok(outcome.error?.stack?.includes("exploded"), "stack keeps the message line");
-  assert.equal(
+  expect(outcome.error?.kind).toBe("exception");
+  expect(outcome.error?.message).toBe("exploded");
+  expect(outcome.error?.stack?.includes("exploded"), "stack keeps the message line").toBe(true);
+  expect(
     outcome.error?.stack?.includes("data:text/javascript"),
-    false,
     "worker bootstrap frames are dropped",
-  );
-  assert.ok((outcome.error?.stack?.split("\n").length ?? 0) <= 6, "stack depth is capped");
-});
+  ).toBe(false);
+  expect((outcome.error?.stack?.split("\n").length ?? 0) <= 6, "stack depth is capped").toBe(true);
+}, RUN_TIMEOUT_MS);
 
-void test(
+test(
   "results that are not lossless JSON report invalid-output with a path",
-  options,
   async () => {
     const cases: Array<[string, RegExp]> = [
       ["return new Date();", /result is a Date/],
@@ -225,22 +220,23 @@ void test(
     ];
     for (const [code, expected] of cases) {
       const outcome = await runCode(code);
-      assert.equal(outcome.error?.kind, "invalid-output", `${code} must be rejected`);
-      assert.match(String(outcome.error?.message), expected);
-      assert.equal("value" in outcome, false);
+      expect(outcome.error?.kind, `${code} must be rejected`).toBe("invalid-output");
+      expect(String(outcome.error?.message)).toMatch(expected);
+      expect("value" in outcome).toBe(false);
     }
   },
+  RUN_TIMEOUT_MS,
 );
 
-void test("undefined follows JSON.stringify rules inside containers", options, async () => {
+test("undefined follows JSON.stringify rules inside containers", async () => {
   const outcome = await runCode("return { kept: 1, dropped: undefined, list: [1, undefined, 3] };");
-  assert.equal(outcome.error, undefined);
-  assert.deepEqual(outcome.value, { kept: 1, list: [1, null, 3] });
-});
+  expect(outcome.error).toBeUndefined();
+  expect(outcome.value).toEqual({ kept: 1, list: [1, null, 3] });
+}, RUN_TIMEOUT_MS);
 
-void test("each run gets a fresh worker realm", options, async () => {
+test("each run gets a fresh worker realm", async () => {
   const first = await runCode("globalThis.leaked = 1; return typeof leaked;");
-  assert.equal(first.value, "number");
+  expect(first.value).toBe("number");
   const second = await runCode("return typeof leaked;");
-  assert.equal(second.value, "undefined");
-});
+  expect(second.value).toBe("undefined");
+}, RUN_TIMEOUT_MS);

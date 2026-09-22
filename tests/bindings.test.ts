@@ -1,7 +1,6 @@
-import assert from "node:assert/strict";
+import { expect, test } from "vitest";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { test } from "node:test";
 import {
   BUILTIN_BINDING_NAMES,
   createBuiltinBindings,
@@ -9,41 +8,41 @@ import {
 } from "../src/runtime/bindings.ts";
 import { makeTempDir, removeTempDir, RUN_TIMEOUT_MS } from "./helpers/ptc.ts";
 
-const options = { timeout: RUN_TIMEOUT_MS };
+const options = RUN_TIMEOUT_MS;
 const call = { callId: 1 };
 
-void test("bash is part of the default binding set on purpose", () => {
-  assert.deepEqual([...DEFAULT_BINDING_NAMES], [...BUILTIN_BINDING_NAMES]);
-  assert.ok(
-    DEFAULT_BINDING_NAMES.includes("bash"),
-    "DSH's PTC preset keeps its shell tool mounted as a binding",
-  );
+test("bash is part of the default binding set on purpose", () => {
+  expect([...DEFAULT_BINDING_NAMES]).toEqual([...BUILTIN_BINDING_NAMES]);
+  expect(DEFAULT_BINDING_NAMES).toContain("bash");
   for (const name of ["read", "edit", "write", "grep", "find", "ls"]) {
-    assert.ok(DEFAULT_BINDING_NAMES.includes(name as never), `${name} must be bindable`);
+    expect(DEFAULT_BINDING_NAMES).toContain(name as never);
   }
 });
 
-void test("createBuiltinBindings builds every built-in by default and honours an explicit subset", () => {
+test("createBuiltinBindings builds every built-in by default and honours an explicit subset", () => {
   const all = createBuiltinBindings({ cwd: process.cwd() });
-  assert.deepEqual([...all.keys()], [...BUILTIN_BINDING_NAMES]);
-  for (const binding of all.values()) assert.equal(typeof binding.execute, "function");
+  expect([...all.keys()]).toEqual([...BUILTIN_BINDING_NAMES]);
+  for (const binding of all.values()) expect(typeof binding.execute).toBe("function");
 
   const readOnly = createBuiltinBindings({ cwd: process.cwd(), names: ["read", "grep"] });
-  assert.deepEqual([...readOnly.keys()], ["read", "grep"]);
+  expect([...readOnly.keys()]).toEqual(["read", "grep"]);
 
   const none = createBuiltinBindings({ cwd: process.cwd(), names: [] });
-  assert.equal(none.size, 0);
+  expect(none.size).toBe(0);
 });
 
-void test("createBuiltinBindings rejects unknown binding names", () => {
-  assert.throws(
-    () => createBuiltinBindings({ cwd: process.cwd(), names: ["read", "teleport"] }),
-    (error: Error) =>
-      error instanceof TypeError && /unknown PTC binding "teleport"/.test(error.message),
-  );
+test("createBuiltinBindings rejects unknown binding names", () => {
+  let caught: unknown;
+  try {
+    createBuiltinBindings({ cwd: process.cwd(), names: ["read", "teleport"] });
+  } catch (e) {
+    caught = e;
+  }
+  expect(caught).toBeInstanceOf(TypeError);
+  expect((caught as Error).message).toMatch(/unknown PTC binding "teleport"/);
 });
 
-void test("the read binding resolves relative paths against the run cwd", options, async () => {
+test("the read binding resolves relative paths against the run cwd", async () => {
   const dir = await makeTempDir();
   try {
     await writeFile(join(dir, "fixture.txt"), "line one\nline two\n");
@@ -52,43 +51,41 @@ void test("the read binding resolves relative paths against the run cwd", option
       content: Array<{ type: string; text: string }>;
       details: unknown;
     };
-    assert.equal(result.content[0]?.text, "line one\nline two\n");
-    assert.equal(result.details, null, "an absent details payload is normalized to null");
+    expect(result.content[0]?.text).toBe("line one\nline two\n");
+    expect(result.details).toBe(null);
   } finally {
     await removeTempDir(dir);
   }
-});
+}, options);
 
-void test("the bash binding runs in the run cwd", options, async () => {
+test("the bash binding runs in the run cwd", async () => {
   const dir = await makeTempDir();
   try {
     const bindings = createBuiltinBindings({ cwd: dir, names: ["bash"] });
     const result = (await bindings.get("bash")?.execute({ command: "pwd" }, call)) as {
       content: Array<{ text: string }>;
     };
-    assert.equal(result.content[0]?.text.trim(), dir);
+    expect(result.content[0]?.text.trim()).toBe(dir);
   } finally {
     await removeTempDir(dir);
   }
-});
+}, options);
 
-void test("binding arguments are validated with pi's own tool validator", options, async () => {
+test("binding arguments are validated with pi's own tool validator", async () => {
   const bindings = createBuiltinBindings({ cwd: process.cwd(), names: ["read"] });
-  await assert.rejects(
+  await expect(
     () => bindings.get("read")?.execute({ offset: 2 }, call) as Promise<unknown>,
-    /Validation failed for tool "read"/,
-  );
-});
+  ).rejects.toThrow(/Validation failed for tool "read"/);
+}, options);
 
-void test("a failing tool calls rejects with the tool's own error", options, async () => {
+test("a failing tool calls rejects with the tool's own error", async () => {
   const dir = await makeTempDir();
   try {
     const bindings = createBuiltinBindings({ cwd: dir, names: ["read"] });
-    await assert.rejects(
+    await expect(
       () => bindings.get("read")?.execute({ path: "does-not-exist.txt" }, call) as Promise<unknown>,
-      (error: Error) => error instanceof Error && error.message.length > 0,
-    );
+    ).rejects.toThrow();
   } finally {
     await removeTempDir(dir);
   }
-});
+}, options);

@@ -5,8 +5,7 @@
  * execute time from `getActiveToolNames`, so a restricted session must observe fewer
  * bindings (or none), and never more than it has enabled.
  */
-import assert from "node:assert/strict";
-import test from "node:test";
+import { expect, test } from "vitest";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AgentToolResult, ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -16,15 +15,11 @@ import type { PtcToolDetails } from "../src/tools/common.ts";
 import { createPtcRunCodeTool } from "../src/tools/run-code.ts";
 import { RUN_TIMEOUT_MS, makeTempDir, removeTempDir, toolContext } from "./helpers/ptc.ts";
 
-void test("resolveBindingNames intersects the active set with the built-in factories", () => {
-  assert.deepEqual([...resolveBindingNames(undefined)], [...BUILTIN_BINDING_NAMES]);
-  assert.deepEqual([...resolveBindingNames([])], []);
-  assert.deepEqual([...resolveBindingNames(["read", "grep"])], ["read", "grep"]);
-  assert.deepEqual(
-    [...resolveBindingNames(["read", "teleport", "bash"])],
-    ["read", "bash"],
-    "names outside the factory set are ignored",
-  );
+test("resolveBindingNames intersects the active set with the built-in factories", () => {
+  expect([...resolveBindingNames(undefined)]).toEqual([...BUILTIN_BINDING_NAMES]);
+  expect([...resolveBindingNames([])]).toEqual([]);
+  expect([...resolveBindingNames(["read", "grep"])]).toEqual(["read", "grep"]);
+  expect([...resolveBindingNames(["read", "teleport", "bash"])]).toEqual(["read", "bash"]);
 });
 
 function executeTool(
@@ -50,9 +45,8 @@ function textOf(result: AgentToolResult<PtcToolDetails>): string {
     .join("\n");
 }
 
-void test(
+test(
   "a restricted session can only reach its active tools",
-  { timeout: RUN_TIMEOUT_MS },
   async () => {
     const dir = await makeTempDir();
     try {
@@ -64,37 +58,35 @@ void test(
         `const r = await tools.read({ path: "data.txt" }); return r.content.map((p) => p.text ?? "").join("").trim();`,
         dir,
       );
-      assert.equal(textOf(allowed), "policy-marker");
+      expect(textOf(allowed)).toBe("policy-marker");
 
-      await assert.rejects(
+      await expect(
         executeTool(tool, `return await tools.write({ path: "x.txt", content: "nope" });`, dir),
-        /no binding named "write".*available bindings: read/,
-        "an unbound tool must reject with the available names",
-      );
+      ).rejects.toThrow(/no binding named "write".*available bindings: read/);
     } finally {
       await removeTempDir(dir);
     }
   },
+  RUN_TIMEOUT_MS,
 );
 
-void test(
+test(
   "an empty active set yields no bindings, yet Node and console still work",
-  { timeout: RUN_TIMEOUT_MS },
   async () => {
     const dir = await makeTempDir();
     try {
       const tool = createPtcRunCodeTool({ getActiveToolNames: () => [] });
 
-      await assert.rejects(
+      await expect(
         executeTool(tool, `return await tools.read({ path: "data.txt" });`, dir),
-        /available bindings: \(none\)/,
-      );
+      ).rejects.toThrow(/available bindings: \(none\)/);
 
       const bare = await executeTool(tool, `console.log("no-tools"); return 40 + 2;`, dir);
-      assert.equal(bare.details.result, 42, "the program still runs without bindings");
-      assert.match(textOf(bare), /no-tools/);
+      expect(bare.details.result).toBe(42);
+      expect(textOf(bare)).toMatch(/no-tools/);
     } finally {
       await removeTempDir(dir);
     }
   },
+  RUN_TIMEOUT_MS,
 );
