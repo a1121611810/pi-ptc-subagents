@@ -19,6 +19,21 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 
+/**
+ * The CLI command used to invoke a fresh pi subprocess for one dispatch.
+ *
+ * Always `"pi"` — pi-ptc is a library, not a CLI, and `dispatch` must spawn the
+ * separate `pi` binary regardless of how the host process was launched. An earlier
+ * copy of this function mirrored pi's own subagent extension and tried to reuse
+ * `process.execPath + process.argv[1]`, which works only when the host is `pi`
+ * itself; in any other host (test scripts, the dispatcher host process, etc.) the
+ * function would spawn the host script in place of `pi`, producing infinite
+ * recursion and a stdout pipe that never drains (so `proc.on('close')` never
+ * fires). Resolved via direct `"pi"`; surfacing the `ENOENT` from `spawn` is the
+ * caller's signal that pi is not on PATH.
+ */
+const PI_COMMAND = "pi";
+
 /** Per-call input. Mirrors pi's subagent extension's parameters (single-mode only). */
 export interface DispatchInput {
   agent: string;
@@ -111,22 +126,14 @@ export function dispatchDepthLimitReached(currentDepth: number): DispatchResult 
   };
 }
 /**
- * Resolve how to invoke `pi`. Mirrors the reference implementation in
- * examples/extensions/subagent/index.ts runSingleAgent so the dispatch path starts
- * the same binary in the same way, regardless of how pi-ptc itself was launched.
+ * Resolve how to invoke `pi`.
+ *
+ * Always returns `{ command: "pi", args }`. Kept as a function for symmetry with
+ * the upstream `runSingleAgent` reference and so the spawn site reads as
+ * "invoke pi with these args" rather than "spawn command 'pi'".
  */
 function getPiInvocation(args: string[]): { command: string; args: string[] } {
-  const currentScript = process.argv[1];
-  const isBunVirtualScript = currentScript?.startsWith("/$bunfs/root/");
-  if (currentScript && !isBunVirtualScript && fs.existsSync(currentScript)) {
-    return { command: process.execPath, args: [currentScript, ...args] };
-  }
-  const execName = path.basename(process.execPath).toLowerCase();
-  const isGenericRuntime = /^(node|bun)(\.exe)?$/.test(execName);
-  if (!isGenericRuntime) {
-    return { command: process.execPath, args };
-  }
-  return { command: "pi", args };
+  return { command: PI_COMMAND, args };
 }
 
 /**
@@ -258,10 +265,21 @@ export function buildArgv(
   const args: string[] = ["--mode", "json", "-p", "--no-session"];
   const model = input.model ?? agent.model;
   if (model) args.push("--model", model);
-  if (input.thinkingLevel) args.push("--thinking", String(input.thinkingLevel));
-  if (input.agentScope && input.agentScope !== "user") {
-    args.push("--agent-scope", input.agentScope);
-  }
+  // Default to --thinking off: a dispatched child is a tool call, not a long-form reasoning
+
+  // task. Thinking blocks the model from emitting text for many seconds; the parent
+
+  // turn keeps its own thinking settings, the child inherits only what the parent's
+
+  // DispatchInput.thinkingLevel says (and defaults to "off" otherwise).
+
+  const thinking = input.thinkingLevel ?? "off";
+
+  args.push("--thinking", thinking);
+  // Note: agentScope is honoured at our layer via discoverAgent(); pi itself does not
+  // accept an --agent-scope flag (the subagent extension does not pass one either), and
+  // in --no-session mode pi loads user-scope agents from ~/.pi/agent/agents by default.
+  // Project agents would need a different mechanism (e.g. PI_CODING_AGENT_DIR override).
   if (agent.tools && agent.tools.length > 0) {
     args.push("--tools", agent.tools.join(","));
   }
@@ -414,14 +432,14 @@ export async function dispatch(
     const onAbort = (): void => {
       if (!proc || proc.killed || resolved) return;
       try {
-        proc.kill("SIGTERM");
+        if (proc.pid !== undefined) proc.kill("SIGTERM");
       } catch {
-        /* ignore */
+        /* ignore: group already gone */
       }
       killTimer = setTimeout(() => {
         if (proc && !proc.killed) {
           try {
-            proc.kill("SIGKILL");
+            if (proc.pid !== undefined) proc.kill("SIGKILL");
           } catch {
             /* ignore */
           }
