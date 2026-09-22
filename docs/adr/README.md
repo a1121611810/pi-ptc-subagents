@@ -11,5 +11,6 @@ ADRs for pi-ptc-subagents, per `docs/agents/domain.md` (single-context repo).
 | [0005](./0005-ptc-execution-boundary.md) | Execution boundary: `worker_threads` + F1–F4; direct binding execution      | accepted |
 | 0006                                     | (reserved — dropped: subagent seam; same G1 #13 decision)                   | —        |
 | [0007](./0007-no-os-sandbox.md)          | No OS sandbox: inherited risk, stated plainly                               | accepted |
+| [0008](./0008-vite-plus-and-pnpm.md)     | Toolchain: adopt `vite-plus` (`vp`) and `pnpm`, staged                      | accepted |
 
 Numbering gaps are deliberate: 0001/0006 were reserved while wayfinder map #7 was charting and dropped when G1 resolved; keeping their slots means every cross-reference in the map and its tickets stays valid.

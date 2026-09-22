@@ -18,7 +18,7 @@ behaviour (tracked as a wayfinder map in this repo's issues).
 pi install npm:pi-ptc-subagents
 ```
 
-From a local checkout: `npm install && npm run build && pi install /abs/path/to/this/repo`.
+From a local checkout: `pnpm install && pnpm run build && pi install /abs/path/to/this/repo` (or `npm install && npm run build && …` — the lockfile is `pnpm-lock.yaml`; with npm you'll need `npm i` to regenerate `package-lock.json`).
 
 pi reads the `pi.extensions` manifest field, so no extra setup steps are
 required — install it and the extension is on for the next pi startup.
@@ -48,12 +48,12 @@ required — install it and the extension is on for the next pi startup.
 ## Development
 
 ```bash
-npm install
-npm run typecheck     # tsc --noEmit
-npm run lint          # oxlint          (`npm run lint:fix` applies fixes)
-npm run fmt           # oxfmt (writes); `npm run fmt:check` verifies
-npm test              # node --test over tests/**/*.test.ts
-npm run build         # rolldown bundle + declaration emit
+pnpm install
+pnpm run typecheck    # tsc --noEmit
+pnpm run lint         # oxlint          (`pnpm run lint:fix` applies fixes)
+pnpm run fmt          # oxfmt (writes); `pnpm run fmt:check` verifies
+pnpm test             # node --test over tests/**/*.test.ts
+pnpm run build        # rolldown bundle + declaration emit
 ```
 
 Tooling: [oxc](https://oxc.rs) — `oxlint` + `oxfmt` (official defaults) — alongside

@@ -22,6 +22,8 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: lts/*
-          cache: npm
-      - run: npm ci
-      - run: npm run lint
+          # pnpm v12 detected via `packageManager: pnpm@…` in package.json
+          # (setup-node v6 reads it and runs Corepack to install the version).
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run lint

@@ -72,6 +72,7 @@
   "engines": {
     "node": ">=22.19.0"
   },
+  "packageManager": "pnpm@12.5.1",
   "pi": {
     "extensions": [
       "./dist/index.js"

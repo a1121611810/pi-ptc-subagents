@@ -1,0 +1,13 @@
+# pnpm 12 project config (single-package — no `packages:` field means only the
+# root is included, see https://pnpm.io/settings).
+#
+# `allowBuilds` (added in pnpm 10.26, replaces the removed `onlyBuiltDependencies`):
+# this project does not need any dependency's install/postinstall scripts.
+# `rolldown` ships its own prebuilt native binary, `esbuild` is a transitive we
+# never invoke directly, and `@google/genai` / `protobufjs` are not used at
+# runtime. Listing each known transitive here with `false` documents that we
+# reviewed them and chose not to run their scripts.
+allowBuilds:
+  esbuild: false
+  "@google/genai": false
+  protobufjs: false
