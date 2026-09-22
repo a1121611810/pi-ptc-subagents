@@ -19,13 +19,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      # pnpm/action-setup reads `packageManager: pnpm@…` from package.json,
+      # runs `corepack enable`, and prepares the matching pnpm version. This
+      # is required because actions/setup-node with `cache: pnpm` verifies
+      # the binary at setup time and will fail if pnpm isn't already
+      # installed.
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: lts/*
-          # `cache: pnpm` only caches — it does not install pnpm. setup-node v6
-          # reads the version from `packageManager` in package.json but only
-          # when Corepack is enabled, hence the explicit `corepack enable`.
           cache: pnpm
-      - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - run: pnpm run lint
