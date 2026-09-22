@@ -27,8 +27,22 @@ export interface PtcConfig {
   maxMessageBytes: number;
   /** Admission control for simultaneously in-flight worker→host binding calls (ADR-0004). */
   maxPendingCalls: number;
-  /** Concurrent binding dispatches; DSH's `maxParallelSubCalls` (ADR-0004 consequence). */
+  /** Concurrent binding dispatches; DSH's `maxParallelSubCalls` (ADR-0004 consequence).
+   *  Renamed in spirit by ADR-0016 section 2: the cap that really matters for
+   *  resource safety is the per-run `dispatchConcurrency` below. This field
+   *  is kept for backward compatibility (and for the in-process builtin
+   *  binding fan-out) but is no longer the authoritative limit on the
+   *  parallel binding `pi.dispatch`. */
   maxParallelSubCalls: number;
+  /** Per-run hard cap on concurrently in-flight `pi.dispatch(...)` calls.
+   *  Default 8, matches pi's `subagent` extension `MAX_PARALLEL_TASKS`.
+   *  ADR-0016 section 2. */
+  dispatchConcurrency: number;
+  /** Maximum recursion depth for `pi.dispatch`. The child PTC run spawned by
+   *  the (depth+1)-th dispatch is allowed only when childDepth <= maxDispatchDepth.
+   *  Default 3. Aligns with dsh's `SubagentCapabilities.depthLimit` and codex's
+   *  `agent_max_depth`. ADR-0016 Recursive dispatch section. */
+  maxDispatchDepth: number;
   /** Items accepted by a single `parallel()` / `pipeline()` call (R1 §1, workflow-side; pinned
    *  here because it guards a helper call rather than an agent budget). */
   maxItemsPerCall: number;
@@ -47,6 +61,8 @@ export const DEFAULT_CONFIG: Readonly<PtcConfig> = Object.freeze({
   maxMessageBytes: 134_217_728,
   maxPendingCalls: 128,
   maxParallelSubCalls: 10,
+  dispatchConcurrency: 8,
+  maxDispatchDepth: 3,
   maxItemsPerCall: 4_096,
   graceMs: 3_000,
   maxOldGenerationSizeMb: 512,

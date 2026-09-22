@@ -34,8 +34,54 @@ required — install it and the extension is on for the next pi startup.
   `agent()` helper on either surface.
 
 Long output follows pi's own truncation contract ([ADR-0015](./docs/adr/0015-pi-truncation-contract.md)):
+
 the text block keeps the tail (50 KB / 2000 lines) and the untruncated text is written to a temp file
+
 the next program can `tools.read`; the collapsed row then shows `truncated` in its meta.
+
+## Dispatch (fan-out to per-call pi subprocesses)
+
+PTC programs can spawn a fresh `pi` subprocess per call via the **`pi.dispatch(...)`** binding ([ADR-0016](./docs/adr/0016-ptc-dispatch-binding.md)). Use it to fan out to a specialist agent — the child subprocess loads the named agent's markdown from `~/.pi/agent/agents/<name>.md` (or `.pi/agents/<name>.md` for project-scope agents), runs that agent's tool set and system prompt in isolation, and returns a structured result.
+
+```ts
+// inside a ptc_run_code program
+const result = await pi.dispatch({
+  agent: "scout",
+  task: "find all auth code in src/",
+  cwd: process.cwd(),
+});
+
+// result.status: "fulfilled" | "rejected"  (the binding never throws)
+// result.text:   final assistant text
+// result.usage:  { input, output, cacheRead, cacheWrite, cost, turns }
+// result.exitCode, result.durationMs, result.stderr?, result.errorMessage?
+```
+
+**Fan out in parallel** with the rest of PTC's tools — dispatch is a binding, not a model-visible lifecycle tool, so the dispatcher handles concurrency the same way it does for any other tool call:
+
+```ts
+const [read, scoutA, scoutB] = await Promise.all([
+  tools.read({ path: "package.json" }),
+  pi.dispatch({ agent: "scout", task: "review auth" }),
+  pi.dispatch({ agent: "scout", task: "review db" }),
+]);
+```
+
+**Bounded.** Three knobs keep fan-out from running away:
+
+- `PtcConfig.dispatchConcurrency` (default **8**) — hard cap on concurrently in-flight `pi.dispatch` calls per run. The N+1th concurrent call resolves immediately with `{ status: "rejected", errorMessage: "dispatch concurrency limit reached" }` instead of queuing or spawning.
+- `PtcConfig.maxDispatchDepth` (default **3**) — recursion bound. The child subprocess loads pi-ptc too, so it can write its own PTC programs and call `pi.dispatch` itself; the `childDepth = parentDepth + 1` is rejected when it would exceed `maxDispatchDepth`. The child sees a `<pi-ptc-context depth="N" max-depth="M">…</pi-ptc-context>` hint appended to its system prompt so it can budget its recursion.
+- `signal` — when the parent run is cancelled (deadline, abort, user Esc), every in-flight child receives `SIGTERM` followed by `SIGKILL` after a 5-second grace window, the same shape as pi's `examples/extensions/subagent/index.ts` reference.
+
+**Opt out.** Pass an explicit binding subset to `createBuiltinBindings` to opt out — the parallel binding is mixed in only when the caller accepts the default set:
+
+```ts
+// in a hypothetical runner that wants to keep reads-only:
+createBuiltinBindings({ cwd: "/abs/path", names: ["read", "grep"] });
+// `pi.dispatch` is NOT in the resulting table.
+```
+
+**Not a subagent.** The term _subagent_ is overloaded in this field (DSH's `subagent` is a different thing; pi's `examples/extensions/subagent/` extension is also a different thing). pi-ptc uses _parallel binding_ and _concurrent tool call_ throughout; see `CONTEXT.md` for the canonical terms.
 
 ## TUI rendering
 
@@ -43,18 +89,26 @@ Both tools register custom `renderCall` / `renderResult` hooks, so a PTC run rea
 rather than as yet another file operation ([ADR-0013](./docs/adr/0013-ptc-row-compact-summary.md)):
 
 ```
-PTC  Verify the inserted image file
-  → {file, clipNow}                        • 6 output lines · 1 image · 536ms
+PTC  Find AssistantMessageComponent instantiations
+  ├─ file: "chat-viewport.ts"                 • 1 output line · 1.42s
+  ├─ instantiations: Array(3)
+  │  ├─ [0] {file: "chat-viewport.ts", line: 23}
+  │  ├─ [1] {file: "chat-viewport.ts", line: 47}
+  │  └─ [2] {file: "chat-viewport.ts", line: 91}
+  └─ totalLines: 47
 ```
 
-The call row is the tool label plus the model's `description`. The result row is one line: the
-completion value as a short hint (`→ …`, or `done`, or `failed: <reason>` in red) with the run's
-countable facts — output lines, workflow phases, attached images, warnings, duration — pinned to the
-right edge. The payload itself is never printed: a value that does not fit collapses to its shape
-(`{file, clipNow}`) and a multi-line string to its first line plus `(+N lines)`. Expanding a row
-(ctrl+e) adds the code head, phase roll-up, `console.log` output, plan-drift warnings and the full
-completion value, each block labelled and capped. `renderShell` stays at pi's default, so these rows
-keep the same box and colors as the built-in tools.
+The call row is the tool label plus the model's `description`. Under it, the completion value is
+shown as a **tree**: an object or array with content gives one row per property (or index), nested
+containers recurse behind `├─` / `└─` / `│` connectors, and a small all-scalar container collapses
+onto one row (`{file: "a", line: 12}`). Depth caps at 4 levels, 6 children per container and 120
+characters per row; whatever is withheld is reported (`…+N more keys`, a trailing `…`). A scalar
+value is one line instead — `→ 47`, `→ {}`, `done` when the program returned nothing, or
+`failed: <reason>` in red. The run's countable facts — output lines, workflow phases, attached
+images, warnings, duration — stay pinned to the right edge of the area's first row. Nothing is ever
+printed as escaped JSON. Expanding a row (ctrl+e) adds the code head, phase roll-up, `console.log`
+output and plan-drift warnings, each block labelled and capped. `renderShell` stays at pi's default,
+so these rows keep the same box and colors as the built-in tools.
 
 ## Images
 

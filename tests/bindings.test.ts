@@ -5,11 +5,12 @@ import {
   BUILTIN_BINDING_NAMES,
   createBuiltinBindings,
   DEFAULT_BINDING_NAMES,
+  DISPATCH_BINDING_NAME,
 } from "../src/runtime/bindings.ts";
 import { makeTempDir, removeTempDir, RUN_TIMEOUT_MS } from "./helpers/ptc.ts";
 
 const options = RUN_TIMEOUT_MS;
-const call = { callId: 1 };
+const call = { callId: 1, depth: 0, maxDispatchDepth: 3 };
 
 test("bash is part of the default binding set on purpose", () => {
   expect([...DEFAULT_BINDING_NAMES]).toEqual([...BUILTIN_BINDING_NAMES]);
@@ -21,7 +22,7 @@ test("bash is part of the default binding set on purpose", () => {
 
 test("createBuiltinBindings builds every built-in by default and honours an explicit subset", () => {
   const all = createBuiltinBindings({ cwd: process.cwd() });
-  expect([...all.keys()]).toEqual([...BUILTIN_BINDING_NAMES]);
+  expect(new Set(all.keys())).toEqual(new Set([...BUILTIN_BINDING_NAMES, DISPATCH_BINDING_NAME]));
   for (const binding of all.values()) expect(typeof binding.execute).toBe("function");
 
   const readOnly = createBuiltinBindings({ cwd: process.cwd(), names: ["read", "grep"] });

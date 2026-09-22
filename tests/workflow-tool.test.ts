@@ -243,12 +243,21 @@ test(
 );
 
 test(
-  "the workflow surface binds all seven built-in tools",
+  "the workflow surface binds every builtin tool and `pi.dispatch` (ADR-0016)",
   async () => {
     const result = await call(createPtcWorkflowTool(), {
       script: "return Object.keys(tools).sort();",
     });
-    expect(result.details.result).toEqual(["bash", "edit", "find", "grep", "ls", "read", "write"]);
+    expect(result.details.result).toEqual([
+      "bash",
+      "edit",
+      "find",
+      "grep",
+      "ls",
+      "pi.dispatch",
+      "read",
+      "write",
+    ]);
   },
   RUN_TIMEOUT_MS,
 );

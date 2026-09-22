@@ -27,6 +27,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { TSchema } from "typebox";
 
+import { dispatch as dispatchBinding, type DispatchInput } from "./dispatch.ts";
+
 /** pi's built-in tools that can be exposed as bindings, in native order. */
 export const BUILTIN_BINDING_NAMES = [
   "read",
@@ -48,6 +50,12 @@ export type BuiltinBindingName = (typeof BUILTIN_BINDING_NAMES)[number];
  * out would silently shrink the surface relative to DSH. Callers that want a read-only
  * PTC surface pass an explicit subset.
  */
+/** Parallel binding name (ADR-0016). Always bound alongside the builtin set;
+ * opt-out is the callers responsibility via an explicit subset to
+ * createBuiltinBindings (today the subset is restricted to builtin names,
+ * so opt-out is effectively use a future flag). */
+export const DISPATCH_BINDING_NAME = "pi.dispatch" as const;
+
 export const DEFAULT_BINDING_NAMES: readonly BuiltinBindingName[] = BUILTIN_BINDING_NAMES;
 
 export interface BindingContext {
@@ -55,6 +63,10 @@ export interface BindingContext {
   signal?: AbortSignal;
   /** Wire call id; also used to build the tool call id the tools see. */
   callId: number;
+  /** Depth of the current PTC run (0 for parent turn, 1+ for a child of `pi.dispatch`). */
+  depth: number;
+  /** Maximum allowed depth; passed through to `pi.dispatch` for the depth check. */
+  maxDispatchDepth: number;
 }
 
 export interface Binding {
@@ -144,6 +156,25 @@ export function createBuiltinBindings(options: CreateBuiltinBindingsOptions): Bi
           content: result.content,
           details: result.details === undefined ? null : result.details,
         };
+      },
+    });
+  }
+  // Register the parallel binding alongside the builtin set (ADR-0016).
+  // The binding is added unconditionally when the caller accepts the default set,
+  // but an explicit subset (the read-only PTC surface pattern, R3) is honoured:
+  // `pi.dispatch` is not mixed into a caller-curated list, because the caller
+  // has signalled they want a specific surface.
+  if (names === DEFAULT_BINDING_NAMES) {
+    table.set(DISPATCH_BINDING_NAME, {
+      name: DISPATCH_BINDING_NAME,
+      execute: async (args, context) => {
+        return dispatchBinding(args as DispatchInput, {
+          signal: context.signal,
+          callId: context.callId,
+          cwd: options.cwd,
+          depth: context.depth,
+          maxDepth: context.maxDispatchDepth,
+        });
       },
     });
   }

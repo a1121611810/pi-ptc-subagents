@@ -157,6 +157,11 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
     let outputBytes = 0;
     let activeDispatches = 0;
     const dispatchWaiters: Array<() => void> = [];
+    // Per-run depth for `pi.dispatch` (ADR-0016 Recursive section).
+    // The parent turn's PTC run is depth 0; a child spawned by `pi.dispatch`
+    // is depth 1, and so on. The depth is read by the binding's `execute`;
+    // the dispatcher itself does not change it within a single run.
+    const runDepth = 0;
     let runTimer: NodeJS.Timeout | undefined;
     let graceTimer: NodeJS.Timeout | undefined;
 
@@ -337,6 +342,8 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
         const value = await binding.execute(frame.args, {
           signal: bindingAbort.signal,
           callId: frame.callId,
+          depth: runDepth,
+          maxDispatchDepth: config.maxDispatchDepth,
         });
         const posted = postCallResult({
           kind: HOST_FRAME_KIND.callResult,
