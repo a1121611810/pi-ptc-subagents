@@ -77,11 +77,6 @@
   "engines": {
     "node": ">=22.19.0"
   },
-  "pnpm": {
-    "overrides": {
-      "vitest": "^4.1.11"
-    }
-  },
   "packageManager": "pnpm@12.5.1",
   "pi": {
     "extensions": [
