@@ -11,7 +11,7 @@ import type {
   ExtensionContext,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import ptcSubagents, { BUILTIN_BINDING_NAMES } from "../../src/index.ts";
+import ptcSubagents from "../../src/index.ts";
 import type { Binding, BindingTable } from "../../src/runtime/bindings.ts";
 
 /** Timeout applied to tests that spawn real workers, so a deadlock fails instead of hanging. */
@@ -32,24 +32,151 @@ export function makeBinding(name: string, execute: Binding["execute"]): Binding 
 }
 
 /**
+ * A recording extension-API stub: registers tools/commands/handlers and records the calls that
+ * only a live pi session would otherwise make (tool loadout changes, status, notifications,
+ * persisted entries). Tests drive it by emitting events, so the mode logic is exercised through
+ * the same entry points pi uses.
+ */
+export interface ExtensionStub {
+  tools: Map<string, ToolDefinition>;
+  commands: Map<
+    string,
+    { description?: string; handler: (args: string, ctx: unknown) => Promise<void> }
+  >;
+  handlers: Map<string, ((event: unknown, ctx: ExtensionContext) => unknown)[]>;
+  /** The live tool loadout the stub reports from `getActiveTools`. */
+  active: string[];
+  /** Every loadout written through `setActiveTools`, in order. */
+  activeWrites: string[][];
+  entries: { customType: string; data?: unknown }[];
+  notifications: { message: string; type?: string }[];
+  statuses: { key: string; text: string | undefined }[];
+  api: ExtensionAPI;
+  /** Fire every handler registered for `event`, in registration order, and collect results. */
+  emit(event: string, ctx: ExtensionContext): Promise<unknown[]>;
+}
+
+/**
+ * pi's default session surface (`agent-session.js`: `["read", "bash", "edit", "write"]`).
+ * The stub models this rather than every bindable name, because a double that reports more tools
+ * than a real session has would hide exactly the class of bug where the mode misreads an ordinary
+ * session as restricted.
+ */
+export const DEFAULT_SESSION_TOOLS: readonly string[] = ["read", "bash", "edit", "write"];
+
+/** Build the stub and run the extension factory against it. */
+export function makeExtensionStub(options: { active?: readonly string[] } = {}): ExtensionStub {
+  const tools = new Map<string, ToolDefinition>();
+  const commands = new Map<
+    string,
+    { description?: string; handler: (args: string, ctx: unknown) => Promise<void> }
+  >();
+  const handlers = new Map<string, ((event: unknown, ctx: ExtensionContext) => unknown)[]>();
+  const activeWrites: string[][] = [];
+  const entries: { customType: string; data?: unknown }[] = [];
+  const notifications: { message: string; type?: string }[] = [];
+  const statuses: { key: string; text: string | undefined }[] = [];
+  const active = [...(options.active ?? DEFAULT_SESSION_TOOLS), "ptc_run_code", "ptc_workflow"];
+
+  const stub: ExtensionStub = {
+    tools,
+    commands,
+    handlers,
+    active,
+    activeWrites,
+    entries,
+    notifications,
+    statuses,
+    api: undefined as unknown as ExtensionAPI,
+    async emit(event, ctx) {
+      const results: unknown[] = [];
+      for (const handler of handlers.get(event) ?? [])
+        results.push(await handler({ type: event }, ctx));
+      return results;
+    },
+  };
+
+  const api = {
+    registerTool: (tool: ToolDefinition) => {
+      tools.set(tool.name, tool);
+    },
+    registerCommand: (
+      name: string,
+      spec: { description?: string; handler: (args: string, ctx: unknown) => Promise<void> },
+    ) => {
+      commands.set(name, spec);
+    },
+    on: (event: string, handler: (event: unknown, ctx: ExtensionContext) => unknown) => {
+      const list = handlers.get(event) ?? [];
+      list.push(handler);
+      handlers.set(event, list);
+      return () => {};
+    },
+    getActiveTools: () => [...active],
+    setActiveTools: (names: string[]) => {
+      active.splice(0, active.length, ...names);
+      activeWrites.push([...names]);
+    },
+    appendEntry: (customType: string, data?: unknown) => {
+      entries.push({ customType, ...(data === undefined ? {} : { data }) });
+    },
+  } as unknown as ExtensionAPI;
+
+  stub.api = api;
+  ptcSubagents(api);
+  return stub;
+}
+
+/**
  * Run the extension factory against a recording stub and return the tools it registered,
  * keyed by registered name. This is the registration path pi itself takes, so the definitions
  * under test are the ones the model would actually call.
  *
  * The stub reports every built-in as active, so integration tests exercise the full surface;
- * enablement-policy tests wire restricted `getActiveToolNames` getters into the factories
+ * enablement-policy tests wire restricted `getBindingSourceNames` getters into the factories
  * directly instead.
  */
 export function captureRegisteredTools(): Map<string, ToolDefinition> {
-  const tools = new Map<string, ToolDefinition>();
-  const stub = {
-    registerTool: (tool: ToolDefinition) => {
-      tools.set(tool.name, tool);
+  return makeExtensionStub().tools;
+}
+
+/**
+ * A minimal `ExtensionContext` for mode tests: the fields the mode reads are `mode`, `ui`
+ * (notify / setStatus / theme) and `sessionManager.getEntries()`.
+ */
+export function modeContext(
+  options: {
+    mode?: string;
+    entries?: { type: string; customType: string; data?: unknown }[];
+    notify?: (message: string, type?: string) => void;
+    setStatus?: (key: string, text: string | undefined) => void;
+  } = {},
+): ExtensionContext {
+  return {
+    mode: options.mode ?? "tui",
+    ui: {
+      notify: options.notify ?? (() => {}),
+      setStatus: options.setStatus ?? (() => {}),
+      theme: { fg: (_color: string, text: string) => text },
     },
-    getActiveTools: () => [...BUILTIN_BINDING_NAMES],
-  } as unknown as ExtensionAPI;
-  ptcSubagents(stub);
-  return tools;
+    sessionManager: { getEntries: () => options.entries ?? [] },
+  } as unknown as ExtensionContext;
+}
+
+/**
+ * A context wired to a stub's recorders, so a test can read what the mode announced in
+ * `stub.notifications` / `stub.statuses` instead of threading its own callbacks around.
+ */
+export function stubContext(
+  stub: ExtensionStub,
+  options: { mode?: string; entries?: { type: string; customType: string; data?: unknown }[] } = {},
+): ExtensionContext {
+  return modeContext({
+    ...options,
+    notify: (message, type) =>
+      stub.notifications.push({ message, ...(type === undefined ? {} : { type }) }),
+    setStatus: (key, text) => stub.statuses.push({ key, text }),
+  });
 }
 
 /**
@@ -62,6 +189,16 @@ export function captureRegisteredTools(): Map<string, ToolDefinition> {
 export function toolContext(cwd: string): ExtensionContext {
   return { cwd } as unknown as ExtensionContext;
 }
+
+/**
+ * A valid 1×1 PNG, base64-encoded.
+ *
+ * Tests that need "an image" use real PNG bytes so the whole path — `read`'s magic-byte detection,
+ * the worker's JSON round trip, the host's hoist (ADR-0014) — is exercised on a decodable image
+ * rather than on a stand-in string.
+ */
+export const ONE_PIXEL_PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
 
 /** Build a binding table; keys become the `tools.<name>` namespace in the worker. */
 export function makeBindings(entries: Record<string, Binding["execute"]>): BindingTable {

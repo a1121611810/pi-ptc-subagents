@@ -1,5 +1,4 @@
 import { expect, test } from "vitest";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import ptcSubagents, {
   createBuiltinBindings,
   createWorkerEnv,
@@ -9,28 +8,24 @@ import ptcSubagents, {
   runPtcProgram,
   WORKER_FRAME_KIND,
 } from "../src/index.ts";
-import { captureRegisteredTools } from "./helpers/ptc.ts";
+import { captureRegisteredTools, makeExtensionStub } from "./helpers/ptc.ts";
 
 /**
- * A stub is enough here: the factory's contract with pi is just "register the PTC tools with the
+ * The factory's contract with pi is "register the PTC tools and the mode hooks against the
  * ExtensionAPI it is handed" — which the parameter type checks against pi's real declaration at
- * compile time.
+ * compile time. `makeExtensionStub` supplies the same surface pi does.
  */
-const stub = {
-  registerTool: () => {},
-  on: () => () => {},
-} as unknown as ExtensionAPI;
 
 test("the default export is the extension factory and runs without touching pi", () => {
   expect(typeof ptcSubagents).toBe("function");
   expect(ptcSubagents.length).toBe(1);
-  expect(ptcSubagents(stub)).toBe(undefined);
+  expect(ptcSubagents(makeExtensionStub().api)).toBe(undefined);
 });
 
 test("the factory registers both PTC tools against the ExtensionAPI", () => {
   const tools = captureRegisteredTools();
   expect([...tools.keys()]).toEqual(["ptc_run_code", "ptc_workflow"]);
-  for (const [name, tool] of tools) {
+  for (const tool of tools.values()) {
     expect(typeof tool.execute).toBe("function");
     expect(typeof tool.description).toBe("string");
     expect(typeof tool.parameters).toBe("object");

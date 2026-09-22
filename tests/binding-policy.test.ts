@@ -2,7 +2,7 @@
  * Enablement policy (T7, #21): PTC bindings mirror the session's active built-in tools.
  *
  * These cases drive the real worker through the real dispatcher — the policy is read at
- * execute time from `getActiveToolNames`, so a restricted session must observe fewer
+ * execute time from `getBindingSourceNames`, so a restricted session must observe fewer
  * bindings (or none), and never more than it has enabled.
  */
 import { expect, test } from "vitest";
@@ -51,7 +51,7 @@ test(
     const dir = await makeTempDir();
     try {
       await writeFile(join(dir, "data.txt"), "policy-marker\n", "utf8");
-      const tool = createPtcRunCodeTool({ getActiveToolNames: () => ["read"] });
+      const tool = createPtcRunCodeTool({ getBindingSourceNames: () => ["read"] });
 
       const allowed = await executeTool(
         tool,
@@ -75,7 +75,7 @@ test(
   async () => {
     const dir = await makeTempDir();
     try {
-      const tool = createPtcRunCodeTool({ getActiveToolNames: () => [] });
+      const tool = createPtcRunCodeTool({ getBindingSourceNames: () => [] });
 
       await expect(
         executeTool(tool, `return await tools.read({ path: "data.txt" });`, dir),
