@@ -23,6 +23,32 @@ map decisions).
 
 ## pi-side terms
 
+### The four things "output" can mean
+
+The word "output" is ambiguous in this project; use these instead (grill
+round 2026-09-22, when "PTC 输出没可读性" turned out to mean the third one).
+
+**completion value** — the value the program `return`s. Carried structurally
+as `details.result` and textually as the last block of the tool-result text.
+_Avoid_: output, result (when you mean the return value).
+
+**captured output** — the `console.log` lines plus workflow narration
+(`log()`): the `logs` / `narrations` arrays. _Avoid_: output.
+
+**tool-result text** — the single text block handed to the model
+(`content[0].text`), assembled by `renderToolResult()`. This is what the model
+reads; it is not what the human sees. _Avoid_: output, "the result".
+
+**PTC row** — the TUI rendering a human reads, produced by `renderCall` /
+`renderResult` from the `details` payload. _Avoid_: output.
+
+**hoisted image** — an image block that a _successful_ binding call handed to a PTC
+program and that the host then lifted out of the program onto the PTC tool result, so
+the model sees the picture without it crossing the program's JSON return value.
+Mechanism and the deviations from DSH: ADR-0014 (DSH parity: `dsh-tools`'s
+`exec.deferContext`). Nothing is capped or deduped. _Avoid_: attachment, "the program returns the image", base64
+result.
+
 **default-on / 默认开启** — for this package, "default-enabled" means: a user
 who runs `pi install npm:pi-ptc-subagents` immediately gets the PTC tools
 (`ptc_run_code`, `ptc_workflow`) on next pi startup, with **no** extra setup.
