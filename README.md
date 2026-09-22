@@ -52,12 +52,16 @@ pnpm install
 pnpm run typecheck    # tsc --noEmit
 pnpm run lint         # oxlint          (`pnpm run lint:fix` applies fixes)
 pnpm run fmt          # oxfmt (writes); `pnpm run fmt:check` verifies
-pnpm test             # node --test over tests/**/*.test.ts
-pnpm run build        # rolldown bundle + declaration emit
+pnpm test             # vp test --run --coverage (Vitest 4; coverage via @vitest/coverage-v8)
+pnpm run test:watch   # vp test (interactive)
+pnpm run test:ui      # vp test --ui (local browser UI; not for CI)
+pnpm run build        # vp pack + declaration emit
 ```
 
 Tooling: [oxc](https://oxc.rs) — `oxlint` + `oxfmt` (official defaults) — alongside
-`rolldown` (also oxc-powered) and TypeScript 7.
+`rolldown` (also oxc-powered), `vite-plus` (bundles Vitest 4), and TypeScript 7.
+
+See ADR-0009 for the Vitest adoption decision (reopens ADR-0008's earlier deferment).
 
 ## License
 

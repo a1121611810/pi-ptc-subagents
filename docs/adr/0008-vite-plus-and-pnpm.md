@@ -108,3 +108,7 @@ Re-attempt the lint/fmt/typecheck swaps when **all** of these are true:
 2. `vite-plus`'s bundled oxfmt reaches `>=0.70.0` — same reason.
 
 Typecheck (`vp check --typecheck`) has been verified to be safe (uses local `tsc` against `tsconfig.json`); it's still not swapped because routing it through `vp` adds one process for no behavioural benefit. Revisit if `vp check` ever becomes a single entry for both lint and typecheck.
+
+### See also
+
+ADR-0009 — Vitest adoption decision (the 2026-09-22 Vitest migration; reopens the earlier deferment language in ADR-0008 §Phases / §Considered options above). The `pnpm test` runner, coverage config, and watch/UI scripts are recorded there.
