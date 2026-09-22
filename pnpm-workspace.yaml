@@ -11,3 +11,10 @@ allowBuilds:
   esbuild: false
   "@google/genai": false
   protobufjs: false
+# pnpm 12.5 ships a default `minimumReleaseAge` that rejects packages
+# published within the last ~24 h. For this project that delay adds friction
+# (CI on `main` and a clean checkout on a developer box can be skewed by
+# hours) without buying anything — the registry's existing metadata is the
+# trust boundary we rely on. Pin to 0 so the lockfile resolves the same on
+# every machine.
+minimumReleaseAge: 0
