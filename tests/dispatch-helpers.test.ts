@@ -2,9 +2,11 @@ import { describe, expect, test } from "vitest";
 import {
   appendDepthHint,
   buildArgv,
+  decideCloseOutcome,
   discoverAgent,
   parseAgentEvent,
   parseAgentMarkdown,
+  safeKill,
   type AgentConfigLike,
 } from "../src/runtime/dispatch.ts";
 
@@ -139,5 +141,95 @@ describe("discoverAgent", () => {
   test("returns null for an unknown agent name", () => {
     const result = discoverAgent("__pi_dispatch_test_unknown__", "/tmp", "user");
     expect(result).toBeNull();
+  });
+});
+
+describe("decideCloseOutcome", () => {
+  // ADR-0016 §4 promises a `rejected` outcome when the run is cancelled, with
+  // an errorMessage that names the cause. The cancel path goes: ctx.signal aborts
+  // → onAbort sends SIGTERM (or SIGKILL after 5 s) → proc closes with code=null
+  // → exitCode = -1. The pre-fix close handler fell through to the catch-all
+  // `rejected` branch with no errorMessage, breaking the §4 contract.
+  test("aborted → rejected with 'dispatch cancelled'", () => {
+    const out = decideCloseOutcome({ exitCode: -1, finalText: "", aborted: true });
+    expect(out.status).toBe("rejected");
+    expect(out.errorMessage).toBe("dispatch cancelled");
+  });
+
+  test("aborted takes precedence even when finalText is non-empty", () => {
+    // Signal-aborted runs never produce a useful finalText, but if one did, the
+    // cancellation message still wins — the run was cancelled, not fulfilled.
+    const out = decideCloseOutcome({ exitCode: -1, finalText: "PONG", aborted: true });
+    expect(out.status).toBe("rejected");
+    expect(out.errorMessage).toBe("dispatch cancelled");
+  });
+
+  test("exit=0 with finalText → fulfilled", () => {
+    const out = decideCloseOutcome({ exitCode: 0, finalText: "PONG", aborted: false });
+    expect(out.status).toBe("fulfilled");
+    expect(out.errorMessage).toBeUndefined();
+  });
+
+  test("exit=0 with empty finalText → rejected 'produced no final text'", () => {
+    const out = decideCloseOutcome({ exitCode: 0, finalText: "", aborted: false });
+    expect(out.status).toBe("rejected");
+    expect(out.errorMessage).toBe("dispatch produced no final text");
+  });
+
+  test("non-zero exit, not aborted → rejected with no errorMessage", () => {
+    // The proc's `error` handler covers spawn failures; a non-zero exit without
+    // our signal is an upstream failure we don't label.
+    const out = decideCloseOutcome({ exitCode: 1, finalText: "", aborted: false });
+    expect(out.status).toBe("rejected");
+    expect(out.errorMessage).toBeUndefined();
+  });
+
+  test("signal-killed exit (-1) without our signal → rejected with no errorMessage", () => {
+    // e.g. someone killed the child externally; the run still failed but we
+    // don't know whose hand was on the kill switch.
+    const out = decideCloseOutcome({ exitCode: -1, finalText: "", aborted: false });
+    expect(out.status).toBe("rejected");
+    expect(out.errorMessage).toBeUndefined();
+  });
+});
+
+describe("safeKill", () => {
+  // The kill calls in onAbort must guard against `pid === undefined` (TS strict)
+  // and absorb "already gone" throws from a process that exited between the
+  // guard check and the kill syscall.
+  test("returns true and calls proc.kill when pid is defined", () => {
+    const killed: string[] = [];
+    const proc = {
+      pid: 1234,
+      kill: (s: string) => {
+        killed.push(s);
+        return true;
+      },
+    };
+    expect(safeKill(proc, "SIGTERM")).toBe(true);
+    expect(killed).toEqual(["SIGTERM"]);
+  });
+
+  test("returns false and skips kill when pid is undefined", () => {
+    const killed: string[] = [];
+    const proc = {
+      pid: undefined,
+      kill: (s: string) => {
+        killed.push(s);
+        return true;
+      },
+    };
+    expect(safeKill(proc, "SIGTERM")).toBe(false);
+    expect(killed).toEqual([]);
+  });
+
+  test("returns false when proc.kill throws (e.g. process already gone)", () => {
+    const proc = {
+      pid: 1234,
+      kill: () => {
+        throw new Error("ESRCH");
+      },
+    };
+    expect(safeKill(proc, "SIGKILL")).toBe(false);
   });
 });

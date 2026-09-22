@@ -23,14 +23,15 @@ import type { ThinkingLevel } from "@earendil-works/pi-ai";
  * The CLI command used to invoke a fresh pi subprocess for one dispatch.
  *
  * Always `"pi"` — pi-ptc is a library, not a CLI, and `dispatch` must spawn the
- * separate `pi` binary regardless of how the host process was launched. An earlier
- * copy of this function mirrored pi's own subagent extension and tried to reuse
- * `process.execPath + process.argv[1]`, which works only when the host is `pi`
- * itself; in any other host (test scripts, the dispatcher host process, etc.) the
- * function would spawn the host script in place of `pi`, producing infinite
- * recursion and a stdout pipe that never drains (so `proc.on('close')` never
- * fires). Resolved via direct `"pi"`; surfacing the `ENOENT` from `spawn` is the
- * caller's signal that pi is not on PATH.
+ * separate `pi` binary regardless of how the host process was launched. An
+ * earlier copy of this function mirrored pi's own subagent extension and tried
+ * to reuse `process.execPath + process.argv[1]`, which works only when the host
+ * is `pi` itself; in any other host (test scripts, the dispatcher host process,
+ * etc.) the function would spawn the host script in place of `pi`, producing
+ * infinite recursion and a stdout pipe that never drains (so `proc.on('close')`
+ * never fires). The caller surfaces a missing-binary condition via the child's
+ * `error` event — `spawn` itself does not throw synchronously on ENOENT, the
+ * async `error` listener does.
  */
 const PI_COMMAND = "pi";
 
@@ -125,15 +126,84 @@ export function dispatchDepthLimitReached(currentDepth: number): DispatchResult 
       "dispatch depth limit reached (current depth " + currentDepth + ", max-depth exceeded)",
   };
 }
+
 /**
- * Resolve how to invoke `pi`.
- *
- * Always returns `{ command: "pi", args }`. Kept as a function for symmetry with
- * the upstream `runSingleAgent` reference and so the spawn site reads as
- * "invoke pi with these args" rather than "spawn command 'pi'".
+ * Inputs to {@link decideCloseOutcome}: the shape the child's `close` event
+ * hands the host, distilled to the fields that drive the resolve decision.
  */
-function getPiInvocation(args: string[]): { command: string; args: string[] } {
-  return { command: PI_COMMAND, args };
+export interface CloseOutcomeInput {
+  /** `code ?? -1` from the child's close event. `-1` covers signal kill and no-code exit. */
+  exitCode: number;
+  /** Accumulated text from the last assistant message_end event. */
+  finalText: string;
+  /** `true` when `ctx.signal` aborted before this close fired. */
+  aborted: boolean;
+}
+
+/** Result of {@link decideCloseOutcome} — what the dispatcher commits to. */
+export interface CloseOutcome {
+  status: "fulfilled" | "rejected";
+  errorMessage?: string;
+}
+
+/**
+ * Decide the outcome of one `dispatch(...)` based on the child's `close` event.
+ *
+ * Cancellation has priority over every other branch: when the host's signal
+ * aborted the run, the child exited because we asked it to, and the contract
+ * (ADR-0016 §4) is to surface "dispatch cancelled" rather than leave the
+ * caller guessing why an aborted run came back `rejected`.
+ *
+ * Non-cancellation cases follow the original close-handler ladder:
+ *   - exit 0 with final text → fulfilled
+ *   - exit 0 without final text → rejected (the model never answered)
+ *   - any other exit code → rejected, no errorMessage (spawn-error path labels
+ *     its own failures with `failed to spawn pi: ...`)
+ */
+export function decideCloseOutcome(input: CloseOutcomeInput): CloseOutcome {
+  if (input.aborted) {
+    return { status: "rejected", errorMessage: "dispatch cancelled" };
+  }
+  if (input.exitCode === 0 && input.finalText.length > 0) {
+    return { status: "fulfilled" };
+  }
+  if (input.exitCode === 0) {
+    return { status: "rejected", errorMessage: "dispatch produced no final text" };
+  }
+  return { status: "rejected" };
+}
+
+/**
+ * Minimal interface for the bits of `node:child_process`'s ChildProcess that
+ * `safeKill` touches — narrow on purpose so tests can pass plain objects.
+ *
+ * `pid` is optional on `ChildProcess` (`pid?: number`); a fresh process whose
+ * pid has not yet been assigned reports `undefined`, and the kill must be a
+ * no-op rather than a TS error. `killed` is intentionally absent: callers read
+ * it on the real ChildProcess directly, not through this helper's contract.
+ */
+export interface Killable {
+  pid?: number | undefined;
+  kill(signal: NodeJS.Signals): boolean;
+}
+
+/**
+ * Send `signal` to `proc` iff the process is still attached, swallowing
+ * "process already gone" throws. Returns whether a kill was actually issued.
+ *
+ * `proc.pid === undefined` happens for processes spawned without a usable
+ * pid (rare, but TS-strict demands the guard); `proc.kill` throwing happens
+ * for processes that exited between the guard and the syscall (the OS hands
+ * back ESRCH). Both are "no-op successfully" for our purposes.
+ */
+export function safeKill(proc: Killable, signal: NodeJS.Signals): boolean {
+  if (proc.pid === undefined) return false;
+  try {
+    proc.kill(signal);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -265,14 +335,12 @@ export function buildArgv(
   const args: string[] = ["--mode", "json", "-p", "--no-session"];
   const model = input.model ?? agent.model;
   if (model) args.push("--model", model);
-  // Default to --thinking off: a dispatched child is a tool call, not a long-form reasoning
-
-  // task. Thinking blocks the model from emitting text for many seconds; the parent
-
-  // turn keeps its own thinking settings, the child inherits only what the parent's
-
-  // DispatchInput.thinkingLevel says (and defaults to "off" otherwise).
-
+  /*
+   * Default to --thinking off: a dispatched child is a tool call, not a long-form reasoning
+   * task. Thinking blocks the model from emitting text for many seconds; the parent turn keeps
+   * its own thinking settings, the child inherits only what the parent's DispatchInput.
+   * thinkingLevel says (and defaults to "off" otherwise).
+   */
   const thinking = input.thinkingLevel ?? "off";
 
   args.push("--thinking", thinking);
@@ -398,7 +466,6 @@ export async function dispatch(
   const tmp = await writePromptToTempFile(agent.name, fullPrompt);
 
   const argv = buildArgv(input, agent, tmp.filePath);
-  const invocation = getPiInvocation(argv);
 
   return await new Promise<DispatchResult>((resolve) => {
     let stdoutBuffer = "";
@@ -409,6 +476,7 @@ export async function dispatch(
     let resolved = false;
     let killTimer: NodeJS.Timeout | undefined;
     let proc: ReturnType<typeof spawn> | undefined;
+    let aborted = false;
 
     const finalize = (status: "fulfilled" | "rejected", errorMessage?: string): void => {
       if (resolved) return;
@@ -431,24 +499,15 @@ export async function dispatch(
 
     const onAbort = (): void => {
       if (!proc || proc.killed || resolved) return;
-      try {
-        if (proc.pid !== undefined) proc.kill("SIGTERM");
-      } catch {
-        /* ignore: group already gone */
-      }
+      aborted = true;
+      safeKill(proc, "SIGTERM");
       killTimer = setTimeout(() => {
-        if (proc && !proc.killed) {
-          try {
-            if (proc.pid !== undefined) proc.kill("SIGKILL");
-          } catch {
-            /* ignore */
-          }
-        }
+        if (proc && !proc.killed) safeKill(proc, "SIGKILL");
       }, 5000);
     };
 
     try {
-      proc = spawn(invocation.command, invocation.args, {
+      proc = spawn(PI_COMMAND, argv, {
         cwd,
         shell: false,
         stdio: ["ignore", "pipe", "pipe"],
@@ -516,13 +575,8 @@ export async function dispatch(
 
     proc.on("close", (code) => {
       exitCode = code ?? -1;
-      if (exitCode === 0 && finalText.length > 0) {
-        finalize("fulfilled");
-      } else if (exitCode === 0) {
-        finalize("rejected", "dispatch produced no final text");
-      } else {
-        finalize("rejected");
-      }
+      const { status, errorMessage } = decideCloseOutcome({ exitCode, finalText, aborted });
+      finalize(status, errorMessage);
     });
 
     proc.on("error", (err) => {
