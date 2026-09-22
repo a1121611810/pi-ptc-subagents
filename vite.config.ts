@@ -28,11 +28,24 @@ export default defineConfig({
     sourcemap: true,
     clean: true,
     // `external` is deprecated in current tsdown — use `deps.neverBundle`.
+    //
+    // Every `@earendil-works/*` package is provided by the pi runtime, not by this package: pi's
+    // extension loader maps the specifier onto its own copy (Node mode: `core/extensions/loader.js`
+    // jiti aliases; bundled/compiled mode: `virtual-modules.js` → `VIRTUAL_MODULES`). tsdown already
+    // externalises `peerDependencies`, but the list is explicit so a future entry moving to
+    // `devDependencies` cannot silently re-inline it.
+    //
+    // `@earendil-works/pi-tui` was missing from this list until 2026-09-22 (it was a devDependency
+    // only, so it was inlined): the build shipped a second copy of the renderer the host was already
+    // running, at whatever version this repo pinned, plus pi-tui's own `marked` and
+    // `get-east-asian-width` — 184.81 kB → 102.69 kB once externalised. tsdown's "Detected
+    // dependencies in bundle" hint is what surfaced it. See ADR-0008's addendum.
     deps: {
       neverBundle: [
         /^node:/,
         "@earendil-works/pi-coding-agent",
         "@earendil-works/pi-ai",
+        "@earendil-works/pi-tui",
         "typebox",
       ],
     },
