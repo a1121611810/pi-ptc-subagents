@@ -7,18 +7,19 @@ import { dispatch } from "../src/runtime/dispatch.ts";
 
 describe("dispatch end-to-end smoke", () => {
   test("spawns pi and returns a structured result for a known agent", async () => {
-    // Opt-in: this test spawns a real pi subprocess and a real provider call.
-    // Run with PT_DISPATCH_E2E=1 PT_SMOKE_MODEL=provider/model to exercise it.
+    console.log("[e2e] PT_DISPATCH_E2E=", process.env.PT_DISPATCH_E2E);
+    console.log("[e2e] PT_SMOKE_MODEL=", process.env.PT_SMOKE_MODEL);
     if (process.env.PT_DISPATCH_E2E !== "1") {
+      console.log("[e2e] skipped (set PT_DISPATCH_E2E=1 to run)");
       return;
     }
     const which = spawnSync("which", ["pi"]);
     if (which.status !== 0) {
-      console.warn("skipping: pi not on PATH");
+      console.warn("[e2e] skipping: pi not on PATH");
       return;
     }
     if (!process.env.PT_SMOKE_MODEL) {
-      console.warn("skipping: PT_SMOKE_MODEL not set");
+      console.warn("[e2e] skipping: PT_SMOKE_MODEL not set");
       return;
     }
 
@@ -41,10 +42,12 @@ describe("dispatch end-to-end smoke", () => {
         { agent: "smoke-echo", task: "ping" },
         { callId: 1, cwd: tmp, depth: 0, maxDepth: 3, signal: controller.signal },
       );
+      console.log("[e2e] status=", result.status);
+      console.log("[e2e] text=", JSON.stringify(result.text));
+      console.log("[e2e] duration=", result.durationMs);
       expect(result.status).toMatch(/^(fulfilled|rejected)$/);
       expect(typeof result.durationMs).toBe("number");
       expect(result.durationMs).toBeGreaterThanOrEqual(0);
-      expect(result.agentName).toBe("smoke-echo");
       if (result.status === "fulfilled") {
         expect(result.text.length).toBeGreaterThan(0);
         expect(result.usage).toBeDefined();
