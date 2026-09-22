@@ -9,7 +9,7 @@ import {
 
 test("DEFAULT_CONFIG is frozen and every limit is a positive finite number", () => {
   expect(Object.isFrozen(DEFAULT_CONFIG)).toBe(true);
-  for (const [key, value] of Object.entries(DEFAULT_CONFIG)) {
+  for (const value of Object.values(DEFAULT_CONFIG)) {
     expect(typeof value).toBe("number");
     expect(Number.isFinite(value) && value > 0).toBeTruthy();
   }
@@ -22,7 +22,9 @@ test("resolveConfig returns the frozen defaults when nothing is overridden", () 
 
 test("resolveConfig applies overrides and rejects invalid ones", () => {
   expect(resolveConfig({ maxOutputBytes: 1024 }).maxOutputBytes).toBe(1024);
-  expect(resolveConfig({ maxOutputBytes: 1024 }).maxPendingCalls).toBe(DEFAULT_CONFIG.maxPendingCalls);
+  expect(resolveConfig({ maxOutputBytes: 1024 }).maxPendingCalls).toBe(
+    DEFAULT_CONFIG.maxPendingCalls,
+  );
 
   for (const invalid of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
     expect(() => resolveConfig({ graceMs: invalid })).toThrow(TypeError);

@@ -71,9 +71,9 @@ test("connect frame guard requires a live MessagePort in the payload", () => {
     // must not validate: the worker would otherwise silently wait forever.
     expect(isPtcConnectFrame({ kind: HOST_FRAME_KIND.connect })).toBe(false);
     expect(isPtcConnectFrame({ kind: HOST_FRAME_KIND.connect, port: {} })).toBe(false);
-    expect(
-      isPtcConnectFrame({ kind: "ready", port: (frame as { port: unknown }).port }),
-    ).toBe(false);
+    expect(isPtcConnectFrame({ kind: "ready", port: (frame as { port: unknown }).port })).toBe(
+      false,
+    );
   } finally {
     close();
   }
@@ -105,9 +105,7 @@ test("call-result frame guard covers both arms", () => {
     value: { content: [] },
   };
   expect(isPtcCallResultFrame(ok)).toBe(true);
-  expect(
-    isPtcCallResultFrame({ ...ok, value: undefined }),
-  ).toBe(true);
+  expect(isPtcCallResultFrame({ ...ok, value: undefined })).toBe(true);
   expect(
     isPtcCallResultFrame({ kind: HOST_FRAME_KIND.callResult, callId: 1, tool: "read", ok: true }),
   ).toBe(false);
@@ -140,9 +138,7 @@ test("host frame union rejects unknown kinds and non-frames", () => {
   expect(isPtcHostFrame(undefined)).toBe(false);
   expect(isPtcHostFrame([])).toBe(false);
   expect(isPtcHostFrame("connect")).toBe(false);
-  expect(
-    isPtcHostFrame({ kind: WORKER_FRAME_KIND.ready }),
-  ).toBe(false);
+  expect(isPtcHostFrame({ kind: WORKER_FRAME_KIND.ready })).toBe(false);
 });
 
 test("ready frame guard", () => {
@@ -163,12 +159,12 @@ test("call frame guard validates ids, names and payload presence", () => {
 });
 
 test("log frame guard validates level and text", () => {
-  expect(
-    isPtcLogFrame({ kind: WORKER_FRAME_KIND.log, level: PTC_LOG_LEVEL.log, text: "hi" }),
-  ).toBe(true);
-  expect(
-    isPtcLogFrame({ kind: WORKER_FRAME_KIND.log, level: PTC_LOG_LEVEL.error, text: "" }),
-  ).toBe(true);
+  expect(isPtcLogFrame({ kind: WORKER_FRAME_KIND.log, level: PTC_LOG_LEVEL.log, text: "hi" })).toBe(
+    true,
+  );
+  expect(isPtcLogFrame({ kind: WORKER_FRAME_KIND.log, level: PTC_LOG_LEVEL.error, text: "" })).toBe(
+    true,
+  );
   expect(isPtcLogFrame({ kind: WORKER_FRAME_KIND.log, level: "verbose", text: "hi" })).toBe(false);
   expect(isPtcLogFrame({ kind: WORKER_FRAME_KIND.log, text: "hi" })).toBe(false);
   expect(isPtcLogFrame({ kind: WORKER_FRAME_KIND.log, level: PTC_LOG_LEVEL.log })).toBe(false);
@@ -177,9 +173,9 @@ test("log frame guard validates level and text", () => {
 });
 
 test("narration and phase frame guards", () => {
-  expect(
-    isPtcNarrationFrame({ kind: WORKER_FRAME_KIND.narration, message: "starting" }),
-  ).toBe(true);
+  expect(isPtcNarrationFrame({ kind: WORKER_FRAME_KIND.narration, message: "starting" })).toBe(
+    true,
+  );
   expect(isPtcNarrationFrame({ kind: WORKER_FRAME_KIND.narration, message: 1 })).toBe(false);
   expect(isPtcPhaseFrame({ kind: WORKER_FRAME_KIND.phase, title: "one" })).toBe(true);
   expect(isPtcPhaseFrame({ kind: WORKER_FRAME_KIND.phase })).toBe(false);
@@ -210,9 +206,7 @@ test("error frame guard validates the nested error shape", () => {
   ).toBe(false);
   expect(isPtcErrorFrame({ kind: WORKER_FRAME_KIND.error })).toBe(false);
   expect(isPtcErrorKind(PTC_ERROR_KIND.outputLimit)).toBe(true);
-  expect(
-    isPtcErrorKind("sandbox-unavailable"),
-  ).toBe(false);
+  expect(isPtcErrorKind("sandbox-unavailable")).toBe(false);
   expect(isPtcErrorKind("agent")).toBe(false);
 });
 
@@ -222,7 +216,5 @@ test("worker frame union rejects unknown kinds and non-frames", () => {
   expect(isPtcWorkerFrame(42)).toBe(false);
   expect(isPtcWorkerFrame([])).toBe(false);
   expect(isPtcWorkerFrame({} as unknown)).toBe(false);
-  expect(
-    isPtcWorkerFrame({ kind: HOST_FRAME_KIND.init }),
-  ).toBe(false);
+  expect(isPtcWorkerFrame({ kind: HOST_FRAME_KIND.init })).toBe(false);
 });
