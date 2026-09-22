@@ -68,18 +68,25 @@ Phase 1 shipped at `98a6591` (CI green on `main`). Phase 2 was attempted the sam
 
 ### Build — `vp pack` vs `rolldown -c rolldown.config.ts`
 
-`vp pack` is a tsdown wrapper. With a `vite.config.ts#pack` block mirroring the rolldown config (`entry: ["./src/index.ts"]`, `format: ["esm"]`, `sourcemap: true`, `dts: { sourcemap: true }`, `platform: "node"`, `external: [/^node:/, "@earendil-works/pi-coding-agent", "@earendil-works/pi-ai", "typebox"]`), and `output.entryFileNames: "[name].js"` to force `.js` extension, the resulting dist files are still named:
+First attempt: a `vite.config.ts#pack` block mirroring the rolldown config, with `output.entryFileNames: "[name].js"` to try to force `.js` extension, produced `dist/index.mjs` + `dist/index.d.mts` (+ sourcemaps). The "Build: not swapping" outcome recorded below was right about the result but wrong about the cause: it blamed tsdown's format→extension rule, when the real reason is that tsdown bypasses rolldown's `outputOptions.entryFileNames` for ESM/CJS and runs its own extension resolution in `src/features/output.ts:resolveChunkFilename`, which pins ESM→`.mjs` and DTS→`.d.mts` whenever `platform: "node"`.
+
+Second attempt (after re-reading the tsdown docs and the source): the `outExtensions` callback on tsdown's `UserConfig` overrides that table on a per-format basis. With:
+
+```ts
+outExtensions: ({ format }) =>
+  format === 'es' ? { js: '.js', dts: '.ts' } : undefined,
+```
+
+`vp pack` produces output **byte-identical** to `rolldown -c rolldown.config.ts`:
 
 ```
-dist/index.mjs       54,832 B   (baseline: dist/index.js    54,831 B)
-dist/index.mjs.map  117,477 B   (baseline: dist/index.js.map 117,476 B)
-dist/index.d.mts     9,564 B    (baseline: dist/index.d.ts  9,563 B)
-dist/index.d.mts.map 1,085 B    (baseline: dist/index.d.ts.map 1,084 B)
+dist/index.js        54,831 B  (rolldown: 54,831 B)
+dist/index.js.map   117,476 B  (rolldown: 117,476 B)
+dist/index.d.ts      9,563 B   (rolldown: 9,563 B)
+dist/index.d.ts.map  1,084 B   (rolldown: 1,084 B)
 ```
 
-tsdown's format → extension rule pins ESM to `.mjs` and DTS to `.d.mts`. The size delta is one byte per file (likely an artifact header). Either way, the **filenames diverge** from what `package.json#exports` / `main` / `types` point to (`./dist/index.js`, `./dist/index.d.ts`), which is a downstream-visible change. The ADR criterion was "produces the same output (`dist/index.js` + `dist/index.d.ts` for build)" — output filenames are part of "the same output." `vp pack` does not pass.
-
-A rename step (`mv dist/index.mjs dist/index.js && mv dist/index.d.mts dist/index.d.ts`) would close the gap, but that puts a post-step in front of `vp pack`, which defeats the point of replacing `rolldown -c`. **Build: not swapping.**
+`diff -q` against the rolldown baseline: all four files identical. Externals (`@earendil-works/*`, `typebox`, `node:*`) preserved. Full primary-source chain and reproducer captured in `docs/research/vp-pack-js-output.md`. **Build: criterion met.**
 
 ### Lint — `vp lint` vs `oxlint`
 
@@ -89,16 +96,15 @@ A rename step (`mv dist/index.mjs dist/index.js && mv dist/index.d.mts dist/inde
 
 `vp check --typecheck` invokes the project-local `tsc` against the same `tsconfig.json`. Same TypeScript version, same flags, same diagnostics. The swap would be safe. But it would also be unremarkable: `pnpm run typecheck` (`tsc --noEmit`) is already the simplest possible incantation, and routing it through `vp` adds one process for no behavioural benefit. **Typecheck: not swapping** — meets the criterion but offers no value.
 
-### Net outcome
+### Net outcome (post-second-attempt)
 
-`vite-plus@0.3.3` is installed as a devDependency to keep the option open and to make the comparison reproducible from this commit. None of the `npm run` scripts change. CI does not invoke `vp`. The migration stopped at Phase 1.
+`vite-plus@0.3.3` is installed as a devDependency. The build script switches to `pnpm exec vp pack`, driven by `vite.config.ts#pack` with the `outExtensions` callback above. `rolldown.config.ts` is removed (no longer the source of truth, and `vp pack` is now proven equivalent). Lint, fmt, and typecheck scripts stay direct (`oxlint`, `oxfmt`, `tsc --noEmit`) for the same version-regression reason as before.
 
-### Revisit criteria
+### Revisit criteria for lint + fmt + typecheck
 
-Re-attempt Phase 2 when **all** of these are true:
+Re-attempt the lint/fmt/typecheck swaps when **all** of these are true:
 
 1. `vite-plus`'s bundled oxlint reaches `>=1.85.0` (matches our direct version) — so `vp lint` is no longer a regression.
 2. `vite-plus`'s bundled oxfmt reaches `>=0.70.0` — same reason.
-3. tsdown (or vp's wrapper around it) exposes a stable option to write ESM with a `.js` extension **without** a post-step, **or** the project is willing to update `package.json#exports` / `main` / `types` to point at `.mjs` / `.d.mts`.
 
-Until then, `rolldown -c rolldown.config.ts`, `oxlint`, `oxfmt`, and `tsc --noEmit` stay as the direct entries — exactly the shape Phase 1 left them in.
+Typecheck (`vp check --typecheck`) has been verified to be safe (uses local `tsc` against `tsconfig.json`); it's still not swapped because routing it through `vp` adds one process for no behavioural benefit. Revisit if `vp check` ever becomes a single entry for both lint and typecheck.
