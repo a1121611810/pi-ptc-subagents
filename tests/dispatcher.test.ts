@@ -104,7 +104,16 @@ void test("independent binding calls overlap under Promise.all", options, async 
     "const rs = await Promise.all([tools.wait({}), tools.wait({}), tools.wait({})]); return rs;",
     { bindings },
   );
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  // The previous `setTimeout(resolve, 50)` raced against the worker cold-start
+  // budget (~45–95 ms: `new Worker` + ~40 KB data-URL decode + connect/ready/init
+  // handshake + startRun). The invariant is "started reached 3 before any call
+  // resolved"; sample it directly instead of wall-clock. 5 s ceiling still trips
+  // RUN_TIMEOUT_MS if dispatch regresses to serial. See
+  // docs/research/dispatcher-test-timing-rootcause.md.
+  const deadline = Date.now() + 5_000;
+  while (started < 3 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
   assert.equal(started, 3, "all three calls reached the host before any of them resolved");
   release.resolve(undefined);
   const outcome = await promise;
