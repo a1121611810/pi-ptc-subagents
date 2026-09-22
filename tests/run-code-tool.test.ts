@@ -6,6 +6,7 @@
  * either from the extension factory (the registration path pi uses) or from the factory with a
  * config override, so a run can be pushed into a limit without materializing 64 MiB of output.
  */
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, test } from "vitest";
@@ -19,6 +20,7 @@ import { createPtcRunCodeTool } from "../src/tools/run-code.ts";
 import {
   captureRegisteredTools,
   makeTempDir,
+  ONE_PIXEL_PNG_BASE64,
   removeTempDir,
   RUN_TIMEOUT_MS,
   toolContext,
@@ -74,6 +76,11 @@ test("the description tells the model how to reach tools and what comes back", (
   expect(description, "names the required code argument").toMatch(/`code`/);
   expect(description, "names the required description argument").toMatch(/`description`/);
   expect(description, "shows the binding call form").toMatch(/tools\.<name>\(args\)/);
+  // DSH's own tool description: "Image-bearing subtool results are attached after the run."
+  expect(description, "promises the image attachment").toMatch(/attached to/);
+  expect(description, "tells the model not to spend context on base64").toMatch(
+    /never return image data/,
+  );
   expect(description).toMatch(/console\.log/);
   expect(description).toMatch(/return value/);
   expect(description, "states the surface has no helpers").toMatch(/has no\s+helpers/i);
@@ -116,14 +123,18 @@ test(
   RUN_TIMEOUT_MS,
 );
 
-test("logs and the return value are rendered together, types stripped", async () => {
-  const result = await call(createPtcRunCodeTool(), {
-    code: 'const value: number = 41;\nconsole.log("seen", value);\nreturn { answer: value + 1 };',
-  });
-  expect(textOf(result)).toBe('seen 41\n{\n  "answer": 42\n}');
-  expect(result.details.logs).toEqual(["seen 41"]);
-  expect(result.details.result).toEqual({ answer: 42 });
-}, RUN_TIMEOUT_MS);
+test(
+  "logs and the return value are rendered together, types stripped",
+  async () => {
+    const result = await call(createPtcRunCodeTool(), {
+      code: 'const value: number = 41;\nconsole.log("seen", value);\nreturn { answer: value + 1 };',
+    });
+    expect(textOf(result)).toBe("seen 41\n{answer: 42}");
+    expect(result.details.logs).toEqual(["seen 41"]);
+    expect(result.details.result).toEqual({ answer: 42 });
+  },
+  RUN_TIMEOUT_MS,
+);
 
 test(
   "a failing program throws R1's failure message with the captured output block",
@@ -146,27 +157,35 @@ test(
   RUN_TIMEOUT_MS,
 );
 
-test("a failing program without logs keeps the failure message bare", async () => {
-  let caught: unknown;
-  try {
-    await call(createPtcRunCodeTool(), { code: "null.everything();" });
-  } catch (e) {
-    caught = e;
-  }
-  expect(caught).toBeInstanceOf(Error);
-  const error = caught as Error;
-  expect(error.message).toMatch(/^code run failed \(exception\): /);
-  expect(error.message).not.toMatch(/Captured output:/);
-}, RUN_TIMEOUT_MS);
+test(
+  "a failing program without logs keeps the failure message bare",
+  async () => {
+    let caught: unknown;
+    try {
+      await call(createPtcRunCodeTool(), { code: "null.everything();" });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    const error = caught as Error;
+    expect(error.message).toMatch(/^code run failed \(exception\): /);
+    expect(error.message).not.toMatch(/Captured output:/);
+  },
+  RUN_TIMEOUT_MS,
+);
 
-test("timeoutMs overrides the deadline and reports the requested value", async () => {
-  await expect(
-    call(createPtcRunCodeTool({ config: { graceMs: 100 } }), {
-      code: "await new Promise(() => {});",
-      timeoutMs: 150,
-    }),
-  ).rejects.toThrow(/^code run failed \(timeout\): run timed out after 150 ms$/);
-}, RUN_TIMEOUT_MS);
+test(
+  "timeoutMs overrides the deadline and reports the requested value",
+  async () => {
+    await expect(
+      call(createPtcRunCodeTool({ config: { graceMs: 100 } }), {
+        code: "await new Promise(() => {});",
+        timeoutMs: 150,
+      }),
+    ).rejects.toThrow(/^code run failed \(timeout\): run timed out after 150 ms$/);
+  },
+  RUN_TIMEOUT_MS,
+);
 
 test(
   "timeoutMs 0 falls back to the configured default instead of disabling the deadline",
@@ -182,18 +201,12 @@ test(
   async () => {
     let caught: unknown;
     try {
-      await call(
-        createPtcRunCodeTool(),
-        { code: "return 1;" },
-        { signal: AbortSignal.abort() },
-      );
+      await call(createPtcRunCodeTool(), { code: "return 1;" }, { signal: AbortSignal.abort() });
     } catch (e) {
       caught = e;
     }
     expect(caught).toBeInstanceOf(Error);
-    expect((caught as Error).message).toBe(
-      "code run failed (abort): run cancelled before start",
-    );
+    expect((caught as Error).message).toBe("code run failed (abort): run cancelled before start");
   },
   RUN_TIMEOUT_MS,
 );
@@ -218,6 +231,73 @@ test(
     );
     expect(message).toMatch(/Captured output:\nx{1500}/);
     expect(message, "only the fitting prefix is retained").not.toMatch(/y{1500}/);
+  },
+  RUN_TIMEOUT_MS,
+);
+
+test(
+  "an oversized text block is truncated the way pi's built-ins truncate (ADR-0015)",
+  async () => {
+    const lines = 3000;
+    const result = await call(createPtcRunCodeTool(), {
+      code: `for (let i = 0; i < ${lines}; i++) console.log("line " + i + " " + "x".repeat(30)); return "done";`,
+    });
+
+    const text = textOf(result);
+    // pi's contract: keep the tail, say what was shown, and point at the whole thing.
+    // 3000 log lines plus the completion value, which is the 3001st.
+    expect(text).toMatch(/\[Showing lines \d+-\d+ of 300\d/);
+    expect(text).toContain("Full output:");
+    expect(text).not.toContain("line 0 ");
+    expect(text).toContain(`line ${lines - 1} `);
+
+    const fullOutputPath = result.details.fullOutputPath;
+    expect(fullOutputPath, "the untruncated text must have a home").toBeDefined();
+    expect(existsSync(fullOutputPath as string)).toBe(true);
+    try {
+      const full = readFileSync(fullOutputPath as string, "utf8");
+      expect(full.split("\n")).toHaveLength(lines + 1);
+      expect(full).toContain("line 0 ");
+      // The model read a tail of the text, not the text.
+      expect(text.length).toBeLessThan(full.length);
+    } finally {
+      unlinkSync(fullOutputPath as string);
+    }
+  },
+  RUN_TIMEOUT_MS,
+);
+
+test(
+  "an image read inside a program is attached to the tool result (ADR-0014)",
+  async () => {
+    const dir = await makeTempDir();
+    try {
+      await writeFile(join(dir, "pixel.png"), Buffer.from(ONE_PIXEL_PNG_BASE64, "base64"));
+      const result = await call(
+        createPtcRunCodeTool(),
+        {
+          code:
+            'const r = await tools.read({ path: "pixel.png" }); ' +
+            'return r.content.filter((b) => b.type === "image").length;',
+        },
+        { cwd: dir },
+      );
+
+      // The program still receives the image — it counted it…
+      expect(result.details.result).toBe(1);
+      // …and so does the model, as an image block on the PTC tool result rather than as base64
+      // inside the completion value.
+      const images = result.content.filter((part) => part.type === "image");
+      expect(images).toHaveLength(1);
+      expect(images[0]).toMatchObject({ type: "image", mimeType: "image/png" });
+      expect((images[0] as { data?: string }).data ?? "").not.toBe("");
+      expect(result.details.imageCount).toBe(1);
+      expect(textOf(result), "the text block must not smuggle the payload").not.toContain(
+        "iVBORw0KGgo",
+      );
+    } finally {
+      await removeTempDir(dir);
+    }
   },
   RUN_TIMEOUT_MS,
 );

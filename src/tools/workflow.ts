@@ -30,11 +30,18 @@ import { runPtcProgram } from "../runtime/dispatcher.ts";
 import type { PtcRunOutcome } from "../runtime/dispatcher.ts";
 import {
   codeRunFailedError,
+  PTC_TOOL_GUIDELINES,
+  PTC_WORKFLOW_SNIPPET,
   renderToolResult,
   resolveBindingNames,
   resolveToolCwd,
 } from "./common.ts";
 import type { PtcToolDetails, PtcToolOptions } from "./common.ts";
+import {
+  renderPtcToolCall,
+  renderPtcToolResultCollapsed,
+  renderPtcToolResultExpanded,
+} from "./render.ts";
 
 const DESCRIPTION = [
   "Run a structured TypeScript workflow: a named plan that reports phases and narration as it",
@@ -50,6 +57,9 @@ const DESCRIPTION = [
   "Tools are reachable as `tools.<name>(args)` exactly as in `ptc_run_code`, and the bound names",
   "mirror the session's enabled tools. What comes back is the script's return value, its",
   "`log`/`phase` narration and its `console.log` output.",
+  "",
+  "Image-bearing tool results inside the script are attached to you after the run — never return",
+  "image data as the script's value.",
 ].join("\n");
 
 /** Schema types written out explicitly for `isolatedDeclarations` (emit must not infer them). */
@@ -206,11 +216,13 @@ export function createPtcWorkflowTool(
     name: "ptc_workflow",
     label: "PTC Workflow",
     description: DESCRIPTION,
+    promptSnippet: PTC_WORKFLOW_SNIPPET,
+    promptGuidelines: [...PTC_TOOL_GUIDELINES],
     parameters: PARAMETERS,
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       validateWorkflowArgs(params.args);
       const cwd = resolveToolCwd(ctx);
-      const names = resolveBindingNames(options.getActiveToolNames?.());
+      const names = resolveBindingNames(options.getBindingSourceNames?.());
       const startedAt = Date.now();
       const outcome = await runPtcProgram({
         code: params.script,
@@ -229,6 +241,19 @@ export function createPtcWorkflowTool(
         warnings: unlistedPhaseWarnings(outcome, declared),
         durationMs: Date.now() - startedAt,
       });
+    },
+
+    // Same renderer as `ptc_run_code`; the `workflow` label tells the two rows apart, the collapsed
+    // meta adds a phase count, and the expanded view puts the phases roll-up first so a reader sees
+    // the workflow plan up top.
+    renderCall(args, theme) {
+      return renderPtcToolCall(args, theme, "workflow");
+    },
+    renderResult(result, options, theme, context) {
+      if (options.expanded) {
+        return renderPtcToolResultExpanded(result, context.args, context.isError, theme);
+      }
+      return renderPtcToolResultCollapsed(result, context.isError, theme);
     },
   });
 }

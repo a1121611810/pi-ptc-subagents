@@ -59,6 +59,17 @@ export interface RunPtcProgramOptions {
   runId?: string;
 }
 
+/**
+ * One image hoisted out of a successful binding result (DSH parity — see ADR-0014).
+ *
+ * `data` is base64 exactly as pi's own `read` tool returns it, so the tool layer can forward it as
+ * an `ImageContent` block without re-encoding.
+ */
+export interface PtcImage {
+  data: string;
+  mimeType: string;
+}
+
 export interface PtcRunOutcome {
   /** `console.*` output in arrival order. */
   logs: string[];
@@ -68,6 +79,15 @@ export interface PtcRunOutcome {
   phases: string[];
   /** Completion value; absent when the program returned nothing or the run failed. */
   value?: PtcJsonValue;
+  /**
+   * Images hoisted out of successful binding results, in call order.
+   *
+   * Every image a program's tool calls produced, with no cap and no dedupe: how many images a run
+   * attaches is the program's business, exactly as it is in DSH. Present only when at least one was
+   * hoisted — a failed or cancelled run attaches nothing, because the tool layer throws for it
+   * (`codeRunFailedError`) and its image would never reach the model.
+   */
+  images?: PtcImage[];
   /** Failure details; absent on success. */
   error?: PtcErrorShape;
 }
@@ -139,6 +159,43 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
     const dispatchWaiters: Array<() => void> = [];
     let runTimer: NodeJS.Timeout | undefined;
     let graceTimer: NodeJS.Timeout | undefined;
+
+    /* --------------------------- hoisted images (ADR-0014) --------------------------- */
+
+    const images: PtcImage[] = [];
+
+    /**
+     * Hoist the images out of one successful binding result.
+     *
+     * DSH does this in its scheduler's commit step: a subtool result whose content carries an image
+     * block has that content attached to the caller's context after the run, so the picture reaches
+     * the model without travelling through the program's lossless-JSON return value (`dsh-tools`:
+     * `exec.deferContext(createUserMessage(...))`). The host sees every binding result before it is
+     * posted to the worker, so this is the same seam.
+     *
+     * Everything is hoisted: no count cap, no byte cap, no dedupe. How much context a run spends on
+     * images is the program's call, and hiding a cap behind a warning would make this layer a
+     * gatekeeper DSH does not have. pi's per-model resize (`inputLimits.images.resize`) still bounds
+     * what a single attachment costs at the provider.
+     */
+    const hoistImages = (value: unknown): void => {
+      const content = (value as { content?: unknown } | null)?.content;
+      if (!Array.isArray(content)) return;
+      for (const block of content) {
+        if (block === null || typeof block !== "object") continue;
+        const candidate = block as { type?: unknown; data?: unknown; mimeType?: unknown };
+        if (candidate.type !== "image") continue;
+        const data = typeof candidate.data === "string" ? candidate.data : "";
+        if (data.length === 0) continue;
+        images.push({
+          data,
+          mimeType:
+            typeof candidate.mimeType === "string"
+              ? candidate.mimeType
+              : "application/octet-stream",
+        });
+      }
+    };
 
     const cancelMessage = (reason: PtcCancelReason): string =>
       reason === "timeout" ? `run timed out after ${timeoutMs} ms` : "run cancelled";
@@ -281,13 +338,16 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
           signal: bindingAbort.signal,
           callId: frame.callId,
         });
-        postCallResult({
+        const posted = postCallResult({
           kind: HOST_FRAME_KIND.callResult,
           callId: frame.callId,
           tool: frame.tool,
           ok: true,
           value,
         });
+        // Hoist only a result the worker actually received: DSH's condition is a *successful*
+        // subtool result, and a payload the port rejected was not one (ADR-0014).
+        if (posted) hoistImages(value);
       } catch (error) {
         postCallResult({
           kind: HOST_FRAME_KIND.callResult,
@@ -301,10 +361,12 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
       }
     };
 
-    const postCallResult = (frame: PtcCallResultFrame): void => {
-      if (settled) return;
+    /** `true` when the worker actually received the result (see the hoist at the call site). */
+    const postCallResult = (frame: PtcCallResultFrame): boolean => {
+      if (settled) return false;
       try {
         control.postMessage(frame);
+        return true;
       } catch (error) {
         // The binding's value could not be structured-cloned; report the call as failed
         // instead of leaving the worker waiting on a response that will never arrive.
@@ -321,6 +383,7 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
         } catch {
           fail(PTC_ERROR_KIND.protocol, "binding result is not transferable");
         }
+        return false;
       }
     };
 
@@ -374,16 +437,21 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
         case WORKER_FRAME_KIND.phase:
           if (accountOutput(bytes, "workflow phase")) phases.push(frame.title);
           return;
-        case WORKER_FRAME_KIND.result:
+        case WORKER_FRAME_KIND.result: {
           if (!accountOutput(bytes, "completion value")) return;
+          // `settleTerminal` rebuilds the outcome when a cancel owns the terminal state, which
+          // drops these fields — the same "a failed run attaches nothing" rule as above.
+          const base = {
+            logs,
+            narrations,
+            phases,
+            ...(images.length > 0 ? { images } : {}),
+          };
           finish(
-            settleTerminal(
-              frame.value === undefined
-                ? { logs, narrations, phases }
-                : { logs, narrations, phases, value: frame.value },
-            ),
+            settleTerminal(frame.value === undefined ? base : { ...base, value: frame.value }),
           );
           return;
+        }
         case WORKER_FRAME_KIND.error:
           finish(settleTerminal({ logs, narrations, phases, error: frame.error }));
           return;

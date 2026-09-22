@@ -9,56 +9,76 @@ const runCode = (code: string, extra: Partial<Parameters<typeof runPtcProgram>[0
 const runWorkflow = (code: string, extra: Partial<Parameters<typeof runPtcProgram>[0]> = {}) =>
   runPtcProgram({ code, surface: "workflow", cwd: process.cwd(), bindings, ...extra });
 
-test("run_code resolves the program's return value as lossless JSON", async () => {
-  const outcome = await runCode(
-    'return { nested: [1, "two", null, true], deep: { a: { b: 2 } } };',
-  );
-  expect(outcome.error).toBeUndefined();
-  expect(outcome.value).toEqual({ nested: [1, "two", null, true], deep: { a: { b: 2 } } });
-}, RUN_TIMEOUT_MS);
+test(
+  "run_code resolves the program's return value as lossless JSON",
+  async () => {
+    const outcome = await runCode(
+      'return { nested: [1, "two", null, true], deep: { a: { b: 2 } } };',
+    );
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.value).toEqual({ nested: [1, "two", null, true], deep: { a: { b: 2 } } });
+  },
+  RUN_TIMEOUT_MS,
+);
 
-test("run_code reports no value when the program returns nothing", async () => {
-  const outcome = await runCode("const x = 1;");
-  expect(outcome.error).toBeUndefined();
-  expect("value" in outcome).toBe(false);
-}, RUN_TIMEOUT_MS);
+test(
+  "run_code reports no value when the program returns nothing",
+  async () => {
+    const outcome = await runCode("const x = 1;");
+    expect(outcome.error).toBeUndefined();
+    expect("value" in outcome).toBe(false);
+  },
+  RUN_TIMEOUT_MS,
+);
 
-test("run_code strips TypeScript annotations", async () => {
-  const outcome = await runCode(
-    "const x: number = 41;\nconst f = (v: number): number => v + 1;\nreturn f(x);",
-  );
-  expect(outcome.error).toBeUndefined();
-  expect(outcome.value).toBe(42);
-}, RUN_TIMEOUT_MS);
+test(
+  "run_code strips TypeScript annotations",
+  async () => {
+    const outcome = await runCode(
+      "const x: number = 41;\nconst f = (v: number): number => v + 1;\nreturn f(x);",
+    );
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.value).toBe(42);
+  },
+  RUN_TIMEOUT_MS,
+);
 
-test("run_code captures console output with level-agnostic formatting", async () => {
-  const outcome = await runCode(
-    'console.log("plain", 1, true); console.error("as error"); console.warn({ a: 1 }); console.log();',
-  );
-  expect(outcome.error).toBeUndefined();
-  expect(outcome.logs.length).toBe(4);
-  expect(outcome.logs[0]).toBe("plain 1 true");
-  expect(outcome.logs[1]).toBe("as error");
-  expect(String(outcome.logs[2])).toMatch(/\{ a: 1 \}/);
-  expect(outcome.logs[3]).toBe("");
-}, RUN_TIMEOUT_MS);
+test(
+  "run_code captures console output with level-agnostic formatting",
+  async () => {
+    const outcome = await runCode(
+      'console.log("plain", 1, true); console.error("as error"); console.warn({ a: 1 }); console.log();',
+    );
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.logs.length).toBe(4);
+    expect(outcome.logs[0]).toBe("plain 1 true");
+    expect(outcome.logs[1]).toBe("as error");
+    expect(String(outcome.logs[2])).toMatch(/\{ a: 1 \}/);
+    expect(outcome.logs[3]).toBe("");
+  },
+  RUN_TIMEOUT_MS,
+);
 
-test("run_code surface exposes tools and Node only — no helpers", async () => {
-  const outcome = await runCode(
-    "return { tools: typeof tools, log: typeof log, phase: typeof phase, parallel: typeof parallel, pipeline: typeof pipeline, agent: typeof agent, args: typeof args, require: typeof require };",
-  );
-  expect(outcome.error).toBeUndefined();
-  expect(outcome.value).toEqual({
-    tools: "object",
-    log: "undefined",
-    phase: "undefined",
-    parallel: "undefined",
-    pipeline: "undefined",
-    agent: "undefined",
-    args: "undefined",
-    require: "undefined",
-  });
-}, RUN_TIMEOUT_MS);
+test(
+  "run_code surface exposes tools and Node only — no helpers",
+  async () => {
+    const outcome = await runCode(
+      "return { tools: typeof tools, log: typeof log, phase: typeof phase, parallel: typeof parallel, pipeline: typeof pipeline, agent: typeof agent, args: typeof args, require: typeof require };",
+    );
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.value).toEqual({
+      tools: "object",
+      log: "undefined",
+      phase: "undefined",
+      parallel: "undefined",
+      pipeline: "undefined",
+      agent: "undefined",
+      args: "undefined",
+      require: "undefined",
+    });
+  },
+  RUN_TIMEOUT_MS,
+);
 
 test(
   "calling a helper that the surface does not have is a plain ReferenceError",
@@ -71,42 +91,54 @@ test(
   RUN_TIMEOUT_MS,
 );
 
-test("workflow surface installs the helper globals and binds args", async () => {
-  const outcome = await runWorkflow(
-    "return { log: typeof log, phase: typeof phase, parallel: typeof parallel, pipeline: typeof pipeline, agent: typeof agent, args, tools: typeof tools };",
-    { args: { task: "write the report" } },
-  );
-  expect(outcome.error).toBeUndefined();
-  expect(outcome.value).toEqual({
-    log: "function",
-    phase: "function",
-    parallel: "function",
-    pipeline: "function",
-    agent: "undefined",
-    args: { task: "write the report" },
-    tools: "object",
-  });
-}, RUN_TIMEOUT_MS);
+test(
+  "workflow surface installs the helper globals and binds args",
+  async () => {
+    const outcome = await runWorkflow(
+      "return { log: typeof log, phase: typeof phase, parallel: typeof parallel, pipeline: typeof pipeline, agent: typeof agent, args, tools: typeof tools };",
+      { args: { task: "write the report" } },
+    );
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.value).toEqual({
+      log: "function",
+      phase: "function",
+      parallel: "function",
+      pipeline: "function",
+      agent: "undefined",
+      args: { task: "write the report" },
+      tools: "object",
+    });
+  },
+  RUN_TIMEOUT_MS,
+);
 
-test("workflow log() and phase() emit frames instead of console output", async () => {
-  const outcome = await runWorkflow(
-    'log("step one"); phase("Research"); console.log("printed"); phase("Write");',
-  );
-  expect(outcome.error).toBeUndefined();
-  expect(outcome.narrations).toEqual(["step one"]);
-  expect(outcome.phases).toEqual(["Research", "Write"]);
-  expect(outcome.logs).toEqual(["printed"]);
-}, RUN_TIMEOUT_MS);
+test(
+  "workflow log() and phase() emit frames instead of console output",
+  async () => {
+    const outcome = await runWorkflow(
+      'log("step one"); phase("Research"); console.log("printed"); phase("Write");',
+    );
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.narrations).toEqual(["step one"]);
+    expect(outcome.phases).toEqual(["Research", "Write"]);
+    expect(outcome.logs).toEqual(["printed"]);
+  },
+  RUN_TIMEOUT_MS,
+);
 
-test("workflow log/phase validate their argument", async () => {
-  const badLog = await runWorkflow("log(42);");
-  expect(badLog.error?.kind).toBe("exception");
-  expect(String(badLog.error?.message)).toMatch(/log\(message\) expects a string/);
+test(
+  "workflow log/phase validate their argument",
+  async () => {
+    const badLog = await runWorkflow("log(42);");
+    expect(badLog.error?.kind).toBe("exception");
+    expect(String(badLog.error?.message)).toMatch(/log\(message\) expects a string/);
 
-  const badPhase = await runWorkflow("phase(null);");
-  expect(badPhase.error?.kind).toBe("exception");
-  expect(String(badPhase.error?.message)).toMatch(/phase\(title\) expects a string/);
-}, RUN_TIMEOUT_MS);
+    const badPhase = await runWorkflow("phase(null);");
+    expect(badPhase.error?.kind).toBe("exception");
+    expect(String(badPhase.error?.message)).toMatch(/phase\(title\) expects a string/);
+  },
+  RUN_TIMEOUT_MS,
+);
 
 test(
   "parallel() runs thunks concurrently and maps per-item failures to null",
@@ -120,26 +152,36 @@ test(
   RUN_TIMEOUT_MS,
 );
 
-test("parallel() validates its argument shape", async () => {
-  const notArray = await runWorkflow('await parallel("nope");');
-  expect(notArray.error?.kind).toBe("exception");
-  expect(String(notArray.error?.message)).toMatch(/parallel\(thunks\) expects an array/);
+test(
+  "parallel() validates its argument shape",
+  async () => {
+    const notArray = await runWorkflow('await parallel("nope");');
+    expect(notArray.error?.kind).toBe("exception");
+    expect(String(notArray.error?.message)).toMatch(/parallel\(thunks\) expects an array/);
 
-  const notFunctions = await runWorkflow("await parallel([1]);");
-  expect(notFunctions.error?.kind).toBe("exception");
-  expect(String(notFunctions.error?.message)).toMatch(
-    /parallel\(thunks\) expects functions; item 0 is a number/,
-  );
-}, RUN_TIMEOUT_MS);
+    const notFunctions = await runWorkflow("await parallel([1]);");
+    expect(notFunctions.error?.kind).toBe("exception");
+    expect(String(notFunctions.error?.message)).toMatch(
+      /parallel\(thunks\) expects functions; item 0 is a number/,
+    );
+  },
+  RUN_TIMEOUT_MS,
+);
 
-test("parallel() enforces maxItemsPerCall", async () => {
-  const outcome = await runWorkflow(
-    `await parallel(Array.from({ length: ${DEFAULT_CONFIG.maxItemsPerCall + 1} }, () => async () => 1));`,
-  );
-  expect(outcome.error?.kind).toBe("exception");
-  expect(String(outcome.error?.message)).toMatch(/maxItemsPerCall/);
-  expect(String(outcome.error?.message)).toMatch(new RegExp(String(DEFAULT_CONFIG.maxItemsPerCall)));
-}, RUN_TIMEOUT_MS);
+test(
+  "parallel() enforces maxItemsPerCall",
+  async () => {
+    const outcome = await runWorkflow(
+      `await parallel(Array.from({ length: ${DEFAULT_CONFIG.maxItemsPerCall + 1} }, () => async () => 1));`,
+    );
+    expect(outcome.error?.kind).toBe("exception");
+    expect(String(outcome.error?.message)).toMatch(/maxItemsPerCall/);
+    expect(String(outcome.error?.message)).toMatch(
+      new RegExp(String(DEFAULT_CONFIG.maxItemsPerCall)),
+    );
+  },
+  RUN_TIMEOUT_MS,
+);
 
 test(
   "pipeline() threads each item through every stage without a cross-stage barrier",
@@ -161,50 +203,72 @@ test(
   RUN_TIMEOUT_MS,
 );
 
-test("pipeline() turns a failing item into null and keeps siblings", async () => {
-  const outcome = await runWorkflow(
-    "const out = await pipeline([1, 2, 3], async (prev, item) => { if (item === 2) throw new Error('boom'); return prev * 10; }); return out;",
-  );
-  expect(outcome.error).toBeUndefined();
-  expect(outcome.value).toEqual([10, null, 30]);
-}, RUN_TIMEOUT_MS);
+test(
+  "pipeline() turns a failing item into null and keeps siblings",
+  async () => {
+    const outcome = await runWorkflow(
+      "const out = await pipeline([1, 2, 3], async (prev, item) => { if (item === 2) throw new Error('boom'); return prev * 10; }); return out;",
+    );
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.value).toEqual([10, null, 30]);
+  },
+  RUN_TIMEOUT_MS,
+);
 
-test("pipeline() validates its arguments and enforces maxItemsPerCall", async () => {
-  const noStages = await runWorkflow("await pipeline([1, 2]);");
-  expect(String(noStages.error?.message)).toMatch(/requires at least one stage function/);
+test(
+  "pipeline() validates its arguments and enforces maxItemsPerCall",
+  async () => {
+    const noStages = await runWorkflow("await pipeline([1, 2]);");
+    expect(String(noStages.error?.message)).toMatch(/requires at least one stage function/);
 
-  const badStage = await runWorkflow("await pipeline([1], 'nope');");
-  expect(String(badStage.error?.message)).toMatch(/stage 0 is a string/);
+    const badStage = await runWorkflow("await pipeline([1], 'nope');");
+    expect(String(badStage.error?.message)).toMatch(/stage 0 is a string/);
 
-  const tooMany = await runWorkflow(
-    `await pipeline(Array.from({ length: ${DEFAULT_CONFIG.maxItemsPerCall + 1} }, (_, i) => i), async (v) => v);`,
-  );
-  expect(String(tooMany.error?.message)).toMatch(/maxItemsPerCall/);
-}, RUN_TIMEOUT_MS);
+    const tooMany = await runWorkflow(
+      `await pipeline(Array.from({ length: ${DEFAULT_CONFIG.maxItemsPerCall + 1} }, (_, i) => i), async (v) => v);`,
+    );
+    expect(String(tooMany.error?.message)).toMatch(/maxItemsPerCall/);
+  },
+  RUN_TIMEOUT_MS,
+);
 
-test("workflow surface has no agent() helper either", async () => {
-  const outcome = await runWorkflow('agent("do something");');
-  expect(outcome.error?.kind).toBe("exception");
-  expect(String(outcome.error?.message)).toMatch(/agent is not defined/);
-}, RUN_TIMEOUT_MS);
+test(
+  "workflow surface has no agent() helper either",
+  async () => {
+    const outcome = await runWorkflow('agent("do something");');
+    expect(outcome.error?.kind).toBe("exception");
+    expect(String(outcome.error?.message)).toMatch(/agent is not defined/);
+  },
+  RUN_TIMEOUT_MS,
+);
 
-test("a program that fails to compile reports an exception", async () => {
-  const outcome = await runCode("return ((((;");
-  expect(outcome.error?.kind).toBe("exception");
-  expect(String(outcome.error?.message)).toMatch(/failed to compile/);
-}, RUN_TIMEOUT_MS);
+test(
+  "a program that fails to compile reports an exception",
+  async () => {
+    const outcome = await runCode("return ((((;");
+    expect(outcome.error?.kind).toBe("exception");
+    expect(String(outcome.error?.message)).toMatch(/failed to compile/);
+  },
+  RUN_TIMEOUT_MS,
+);
 
-test("a thrown program error carries a trimmed stack", async () => {
-  const outcome = await runCode('throw new Error("exploded");');
-  expect(outcome.error?.kind).toBe("exception");
-  expect(outcome.error?.message).toBe("exploded");
-  expect(outcome.error?.stack?.includes("exploded"), "stack keeps the message line").toBe(true);
-  expect(
-    outcome.error?.stack?.includes("data:text/javascript"),
-    "worker bootstrap frames are dropped",
-  ).toBe(false);
-  expect((outcome.error?.stack?.split("\n").length ?? 0) <= 6, "stack depth is capped").toBe(true);
-}, RUN_TIMEOUT_MS);
+test(
+  "a thrown program error carries a trimmed stack",
+  async () => {
+    const outcome = await runCode('throw new Error("exploded");');
+    expect(outcome.error?.kind).toBe("exception");
+    expect(outcome.error?.message).toBe("exploded");
+    expect(outcome.error?.stack?.includes("exploded"), "stack keeps the message line").toBe(true);
+    expect(
+      outcome.error?.stack?.includes("data:text/javascript"),
+      "worker bootstrap frames are dropped",
+    ).toBe(false);
+    expect((outcome.error?.stack?.split("\n").length ?? 0) <= 6, "stack depth is capped").toBe(
+      true,
+    );
+  },
+  RUN_TIMEOUT_MS,
+);
 
 test(
   "results that are not lossless JSON report invalid-output with a path",
@@ -228,15 +292,25 @@ test(
   RUN_TIMEOUT_MS,
 );
 
-test("undefined follows JSON.stringify rules inside containers", async () => {
-  const outcome = await runCode("return { kept: 1, dropped: undefined, list: [1, undefined, 3] };");
-  expect(outcome.error).toBeUndefined();
-  expect(outcome.value).toEqual({ kept: 1, list: [1, null, 3] });
-}, RUN_TIMEOUT_MS);
+test(
+  "undefined follows JSON.stringify rules inside containers",
+  async () => {
+    const outcome = await runCode(
+      "return { kept: 1, dropped: undefined, list: [1, undefined, 3] };",
+    );
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.value).toEqual({ kept: 1, list: [1, null, 3] });
+  },
+  RUN_TIMEOUT_MS,
+);
 
-test("each run gets a fresh worker realm", async () => {
-  const first = await runCode("globalThis.leaked = 1; return typeof leaked;");
-  expect(first.value).toBe("number");
-  const second = await runCode("return typeof leaked;");
-  expect(second.value).toBe("undefined");
-}, RUN_TIMEOUT_MS);
+test(
+  "each run gets a fresh worker realm",
+  async () => {
+    const first = await runCode("globalThis.leaked = 1; return typeof leaked;");
+    expect(first.value).toBe("number");
+    const second = await runCode("return typeof leaked;");
+    expect(second.value).toBe("undefined");
+  },
+  RUN_TIMEOUT_MS,
+);

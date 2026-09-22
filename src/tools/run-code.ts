@@ -24,11 +24,18 @@ import { runPtcProgram } from "../runtime/dispatcher.ts";
 import { DEFAULT_CONFIG } from "../runtime/limits.ts";
 import {
   codeRunFailedError,
+  PTC_RUN_CODE_SNIPPET,
+  PTC_TOOL_GUIDELINES,
   renderToolResult,
   resolveBindingNames,
   resolveToolCwd,
 } from "./common.ts";
 import type { PtcToolDetails, PtcToolOptions } from "./common.ts";
+import {
+  renderPtcToolCall,
+  renderPtcToolResultCollapsed,
+  renderPtcToolResultExpanded,
+} from "./render.ts";
 
 const DESCRIPTION = [
   "Run a TypeScript program that composes pi's tools in one shot. Required arguments: `code` —",
@@ -44,6 +51,10 @@ const DESCRIPTION = [
   "",
   "Only the program's return value and its `console.log` output come back. This surface has no",
   "helpers: `log` / `phase` / `parallel` / `pipeline` exist only in `ptc_workflow`.",
+  "",
+  "Image-bearing tool results inside the program (a `tools.read` on a PNG, say) are attached to you",
+  "after the run, so never return image data as the completion value — that only spends your context",
+  "on base64.",
 ].join("\n");
 
 /** Schema type written out explicitly for `isolatedDeclarations` (emit must not infer it). */
@@ -84,10 +95,12 @@ export function createPtcRunCodeTool(
     name: "ptc_run_code",
     label: "PTC Run Code",
     description: DESCRIPTION,
+    promptSnippet: PTC_RUN_CODE_SNIPPET,
+    promptGuidelines: [...PTC_TOOL_GUIDELINES],
     parameters: PARAMETERS,
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const cwd = resolveToolCwd(ctx);
-      const names = resolveBindingNames(options.getActiveToolNames?.());
+      const names = resolveBindingNames(options.getBindingSourceNames?.());
       const startedAt = Date.now();
       const outcome = await runPtcProgram({
         code: params.code,
@@ -100,6 +113,18 @@ export function createPtcRunCodeTool(
       });
       if (outcome.error !== undefined) throw codeRunFailedError(outcome);
       return renderToolResult({ outcome, surface: "run_code", durationMs: Date.now() - startedAt });
+    },
+
+    // Compact TUI rendering — see `render.ts` and ADR-0013. `renderShell` stays at the default
+    // `ToolExecutionComponent` shell so PTC rows match the visual rhythm of `read`/`bash`.
+    renderCall(args, theme) {
+      return renderPtcToolCall(args, theme, "run_code");
+    },
+    renderResult(result, options, theme, context) {
+      if (options.expanded) {
+        return renderPtcToolResultExpanded(result, context.args, context.isError, theme);
+      }
+      return renderPtcToolResultCollapsed(result, context.isError, theme);
     },
   });
 }

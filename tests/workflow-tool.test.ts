@@ -69,75 +69,91 @@ test("the description lists the four helpers and says there is no agent()", () =
     expect(description, `description must document ${helper}`).toContain(helper);
   }
   expect(description).toMatch(/There is no `agent\(\)` helper\./);
-  expect(
-    description,
-    "states the binding form shared with ptc_run_code",
-  ).toMatch(/tools\.<name>\(args\)/);
+  expect(description, "states the binding form shared with ptc_run_code").toMatch(
+    /tools\.<name>\(args\)/,
+  );
   expect(description).toMatch(/`meta\.phases`/);
   expect(description).toMatch(/`args`/);
 });
 
-test("args round-trips to the program's args global", async () => {
-  const args = { task: "write the report", nested: { count: 2 }, list: [1, "two", null, true] };
-  const result = await call(
-    createPtcWorkflowTool(),
-    { script: "return { received: args, task: args.task };", args },
-    { cwd: process.cwd() },
-  );
-  expect(textOf(result)).toBe(
-    '{\n  "received": {\n    "task": "write the report",\n    "nested": {\n      "count": 2\n    },\n    "list": [\n      1,\n      "two",\n      null,\n      true\n    ]\n  },\n  "task": "write the report"\n}',
-  );
-  expect(result.details.result).toEqual({ received: args, task: "write the report" });
-}, RUN_TIMEOUT_MS);
+test(
+  "args round-trips to the program's args global",
+  async () => {
+    const args = { task: "write the report", nested: { count: 2 }, list: [1, "two", null, true] };
+    const result = await call(
+      createPtcWorkflowTool(),
+      { script: "return { received: args, task: args.task };", args },
+      { cwd: process.cwd() },
+    );
+    expect(textOf(result)).toBe(
+      [
+        "{",
+        '  received: {task: "write the report", nested: {count: 2}, list: [1, "two", null, true]}',
+        '  task: "write the report"',
+        "}",
+      ].join("\n"),
+    );
+    expect(result.details.result).toEqual({ received: args, task: "write the report" });
+  },
+  RUN_TIMEOUT_MS,
+);
 
-test("args is optional: a workflow with no args sees null", async () => {
-  const result = await call(createPtcWorkflowTool(), { script: "return args === null;" });
-  expect(textOf(result)).toBe("true");
-}, RUN_TIMEOUT_MS);
+test(
+  "args is optional: a workflow with no args sees null",
+  async () => {
+    const result = await call(createPtcWorkflowTool(), { script: "return args === null;" });
+    expect(textOf(result)).toBe("true");
+  },
+  RUN_TIMEOUT_MS,
+);
 
-test("non-plain-JSON args are rejected before the run is dispatched", async () => {
-  const tool = createPtcWorkflowTool();
-  const cyclic: Record<string, unknown> = { name: "cycle" };
-  cyclic.self = cyclic;
+test(
+  "non-plain-JSON args are rejected before the run is dispatched",
+  async () => {
+    const tool = createPtcWorkflowTool();
+    const cyclic: Record<string, unknown> = { name: "cycle" };
+    cyclic.self = cyclic;
 
-  const cases: Array<[string, unknown, RegExp]> = [
-    ["function entry", { fn: () => 1 }, /args\.fn is a function/],
-    ["undefined entry", { missing: undefined }, /args\.missing is undefined/],
-    ["symbol entry", { flag: Symbol("nope") }, /args\.flag is a symbol/],
-    ["cycle", cyclic, /args\.self\.self is a circular reference/],
-    ["class instance", { when: new Date(0) }, /args\.when is a Date/],
-    ["non-finite number", { ratio: Number.NaN }, /args\.ratio is NaN/],
-    ["nested function", { nested: { deep: [() => 1] } }, /args\.nested\.deep\[0\] is a function/],
-    ["array payload", [1, 2], /args must be a plain JSON object, received an array/],
-  ];
-  for (const [label, args, expected] of cases) {
+    const cases: Array<[string, unknown, RegExp]> = [
+      ["function entry", { fn: () => 1 }, /args\.fn is a function/],
+      ["undefined entry", { missing: undefined }, /args\.missing is undefined/],
+      ["symbol entry", { flag: Symbol("nope") }, /args\.flag is a symbol/],
+      ["cycle", cyclic, /args\.self\.self is a circular reference/],
+      ["class instance", { when: new Date(0) }, /args\.when is a Date/],
+      ["non-finite number", { ratio: Number.NaN }, /args\.ratio is NaN/],
+      ["nested function", { nested: { deep: [() => 1] } }, /args\.nested\.deep\[0\] is a function/],
+      ["array payload", [1, 2], /args must be a plain JSON object, received an array/],
+    ];
+    for (const [label, args, expected] of cases) {
+      let caught: unknown;
+      try {
+        await call(tool, { script: "return 1;", args });
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(Error);
+      const error = caught as Error;
+      expect(error.name, label).toBe("TypeError");
+      expect(error.message, label).toMatch(expected);
+    }
+
+    // An already-aborted signal proves the ordering: args validation happens before the dispatcher
+    // would have reported `code run failed (abort)`.
     let caught: unknown;
     try {
-      await call(tool, { script: "return 1;", args });
+      await call(
+        tool,
+        { script: "return 1;", args: { fn: () => 1 } },
+        { signal: AbortSignal.abort() },
+      );
     } catch (e) {
       caught = e;
     }
     expect(caught).toBeInstanceOf(Error);
-    const error = caught as Error;
-    expect(error.name, label).toBe("TypeError");
-    expect(error.message, label).toMatch(expected);
-  }
-
-  // An already-aborted signal proves the ordering: args validation happens before the dispatcher
-  // would have reported `code run failed (abort)`.
-  let caught: unknown;
-  try {
-    await call(
-      tool,
-      { script: "return 1;", args: { fn: () => 1 } },
-      { signal: AbortSignal.abort() },
-    );
-  } catch (e) {
-    caught = e;
-  }
-  expect(caught).toBeInstanceOf(Error);
-  expect((caught as Error).message).toMatch(/args\.fn is a function/);
-}, RUN_TIMEOUT_MS);
+    expect((caught as Error).message).toMatch(/args\.fn is a function/);
+  },
+  RUN_TIMEOUT_MS,
+);
 
 test(
   "log/phase narration and console output are rendered above the return value",
@@ -151,9 +167,7 @@ test(
       script:
         'log("narrating"); phase("Research"); console.log("printed"); phase("Write"); return { done: true };',
     });
-    expect(textOf(result)).toBe(
-      'Phases: Research → Write\nnarrating\nprinted\n{\n  "done": true\n}',
-    );
+    expect(textOf(result)).toBe("Phases: Research → Write\nnarrating\nprinted\n{done: true}");
     expect(result.details.phases).toEqual(["Research", "Write"]);
     expect(result.details.narrations).toEqual(["narrating"]);
     expect(result.details.logs).toEqual(["printed"]);
@@ -192,13 +206,17 @@ test(
   RUN_TIMEOUT_MS,
 );
 
-test("parallel() maps a failed item to null and keeps its siblings", async () => {
-  const result = await call(createPtcWorkflowTool(), {
-    script:
-      'const out = await parallel([async () => "a", async () => { throw new Error("boom"); }, async () => 3]); return out;',
-  });
-  expect(result.details.result).toEqual(["a", null, 3]);
-}, RUN_TIMEOUT_MS);
+test(
+  "parallel() maps a failed item to null and keeps its siblings",
+  async () => {
+    const result = await call(createPtcWorkflowTool(), {
+      script:
+        'const out = await parallel([async () => "a", async () => { throw new Error("boom"); }, async () => 3]); return out;',
+    });
+    expect(result.details.result).toEqual(["a", null, 3]);
+  },
+  RUN_TIMEOUT_MS,
+);
 
 test(
   "pipeline() threads items through stages with the same per-item null on failure",
@@ -212,20 +230,28 @@ test(
   RUN_TIMEOUT_MS,
 );
 
-test("scripts are type-stripped on this surface too", async () => {
-  const result = await call(createPtcWorkflowTool(), {
-    script:
-      "const total: number = 40 + 2;\nconst label = (value: number): string => `total=${value}`;\nreturn label(total);",
-  });
-  expect(textOf(result)).toBe("total=42");
-}, RUN_TIMEOUT_MS);
+test(
+  "scripts are type-stripped on this surface too",
+  async () => {
+    const result = await call(createPtcWorkflowTool(), {
+      script:
+        "const total: number = 40 + 2;\nconst label = (value: number): string => `total=${value}`;\nreturn label(total);",
+    });
+    expect(textOf(result)).toBe("total=42");
+  },
+  RUN_TIMEOUT_MS,
+);
 
-test("the workflow surface binds all seven built-in tools", async () => {
-  const result = await call(createPtcWorkflowTool(), {
-    script: "return Object.keys(tools).sort();",
-  });
-  expect(result.details.result).toEqual(["bash", "edit", "find", "grep", "ls", "read", "write"]);
-}, RUN_TIMEOUT_MS);
+test(
+  "the workflow surface binds all seven built-in tools",
+  async () => {
+    const result = await call(createPtcWorkflowTool(), {
+      script: "return Object.keys(tools).sort();",
+    });
+    expect(result.details.result).toEqual(["bash", "edit", "find", "grep", "ls", "read", "write"]);
+  },
+  RUN_TIMEOUT_MS,
+);
 
 test(
   "a failing workflow throws R1's failure message with phase and narration in the captured output",
