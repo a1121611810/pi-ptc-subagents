@@ -38,7 +38,9 @@
     "lint:fix": "oxlint --fix",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
-    "test": "node scripts/test.mjs",
+    "test": "pnpm exec vp test --run --coverage",
+    "test:watch": "pnpm exec vp test",
+    "test:ui": "pnpm exec vp test --ui",
     "prepublishOnly": "npm run typecheck && npm run lint && npm run fmt:check && npm run test && npm run build"
   },
   "devDependencies": {
@@ -72,6 +74,11 @@
   },
   "engines": {
     "node": ">=22.19.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "vitest": "^4.1.11"
+    }
   },
   "packageManager": "pnpm@12.5.1",
   "pi": {
