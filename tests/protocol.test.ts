@@ -48,7 +48,7 @@ const initFrame = {
   maxPendingCalls: DEFAULT_CONFIG.maxPendingCalls,
 };
 
-test("frame kind tables are closed sets of unique strings", () => {
+void test("frame kind tables are closed sets of unique strings", () => {
   for (const table of [HOST_FRAME_KIND, WORKER_FRAME_KIND, PTC_ERROR_KIND, PTC_LOG_LEVEL]) {
     const values = Object.values(table);
     assert.equal(new Set(values).size, values.length, "duplicate kind");
@@ -63,7 +63,7 @@ test("frame kind tables are closed sets of unique strings", () => {
   });
 });
 
-test("connect frame guard requires a live MessagePort in the payload", () => {
+void test("connect frame guard requires a live MessagePort in the payload", () => {
   const { frame, close } = withPort();
   try {
     assert.equal(isPtcConnectFrame(frame), true);
@@ -81,7 +81,7 @@ test("connect frame guard requires a live MessagePort in the payload", () => {
   }
 });
 
-test("init frame guard validates every field", () => {
+void test("init frame guard validates every field", () => {
   assert.equal(isPtcInitFrame(initFrame), true);
   assert.equal(isPtcInitFrame({ ...initFrame, args: { task: "x" } }), true);
   assert.equal(isPtcInitFrame({ ...initFrame, runId: 1 }), false);
@@ -98,7 +98,7 @@ test("init frame guard validates every field", () => {
   assert.equal(isPtcInitFrame(null), false);
 });
 
-test("call-result frame guard covers both arms", () => {
+void test("call-result frame guard covers both arms", () => {
   const ok = {
     kind: HOST_FRAME_KIND.callResult,
     callId: 1,
@@ -131,7 +131,7 @@ test("call-result frame guard covers both arms", () => {
   assert.equal(isPtcCallResultFrame({ ...failed, tool: undefined }), false);
 });
 
-test("cancel frame guard validates reason and kind", () => {
+void test("cancel frame guard validates reason and kind", () => {
   assert.equal(isPtcCancelFrame({ kind: HOST_FRAME_KIND.cancel, reason: "timeout" }), true);
   assert.equal(isPtcCancelFrame({ kind: HOST_FRAME_KIND.cancel, reason: "abort" }), true);
   assert.equal(isPtcCancelFrame({ kind: HOST_FRAME_KIND.cancel, reason: "stop" }), false);
@@ -140,7 +140,7 @@ test("cancel frame guard validates reason and kind", () => {
   assert.equal(isPtcCancelReason("cancel"), false);
 });
 
-test("host frame union rejects unknown kinds and non-frames", () => {
+void test("host frame union rejects unknown kinds and non-frames", () => {
   assert.equal(isPtcHostFrame({ kind: "nope" }), false);
   assert.equal(isPtcHostFrame(undefined), false);
   assert.equal(isPtcHostFrame([]), false);
@@ -152,14 +152,14 @@ test("host frame union rejects unknown kinds and non-frames", () => {
   );
 });
 
-test("ready frame guard", () => {
+void test("ready frame guard", () => {
   assert.equal(isPtcReadyFrame({ kind: WORKER_FRAME_KIND.ready }), true);
   assert.equal(isPtcReadyFrame({ kind: WORKER_FRAME_KIND.ready, extra: 1 }), true);
   assert.equal(isPtcReadyFrame({ kind: WORKER_FRAME_KIND.call }), false);
   assert.equal(isPtcWorkerFrame({ kind: WORKER_FRAME_KIND.ready }), true);
 });
 
-test("call frame guard validates ids, names and payload presence", () => {
+void test("call frame guard validates ids, names and payload presence", () => {
   const call = { kind: WORKER_FRAME_KIND.call, callId: 3, tool: "bash", args: { command: "ls" } };
   assert.equal(isPtcCallFrame(call), true);
   assert.equal(isPtcCallFrame({ ...call, args: undefined }), true);
@@ -169,7 +169,7 @@ test("call frame guard validates ids, names and payload presence", () => {
   assert.equal(isPtcCallFrame({ ...call, tool: null }), false);
 });
 
-test("log frame guard validates level and text", () => {
+void test("log frame guard validates level and text", () => {
   assert.equal(
     isPtcLogFrame({ kind: WORKER_FRAME_KIND.log, level: PTC_LOG_LEVEL.log, text: "hi" }),
     true,
@@ -185,7 +185,7 @@ test("log frame guard validates level and text", () => {
   assert.equal(isPtcLogLevel(undefined), false);
 });
 
-test("narration and phase frame guards", () => {
+void test("narration and phase frame guards", () => {
   assert.equal(
     isPtcNarrationFrame({ kind: WORKER_FRAME_KIND.narration, message: "starting" }),
     true,
@@ -195,14 +195,14 @@ test("narration and phase frame guards", () => {
   assert.equal(isPtcPhaseFrame({ kind: WORKER_FRAME_KIND.phase }), false);
 });
 
-test("result frame guard allows an absent value but no other shape", () => {
+void test("result frame guard allows an absent value but no other shape", () => {
   assert.equal(isPtcResultFrame({ kind: WORKER_FRAME_KIND.result }), true);
   assert.equal(isPtcResultFrame({ kind: WORKER_FRAME_KIND.result, value: { a: [1, 2] } }), true);
   assert.equal(isPtcResultFrame({ kind: WORKER_FRAME_KIND.result, value: undefined }), true);
   assert.equal(isPtcResultFrame({ kind: WORKER_FRAME_KIND.phase }), false);
 });
 
-test("error frame guard validates the nested error shape", () => {
+void test("error frame guard validates the nested error shape", () => {
   const base = {
     kind: WORKER_FRAME_KIND.error,
     error: { kind: PTC_ERROR_KIND.exception, message: "boom" },
@@ -231,7 +231,7 @@ test("error frame guard validates the nested error shape", () => {
   assert.equal(isPtcErrorKind("agent"), false, "there is no agent() helper (G1 #13 → B)");
 });
 
-test("worker frame union rejects unknown kinds and non-frames", () => {
+void test("worker frame union rejects unknown kinds and non-frames", () => {
   assert.equal(isPtcWorkerFrame({ kind: "nope" }), false);
   assert.equal(isPtcWorkerFrame(undefined), false);
   assert.equal(isPtcWorkerFrame(42), false);

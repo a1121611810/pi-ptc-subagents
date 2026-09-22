@@ -12,7 +12,7 @@ import { makeTempDir, removeTempDir, RUN_TIMEOUT_MS } from "./helpers/ptc.ts";
 const options = { timeout: RUN_TIMEOUT_MS };
 const call = { callId: 1 };
 
-test("bash is part of the default binding set on purpose", () => {
+void test("bash is part of the default binding set on purpose", () => {
   assert.deepEqual([...DEFAULT_BINDING_NAMES], [...BUILTIN_BINDING_NAMES]);
   assert.ok(
     DEFAULT_BINDING_NAMES.includes("bash"),
@@ -23,7 +23,7 @@ test("bash is part of the default binding set on purpose", () => {
   }
 });
 
-test("createBuiltinBindings builds every built-in by default and honours an explicit subset", () => {
+void test("createBuiltinBindings builds every built-in by default and honours an explicit subset", () => {
   const all = createBuiltinBindings({ cwd: process.cwd() });
   assert.deepEqual([...all.keys()], [...BUILTIN_BINDING_NAMES]);
   for (const binding of all.values()) assert.equal(typeof binding.execute, "function");
@@ -35,7 +35,7 @@ test("createBuiltinBindings builds every built-in by default and honours an expl
   assert.equal(none.size, 0);
 });
 
-test("createBuiltinBindings rejects unknown binding names", () => {
+void test("createBuiltinBindings rejects unknown binding names", () => {
   assert.throws(
     () => createBuiltinBindings({ cwd: process.cwd(), names: ["read", "teleport"] }),
     (error: Error) =>
@@ -43,7 +43,7 @@ test("createBuiltinBindings rejects unknown binding names", () => {
   );
 });
 
-test("the read binding resolves relative paths against the run cwd", options, async () => {
+void test("the read binding resolves relative paths against the run cwd", options, async () => {
   const dir = await makeTempDir();
   try {
     await writeFile(join(dir, "fixture.txt"), "line one\nline two\n");
@@ -59,7 +59,7 @@ test("the read binding resolves relative paths against the run cwd", options, as
   }
 });
 
-test("the bash binding runs in the run cwd", options, async () => {
+void test("the bash binding runs in the run cwd", options, async () => {
   const dir = await makeTempDir();
   try {
     const bindings = createBuiltinBindings({ cwd: dir, names: ["bash"] });
@@ -72,7 +72,7 @@ test("the bash binding runs in the run cwd", options, async () => {
   }
 });
 
-test("binding arguments are validated with pi's own tool validator", options, async () => {
+void test("binding arguments are validated with pi's own tool validator", options, async () => {
   const bindings = createBuiltinBindings({ cwd: process.cwd(), names: ["read"] });
   await assert.rejects(
     () => bindings.get("read")?.execute({ offset: 2 }, call) as Promise<unknown>,
@@ -80,7 +80,7 @@ test("binding arguments are validated with pi's own tool validator", options, as
   );
 });
 
-test("a failing tool calls rejects with the tool's own error", options, async () => {
+void test("a failing tool calls rejects with the tool's own error", options, async () => {
   const dir = await makeTempDir();
   try {
     const bindings = createBuiltinBindings({ cwd: dir, names: ["read"] });

@@ -56,7 +56,7 @@ function call(
   ) as Promise<AgentToolResult<PtcToolDetails>>;
 }
 
-test("the extension factory registers ptc_run_code with the documented parameter surface", () => {
+void test("the extension factory registers ptc_run_code with the documented parameter surface", () => {
   const tool = captureRegisteredTools().get("ptc_run_code");
   assert.ok(tool, "ptc_run_code must be registered");
   assert.equal(tool.label, "PTC Run Code");
@@ -72,7 +72,7 @@ test("the extension factory registers ptc_run_code with the documented parameter
   assert.equal("justification" in (parameters.properties ?? {}), false);
 });
 
-test("the description tells the model how to reach tools and what comes back", () => {
+void test("the description tells the model how to reach tools and what comes back", () => {
   const description = captureRegisteredTools().get("ptc_run_code")?.description ?? "";
   assert.match(description, /`code`/, "names the required code argument");
   assert.match(description, /`description`/, "names the required description argument");
@@ -84,7 +84,7 @@ test("the description tells the model how to reach tools and what comes back", (
   assert.doesNotMatch(description, /sandbox/i);
 });
 
-test(
+void test(
   "a program calling tools.read resolves relative paths against the tool context's cwd",
   options,
   async () => {
@@ -109,13 +109,17 @@ test(
   },
 );
 
-test("a program that returns nothing renders R1's no-output placeholder", options, async () => {
-  const result = await call(createPtcRunCodeTool(), { code: "const unused = 1;" });
-  assert.equal(textOf(result), "(ptc_run_code completed with no output)");
-  assert.equal("result" in result.details, false);
-});
+void test(
+  "a program that returns nothing renders R1's no-output placeholder",
+  options,
+  async () => {
+    const result = await call(createPtcRunCodeTool(), { code: "const unused = 1;" });
+    assert.equal(textOf(result), "(ptc_run_code completed with no output)");
+    assert.equal("result" in result.details, false);
+  },
+);
 
-test("logs and the return value are rendered together, types stripped", options, async () => {
+void test("logs and the return value are rendered together, types stripped", options, async () => {
   const result = await call(createPtcRunCodeTool(), {
     code: 'const value: number = 41;\nconsole.log("seen", value);\nreturn { answer: value + 1 };',
   });
@@ -124,7 +128,7 @@ test("logs and the return value are rendered together, types stripped", options,
   assert.deepEqual(result.details.result, { answer: 42 });
 });
 
-test(
+void test(
   "a failing program throws R1's failure message with the captured output block",
   options,
   async () => {
@@ -144,7 +148,7 @@ test(
   },
 );
 
-test("a failing program without logs keeps the failure message bare", options, async () => {
+void test("a failing program without logs keeps the failure message bare", options, async () => {
   await assert.rejects(
     call(createPtcRunCodeTool(), { code: "null.everything();" }),
     (error: Error) => {
@@ -155,7 +159,7 @@ test("a failing program without logs keeps the failure message bare", options, a
   );
 });
 
-test("timeoutMs overrides the deadline and reports the requested value", options, async () => {
+void test("timeoutMs overrides the deadline and reports the requested value", options, async () => {
   const tool = createPtcRunCodeTool({ config: { graceMs: 100 } });
   await assert.rejects(
     call(tool, { code: "await new Promise(() => {});", timeoutMs: 150 }),
@@ -166,7 +170,7 @@ test("timeoutMs overrides the deadline and reports the requested value", options
   );
 });
 
-test(
+void test(
   "timeoutMs 0 falls back to the configured default instead of disabling the deadline",
   options,
   async () => {
@@ -175,7 +179,7 @@ test(
   },
 );
 
-test(
+void test(
   "an aborted signal fails the run with the abort kind before spawning work",
   options,
   async () => {
@@ -189,21 +193,25 @@ test(
   },
 );
 
-test("an oversize run surfaces output-limit with the retained log prefix", options, async () => {
-  // A small budget exercises the same code path a 64 MiB overrun would, without the payload.
-  const tool = createPtcRunCodeTool({ config: { maxOutputBytes: 2048 } });
-  await assert.rejects(
-    call(tool, {
-      code: 'console.log("x".repeat(1500)); console.log("y".repeat(1500)); console.log("third"); return 1;',
-    }),
-    (error: Error) => {
-      assert.match(
-        error.message,
-        /^code run failed \(output-limit\): .*maxOutputBytes=2048.*1 log line\(s\) retained/,
-      );
-      assert.match(error.message, /Captured output:\nx{1500}/);
-      assert.doesNotMatch(error.message, /y{1500}/, "only the fitting prefix is retained");
-      return true;
-    },
-  );
-});
+void test(
+  "an oversize run surfaces output-limit with the retained log prefix",
+  options,
+  async () => {
+    // A small budget exercises the same code path a 64 MiB overrun would, without the payload.
+    const tool = createPtcRunCodeTool({ config: { maxOutputBytes: 2048 } });
+    await assert.rejects(
+      call(tool, {
+        code: 'console.log("x".repeat(1500)); console.log("y".repeat(1500)); console.log("third"); return 1;',
+      }),
+      (error: Error) => {
+        assert.match(
+          error.message,
+          /^code run failed \(output-limit\): .*maxOutputBytes=2048.*1 log line\(s\) retained/,
+        );
+        assert.match(error.message, /Captured output:\nx{1500}/);
+        assert.doesNotMatch(error.message, /y{1500}/, "only the fitting prefix is retained");
+        return true;
+      },
+    );
+  },
+);

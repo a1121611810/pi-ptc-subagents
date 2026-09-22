@@ -16,7 +16,7 @@ import type { PtcToolDetails } from "../src/tools/common.ts";
 import { createPtcRunCodeTool } from "../src/tools/run-code.ts";
 import { RUN_TIMEOUT_MS, makeTempDir, removeTempDir, toolContext } from "./helpers/ptc.ts";
 
-test("resolveBindingNames intersects the active set with the built-in factories", () => {
+void test("resolveBindingNames intersects the active set with the built-in factories", () => {
   assert.deepEqual([...resolveBindingNames(undefined)], [...BUILTIN_BINDING_NAMES]);
   assert.deepEqual([...resolveBindingNames([])], []);
   assert.deepEqual([...resolveBindingNames(["read", "grep"])], ["read", "grep"]);
@@ -50,7 +50,7 @@ function textOf(result: AgentToolResult<PtcToolDetails>): string {
     .join("\n");
 }
 
-test(
+void test(
   "a restricted session can only reach its active tools",
   { timeout: RUN_TIMEOUT_MS },
   async () => {
@@ -77,7 +77,7 @@ test(
   },
 );
 
-test(
+void test(
   "an empty active set yields no bindings, yet Node and console still work",
   { timeout: RUN_TIMEOUT_MS },
   async () => {

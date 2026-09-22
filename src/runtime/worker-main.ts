@@ -360,6 +360,7 @@ export function workerMain(deps: WorkerMainDeps): void {
     } catch {
       source = wrapped;
     }
+    // oxlint-disable-next-line typescript/no-implied-eval -- compiling the submitted program is this worker's job; it never compiles host code.
     return new Function(`${source}\nreturn ${programName}();`) as () => unknown;
   };
 

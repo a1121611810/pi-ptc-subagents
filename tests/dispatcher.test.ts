@@ -38,7 +38,7 @@ const run = (
     ...(extra.signal === undefined ? {} : { signal: extra.signal }),
   });
 
-test(
+void test(
   "end-to-end smoke: `return 40 + 2` resolves to 42 through the real dispatcher",
   options,
   async () => {
@@ -47,22 +47,26 @@ test(
   },
 );
 
-test("console output is collected in arrival order around binding calls", options, async () => {
-  const bindings = makeBindings({
-    ping: async () => {
-      return { pong: true };
-    },
-  });
-  const outcome = await run(
-    'console.log("before"); const r = await tools.ping({}); console.log("after", r.pong); return 1;',
-    { bindings },
-  );
-  assert.equal(outcome.error, undefined);
-  assert.deepEqual(outcome.logs, ["before", "after true"]);
-  assert.equal(outcome.value, 1);
-});
+void test(
+  "console output is collected in arrival order around binding calls",
+  options,
+  async () => {
+    const bindings = makeBindings({
+      ping: async () => {
+        return { pong: true };
+      },
+    });
+    const outcome = await run(
+      'console.log("before"); const r = await tools.ping({}); console.log("after", r.pong); return 1;',
+      { bindings },
+    );
+    assert.equal(outcome.error, undefined);
+    assert.deepEqual(outcome.logs, ["before", "after true"]);
+    assert.equal(outcome.value, 1);
+  },
+);
 
-test(
+void test(
   "bindings round-trip through the real worker against a temp-dir fixture",
   options,
   async () => {
@@ -86,7 +90,7 @@ test(
   },
 );
 
-test("independent binding calls overlap under Promise.all", options, async () => {
+void test("independent binding calls overlap under Promise.all", options, async () => {
   const release = deferred<void>();
   let started = 0;
   const bindings = makeBindings({
@@ -108,7 +112,7 @@ test("independent binding calls overlap under Promise.all", options, async () =>
   assert.deepEqual(outcome.value, [3, 3, 3]);
 });
 
-test("dispatch forwarding is capped at maxParallelSubCalls", options, async () => {
+void test("dispatch forwarding is capped at maxParallelSubCalls", options, async () => {
   let active = 0;
   let peak = 0;
   const bindings = makeBindings({
@@ -130,19 +134,23 @@ test("dispatch forwarding is capped at maxParallelSubCalls", options, async () =
   assert.equal(peak, DEFAULT_CONFIG.maxParallelSubCalls, "concurrency stays at the cap");
 });
 
-test("a wide fan-out queues inside the worker instead of failing the run", options, async () => {
-  const maxPendingCalls = 4;
-  const calls = maxPendingCalls * 5;
-  const bindings = makeBindings({ ping: async (args) => (args as { i: number }).i });
-  const outcome = await run(
-    `const rs = await Promise.all(Array.from({ length: ${calls} }, (_, i) => tools.ping({ i }))); return rs.length;`,
-    { bindings, config: { maxPendingCalls } },
-  );
-  assert.equal(outcome.error, undefined, "admission control must not fail a legitimate burst");
-  assert.equal(outcome.value, calls);
-});
+void test(
+  "a wide fan-out queues inside the worker instead of failing the run",
+  options,
+  async () => {
+    const maxPendingCalls = 4;
+    const calls = maxPendingCalls * 5;
+    const bindings = makeBindings({ ping: async (args) => (args as { i: number }).i });
+    const outcome = await run(
+      `const rs = await Promise.all(Array.from({ length: ${calls} }, (_, i) => tools.ping({ i }))); return rs.length;`,
+      { bindings, config: { maxPendingCalls } },
+    );
+    assert.equal(outcome.error, undefined, "admission control must not fail a legitimate burst");
+    assert.equal(outcome.value, calls);
+  },
+);
 
-test(
+void test(
   "the worker keeps simultaneous host binding calls at or below maxPendingCalls",
   options,
   async () => {
@@ -172,7 +180,7 @@ test(
   },
 );
 
-test(
+void test(
   "cancel while calls wait for admission rejects them without waiting out the grace window",
   options,
   async () => {
@@ -198,7 +206,7 @@ test(
   },
 );
 
-test("a workflow fan-out obeys the same admission budget", options, async () => {
+void test("a workflow fan-out obeys the same admission budget", options, async () => {
   const maxPendingCalls = 4;
   const bindings = makeBindings({ step: async (args) => (args as { n: number }).n });
   const outcome = await run(
@@ -209,7 +217,7 @@ test("a workflow fan-out obeys the same admission budget", options, async () => 
   assert.equal(outcome.value, maxPendingCalls * 3);
 });
 
-test(
+void test(
   "a failing binding rejects the call with ToolCallError and keeps the run alive",
   options,
   async () => {
@@ -231,7 +239,7 @@ test(
   },
 );
 
-test(
+void test(
   "a binding result that cannot be transferred fails the call instead of hanging",
   options,
   async () => {
@@ -245,17 +253,20 @@ test(
       { bindings },
     );
     assert.equal(outcome.error, undefined);
-    assert.match(String(outcome.value), /could not be transferred/);
+    assert.ok(
+      typeof outcome.value === "string" && outcome.value.includes("could not be transferred"),
+      `expected a string mentioning the transfer failure, got ${JSON.stringify(outcome.value)}`,
+    );
   },
 );
 
-test("worker crashes surface as worker-exit", options, async () => {
+void test("worker crashes surface as worker-exit", options, async () => {
   const outcome = await run("process.exit(3);");
   assert.equal(outcome.error?.kind, "worker-exit");
   assert.match(String(outcome.error?.message), /exited with code 3/);
 });
 
-test("F1 — the worker environment is the allow-list and nothing else", options, async () => {
+void test("F1 — the worker environment is the allow-list and nothing else", options, async () => {
   const outcome = await run("return Object.keys(process.env).sort();");
   assert.equal(outcome.error, undefined);
   const workerKeys = outcome.value as string[];
@@ -269,7 +280,7 @@ test("F1 — the worker environment is the allow-list and nothing else", options
   }
 });
 
-test("F2 — the worker heap is capped by resourceLimits", options, async () => {
+void test("F2 — the worker heap is capped by resourceLimits", options, async () => {
   const outcome = await run(
     "return (await import('node:v8')).getHeapStatistics().heap_size_limit;",
   );
@@ -286,7 +297,7 @@ test("F2 — the worker heap is capped by resourceLimits", options, async () => 
   );
 });
 
-test(
+void test(
   "F3 — the frozen per-run environment travels in workerData and is authoritative",
   options,
   async () => {
@@ -303,7 +314,7 @@ test(
   },
 );
 
-test("F3 — a run id passed by the caller is the one the worker sees", options, async () => {
+void test("F3 — a run id passed by the caller is the one the worker sees", options, async () => {
   const outcome = await runPtcProgram({
     code: "return (await import('node:worker_threads')).workerData.runId;",
     surface: "run_code",
@@ -314,7 +325,7 @@ test("F3 — a run id passed by the caller is the one the worker sees", options,
   assert.equal(outcome.value, "run-abc");
 });
 
-test("F4 — bindings run in the run's cwd, not the host process cwd", options, async () => {
+void test("F4 — bindings run in the run's cwd, not the host process cwd", options, async () => {
   const dir = await makeTempDir();
   try {
     const bindings = createBuiltinBindings({ cwd: dir, names: ["bash", "read"] });
@@ -339,7 +350,7 @@ test("F4 — bindings run in the run's cwd, not the host process cwd", options, 
   }
 });
 
-test("a run that outlives its deadline fails with timeout", options, async () => {
+void test("a run that outlives its deadline fails with timeout", options, async () => {
   const timeoutMs = 150;
   const started = Date.now();
   const outcome = await run("await new Promise(() => {});", {
@@ -351,7 +362,7 @@ test("a run that outlives its deadline fails with timeout", options, async () =>
   assert.ok(Date.now() - started < RUN_TIMEOUT_MS);
 });
 
-test(
+void test(
   "aborting the caller's signal cancels the run and aborts in-flight bindings",
   options,
   async () => {
@@ -379,13 +390,13 @@ test(
   },
 );
 
-test("cancelling an already-aborted signal never spawns work", options, async () => {
+void test("cancelling an already-aborted signal never spawns work", options, async () => {
   const outcome = await run("return 1;", { signal: AbortSignal.abort() });
   assert.equal(outcome.error?.kind, "abort");
   assert.deepEqual(outcome.logs, []);
 });
 
-test("the joint output budget covers logs and the completion value", options, async () => {
+void test("the joint output budget covers logs and the completion value", options, async () => {
   const budget = Math.floor(DEFAULT_CONFIG.maxOutputBytes / 1024);
   const chunk = "x".repeat(Math.ceil(budget / 2));
   const outcome = await run(
@@ -397,7 +408,7 @@ test("the joint output budget covers logs and the completion value", options, as
   assert.equal(outcome.value, undefined);
 });
 
-test("an oversized single control frame is a protocol failure", options, async () => {
+void test("an oversized single control frame is a protocol failure", options, async () => {
   const maxMessageBytes = Math.floor(DEFAULT_CONFIG.maxMessageBytes / 1024);
   const oversized = "y".repeat(maxMessageBytes * 2);
   const outcome = await run(`console.log("z".repeat(${oversized.length})); return 1;`, {
@@ -407,7 +418,7 @@ test("an oversized single control frame is a protocol failure", options, async (
   assert.match(String(outcome.error?.message), /maxMessageBytes/);
 });
 
-test("concurrent runs stay isolated from each other", options, async () => {
+void test("concurrent runs stay isolated from each other", options, async () => {
   const bindings = makeBindings({ echo: async (args) => args });
   const [first, second] = await Promise.all([
     run('console.log("first"); await tools.echo({ tag: "a" }); return "a";', { bindings }),
@@ -419,7 +430,7 @@ test("concurrent runs stay isolated from each other", options, async () => {
   assert.deepEqual(second.logs, ["second"]);
 });
 
-test("the workflow surface runs through the dispatcher end to end", options, async () => {
+void test("the workflow surface runs through the dispatcher end to end", options, async () => {
   const bindings = makeBindings({ double: async (args) => (args as { n: number }).n * 2 });
   const outcome = await runPtcProgram({
     code: 'log("start"); phase("Compute"); const values = await parallel(args.items.map((n) => async () => tools.double({ n }))); return values;',

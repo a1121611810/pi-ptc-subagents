@@ -22,13 +22,13 @@ const stub = {
   on: () => () => {},
 } as unknown as ExtensionAPI;
 
-test("the default export is the extension factory and runs without touching pi", () => {
+void test("the default export is the extension factory and runs without touching pi", () => {
   assert.equal(typeof ptcSubagents, "function");
   assert.equal(ptcSubagents.length, 1, "the factory takes the ExtensionAPI parameter");
   assert.equal(ptcSubagents(stub), undefined);
 });
 
-test("the factory registers both PTC tools against the ExtensionAPI", () => {
+void test("the factory registers both PTC tools against the ExtensionAPI", () => {
   const tools = captureRegisteredTools();
   assert.deepEqual([...tools.keys()], ["ptc_run_code", "ptc_workflow"]);
   for (const [name, tool] of tools) {
@@ -42,7 +42,7 @@ test("the factory registers both PTC tools against the ExtensionAPI", () => {
   }
 });
 
-test("the factory module re-exports the machinery T4/T5 build on", () => {
+void test("the factory module re-exports the machinery T4/T5 build on", () => {
   assert.equal(typeof runPtcProgram, "function");
   assert.equal(typeof createBuiltinBindings, "function");
   assert.equal(typeof createWorkerEnv, "function");

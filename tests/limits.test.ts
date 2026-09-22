@@ -8,7 +8,7 @@ import {
   WORKER_ENV_ALLOW_LIST,
 } from "../src/runtime/limits.ts";
 
-test("DEFAULT_CONFIG is frozen and every limit is a positive finite number", () => {
+void test("DEFAULT_CONFIG is frozen and every limit is a positive finite number", () => {
   assert.equal(Object.isFrozen(DEFAULT_CONFIG), true);
   for (const [key, value] of Object.entries(DEFAULT_CONFIG)) {
     assert.equal(typeof value, "number", `${key} must be a number`);
@@ -16,12 +16,12 @@ test("DEFAULT_CONFIG is frozen and every limit is a positive finite number", () 
   }
 });
 
-test("resolveConfig returns the frozen defaults when nothing is overridden", () => {
+void test("resolveConfig returns the frozen defaults when nothing is overridden", () => {
   assert.deepEqual(resolveConfig(), { ...DEFAULT_CONFIG });
   assert.notEqual(resolveConfig(), DEFAULT_CONFIG, "callers must get their own copy");
 });
 
-test("resolveConfig applies overrides and rejects invalid ones", () => {
+void test("resolveConfig applies overrides and rejects invalid ones", () => {
   assert.equal(resolveConfig({ maxOutputBytes: 1024 }).maxOutputBytes, 1024);
   assert.equal(
     resolveConfig({ maxOutputBytes: 1024 }).maxPendingCalls,
@@ -40,7 +40,7 @@ test("resolveConfig applies overrides and rejects invalid ones", () => {
   assert.deepEqual(resolveConfig({ nope: 1 } as never), { ...DEFAULT_CONFIG });
 });
 
-test("createWorkerEnv keeps only allow-listed names (F1)", () => {
+void test("createWorkerEnv keeps only allow-listed names (F1)", () => {
   const source = {
     PATH: "/usr/bin",
     HOME: "/home/someone",
@@ -62,7 +62,7 @@ test("createWorkerEnv keeps only allow-listed names (F1)", () => {
   }
 });
 
-test("effectiveTimeoutMs falls back to the default and clamps to the ceiling", () => {
+void test("effectiveTimeoutMs falls back to the default and clamps to the ceiling", () => {
   assert.equal(effectiveTimeoutMs(undefined), DEFAULT_CONFIG.timeoutMs);
   assert.equal(
     effectiveTimeoutMs(0),

@@ -42,7 +42,7 @@ function call(
   ) as Promise<AgentToolResult<PtcToolDetails>>;
 }
 
-test("the extension factory registers ptc_workflow with the documented parameter surface", () => {
+void test("the extension factory registers ptc_workflow with the documented parameter surface", () => {
   const tool = captureRegisteredTools().get("ptc_workflow");
   assert.ok(tool, "ptc_workflow must be registered");
   assert.equal(tool.label, "PTC Workflow");
@@ -61,7 +61,7 @@ test("the extension factory registers ptc_workflow with the documented parameter
   ]);
 });
 
-test("the description lists the four helpers and says there is no agent()", () => {
+void test("the description lists the four helpers and says there is no agent()", () => {
   const description = captureRegisteredTools().get("ptc_workflow")?.description ?? "";
   for (const helper of [
     "log(message)",
@@ -81,7 +81,7 @@ test("the description lists the four helpers and says there is no agent()", () =
   assert.match(description, /`args`/);
 });
 
-test("args round-trips to the program's args global", options, async () => {
+void test("args round-trips to the program's args global", options, async () => {
   const args = { task: "write the report", nested: { count: 2 }, list: [1, "two", null, true] };
   const result = await call(
     createPtcWorkflowTool(),
@@ -95,12 +95,12 @@ test("args round-trips to the program's args global", options, async () => {
   assert.deepEqual(result.details.result, { received: args, task: "write the report" });
 });
 
-test("args is optional: a workflow with no args sees null", options, async () => {
+void test("args is optional: a workflow with no args sees null", options, async () => {
   const result = await call(createPtcWorkflowTool(), { script: "return args === null;" });
   assert.equal(textOf(result), "true");
 });
 
-test("non-plain-JSON args are rejected before the run is dispatched", async () => {
+void test("non-plain-JSON args are rejected before the run is dispatched", async () => {
   const tool = createPtcWorkflowTool();
   const cyclic: Record<string, unknown> = { name: "cycle" };
   cyclic.self = cyclic;
@@ -134,7 +134,7 @@ test("non-plain-JSON args are rejected before the run is dispatched", async () =
   );
 });
 
-test(
+void test(
   "log/phase narration and console output are rendered above the return value",
   options,
   async () => {
@@ -158,7 +158,7 @@ test(
   },
 );
 
-test(
+void test(
   "a phase title outside meta.phases warns once instead of failing the run",
   options,
   async () => {
@@ -176,16 +176,20 @@ test(
   },
 );
 
-test("without meta.phases there is no declared plan, so phase() never warns", options, async () => {
-  const result = await call(createPtcWorkflowTool(), {
-    meta: { name: "undeclared", description: "no plan declared" },
-    script: 'phase("Anything"); return 1;',
-  });
-  assert.deepEqual(result.details.warnings, []);
-  assert.equal(textOf(result), "Phases: Anything\n1");
-});
+void test(
+  "without meta.phases there is no declared plan, so phase() never warns",
+  options,
+  async () => {
+    const result = await call(createPtcWorkflowTool(), {
+      meta: { name: "undeclared", description: "no plan declared" },
+      script: 'phase("Anything"); return 1;',
+    });
+    assert.deepEqual(result.details.warnings, []);
+    assert.equal(textOf(result), "Phases: Anything\n1");
+  },
+);
 
-test("parallel() maps a failed item to null and keeps its siblings", options, async () => {
+void test("parallel() maps a failed item to null and keeps its siblings", options, async () => {
   const result = await call(createPtcWorkflowTool(), {
     script:
       'const out = await parallel([async () => "a", async () => { throw new Error("boom"); }, async () => 3]); return out;',
@@ -193,7 +197,7 @@ test("parallel() maps a failed item to null and keeps its siblings", options, as
   assert.deepEqual(result.details.result, ["a", null, 3]);
 });
 
-test(
+void test(
   "pipeline() threads items through stages with the same per-item null on failure",
   options,
   async () => {
@@ -205,7 +209,7 @@ test(
   },
 );
 
-test("scripts are type-stripped on this surface too", options, async () => {
+void test("scripts are type-stripped on this surface too", options, async () => {
   const result = await call(createPtcWorkflowTool(), {
     script:
       "const total: number = 40 + 2;\nconst label = (value: number): string => `total=${value}`;\nreturn label(total);",
@@ -213,14 +217,14 @@ test("scripts are type-stripped on this surface too", options, async () => {
   assert.equal(textOf(result), "total=42");
 });
 
-test("the workflow surface binds all seven built-in tools", options, async () => {
+void test("the workflow surface binds all seven built-in tools", options, async () => {
   const result = await call(createPtcWorkflowTool(), {
     script: "return Object.keys(tools).sort();",
   });
   assert.deepEqual(result.details.result, ["bash", "edit", "find", "grep", "ls", "read", "write"]);
 });
 
-test(
+void test(
   "a failing workflow throws R1's failure message with phase and narration in the captured output",
   options,
   async () => {
