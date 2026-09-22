@@ -125,7 +125,8 @@ const collapsedOut = show(
   ),
 );
 expect("collapsed/success", collapsedOut, [
-  '→ {version: "0.1.0", node: "v24"}',
+  '├─ version: "0.1.0"',
+  '└─ node: "v24"',
   "2 output lines",
   "412ms",
 ]);
@@ -182,9 +183,9 @@ const expandedOut = show(
 expect("expanded/workflow", expandedOut, [
   // description lives on the renderCall row, not repeated here
   "code   ",
-  "phases init → compute → report",
-  "log    log line A",
-  'warn   phase "extra" is not listed',
+  "├─ phases  init → compute → report",
+  "├─ log     log line A",
+  '└─ warn    phase "extra" is not listed',
 ]);
 if (expandedOut.includes("demo")) {
   failures.push("expanded/workflow: description leaked into expanded view (renderCall-only)");
@@ -216,10 +217,10 @@ const resultExpanded = show(
     { args: codeArgs, isError: false },
   ),
 );
-expect("expanded/result", resultExpanded, ['value  {version: "0.1.0", node: "v24"}']);
+expect("expanded/result", resultExpanded, ['├─ version: "0.1.0"', '├─ node: "v24"']);
 
 // A failed run has no completion value; the result block must not appear.
-if (errExpanded.includes("value  ")) {
+if (errExpanded.includes("├─ value") || errExpanded.includes("└─ value")) {
   failures.push("expanded/error: value block rendered on a failed run");
 }
 checks += 1;

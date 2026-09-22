@@ -31,7 +31,7 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { PtcToolDetails } from "./common.ts";
-import type { PtcJsonValue } from "../runtime/protocol.ts";
+import type { PtcJsonObject, PtcJsonValue } from "../runtime/protocol.ts";
 import { renderModelValue, sanitizeText } from "./text.ts";
 
 /** Call-row label per surface; `ptc_workflow` gets its own so the two rows stay tellable apart. */
@@ -55,13 +55,13 @@ const TOOL_TITLE: Record<PtcToolDetails["surface"], string> = {
  *
  * `TREE_INDENT` (3 spaces) is the column children and root continuations share.
  */
-const TREE_ROOT = "└─ ";          // call-row prefix
-const TREE_ROOT_CONT = "   ";      // continuation under the root (summary line + error text)
-const TREE_INDENT = "   ";         // column children start at
-const TREE_FIRST = "├─ ";          // connector of first / middle child
-const TREE_LAST = "└─ ";           // connector of last child
-const TREE_CONT_FIRST = "│  ";     // continuation of first / middle child
-const TREE_CONT_LAST = "   ";      // continuation of last child (just spaces — no connector)
+const TREE_ROOT = "└─ "; // call-row prefix
+const TREE_ROOT_CONT = "   "; // continuation under the root (summary line + error text)
+const TREE_INDENT = "   "; // column children start at
+const TREE_FIRST = "├─ "; // connector of first / middle child
+const TREE_LAST = "└─ "; // connector of last child
+const TREE_CONT_FIRST = "│  "; // continuation of first / middle child
+const TREE_CONT_LAST = "   "; // continuation of last child (just spaces — no connector)
 
 /**
  * Gutter width for child labels. `code` / `out` / `value` / `warn` / `image` are 3–5 chars; `phases`
@@ -74,7 +74,6 @@ const MAX_CODE_LINE_CHARS = 120;
 const MAX_LOG_LINES_EXPANDED = 12;
 const MAX_PHASES_EXPANDED = 8;
 const MAX_WARNINGS_EXPANDED = 4;
-const MAX_VALUE_LINES_EXPANDED = 12;
 const MAX_RESULT_HINT_CHARS = 60;
 const MAX_ERROR_CHARS = 120;
 
@@ -253,6 +252,299 @@ function renderChildBlock(child: ChildBlock, isLast: boolean, theme: Theme): Row
 }
 
 // ---------------------------------------------------------------------------
+// Value-as-tree renderer (ADR-0013 §5)
+//
+// The value a program returns is a tree when it is a JSON object or array:
+// each property (or index) gets its own row with a ├─ / └─ connector, recursive
+// children inherit the parent's continuation bar, and a tail row collapses
+// what was withheld. This module only knows PtcJsonValue; consumers wrap each
+// emitted row with TREE_ROOT_CONT (so a row that starts with ├─ lands at the
+// call row's column-3 indent).
+// ---------------------------------------------------------------------------
+
+/** Defaults: collapse at 4 levels, 6 children per container, 120 chars per row. */
+export const TREE_VALUE_MAX_DEPTH = 4;
+export const TREE_VALUE_MAX_CHILDREN = 6;
+export const TREE_VALUE_MAX_LINE_CHARS = 120;
+
+/** A JSON value is "expandable" when it is a non-empty object or array. */
+export function isExpandableContainer(
+  value: PtcJsonValue,
+): value is PtcJsonObject | PtcJsonValue[] {
+  if (value === null || typeof value !== "object") return false;
+  if (Array.isArray(value)) return value.length > 0;
+  return Object.keys(value).length > 0;
+}
+
+/** Object keys that read as identifiers are left unquoted; the rest get JSON quoting. */
+const TREE_BARE_KEY = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+function treeFormatKey(key: string): string {
+  return TREE_BARE_KEY.test(key) ? key : JSON.stringify(key);
+}
+
+/** A scalar JSON value as a single readable token; strings are JSON-quoted, newlines folded. */
+function treeScalarPreview(value: PtcJsonValue, maxChars: number): string {
+  if (value === null) return "null";
+  if (typeof value === "boolean" || typeof value === "number") return String(value);
+  if (typeof value === "string") {
+    const sanitized = sanitizeText(value);
+    if (sanitized.length === 0) return '""';
+    if (sanitized.includes("\n")) {
+      const flat = sanitized.replace(/\n/g, " ");
+      const head = truncateChars(flat, Math.max(2, maxChars - 5));
+      return JSON.stringify(head) + "…";
+    }
+    if (sanitized.length + 2 <= maxChars) return JSON.stringify(sanitized);
+    return JSON.stringify(truncateChars(sanitized, Math.max(2, maxChars - 5))) + "…";
+  }
+  return "?";
+}
+
+function treeIsScalarJson(value: PtcJsonValue): boolean {
+  return value === null || typeof value !== "object";
+}
+
+/** Try to render a container as a one-liner bracket form ({k: v} / [v, v]); undefined when it does not fit or children are deep. */
+function treeInlinePreview(value: PtcJsonValue, maxChars: number): string | undefined {
+  if (maxChars < 8) return undefined;
+  if (Array.isArray(value)) {
+    if (value.length === 0) return "[]";
+    if (value.length > 5 || !value.every(treeIsScalarJson)) return undefined;
+    const items = value.map((item) =>
+      treeScalarPreview(item, Math.max(2, Math.floor(maxChars / 4))),
+    );
+    const inline = "[" + items.join(", ") + "]";
+    return inline.length <= maxChars ? inline : undefined;
+  }
+  if (value === null || typeof value !== "object") return undefined;
+  const keys = Object.keys(value);
+  if (keys.length === 0) return "{}";
+  if (keys.length > 5 || !Object.values(value).every(treeIsScalarJson)) return undefined;
+  const entries = keys.map((key) => {
+    const child = (value as Record<string, PtcJsonValue>)[key] ?? null;
+    return (
+      treeFormatKey(key) + ": " + treeScalarPreview(child, Math.max(2, Math.floor(maxChars / 4)))
+    );
+  });
+  const inline = "{" + entries.join(", ") + "}";
+  return inline.length <= maxChars ? inline : undefined;
+}
+
+/**
+ * Append one pre-prefixed tree row to out, recursing for containers. Each level passes the
+ * continuation indent its children should use; the connector itself encodes "more siblings".
+ */
+function treeAppendNode(
+  value: PtcJsonValue,
+  label: string, // "key: ", "[0] ", or "" — the row's own text after the connector
+  parentPrefix: string, // page above this row's connector (root's children pass "")
+  isLast: boolean,
+  maxDepth: number,
+  maxChildren: number,
+  maxLineChars: number,
+  depth: number,
+  out: string[],
+): void {
+  const connector = isLast ? "└─ " : "├─ ";
+  const ownPrefix = parentPrefix + connector;
+  const continuation = parentPrefix + (isLast ? "   " : "│  ");
+
+  // Depth guard: collapse to ellipsis and stop recursing.
+  if (depth >= maxDepth) {
+    out.push(treeTruncateIndent(ownPrefix + label + "…", maxLineChars));
+    return;
+  }
+
+  // Empty containers are leaves.
+  if (Array.isArray(value) && value.length === 0) {
+    out.push(treeTruncateIndent(ownPrefix + label + "[]", maxLineChars));
+    return;
+  }
+  if (
+    !Array.isArray(value) &&
+    value !== null &&
+    typeof value === "object" &&
+    Object.keys(value).length === 0
+  ) {
+    out.push(treeTruncateIndent(ownPrefix + label + "{}", maxLineChars));
+    return;
+  }
+
+  // Scalars.
+  if (value === null || typeof value !== "object") {
+    const budget = Math.max(0, maxLineChars - visibleWidth(ownPrefix) - label.length);
+    out.push(
+      treeTruncateIndent(ownPrefix + label + treeScalarPreview(value, budget), maxLineChars),
+    );
+    return;
+  }
+
+  // Small all-scalar containers collapse to one line.
+  const inlineBudget = Math.max(0, maxLineChars - visibleWidth(ownPrefix) - label.length);
+  const inline = treeInlinePreview(value, inlineBudget);
+  if (inline !== undefined) {
+    out.push(treeTruncateIndent(ownPrefix + label + inline, maxLineChars));
+    return;
+  }
+
+  // Larger containers: header row, then recurse.
+  const listLike = Array.isArray(value);
+  const childCount = listLike ? value.length : Object.keys(value).length;
+  let header: string;
+  if (listLike) {
+    header = "Array(" + childCount + ")";
+  } else {
+    header =
+      childCount > maxChildren
+        ? "{" + maxChildren + " of " + childCount + "}"
+        : "{" + childCount + " keys}";
+  }
+  out.push(treeTruncateIndent(ownPrefix + label + header, maxLineChars));
+
+  const limit = Math.min(maxChildren, childCount);
+  if (listLike) {
+    for (let index = 0; index < limit; index += 1) {
+      const isChildLast = index === limit - 1 && childCount <= limit;
+      treeAppendNode(
+        (value as PtcJsonValue[])[index] ?? null,
+        "[" + index + "] ",
+        continuation,
+        isChildLast,
+        maxDepth,
+        maxChildren,
+        maxLineChars,
+        depth + 1,
+        out,
+      );
+    }
+  } else {
+    const keys = Object.keys(value);
+    for (let index = 0; index < limit; index += 1) {
+      const isChildLast = index === limit - 1 && childCount <= limit;
+      const key = keys[index] as string;
+      treeAppendNode(
+        (value as Record<string, PtcJsonValue>)[key] ?? null,
+        treeFormatKey(key) + ": ",
+        continuation,
+        isChildLast,
+        maxDepth,
+        maxChildren,
+        maxLineChars,
+        depth + 1,
+        out,
+      );
+    }
+  }
+  if (childCount > limit) {
+    const tail = listLike ? "items" : "keys";
+    out.push(
+      treeTruncateIndent(
+        continuation + "└─ " + "…+" + (childCount - limit) + " more " + tail,
+        maxLineChars,
+      ),
+    );
+  }
+}
+
+/** Truncate a rendered row, preserving the leading tree-prefix indent (│/├/└ etc.). */
+function treeTruncateIndent(line: string, maxLineChars: number): string {
+  if (visibleWidth(line) <= maxLineChars) return line;
+  const match = line.match(/^([\s│├└─]*)/);
+  const indent = match && match[1] ? match[1] : "";
+  const indentWidth = visibleWidth(indent);
+  const budget = Math.max(0, maxLineChars - indentWidth - 1);
+  let body = "";
+  let used = 0;
+  for (const ch of line.slice(indent.length)) {
+    const w = visibleWidth(ch);
+    if (used + w > budget) break;
+    body += ch;
+    used += w;
+  }
+  return indent + body + "…";
+}
+
+/**
+ * Render a JSON value as an array of indented tree rows.
+ *
+ * Each row is a complete prefixed line ready to live under the call row's "   " indent
+ * (TREE_ROOT_CONT): root children start at "├─ " / "└─ ", deeper levels add their own
+ * connectors on top of the continuation bar. Caller supplies the row's TREE_ROOT_CONT — a
+ * row that starts with "├─ " lands at column 3, exactly where other call-row children sit.
+ *
+ * Empty / scalar values return a one-row preview; non-empty containers recurse.
+ */
+export function renderValueTree(
+  value: PtcJsonValue,
+  options: {
+    maxDepth?: number;
+    maxChildren?: number;
+    maxLineChars?: number;
+    moreAfter?: boolean;
+  } = {},
+): string[] {
+  const maxDepth = options.maxDepth ?? TREE_VALUE_MAX_DEPTH;
+  const maxChildren = options.maxChildren ?? TREE_VALUE_MAX_CHILDREN;
+  const maxLineChars = options.maxLineChars ?? TREE_VALUE_MAX_LINE_CHARS;
+  // A tree followed by sibling blocks must keep the chain open: its last row stays ├─.
+  const moreAfter = options.moreAfter === true;
+  if (!isExpandableContainer(value)) {
+    // An empty container is not "expandable" but still must show its own shape, not the
+    // scalar fallback ("?").
+    if (value !== null && typeof value === "object") {
+      return [Array.isArray(value) ? "[]" : "{}"];
+    }
+    return [treeScalarPreview(value, maxLineChars)];
+  }
+  const out: string[] = [];
+  if (Array.isArray(value)) {
+    const total = value.length;
+    const limit = Math.min(maxChildren, total);
+    for (let index = 0; index < limit; index += 1) {
+      const isLast = !moreAfter && index === limit - 1 && total <= limit;
+      treeAppendNode(
+        value[index] ?? null,
+        "[" + index + "] ",
+        "",
+        isLast,
+        maxDepth,
+        maxChildren,
+        maxLineChars,
+        0,
+        out,
+      );
+    }
+    if (total > limit) {
+      out.push((moreAfter ? "├─ " : "└─ ") + "…+" + (total - limit) + " more items");
+    }
+    return out;
+  }
+  const keys = Object.keys(value);
+  const total = keys.length;
+  const limit = Math.min(maxChildren, total);
+  for (let index = 0; index < limit; index += 1) {
+    const isLast = !moreAfter && index === limit - 1 && total <= limit;
+    const key = keys[index] as string;
+    const childValue = (value as Record<string, PtcJsonValue>)[key] ?? null;
+    treeAppendNode(
+      childValue,
+      treeFormatKey(key) + ": ",
+      "",
+      isLast,
+      maxDepth,
+      maxChildren,
+      maxLineChars,
+      0,
+      out,
+    );
+  }
+  if (total > limit) {
+    out.push((moreAfter ? "├─ " : "└─ ") + "…+" + (total - limit) + " more keys");
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Public API: renderCall / renderResult
 // ---------------------------------------------------------------------------
 
@@ -272,10 +564,10 @@ export interface PtcRenderArgs {
  * than a heading. The code is one `ctrl+e` away in the expanded view.
  */
 export function renderPtcToolCall(
-    args: PtcRenderArgs,
-    theme: Theme,
-    surface: PtcToolDetails["surface"] = "run_code",
-  ): PtcRow {
+  args: PtcRenderArgs,
+  theme: Theme,
+  surface: PtcToolDetails["surface"] = "run_code",
+): PtcRow {
   const description =
     (typeof args.description === "string" && args.description.trim().length > 0
       ? args.description.trim()
@@ -302,66 +594,104 @@ function errorText(result: PtcRenderResult): string {
 }
 
 /**
- * Left half of the result row: value hint, `done`, or the failure reason. Returned WITHOUT the root
- * continuation prefix — the caller prepends `TREE_ROOT_CONT` so the same string works for both
- * collapsed and expanded first lines.
- */
-function summaryLeft(result: PtcRenderResult, isError: boolean, theme: Theme): string {
-  if (isError) return `${theme.fg("error", `failed: ${errorText(result)}`)}`;
-  const hint = resultHint(result.details?.result);
-  if (hint !== undefined) return `${theme.fg("dim", `→ ${hint}`)}`;
-  return `${theme.fg("muted", "done")}`;
-}
-
-/**
- * Collapsed result: one summary line under the call row.
+ * The result area under the call row.
  *
- * Three states, each with the same right-aligned meta so a column of PTC rows stays scannable:
- * the completion value (`→ …`), "no completion value" (`done`), or the failure reason
- * (`failed: …`, in the error colour). The summary itself hangs at the call's column (3 spaces)
- * so a reader scanning down a transcript sees the same indent under every call.
- */
-export function renderPtcToolResultCollapsed(
-    result: PtcRenderResult,
-    isError: boolean,
-    theme: Theme,
-  ): PtcRow {
-  const details = result.details;
-  const right = metaText(details, theme);
-  const row: RowLine =
-    details === undefined
-      ? {
-          left: `${TREE_ROOT_CONT}${theme.fg(isError ? "error" : "muted", isError ? `failed: ${errorText(result)}` : "done")}`,
-        }
-      : { left: `${TREE_ROOT_CONT}${summaryLeft(result, isError, theme)}` };
-  return new PtcRow([right === undefined ? row : { ...row, right }]);
-}
-
-/**
- * Expanded view: the summary line, then the run's children as tree blocks — code head, phase
- * roll-up, narration, console output, warnings, value, and an image-attached line. Each block is
- * capped and reports what it withheld, so expanded never means unbounded. The tool description
- * is deliberately absent: it lives on the call row directly above.
+ * One of four shapes, all hanging at column 3 so a column of PTC rows stays scannable:
+ * - error:                    one line with the failure reason in the error colour.
+ * - no completion value:      one line, "done".
+ * - scalar / empty container: one line, `→ <hint>` (or "done" for null).
+ * - non-empty container:      a tree of rows (recursive `├─/└─/│` connectors from
+ *                             `renderValueTree`), with the right-aligned meta pinned to
+ *                             the tree's first row. ADR-0013 §5.
  *
- * The summary line is kept (same content as the collapsed view) so a reader who expands a row
- * still gets the value hint before scrolling through the value block.
+ * Each row returns its left-side text WITHOUT the `TREE_ROOT_CONT` prefix being in scope;
+ * we prepend it here so the same output works for both surfaces.
  */
-export function renderPtcToolResultExpanded(
-    result: PtcRenderResult,
-    args: PtcRenderArgs,
-    isError: boolean,
-    theme: Theme,
-  ): PtcRow {
-  const details = result.details;
-  const right = metaText(details, theme);
-  const summary = summaryLeft(result, isError, theme);
-  const lines: RowLine[] = [
-    right === undefined
-      ? { left: `${TREE_ROOT_CONT}${summary}` }
-      : { left: `${TREE_ROOT_CONT}${summary}`, right },
-  ];
+function resultArea(
+  result: PtcRenderResult,
+  isError: boolean,
+  theme: Theme,
+  moreAfter = false,
+): RowLine[] {
+  const right = metaText(result.details, theme);
+  const attachRight = (row: RowLine): RowLine => (right === undefined ? row : { ...row, right });
 
   if (isError) {
+    return [
+      attachRight({
+        left: `${TREE_ROOT_CONT}${theme.fg("error", `failed: ${errorText(result)}`)}`,
+      }),
+    ];
+  }
+
+  const value = result.details?.result;
+  if (value === undefined) {
+    return [
+      attachRight({
+        left: `${TREE_ROOT_CONT}${theme.fg("muted", "done")}`,
+      }),
+    ];
+  }
+
+  if (isExpandableContainer(value)) {
+    const tree = renderValueTree(value, {
+      maxDepth: TREE_VALUE_MAX_DEPTH,
+      maxChildren: TREE_VALUE_MAX_CHILDREN,
+      maxLineChars: TREE_VALUE_MAX_LINE_CHARS,
+      moreAfter,
+    });
+    return tree.map((line, index) => {
+      const row: RowLine = { left: `${TREE_ROOT_CONT}${line}` };
+      return index === 0 && right !== undefined ? { ...row, right } : row;
+    });
+  }
+
+  // Scalar / empty / null — one-line `→ <hint>` (or "done" when no hint is producible).
+  const hint = resultHint(value);
+  if (hint === undefined) {
+    return [
+      attachRight({
+        left: `${TREE_ROOT_CONT}${theme.fg("muted", "done")}`,
+      }),
+    ];
+  }
+  return [
+    attachRight({
+      left: `${TREE_ROOT_CONT}${theme.fg("dim", `→ ${hint}`)}`,
+    }),
+  ];
+}
+
+/**
+ * Collapsed result: the result area only.
+ *
+ * A scalar row fits on one line; a container value expands into a tree (1+ lines). Right-aligned
+ * meta (output lines / phases / warnings / duration) is pinned to the first row of the area.
+ */
+export function renderPtcToolResultCollapsed(
+  result: PtcRenderResult,
+  isError: boolean,
+  theme: Theme,
+): PtcRow {
+  return new PtcRow(resultArea(result, isError, theme));
+}
+
+/**
+ * Expanded view: the result area, then the run's children as labelled blocks.
+ *
+ * Each child block opens with a fixed-width gutter (`code`, `phases`, `log`, `out`, `warn`,
+ * `image`); the `value` block is gone — for a scalar value the result area already shows the
+ * hint, and for a container value the area shows the full tree (ADR-0013 §5). Children that
+ * overflow cap themselves and report `+N more lines`; the view stays bounded.
+ */
+export function renderPtcToolResultExpanded(
+  result: PtcRenderResult,
+  args: PtcRenderArgs,
+  isError: boolean,
+  theme: Theme,
+): PtcRow {
+  if (isError) {
+    const lines: RowLine[] = resultArea(result, true, theme);
     // The failure text is the reason the reader expanded the row at all: give it the full width
     // under the summary, no tree connectors (it is the error message, not a structured block).
     const text = sanitizeText(
@@ -373,6 +703,7 @@ export function renderPtcToolResultExpanded(
     return new PtcRow(lines);
   }
 
+  const details = result.details;
   const children: ChildBlock[] = [];
 
   const code = args.code ?? args.script ?? "";
@@ -423,21 +754,15 @@ export function renderPtcToolResultExpanded(
     });
   }
 
-  if (details !== undefined && details.result !== undefined) {
-    const valueLines = renderModelValue(details.result).split("\n");
-    const shown = valueLines.slice(0, MAX_VALUE_LINES_EXPANDED);
-    children.push({
-      label: "value",
-      lines: shown,
-      ...(valueLines.length > shown.length ? { more: valueLines.length - shown.length } : {}),
-    });
-  }
-
   if (details !== undefined && details.imageCount > 0) {
     const desc =
       details.imageCount === 1 ? "1 image attached" : `${details.imageCount} images attached`;
     children.push({ label: "image", lines: [desc] });
   }
+
+  // Result rows first, then the labelled blocks. `moreAfter` keeps the connector chain open
+  // while blocks follow, so the value tree and the blocks read as one list of siblings.
+  const lines: RowLine[] = resultArea(result, false, theme, children.length > 0);
 
   for (let index = 0; index < children.length; index += 1) {
     const isLast = index === children.length - 1;

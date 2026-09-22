@@ -9,16 +9,18 @@
  * The contract these tests pin down is ADR-0013: a collapsed PTC row never prints an escaped JSON
  * payload. The shape (tree-connector layout) is documented in `render.ts`; the tests below pin the
  * call row's `└─ ` root, the result row's `   ` continuation under it, and the `├─` / `│` / `└─`
- * connectors used in the expanded view.
+ * connectors used in the expanded view. §5 of the ADR adds: container values expand as trees.
  */
 import { describe, expect, test, vi } from "vitest";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import {
   firstMeaningfulCodeLine,
+  isExpandableContainer,
   renderPtcToolCall,
   renderPtcToolResultCollapsed,
   renderPtcToolResultExpanded,
+  renderValueTree,
 } from "../src/tools/render.ts";
 import type { PtcToolDetails } from "../src/tools/common.ts";
 
@@ -71,7 +73,7 @@ function visible(component: Renderable, width = 200): string {
   return lines(component, width).join("\n");
 }
 
-/** `\n` written as two characters — the escape this renderer must never emit. */
+/** `\\n` written as two characters — the escape this renderer must never emit. */
 const ESCAPED_NEWLINE = String.fromCharCode(92) + "n";
 
 function makeDetails(overrides: Partial<PtcToolDetails> = {}): PtcToolDetails {
@@ -103,6 +105,126 @@ describe("firstMeaningfulCodeLine", () => {
 
   test("returns undefined when only comments / blanks are present", () => {
     expect(firstMeaningfulCodeLine("// nothing\n\n")).toBeUndefined();
+  });
+});
+
+describe("isExpandableContainer", () => {
+  test("recognises non-empty objects and arrays", () => {
+    expect(isExpandableContainer({ a: 1 })).toBe(true);
+    expect(isExpandableContainer([1, 2])).toBe(true);
+  });
+  test("rejects scalars, null, and empty containers", () => {
+    expect(isExpandableContainer(null)).toBe(false);
+    expect(isExpandableContainer(0)).toBe(false);
+    expect(isExpandableContainer("")).toBe(false);
+    expect(isExpandableContainer({})).toBe(false);
+    expect(isExpandableContainer([])).toBe(false);
+  });
+});
+
+describe("renderValueTree", () => {
+  test("object with all-scalar values renders one row per property, key:value", () => {
+    const rows = renderValueTree(
+      { file: "x.ts", instantiations: [{ a: 1 }], totalLines: 47 },
+      { maxChildren: 6 },
+    );
+    // Children that are objects: all-scalar nested arrays collapse to a single inline `{...}` row.
+    // Root: 3 properties, all keys are bare.
+    expect(rows[0]).toBe('├─ file: "x.ts"');
+    // instantiations is an array of objects → not inline-eligible, gets a header.
+    expect(rows).toContain("├─ instantiations: Array(1)");
+    expect(rows[rows.length - 1]).toBe("└─ totalLines: 47");
+  });
+
+  test("array of objects recurses with [i] indices", () => {
+    const rows = renderValueTree(
+      [
+        { file: "a", line: 12 },
+        { file: "b", line: 47 },
+      ],
+      { maxChildren: 6 },
+    );
+    // Each item is an all-scalar object → inline `{file: ..., line: ...}`.
+    expect(rows).toContain('├─ [0] {file: "a", line: 12}');
+    expect(rows).toContain('└─ [1] {file: "b", line: 47}');
+  });
+
+  test("nested containers keep their own continuation bar", () => {
+    const rows = renderValueTree({
+      root: { inner: [{ deep: 1 }] },
+    });
+    // Expect the chain of ├── └── │ throughout; spot-check key indents.
+    expect(rows).toEqual(["└─ root: {1 keys}", "   └─ inner: Array(1)", "      └─ [0] {deep: 1}"]);
+  });
+
+  test("maxChildren caps children with a +N more tail", () => {
+    const big: Record<string, number> = {};
+    for (let i = 0; i < 20; i += 1) big[`k${i}`] = i;
+    const rows = renderValueTree(big, { maxChildren: 4, maxLineChars: 200 });
+    // Limit 4 → 4 child rows + a tail.
+    expect(rows.length).toBe(5);
+    expect(rows[rows.length - 1]).toBe("└─ …+16 more keys");
+  });
+
+  test("arrays overflow with a +N more items tail", () => {
+    const rows = renderValueTree([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], {
+      maxChildren: 4,
+      maxLineChars: 200,
+    });
+    expect(rows[rows.length - 1]).toBe("└─ …+6 more items");
+  });
+
+  test("maxDepth collapses deep nesting to a single … row", () => {
+    const rows = renderValueTree({ a: { b: { c: { d: 1 } } } }, { maxDepth: 2, maxChildren: 6 });
+    expect(rows.some((r) => r.includes("…") && !r.includes("more"))).toBe(true);
+    expect(rows.some((r) => r.endsWith("└─ a: {1 keys}"))).toBe(true);
+  });
+
+  test("long strings truncate with a trailing ellipsis, preserving the tree-prefix", () => {
+    const rows = renderValueTree({ file: "x".repeat(200) }, { maxLineChars: 30, maxChildren: 6 });
+    expect(rows[0]?.startsWith("└─ file: ")).toBe(true);
+    expect(rows[0]?.endsWith("…")).toBe(true);
+    expect(visibleWidth(rows[0] ?? "")).toBeLessThanOrEqual(30);
+  });
+
+  test("scalar values return a one-row preview", () => {
+    expect(renderValueTree(47)).toEqual(["47"]);
+    expect(renderValueTree("hello")).toEqual(['"hello"']);
+    expect(renderValueTree(null)).toEqual(["null"]);
+  });
+
+  test("non-identifier keys are JSON-quoted", () => {
+    const rows = renderValueTree({ "two words": 1 }, { maxChildren: 6 });
+    expect(rows).toContain('└─ "two words": 1');
+  });
+
+  test("empty containers return one row", () => {
+    expect(renderValueTree({})).toEqual(["{}"]);
+    expect(renderValueTree([])).toEqual(["[]"]);
+  });
+
+  test("all-scalar array renders inline when it fits", () => {
+    const rows = renderValueTree([1, 2, 3], { maxLineChars: 200, maxChildren: 6 });
+    expect(rows).toContain("├─ [0] 1");
+    expect(rows).toContain("├─ [1] 2");
+    expect(rows).toContain("└─ [2] 3");
+  });
+
+  test("moreAfter keeps the last row's connector open for following siblings", () => {
+    // The expanded view renders a value tree and then labelled blocks. One connector chain means
+    // the tree's last row must stay `├─` while blocks follow, and `└─` when nothing follows.
+    const closed = renderValueTree({ a: 1, b: 2 });
+    const open = renderValueTree({ a: 1, b: 2 }, { moreAfter: true });
+    expect(closed[closed.length - 1]).toBe("└─ b: 2");
+    expect(open[open.length - 1]).toBe("├─ b: 2");
+  });
+
+  test("moreAfter also opens the tail row when children were withheld", () => {
+    const big = { a: 1, b: 2, c: 3, d: 4 };
+    const closed = renderValueTree(big, { maxChildren: 2 });
+    const open = renderValueTree(big, { maxChildren: 2, moreAfter: true });
+    expect(closed[closed.length - 1]).toBe("└─ …+2 more keys");
+    expect(open[open.length - 1]).toBe("├─ …+2 more keys");
   });
 });
 
@@ -164,28 +286,43 @@ describe("renderPtcToolCall", () => {
 });
 
 describe("renderPtcToolResultCollapsed", () => {
-  test("success: summary under the call, right-aligned meta on the same line", () => {
+  test("scalar result: one-line summary, meta pinned to right", () => {
+    const theme = makeTheme();
+    const out = lines(
+      renderPtcToolResultCollapsed(
+        { details: makeDetails({ result: "hello", logs: ["a"] }) },
+        false,
+        theme,
+      ),
+      80,
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0]).toContain("   → hello");
+    expect(out[0]).toContain("1 output line");
+    expect(visibleWidth(out[0] ?? "")).toBe(80);
+    expect(out[0]?.endsWith("123ms")).toBe(true);
+  });
+
+  test("container result: tree rows, meta on first row only", () => {
     const theme = makeTheme();
     const result = {
-      content: [{ type: "text", text: "unused" }],
       details: makeDetails({
-        result: { version: "0.1.0", name: "pi-ptc-subagents" },
-        logs: ["a", "b"],
+        result: { file: "x.ts", totalLines: 47 },
+        logs: ["a"],
       }),
     };
     const out = lines(renderPtcToolResultCollapsed(result, false, theme), 80);
-    expect(out).toHaveLength(1);
-    const line = out[0] ?? "";
-    // The summary hangs at column 3 (the call's content column) with three spaces of indent.
-    expect(line).toContain('   → {version: "0.1.0", name: "pi-ptc-subagents"}');
-    expect(line).toContain("2 output lines");
-    expect(line).toContain("123ms");
-    // The meta is pinned to the right edge: the row is padded to exactly the viewport width.
-    expect(visibleWidth(line)).toBe(80);
-    expect(line.endsWith("123ms")).toBe(true);
+    // Two property rows.
+    expect(out.length).toBe(2);
+    expect(out[0]).toContain('├─ file: "x.ts"');
+    expect(out[0]).toContain("1 output line");
+    expect(out[1]).toBe("   └─ totalLines: 47");
+    // Meta on first row only — second row has no right meta.
+    expect(out[0]?.endsWith("123ms")).toBe(true);
+    expect(out[1]?.endsWith("123ms")).toBe(false);
   });
 
-  test("multi-line string result collapses to its first line — never an escaped payload", () => {
+  test("multi-line string scalar result collapses to its first line — never an escaped payload", () => {
     const theme = makeTheme();
     const result = {
       details: makeDetails({ result: "line one\nline two\nline three", durationMs: 412 }),
@@ -196,15 +333,21 @@ describe("renderPtcToolResultCollapsed", () => {
     expect(out[0]).not.toContain(ESCAPED_NEWLINE);
   });
 
-  test("large object result reports its shape instead of its contents", () => {
+  test("large object result renders as a tree, never a JSON-escaped payload", () => {
     const theme = makeTheme();
     const big: Record<string, string> = {};
     for (const key of ["file", "clipNow", "extra", "more", "evenMore"]) big[key] = "x".repeat(80);
-    const out = visible(
+    const out = lines(
       renderPtcToolResultCollapsed({ details: makeDetails({ result: big }) }, false, theme),
+      120,
     );
-    expect(out).toContain("→ {file, clipNow, extra, more, +1}");
-    expect(out).not.toContain("x".repeat(80));
+    // Five properties → 5 tree rows in default budget.
+    expect(out).toHaveLength(5);
+    // One row per key, never a JSON-escaped payload.
+    for (const key of Object.keys(big)) {
+      expect(out.some((row) => row.includes(`${key}: "`))).toBe(true);
+    }
+    expect(out.join(String.fromCharCode(10))).not.toContain(ESCAPED_NEWLINE);
   });
 
   test("no completion value: 'done'", () => {
@@ -250,7 +393,7 @@ describe("renderPtcToolResultCollapsed", () => {
     expect(fgTagsUsed(theme)).toContain("warning");
   });
 
-  test("narrow viewport keeps the meta and stays on one line", () => {
+  test("narrow viewport keeps the meta and stays on one line for scalar values", () => {
     const theme = makeTheme();
     const result = {
       details: makeDetails({
@@ -271,7 +414,7 @@ describe("renderPtcToolResultExpanded", () => {
     code: "// preamble\nconst pkg = await tools.read({ path: 'x' });\nconst y = 2;\nreturn pkg;",
   };
 
-  test("summary line then tree children: code, phases, log, out, warn, value", () => {
+  test("scalar result: summary line then tree children (code, phases, log, out, warn) — no value block", () => {
     const theme = makeTheme();
     const result = {
       content: [{ type: "text", text: "Phases: init → compute" }],
@@ -281,54 +424,45 @@ describe("renderPtcToolResultExpanded", () => {
         logs: ["[ptc] out 1"],
         phases: ["init", "compute"],
         warnings: ['phase "extra" is not listed in meta.phases'],
-        result: { version: "0.1.0", node: "v24" },
+        result: 42,
         durationMs: 1500,
       }),
     };
     const out = visible(renderPtcToolResultExpanded(result, codeArgs, false, theme));
-    // The summary line carries the hint), with ` +`,
-    expect(out).toContain('   → {version: "0.1.0", node: "v24"}');
-    // Each child block is led by its connector, with the label padded into the gutter.
-    expect(out).toContain('├─ phases  init → compute');
-    expect(out).toContain('├─ log     log line A');
-    expect(out).toContain('├─ out     [ptc] out 1');
-    expect(out).toContain('├─ warn    phase "extra" is not listed');
-    expect(out).toContain('└─ value   {version: "0.1.0", node: "v24"}');
-    // The first child uses `├─`; the last child uses `└─`.
-    expect(out).toContain('├─ code    // preamble');
-    expect(out).toContain('└─ value   {version: "0.1.0", node: "v24"}');
-    // The description lives on the call row; repeating it here would be noise.
+    // Scalar value → summary line.
+    expect(out).toContain("   → 42");
+    // Child blocks still present, with their connectors, but no "value" label.
+    expect(out).toContain("├─ phases  init → compute");
+    expect(out).toContain("├─ log     log line A");
+    expect(out).toContain("├─ out     [ptc] out 1");
+    expect(out).toContain('└─ warn    phase "extra" is not listed');
+    // Description lives on the call row, not duplicated here.
     expect(out).not.toContain("Ship the release");
+    // No more "value" child block.
+    expect(out).not.toContain("├─ value");
+    expect(out).not.toContain("└─ value");
   });
 
-  test("value blocks keep real newlines and indent continuations past the gutter", () => {
+  test("container result: tree rows replace the summary line, child blocks follow", () => {
     const theme = makeTheme();
     const result = {
       details: makeDetails({
-        result: { file: "one\ntwo\nthree", clipNow: "«class PNGf»" },
+        result: {
+          version: "0.1.0",
+          install: { npm: "pi-ptc-subagents", depth: 0 },
+        },
+        logs: ["[ptc] out 1"],
         durationMs: 536,
       }),
     };
-    const out = visible(renderPtcToolResultExpanded(result, { code: "return x;" }, false, theme));
-    // The `value` block opens on a `├─ ` (last child here, so actually `└─ `); check both prefixes.
-    expect(out).toMatch(/[├└]─ value\s+\{/);
-    expect(out).toContain("file:");
-    // Continuations are prefixed with `│          ` (3 indent + 2 connector + 3 gutter = 8), so
-    // a value-line at the same indent as the label sits beneath, e.g. the file content lines.
-    expect(out).toMatch(/^\s+one$/m);
-    expect(out).not.toContain(ESCAPED_NEWLINE);
-  });
-
-  test("caps long blocks and says how much it withheld", () => {
-    const theme = makeTheme();
-    const logs = Array.from({ length: 20 }, (_, i) => `line ${i}`);
-    const result = { details: makeDetails({ logs, durationMs: 10 }) };
-    const out = visible(renderPtcToolResultExpanded(result, {}, false, theme));
-    // First 12 logs (MAX_LOG_LINES_EXPANDED) are shown; line 12+ is truncated.
-    expect(out).toContain("line 11");
-    expect(out).not.toContain("line 12");
-    // `+8 more lines` (20 - 12 = 8) appears as a continuation line under the out block.
-    expect(out).toContain("…+8 more lines");
+    const out = visible(renderPtcToolResultExpanded(result, { code: "return 1;" }, false, theme));
+    // No single-line → preview.
+    expect(out).not.toMatch(/^   →/m);
+    // Tree rows for the value, with a children block in between.
+    expect(out).toContain('├─ version: "0.1.0"');
+    expect(out).toContain('├─ install: {npm: "pi-ptc-subagents", depth: 0}');
+    // Other child blocks follow.
+    expect(out).toContain("└─ out     [ptc] out 1");
   });
 
   test("failure: the full error text is surfaced in the error color, with the tree-indent", () => {
@@ -352,7 +486,7 @@ describe("renderPtcToolResultExpanded", () => {
     const theme = makeTheme();
     const out = visible(
       renderPtcToolResultCollapsed(
-        { details: makeDetails({ fullOutputPath: "/tmp/pi-ptc-output-1.txt" })},
+        { details: makeDetails({ fullOutputPath: "/tmp/pi-ptc-output-1.txt" }) },
         false,
         theme,
       ),
@@ -364,35 +498,46 @@ describe("renderPtcToolResultExpanded", () => {
   test("hoisted images ride the meta and get their own child block (ADR-0014)", () => {
     const theme = makeTheme();
     // Collapsed: image count goes into the meta segment.
-    const collapsed = visible(renderPtcToolResultCollapsed({ details: makeDetails({ imageCount: 2 }) }, false, theme));
+    const collapsed = visible(
+      renderPtcToolResultCollapsed({ details: makeDetails({ imageCount: 2 }) }, false, theme),
+    );
     expect(collapsed).toContain("2 images");
     expect(fgTagsUsed(theme)).toContain("toolOutput");
-    // Expanded: a tree child `img` child block at the end with the image description.
-    const expanded = visible(renderPtcToolResultExpanded({ details: makeDetails({ imageCount: 2 }) }, {}, false, theme));
+    // Expanded: an image child block at the end.
+    const expanded = visible(
+      renderPtcToolResultExpanded({ details: makeDetails({ imageCount: 2 }) }, {}, false, theme),
+    );
     expect(expanded).toContain("└─ image");
     expect(expanded).toContain("2 images attached");
   });
 
-  test("tree connectors: first child uses `├─`, last child uses `└─`, mid children use `├─`", () => {
+  test("caps long blocks and says how much it withheld", () => {
     const theme = makeTheme();
-    // Three blocks: code, out, value (value is last).
+    const logs = Array.from({ length: 20 }, (_, i) => `line ${i}`);
+    const result = { details: makeDetails({ logs, durationMs: 10 }) };
+    const out = visible(renderPtcToolResultExpanded(result, {}, false, theme));
+    expect(out).toContain("line 11");
+    expect(out).not.toContain("line 12");
+    expect(out).toContain("…+8 more lines");
+  });
+
+  test("child blocks keep their own ├─ / └─ connectors based on position in the children list", () => {
+    const theme = makeTheme();
+    // Two non-value children: code, out. Out is last → └─.
     const result = {
       details: makeDetails({
         logs: ["a", "b"],
-        result: { x: 1 },
+        result: 7,
       }),
     };
     const args = { description: "d", code: "return 1;" };
-    const out = visible(renderPtcToolResultExpanded(result, args, false, theme));
-    const lines = out.split("\n");
-    const codeLine = lines.find((l) => l.startsWith("   ├─ code") || l.startsWith("   └─ code"));
-    const outLine = lines.find((l) => l.startsWith("   ├─ out") || l.startsWith("   └─ out"));
-    const valueLine = lines.find((l) => l.startsWith("   ├─ value") || l.startsWith("   └─ value"));
+    const outLines = visible(renderPtcToolResultExpanded(result, args, false, theme)).split("\n");
+    const codeLine = outLines.find((l) => l.startsWith("   ├─ code") || l.startsWith("   └─ code"));
+    const outLine = outLines.find((l) => l.startsWith("   ├─ out") || l.startsWith("   └─ out"));
     expect(codeLine).toMatch(/^   ├─ code/);
-    expect(outLine).toMatch(/^   ├─ out/);
-    expect(valueLine).toMatch(/^   └─ value/);
-    // Continuation lines under `├─ ` children use `│          `; under `└─ ` they use spaces.
-    const continuations = lines.filter((l) => /^[│ ]+\s{8}/.test(l));
+    expect(outLine).toMatch(/^   └─ out/);
+    // Continuation lines under ├─ children use `│          `; under └─ they use spaces.
+    const continuations = outLines.filter((l) => /^[│ ]+\s{8}/.test(l));
     expect(continuations.length).toBeGreaterThan(0);
   });
 });
