@@ -1,0 +1,29 @@
+{
+  "rules": [
+    {
+      "path": "src/runtime/protocol.ts",
+      "rule": ".opencodereview/rules/ptc-protocol-pair-correctness.md",
+      "merge_system_rule": false
+    },
+    {
+      "path": "src/runtime/worker-*.ts",
+      "rule": ".opencodereview/rules/ptc-worker-lifecycle.md",
+      "merge_system_rule": false
+    },
+    {
+      "path": "src/tools/render.ts",
+      "rule": ".opencodereview/rules/ptc-render-bounds.md",
+      "merge_system_rule": false
+    },
+    {
+      "path": "tests/dispatch-*.test.ts",
+      "rule": ".opencodereview/rules/test-discipline-oracle.md",
+      "merge_system_rule": false
+    },
+    {
+      "path": "tests/**/*.test.ts",
+      "rule": ".opencodereview/rules/test-discipline.md",
+      "merge_system_rule": false
+    }
+  ]
+}
