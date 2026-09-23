@@ -117,12 +117,14 @@ concurrently); the PTC program composes with `Promise.all` /
 §3.
 
 **pi.dispatch** — the only _parallel binding_ shipped today. Spawns a
-fresh `pi` subprocess (`--mode json -p --no-session
---append-system-prompt <tmpfile>`) and returns a structured
-`DispatchResult`. Subject to a per-run _dispatch concurrency_ cap
-(default 8, matches pi's `subagent` extension `MAX_PARALLEL_TASKS`).
-_Not_ a model-visible lifecycle tool: the model cannot `task_query` /
-`task_stop` it — it is program-visible only, because it is a binding.
+fresh `pi` subprocess (`--mode json -p` plus session-file flags from R1
+when `{ background: true }` is set) and returns a structured result
+(see _DispatchResult_ for foreground, _DispatchHandle_ for background).
+Subject to a per-run _dispatch concurrency_ cap (default 8, matches pi's
+`subagent` extension `MAX_PARALLEL_TASKS`).
+The spawn surface is binding-only (the model cannot call `pi.dispatch`);
+but the **lifecycle face** for background tasks is model-visible via
+`ptc_task_*` tools and `<bg-task-notification>` events (see ADR-0022).
 _Avoid_: `agent()` (DSH helper stub, deferred), `subagent` (DSH / pi
 extension).
 
@@ -294,6 +296,58 @@ Falls back to `JSON.stringify(args)` truncated to 40 chars when the
 selector misses — **the only place** `JSON.stringify` is acceptable on a
 sub-row. ADR-0021 §3. _Avoid_: "args display" (vague), "args format"
 (implies the JSON-format capability).
+
+**DispatchHandle** — the thin 3-field snapshot returned by background
+`pi.dispatch(...)` when `{ background: true }` is set:
+`{ taskId: ULID, label: string, status: "running" }`. Spawn-time projection
+of the TaskRecord; not updated on transition. Programs that need live
+state call `ptc_task_list` instead. See ADR-0022.
+
+**background dispatch** — the long-lived variant of `pi.dispatch`. The
+spawning program's model observes the spawned child via `<bg-task-notification>`
+events delivered through the TaskRegistry subscription buffer, and via
+model-facing tools `ptc_task_list` / `ptc_task_output` / `ptc_task_stop`.
+The child may outlive the spawn turn, run across program boundaries,
+finish while the parent is in a tool loop, fail because the host
+rebooted, or be stopped explicitly (`ptc_task_stop`) or implicitly by
+session abort (`Esc`). See ADR-0022.
+
+**TaskRecord** — session-level _TaskRegistry_ row tracking the full
+lifecycle of one background child. 21-field schema persisted to
+`<sessionDir>/tasks/<taskId>.json` per R1. Independent of `DispatchResult`
+and `SubCallRecord`. See ADR-0022.
+
+**TaskStatus** — the 6-state enum for `TaskRecord.status`:
+`running / stopping / succeeded / failed / canceled / lost`. The `queued`
+state is deliberately absent in v1 (spawn-or-reject, no in-task queue).
+See ADR-0022.
+
+**TaskRegistry** — session-level singleton holding `TaskRecord` rows and
+their per-subscriber `Subscription` cursors. On session restart,
+replays events whose cursor is ahead of the highest-scanned position;
+tasks left `running` at shutdown are marked `lost` (reason
+`lost_on_session_restart`). See ADR-0022.
+
+**Subscription** — per-subscriber cursor for one `TaskRecord`.
+Persisted to `<sessionDir>/subscriptions/<subscriberId>-<taskId>.json`.
+Default fork cursor is `max(parent, child)` (child observes post-fork
+events only); `ptc_task_resubscribe(taskId, since: "initial")` resets
+to task-creation. See ADR-0022.
+
+**`ptc_task_*` (model-facing management tools)** — three tools always
+on (not gated by `/ptc off`, per ADR-0022 + map Notes clause 5):
+`ptc_task_list(filter?, opts?)` returns matching TaskRecords;
+`ptc_task_output(taskId, opts?)` dereferences `outputRef` and applies
+ADR-0015 truncateTail; `ptc_task_stop(taskId, opts?)` triggers
+`running → stopping → canceled`. See ADR-0022.
+
+**`<bg-task-notification>` (event schema)** — user-role XML emitted to
+the model when a `TaskRecord` changes. Batch parent `<bg-task-notifications>`
+wraps N per-event children; per-event `<bg-task-notification>` carries
+`id="task:<ulid>:-><status>"`, `task-id`, `subscription-id`, `status`,
+`label`, `agent-name`, `depth`, `duration-ms`, `transition-at-ms`,
+`<output-bytes>`, optional `<output-ref>`, optional `<output-preview>`
+(only when outputBytes <= 2048). See ADR-0022.
 
 **dispatch sub-row** — the variant of a sub-row for `pi.dispatch(...)`
 calls. Uses the binding's `agent` argument for the args preview and reads
