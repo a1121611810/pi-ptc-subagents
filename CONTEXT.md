@@ -183,6 +183,28 @@ warm reuse, `ready` means "this worker has cleared all per-run state and is
 ready for the next `init` frame". On cold start, `ready` keeps its original
 meaning ("booted"). No new frame kind.
 
+## Release & supply chain
+
+**release tag** — an annotated git tag `v<version>` on `main`; pushing it is the act
+that publishes the package (the `v*` workflow does the rest). The tag must agree with
+`version` in `package.json`. _Avoid_: "version bump" (the commit that precedes the
+tag), "npm publish" (the mechanism the tag triggers).
+
+**trusted publishing** — npm's OIDC publish path: the `publish.yml` workflow is
+registered on npmjs.com as this package's trusted publisher, so no long-lived npm
+token exists anywhere. ADR-0018 §2. _Avoid_: "NPM_TOKEN" / "automation token" (this
+package has none).
+
+**provenance** — the signed build attestation npm attaches to a published version.
+**Absent for this package**, because npm generates it only for public source
+repositories; the absence is expected, not a publishing defect, and it clears by
+itself if the repository is ever made public. ADR-0018 §7. _Avoid_: "signature"
+(registry signatures are a different npm feature).
+
+**staged publishing** — npm's optional approval gate (`npm stage publish`, then a 2FA
+`npm stage approve`). Not adopted here; ADR-0018's considered options say why, and
+when to revisit. _Avoid_: "draft release" (that is a GitHub Releases concept).
+
 ## Out-of-glossary (do not confuse)
 
 - **DSH `subagent`** (a separate dsh concept: continuable sub-agent with
