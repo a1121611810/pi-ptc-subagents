@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Build pipeline: minify + source-map exclusion.** `pnpm run build`
+  (`vp pack`) now produces minified `dist/*.js` (rolldown's built-in oxc
+  minifier; no new dependency). The npm tarball excludes `dist/**/*.map`
+  via the `package.json#files` whitelist — sourcemaps stay on disk for
+  local stack traces, but no longer ship. Tarball shrinks from 168.7 kB
+  packed / 548.6 kB unpacked (v0.1.2 baseline) to 40.5 kB / 113.6 kB
+  (−76% / −79%); `dist/*.js` total shrinks from 161,303 B to 53,959 B
+  (−66.5%). All 39 public exports retain their original names. ADR-0019.
+
 ## [0.1.2] - 2026-09-23
 
 ### Fixed

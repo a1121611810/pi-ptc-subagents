@@ -22,5 +22,6 @@ ADRs for pi-ptc-subagents, per `docs/agents/domain.md` (single-context repo).
 | [0016](./0016-ptc-dispatch-binding.md)                 | pi.dispatch binding: PTC programs may explicitly fan out to per-call pi sessions | accepted |
 | [0017](./0017-ptc-worker-pool-and-image-wire-shape.md) | Worker pool per turn; hoisted images stay base64 (no transferList)               | accepted |
 | [0018](./0018-release-path-oidc-publishing.md)         | Release path: tag-triggered OIDC publishing (no provenance while private)        | accepted |
+| [0019](./0019-minify-and-source-map-exclusion.md)      | Build pipeline: enable minification + exclude source maps from npm tarball       | accepted |
 
 Numbering gaps are deliberate: 0001/0006 were reserved while wayfinder map #7 was charting and dropped when G1 resolved; keeping their slots means every cross-reference in the map and its tickets stays valid.
