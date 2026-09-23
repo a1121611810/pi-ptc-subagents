@@ -36,14 +36,22 @@ Consequence to expect in npm's version metadata: `_npmUser` reads `GitHub Action
 maintainer's account.
 
 **3. §3 · The gates run twice, on purpose.** The workflow runs `typecheck`, `lint`,
-`fmt:check` and `test` as explicit steps; `npm publish` then runs `prepublishOnly`,
-which runs all four again plus `build`. Collapsing the two would cost the CI log its
-per-gate granularity (a red run currently names the gate that failed) or cost a local
-publish its gate; keeping both means a failure that only reproduces under
+`fmt:check`, `build` and `test` as explicit steps; `npm publish` then runs
+`prepublishOnly`, which runs the same five again. Collapsing the two would cost the CI
+log its per-gate granularity (a red run currently names the gate that failed) or cost a
+local publish its gate; keeping both means a failure that only reproduces under
 `prepublishOnly` is still caught. Worth stating plainly, since it is the kind of
 duplication a later reader would otherwise "clean up": today neither of the other
 workflows runs `typecheck` or `test` at all, so this job is the only place CI exercises
 them.
+
+**`build` precedes `test` in both places, and it has to.** `tests/tool-visibility.test.ts`
+drives the _built_ bundle — it loads `dist/index.js` under a real `pi` and asserts what the
+provider is offered — so a test run that starts from a clean checkout with no `dist/` fails
+with "the probe never observed a provider request", which says nothing about the code. The
+first version of this workflow ran `test` before any build and failed exactly that way (run
+35810906655); `prepublishOnly` had the same latent ordering bug, invisible locally because a
+working copy usually still has a `dist/` from the last build.
 
 **4. §4 · Release builds do not cache the package manager.** `package-manager-cache:
 false` on `setup-node`, as npm's trusted-publishing example does. A release build is

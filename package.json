@@ -43,7 +43,7 @@
     "test:watch": "pnpm exec vp test",
     "test:ui": "pnpm exec vp test --ui",
     "verify:dist": "node scripts/verify-dist-render.mjs",
-    "prepublishOnly": "npm run typecheck && npm run lint && npm run fmt:check && npm run test && npm run build"
+    "prepublishOnly": "npm run typecheck && npm run lint && npm run fmt:check && npm run build && npm run test"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "^0.86.1",
