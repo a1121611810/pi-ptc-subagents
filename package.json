@@ -18,7 +18,8 @@
     "url": "git+https://github.com/a1121611810/pi-ptc-subagents.git"
   },
   "files": [
-    "dist",
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
     "README.md",
     "LICENSE",
     "CHANGELOG.md"
