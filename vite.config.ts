@@ -37,9 +37,15 @@ export default defineConfig({
     dts: { sourcemap: true },
     sourcemap: true,
     clean: true,
-    // ADR-0019: build still emits *.map on disk for local stack traces; the
-    // npm tarball excludes them via the `files` whitelist in package.json.
-    // See also `minify: true` below — both decisions land together.
+    // ADR-0019: enable production minification and exclude source maps from
+    // the npm tarball. `minify: true` resolves to rolldown's built-in oxc
+    // minifier (rolldown 1.2.9 is transitive through `vite-plus`); tsdown's
+    // own `minify` option schema is `boolean | "dce-only" | MinifyOptions`
+    // and tsdown defaults it to `false` — leaving it unset gave us the
+    // import-alias-only / function-body-readable shape at v0.1.2. The
+    // `dts.sourcemap` / `sourcemap` options above keep emitting *.map on
+    // disk for local stack traces; the package.json#files whitelist (see
+    // T2 / ADR-0019 §2) is what stops them from reaching the npm tarball.
     minify: true,
     // `external` is deprecated in current tsdown — use `deps.neverBundle`.
     //
