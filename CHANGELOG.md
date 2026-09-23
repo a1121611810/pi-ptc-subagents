@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.3] - 2026-09-23
 
 ### Added
 
@@ -18,12 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     live from the moment the call is made, with its own five-state status
     (`running` / `ok` / `error` / `cancelled` / `rejected`) and duration,
     visible without expanding the row and capped at 32 with a `+N more` tail
-    (ADR-0021).
-    A failed run shows the failure text but no sub-call tree: the tool throws
-    (pi's convention), and pi builds that error result with an empty `details`,
-    so the tracked calls are dropped with it.
-
-## [0.1.3] - 2026-09-23
+    (ADR-0021). A failed run shows the failure text but no sub-call tree: the
+    tool throws (pi's convention), and pi builds that error result with an empty
+    `details`, so the tracked calls are dropped with it.
 
 ### Changed
 
