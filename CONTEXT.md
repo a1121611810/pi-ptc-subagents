@@ -183,6 +183,126 @@ warm reuse, `ready` means "this worker has cleared all per-run state and is
 ready for the next `init` frame". On cold start, `ready` keeps its original
 meaning ("booted"). No new frame kind.
 
+## TUI rendering — partial-state visibility (ADR-0020, ADR-0021)
+
+**partial-state render** — the visual treatment of a PTC row while a run is in
+flight (`isPartial: true`). Three visible parts: a shimmered description on
+the parent row, a sub-call tree under it, and right-aligned meta not yet
+present. _Avoid_: "running state", "loading state" (these collide with pi's
+own `toolPendingBg` / settled-state distinctions elsewhere in the TUI).
+
+**settled-state render** — the visual treatment after the run completes
+(`isPartial: false`). Description is uniformly `accent` (no character is
+highlighted), sub-call tree is fully populated with their final statuses, and
+right-aligned meta is present. By ADR-0020 §5 and ADR-0021 §8, the only
+visible difference between partial and settled is the shimmer band on
+running rows + the row colour of sub-calls still in flight.
+
+**shimmer** — DSH's `TextShimmer` design, adapted to ANSI: same text
+content, one character at a time is bright (`accent`) and the rest dim — except at the
+sweep-off step, where every character is dim.
+The bright character's position advances one step per 150ms, wrapping at
+the description's length. Subtle by design (DSH §A; ADR-0020 "trade-off,
+restated"). _Avoid_: "TextShimmer" alone (that name refers to DSH's CSS
+implementation, not ours); "pulse" (that name covers too many distinct
+visuals — see ADR-0020 §1 vs `Loader`, Knight-Rider, trailing dots).
+
+**shimmer band** — the bright accent character at the current band
+position. In a description of length N the band visits positions 0 … N
+inclusive (`% (N + 1)` in the formula). At the extra step N the band has
+swept past the end and the whole description rests at the off-band colour
+(`dim`) — never the settled all-`accent`, which would make one frame per
+sweep indistinguishable from a finished run. Everywhere else the bright
+character is the **only** colour difference; font, position and glyphs are
+identical in both states.
+
+**bandPos** — the integer index of the bright character on a running row,
+computed in `render()` as `floor((Date.now() - startedAt) / intervalMs) %
+(desc.length + 1)`. It is **derived, never stored**: the "no character
+highlighted" state is a cleared `startedAt` (settle), which short-circuits
+the whole band computation. _Avoid_: a `-1` sentinel (an earlier draft
+stored one; the render path no longer tests for it).
+
+**ShimmerDecorator** — the module that owns the shimmer mechanism:
+`src/tools/shimmer.ts`. Exposes `withShimmer<T extends Component>(inner,
+options): T`, which wraps a pi-tui `Component` with the band's colour
+cycle, and attaches a `dispose()` hook that stops the interval (belt-and-braces:
+production settle rides pi's `isPartial` flip, and pi never disposes a tool row
+itself — the hook exists for a caller that replaces a still-partial row). Its
+lifecycle state — `startedAt` and the interval handle — lives in the
+**`ShimmerState`** bag the caller passes in, which is pi's
+`ToolRenderContext.state`. It cannot live on the decorated instance:
+pi rebuilds the row on every `updateDisplay()`, and the shimmer's own
+interval triggers one, so instance state would restart `startedAt`
+each tick (band frozen at position 0) and leak the previous interval.
+Used only by `PtcRow`'s call row — sub-call rows do not shimmer
+(US16). _Avoid_: "shimmer wrapper" (too generic), "shimmer component"
+(collides with the `Component` vocabulary elsewhere).
+
+**ShimmerState** — the two-field bag `{ startedAt?, interval? }` that
+carries the shimmer across the row recreation pi performs. Owned by pi
+(`ToolRenderContext.state`, one bag per tool call) and threaded through
+`PtcRenderOptions.state`; `withShimmer` reads and writes it. Direct
+library callers and tests may pass a throwaway `{}`.
+
+**sub-call tree** — the list of `SubCallRecord` rows under a PTC parent
+row, always visible: both while the run is in flight (pushed live through
+pi's `onUpdate`, so the reader can see which binding is currently in
+flight) and at settle, and in both collapsed and expanded states. Each row
+carries its own status + duration; order = host-side dispatch order; capped
+at `maxSubCalls = 32` with a `└─ …+N more calls` tail. ADR-0021.
+
+**SubCallRecord** — the per-binding-call data the dispatcher tracks and
+the renderer reads:
+
+```
+{ callId, name, args, status, startMs, endMs?, durationMs?,
+  resultSummary?, errorMessage? }
+```
+
+Copied out of `SubCallTracker.snapshot()` and into `PtcToolDetails.subCalls`
+by `renderToolResult`. The snapshot copies the records, so a captured push
+shows the state as of that moment rather than the state the record was later
+mutated into. _Avoid_: "binding call", "tool call" (those refer to the
+binding's own concept, not the record we surface to the renderer).
+
+**SubCallStatus** — the five-state union on a `SubCallRecord`:
+`"running" | "ok" | "error" | "cancelled" | "rejected"`. `running` is the
+moment between `call`-frame arrival and binding resolve; `ok` / `error`
+follow `binding.execute` resolution; `cancelled` is set when the run's
+`AbortSignal` fired before the binding resolved; `rejected` is set when
+the `pi.dispatch` capacity gate (ADR-0016 §2) declined the call before
+it started. ADR-0021 §6. _Avoid_: three-state collapsing (DSH has
+running/ok/error; we add `cancelled` + `rejected` because the dispatcher
+already knows them).
+
+**SubCallTracker** — the module that owns the `SubCallRecord` lifecycle:
+`src/runtime/sub-call-tracker.ts`. Exposes `recordStart(callId, name, args)`,
+`recordEnd(callId, status, summary?)`, `snapshot(): readonly SubCallRecord[]`.
+Dispatcher holds one instance per run and calls `snapshot()` on every start
+and end (feeding the tool's throttled live push) and once at settle. The
+renderer never sees the tracker directly, only snapshots that reached it via
+`PtcToolDetails.subCalls`. ADR-0021 §9. _Avoid_: "sub-call store",
+"sub-call list" (the data is a snapshot, copied per call, not a live view of
+the tracker's internals).
+
+**args preview** — the one-line summary of a sub-call's args, rendered
+after the status cell. `read` → `args.path`, `bash` →
+`args.command`, `grep` → `args.pattern`, `find` → `args.pattern`,
+`ls` → `args.path`, `edit` → `args.path`, `write` → `args.path`.
+Falls back to `JSON.stringify(args)` truncated to 40 chars when the
+selector misses — **the only place** `JSON.stringify` is acceptable on a
+sub-row. ADR-0021 §3. _Avoid_: "args display" (vague), "args format"
+(implies the JSON-format capability).
+
+**dispatch sub-row** — the variant of a sub-row for `pi.dispatch(...)`
+calls. Uses the binding's `agent` argument for the args preview and reads
+its state from `DispatchResult`: a refusal (`status: "rejected"` with
+`started: false` — depth or concurrency gate, unknown agent, a spawn that
+never happened) is `rejected`, a child that ran and failed
+(`started: true`) is `error`, and everything else is `ok`. One per dispatch call; no recursion into the child PTC run's
+tree (ADR-0021 §7).
+
 ## Release & supply chain
 
 **release tag** — an annotated git tag `v<version>` on `main`; pushing it is the act
