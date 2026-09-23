@@ -21,8 +21,11 @@ import {
   renderPtcToolResultCollapsed,
   renderPtcToolResultExpanded,
   renderValueTree,
+  createPtcRenderers,
 } from "../src/tools/render.ts";
+import { MAX_SUBCALLS } from "../src/tools/common.ts";
 import type { PtcToolDetails } from "../src/tools/common.ts";
+import type { SubCallRecord } from "../src/runtime/protocol.ts";
 
 /** Recording theme stub: returns the input text but records which color tag was used. */
 function makeTheme(): Theme {
@@ -58,6 +61,38 @@ function fgTagsUsed(theme: Theme): string[] {
   return (theme.fg as unknown as { mock: { calls: string[][] } }).mock.calls.map(
     (c) => c[0] as string,
   );
+}
+
+/** Like `makeBracketedTheme` but emits real ANSI escape sequences — needed by the shimmer
+ * decorator's `stripAnsi` so the band-position regex can locate the description after the
+ * label/theme wrappers are removed. */
+function makeAnsiTheme(): Theme {
+  const wrap =
+    (code: string, close = "") =>
+    (text: string): string =>
+      `\x1b[${code}m${text}\x1b[${close}m`;
+  return {
+    fg: (slot: string, text: string) => {
+      if (slot === "toolTitle") return `\x1b[34m${text}\x1b[39m`;
+      if (slot === "accent") return `\x1b[36m${text}\x1b[39m`;
+      if (slot === "dim") return `\x1b[2m${text}\x1b[22m`;
+      if (slot === "muted") return `\x1b[2m${text}\x1b[22m`;
+      if (slot === "error") return `\x1b[31m${text}\x1b[39m`;
+      if (slot === "warning") return `\x1b[33m${text}\x1b[39m`;
+      return text;
+    },
+    bg: wrap("44", "49"),
+    bold: wrap("1", "22"),
+    italic: wrap("3", "23"),
+    underline: wrap("4", "24"),
+    inverse: wrap("7", "27"),
+    strikethrough: wrap("9", "29"),
+    getFgAnsi: () => "",
+    getBgAnsi: () => "",
+    getColorMode: () => "truecolor",
+    getThinkingBorderColor: () => (s: string) => s,
+    getBashModeBorderColor: () => (s: string) => s,
+  } as unknown as Theme;
 }
 
 interface Renderable {
@@ -282,6 +317,99 @@ describe("renderPtcToolCall", () => {
     const theme = makeTheme();
     renderPtcToolCall({ description: "x", code: "return 1;" }, theme);
     expect(fgTagsUsed(theme)).toContain("toolTitle");
+  });
+
+  test("partial call row shimmers: bright band advances on the 150ms cadence (ADR-0020)", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const theme = makeAnsiTheme();
+    const row = renderPtcToolCall({ description: "Verify file integrity" }, theme, "run_code", {
+      isPartial: true,
+      state: {},
+      requestInvalidate: () => {},
+    });
+    const outAt0 = row.render(80);
+    expect(outAt0).toHaveLength(1);
+    // The label and prefix's ANSI wrappers are preserved verbatim…
+    expect(outAt0[0]?.startsWith("└─ \x1b[34m\x1b[1mPTC\x1b[22m\x1b[39m ")).toBe(true);
+    // …and the description is dim/accent/dim with the bright character at position 0.
+    expect(outAt0[0]).toContain("\x1b[36mV\x1b[39m");
+    expect(outAt0[0]).toContain("\x1b[2merify file integrity\x1b[22m");
+    vi.setSystemTime(300);
+    const outAt300 = row.render(80);
+    expect(outAt300[0]).toContain("\x1b[2mVe\x1b[22m");
+    expect(outAt300[0]).toContain("\x1b[36mr\x1b[39m");
+    expect(outAt300[0]).toContain("\x1b[2mify file integrity\x1b[22m");
+    vi.useRealTimers();
+  });
+
+  test("settled call row does not shimmer (isPartial: false)", () => {
+    // The settle path: pi flips `isPartial` to false, the decorator drops `startedAt`, and the
+    // row renders exactly as ADR-0013's settled row does.
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const theme = makeAnsiTheme();
+    const row = renderPtcToolCall({ description: "Verify file integrity" }, theme, "run_code", {
+      isPartial: false,
+      state: {},
+      requestInvalidate: () => {},
+    });
+    const out = row.render(80);
+    expect(out).toHaveLength(1);
+    // No band: the description keeps its plain accent wrapper.
+    expect(out[0]).toContain("\x1b[36mVerify file integrity\x1b[39m");
+    expect(out[0]).not.toContain("\x1b[2m");
+    vi.useRealTimers();
+  });
+
+  test("band survives the row recreation pi performs on every render (state bag carries startedAt)", () => {
+    // pi rebuilds the row on every `updateDisplay()`, and the interval itself triggers one via
+    // `requestInvalidate`. Component-instance state would restart `startedAt` each rebuild and
+    // freeze the band at position 0; `context.state` is what carries it.
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const theme = makeAnsiTheme();
+    const state = {};
+    const options = { isPartial: true, state, requestInvalidate: () => {} };
+    renderPtcToolCall({ description: "Verify file integrity" }, theme, "run_code", options);
+
+    vi.setSystemTime(450);
+    const rebuilt = renderPtcToolCall(
+      { description: "Verify file integrity" },
+      theme,
+      "run_code",
+      options,
+    );
+    expect(rebuilt.render(80)[0]).toContain("\x1b[36mi\x1b[39m");
+    vi.useRealTimers();
+  });
+
+  test("call row invokes requestInvalidate on the 150ms cadence", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const requestInvalidate = vi.fn();
+    const theme = makeAnsiTheme();
+    renderPtcToolCall({ description: "Verify file integrity" }, theme, "run_code", {
+      isPartial: true,
+      state: {},
+      requestInvalidate,
+    });
+    expect(requestInvalidate).toHaveBeenCalledTimes(0);
+    vi.advanceTimersByTime(450);
+    expect(requestInvalidate).toHaveBeenCalledTimes(3);
+    vi.useRealTimers();
+  });
+
+  test("repeated partial renders keep exactly one interval (no leak across rebuilds)", () => {
+    const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
+    const theme = makeAnsiTheme();
+    const state = {};
+    const options = { isPartial: true, state, requestInvalidate: () => {} };
+    for (let i = 0; i < 5; i += 1) {
+      renderPtcToolCall({ description: "Verify file integrity" }, theme, "run_code", options);
+    }
+    expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+    setIntervalSpy.mockRestore();
   });
 });
 
@@ -539,5 +667,420 @@ describe("renderPtcToolResultExpanded", () => {
     // Continuation lines under ├─ children use `│          `; under └─ they use spaces.
     const continuations = outLines.filter((l) => /^[│ ]+\s{8}/.test(l));
     expect(continuations.length).toBeGreaterThan(0);
+  });
+});
+
+describe("MAX_SUBCALLS (ADR-0021 §5)", () => {
+  test("is exported from common.ts with the ADR-pinned value 32", () => {
+    expect(typeof MAX_SUBCALLS).toBe("number");
+    expect(MAX_SUBCALLS).toBe(32);
+  });
+});
+
+describe("error-result shape from pi (a thrown tool)", () => {
+  test("a bare `details: {}` renders the failure line instead of throwing", () => {
+    // pi builds `details: {}` for a throwing tool (`pi-agent-core` agent-loop). The renderer
+    // indexes `details.logs` / `narrations` / `phases` / `warnings` directly, so a missing field
+    // used to throw a second time inside the renderer, dropping ADR-0013's formatted failure row
+    // and falling back to pi's raw-text path.
+    const result = { content: [{ type: "text", text: "code run failed (exception): boom" }] };
+    const collapsed = renderPtcToolResultCollapsed({ ...result, details: {} }, true, makeTheme());
+    expect(collapsed.render(80).join("\n")).toContain("failed: code run failed (exception): boom");
+
+    const expanded = renderPtcToolResultExpanded(
+      { ...result, details: {} },
+      { description: "x" },
+      true,
+      makeTheme(),
+    );
+    expect(expanded.render(80).join("\n")).toContain("boom");
+  });
+
+  test("a failed run invents no meta — no '0ms' duration it was never told", () => {
+    const collapsed = renderPtcToolResultCollapsed(
+      { content: [{ type: "text", text: "boom" }], details: {} },
+      true,
+      makeTheme(),
+    );
+    expect(collapsed.render(80).join("\n")).not.toContain("0ms");
+  });
+});
+
+describe("createPtcRenderers (the pair both tools register)", () => {
+  test("renderResult dispatches collapsed / expanded / partial for either surface", () => {
+    const details = {
+      surface: "workflow" as const,
+      logs: [],
+      narrations: [],
+      phases: ["build"],
+      warnings: [],
+      durationMs: 12,
+      imageCount: 0,
+      subCalls: [
+        {
+          callId: 1,
+          name: "bash",
+          args: { command: "pnpm test" },
+          status: "ok" as const,
+          startMs: 0,
+          endMs: 12,
+          durationMs: 12,
+        },
+      ],
+    };
+    const context = { args: { description: "Verify", script: "return 1;" }, isError: false };
+    const renderers = createPtcRenderers("workflow");
+    const renderResult = renderers.renderResult;
+    if (renderResult === undefined) throw new Error("renderResult must be defined");
+
+    const collapsed = renderResult(
+      { content: [], details },
+      { expanded: false, isPartial: false },
+      makeTheme(),
+      context as never,
+    );
+    expect(collapsed.render(80).join("\n")).toContain("pnpm test");
+
+    const expanded = renderResult(
+      { content: [], details },
+      { expanded: true, isPartial: false },
+      makeTheme(),
+      context as never,
+    );
+    // The expanded view adds the labelled blocks; the sub-call tree stays in both.
+    expect(expanded.render(80).join("\n")).toContain("phases");
+    expect(expanded.render(80).join("\n")).toContain("pnpm test");
+
+    // A partial push renders the tree alone, with no completion-value placeholder.
+    const partial = renderResult(
+      { content: [], details },
+      { expanded: false, isPartial: true },
+      makeTheme(),
+      context as never,
+    );
+    const partialText = partial.render(80).join("\n");
+    expect(partialText).toContain("pnpm test");
+    expect(partialText).not.toContain("done");
+  });
+});
+
+describe("sub-row label gutter", () => {
+  test("a name longer than the gutter still gets a separator before the status", () => {
+    // `pi.dispatch` is 11 characters and the gutter is 8, so `padEnd` alone left it glued to the
+    // status text — the flagship dispatch row read `pi.dispatchrejected: …`.
+    const subCalls: SubCallRecord[] = [
+      {
+        callId: 1,
+        name: "pi.dispatch",
+        args: { agent: "agent-research" },
+        status: "rejected",
+        startMs: 0,
+        durationMs: 0,
+        errorMessage: "dispatch depth limit reached",
+      },
+    ];
+    const out = renderPtcToolResultCollapsed(
+      {
+        content: [],
+        details: {
+          surface: "run_code",
+          logs: [],
+          narrations: [],
+          phases: [],
+          warnings: [],
+          durationMs: 1,
+          imageCount: 0,
+          subCalls,
+        },
+      },
+      false,
+      makeTheme(),
+      { isPartial: true },
+    ).render(120);
+    const row = out.find((line) => line.includes("pi.dispatch"));
+    expect(row).toBeDefined();
+    expect(row).toContain("pi.dispatch ");
+    expect(row).not.toContain("pi.dispatchrejected");
+  });
+});
+
+describe("partial sub-call tree (ADR-0021 §4)", () => {
+  test("a partial render shows the tree and claims no completion value", () => {
+    // While the run is in flight there is no completion value yet. Rendering the settled
+    // placeholder ("done") here would claim the program had finished; the live push must show
+    // only the tree.
+    const theme = makeTheme();
+    const row = renderPtcToolResultCollapsed(
+      {
+        content: [],
+        details: {
+          surface: "run_code",
+          logs: [],
+          narrations: [],
+          phases: [],
+          warnings: [],
+          durationMs: 42,
+          imageCount: 0,
+          subCalls: [
+            {
+              callId: 1,
+              name: "bash",
+              args: { command: "sleep 5" },
+              status: "running",
+              startMs: 0,
+            },
+          ],
+        },
+      },
+      false,
+      theme,
+      { isPartial: true },
+    );
+    const lines = row.render(80);
+    expect(lines.join("\n")).not.toContain("done");
+    expect(lines.join("\n")).toContain("running");
+    expect(lines.join("\n")).toContain("sleep 5");
+  });
+
+  test("a settled render still shows the completion value placeholder", () => {
+    // The guard is scoped to partial renders: once settled with no return value, "done" is right.
+    const row = renderPtcToolResultCollapsed(
+      {
+        content: [],
+        details: {
+          surface: "run_code",
+          logs: [],
+          narrations: [],
+          phases: [],
+          warnings: [],
+          durationMs: 42,
+          imageCount: 0,
+        },
+      },
+      false,
+      makeTheme(),
+    );
+    expect(row.render(80).join("\n")).toContain("done");
+  });
+});
+
+describe("sub-call tree in collapsed view (ADR-0021)", () => {
+  test("appends five sub-rows after the result area, one per status, with the right connectors and previews", () => {
+    const theme = makeTheme();
+    const subCalls: SubCallRecord[] = [
+      {
+        callId: 1,
+        name: "read",
+        args: { path: "/tmp/foo.ts" },
+        status: "running",
+        startMs: 0,
+      },
+      {
+        callId: 2,
+        name: "bash",
+        args: { command: "pnpm test" },
+        status: "ok",
+        startMs: 0,
+        endMs: 1200,
+        durationMs: 1200,
+      },
+      {
+        callId: 3,
+        name: "pi.dispatch",
+        args: { agent: "agent-research" },
+        status: "error",
+        startMs: 0,
+        endMs: 100,
+        errorMessage: "boom",
+      },
+      {
+        callId: 4,
+        name: "bash",
+        args: { command: "long-running-cmd" },
+        status: "cancelled",
+        startMs: 0,
+        endMs: 50,
+        durationMs: 50,
+      },
+      {
+        callId: 5,
+        name: "pi.dispatch",
+        args: { agent: "agent-extra" },
+        status: "rejected",
+        startMs: 0,
+        endMs: 0,
+        durationMs: 0,
+        errorMessage: "capacity",
+      },
+    ];
+    const result = { details: makeDetails({ result: "hello", subCalls }) };
+    const out = lines(renderPtcToolResultCollapsed(result, false, theme), 200);
+    // Result area + 5 sub-rows = 6 lines.
+    expect(out).toHaveLength(6);
+    expect(out[0]).toContain("→ hello");
+    // First sub-row: running read with path preview, muted slot.
+    expect(out[1]).toMatch(/^   ├─ read/);
+    expect(out[1]).toContain("/tmp/foo.ts");
+    expect(out[1]).toContain("running");
+    // Middle sub-row: ok bash with command preview and duration, accent slot.
+    expect(out[2]).toMatch(/^   ├─ bash/);
+    expect(out[2]).toContain("pnpm test");
+    expect(out[2]).toContain("ok 1.2s");
+    // Mid sub-row: failed pi.dispatch with → agent preview, error slot.
+    expect(out[3]).toMatch(/^   ├─ pi.dispatch/);
+    expect(out[3]).toContain("→ agent-research");
+    expect(out[3]).toContain("failed: boom");
+    // Mid sub-row: cancelled bash, muted slot.
+    expect(out[4]).toMatch(/^   ├─ bash/);
+    expect(out[4]).toContain("cancelled");
+    // Last sub-row: rejected pi.dispatch with default concurrency message, warning slot.
+    expect(out[5]).toMatch(/^   └─ pi.dispatch/);
+    expect(out[5]).toContain("→ agent-extra");
+    expect(out[5]).toContain("rejected: capacity");
+    // All five status colour slots show up in the render path (running + cancelled both use muted).
+    expect(fgTagsUsed(theme)).toContain("muted");
+    expect(fgTagsUsed(theme)).toContain("accent");
+    expect(fgTagsUsed(theme)).toContain("error");
+    expect(fgTagsUsed(theme)).toContain("warning");
+  });
+
+  test("rejected with no errorMessage falls back to 'rejected: concurrency'", () => {
+    const theme = makeTheme();
+    const subCalls: SubCallRecord[] = [
+      {
+        callId: 1,
+        name: "pi.dispatch",
+        args: { agent: "agent-extra" },
+        status: "rejected",
+        startMs: 0,
+        endMs: 0,
+        durationMs: 0,
+      },
+    ];
+    const result = { details: makeDetails({ result: "hello", subCalls }) };
+    const out = lines(renderPtcToolResultCollapsed(result, false, theme), 200);
+    expect(out).toHaveLength(2);
+    expect(out[1]).toContain("rejected: concurrency");
+  });
+
+  test("cancelled sub-row has no duration suffix (US12 says it was interrupted, not timed)", () => {
+    const theme = makeTheme();
+    const subCalls: SubCallRecord[] = [
+      {
+        callId: 1,
+        name: "bash",
+        args: { command: "pnpm test" },
+        status: "cancelled",
+        startMs: 0,
+        endMs: 50,
+        durationMs: 50,
+      },
+    ];
+    const result = { details: makeDetails({ result: "hello", subCalls }) };
+    const out = lines(renderPtcToolResultCollapsed(result, false, theme), 200);
+    expect(out).toHaveLength(2);
+    // Cancelled status is the literal "cancelled" — no duration suffix (ADR-0021 §6).
+    expect(out[1]).toMatch(/cancelled(?!\s+\d)/);
+    expect(out[1]).not.toContain("50ms");
+  });
+
+  test("32-row hard cap with a +18 more calls tail when fed 50 records", () => {
+    const theme = makeTheme();
+    const subCalls: SubCallRecord[] = Array.from({ length: 50 }, (_, i): SubCallRecord => ({
+      callId: i,
+      name: "read",
+      args: { path: `/tmp/file${i}.ts` },
+      status: "ok",
+      startMs: 0,
+      durationMs: 100 + i,
+    }));
+    const result = { details: makeDetails({ result: "hello", subCalls }) };
+    const out = lines(renderPtcToolResultCollapsed(result, false, theme), 200);
+    // Result area + 32 sub-rows + 1 tail = 34 lines.
+    expect(out).toHaveLength(34);
+    // First sub-row is `├─` (not `└─`) because a tail follows.
+    expect(out[1]).toMatch(/^   ├─ read/);
+    // The 32nd sub-row (index 32) is still `├─` for the same reason.
+    expect(out[32]).toMatch(/^   ├─ read/);
+    // Tail row carries `└─ …+18 more calls`.
+    expect(out[33]).toBe("   └─ …+18 more calls");
+  });
+
+  test("args preview falls back to JSON.stringify(args) when no name selector matches", () => {
+    const theme = makeTheme();
+    const subCalls: SubCallRecord[] = [
+      {
+        callId: 1,
+        name: "tools.foo",
+        args: { x: 1 },
+        status: "running",
+        startMs: 0,
+      },
+    ];
+    const result = { details: makeDetails({ result: "hello", subCalls }) };
+    const out = lines(renderPtcToolResultCollapsed(result, false, theme), 200);
+    expect(out).toHaveLength(2);
+    expect(out[1]).toContain('{"x":1}');
+    // JSON.stringify produced no newlines.
+    expect(out[1]).not.toContain("\n");
+  });
+
+  test("args preview folds embedded newlines and caps at 40 chars", () => {
+    const theme = makeTheme();
+    const longKey = "k".repeat(80);
+    const subCalls: SubCallRecord[] = [
+      {
+        callId: 1,
+        name: "tools.foo",
+        args: { [longKey]: "value\nwith\nbreaks" },
+        status: "running",
+        startMs: 0,
+      },
+    ];
+    const result = { details: makeDetails({ result: "hello", subCalls }) };
+    const out = lines(renderPtcToolResultCollapsed(result, false, theme), 200);
+    expect(out).toHaveLength(2);
+    // No embedded newlines in the rendered line.
+    expect(out[1]).not.toContain("\n");
+    // The preview segment (after `running ` and its leading space) is at most 40 chars and
+    // capped with `…` (ADR-0021 §3: 40-char preview cap with ellipsis when longer).
+    const preview = out[1]?.split("running ")[1] ?? "";
+    expect(preview.length).toBeLessThanOrEqual(40);
+    expect(preview.endsWith("…")).toBe(true);
+  });
+});
+
+describe("sub-call tree in expanded view (ADR-0021)", () => {
+  test("renders the sub-call tree between the result area and the labelled blocks", () => {
+    const theme = makeTheme();
+    const subCalls: SubCallRecord[] = [
+      {
+        callId: 1,
+        name: "read",
+        args: { path: "/tmp/foo.ts" },
+        status: "ok",
+        startMs: 0,
+        durationMs: 12,
+      },
+    ];
+    const result = {
+      details: makeDetails({
+        result: 42,
+        logs: ["[ptc] out 1"],
+        subCalls,
+      }),
+    };
+    const out = lines(
+      renderPtcToolResultExpanded(result, { code: "return 42;" }, false, theme),
+      200,
+    );
+    // Result area is the summary line for the scalar value.
+    expect(out[0]).toContain("→ 42");
+    // Sub-call row sits between the result area and the `out` labelled block.
+    const subRowIndex = out.findIndex((l) => l.includes("read"));
+    const outBlockIndex = out.findIndex((l) => l.includes("└─ out") || l.includes("├─ out"));
+    expect(subRowIndex).toBeGreaterThan(0);
+    expect(outBlockIndex).toBeGreaterThan(subRowIndex);
+    expect(out[subRowIndex]).toContain("/tmp/foo.ts");
   });
 });

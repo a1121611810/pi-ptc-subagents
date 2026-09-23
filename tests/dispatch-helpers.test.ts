@@ -8,6 +8,7 @@ import {
   decideCloseOutcome,
   discoverAgent,
   dispatch,
+  dispatchConcurrencyLimitReached,
   parseAgentEvent,
   parseAgentMarkdown,
   safeKill,
@@ -27,6 +28,8 @@ const spawnRecorder = vi.hoisted(() => ({
     args: readonly string[];
     options: Record<string, unknown>;
   }>,
+  /** Set before a call to make the fake child fail to spawn instead of closing cleanly. */
+  spawnError: undefined as Error | undefined,
 }));
 
 vi.mock("node:child_process", async (importOriginal) => {
@@ -49,8 +52,14 @@ vi.mock("node:child_process", async (importOriginal) => {
     proc.pid = 4242;
     proc.killed = false;
     proc.kill = () => true;
-    // Close cleanly with no events: enough for dispatch() to resolve promptly.
+    // Node reports an async spawn failure (ENOENT and friends) as `error` *before* `close`.
+    const failure = spawnRecorder.spawnError;
     queueMicrotask(() => {
+      if (failure !== undefined) {
+        proc.emit("error", failure);
+        proc.emit("close", -2);
+        return;
+      }
       proc.emit("close", 0);
     });
     return proc;
@@ -320,5 +329,37 @@ describe("dispatch depth propagation (ADR-0016 Recursive section)", () => {
     // Verbatim per the hint block appendDepthHint promises the child program.
     expect(result.errorMessage).toBe("dispatch depth limit reached");
     expect(spawnRecorder.calls).toHaveLength(0);
+    // The marker that tells a declined dispatch apart from one that ran and failed — the
+    // sub-call tree colours the first `rejected` and the second `error` (ADR-0021 §6).
+    expect(result.started).toBe(false);
+  });
+
+  test("the concurrency-gate refusal is marked 'not started' too", () => {
+    expect(dispatchConcurrencyLimitReached().started).toBe(false);
+  });
+
+  test("a spawn that never happened is marked 'not started' (ENOENT arrives as `error`)", async () => {
+    const dir = await makeTempDir();
+    spawnRecorder.calls.length = 0;
+    spawnRecorder.spawnError = Object.assign(new Error("spawn pi ENOENT"), { code: "ENOENT" });
+    try {
+      await mkdir(join(dir, ".pi", "agents"), { recursive: true });
+      await writeFile(
+        join(dir, ".pi", "agents", "env-probe.md"),
+        "---\nname: env-probe\n---\nProbe.\n",
+      );
+      const result = await dispatch(
+        { agent: "env-probe", task: "ping", agentScope: "project" },
+        { callId: 9, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+      );
+      expect(result.status).toBe("rejected");
+      expect(result.errorMessage).toContain("failed to spawn pi");
+      // No child ever came up, so this is a refusal like the depth and concurrency gates — the
+      // sub-call tree colours it `rejected`, not the `error` bucket a ran-and-failed child gets.
+      expect(result.started).toBe(false);
+    } finally {
+      spawnRecorder.spawnError = undefined;
+      await removeTempDir(dir);
+    }
   });
 });

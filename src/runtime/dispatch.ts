@@ -60,6 +60,16 @@ export interface DispatchUsage {
 export interface DispatchResult {
   text: string;
   status: "fulfilled" | "rejected";
+  /**
+   * Whether the child pi process was actually brought up.
+   *
+   * `status: "rejected"` covers two very different things — the harness declining to start
+   * (depth gate, concurrency gate, unknown agent, a spawn that never happened) and a child that
+   * ran and failed. The sub-call
+   * tree colours the first `rejected` (the harness said no) and the second `error` (the work
+   * failed), so it needs the distinction rather than inferring it from `status` alone.
+   */
+  started: boolean;
   agentName: string;
   durationMs: number;
   exitCode: number;
@@ -120,6 +130,7 @@ export function dispatchDepthLimitReached(): DispatchResult {
   return {
     text: "",
     status: "rejected",
+    started: false,
     agentName: "unknown",
     durationMs: 0,
     exitCode: -1,
@@ -141,6 +152,7 @@ export function dispatchConcurrencyLimitReached(): DispatchResult {
   return {
     text: "",
     status: "rejected",
+    started: false,
     agentName: "unknown",
     durationMs: 0,
     exitCode: -1,
@@ -475,6 +487,7 @@ export async function dispatch(
     return {
       text: "",
       status: "rejected",
+      started: false,
       agentName: input.agent,
       durationMs: Date.now() - start,
       exitCode: 1,
@@ -499,7 +512,11 @@ export async function dispatch(
     let proc: ReturnType<typeof spawn> | undefined;
     let aborted = false;
 
-    const finalize = (status: "fulfilled" | "rejected", errorMessage?: string): void => {
+    const finalize = (
+      status: "fulfilled" | "rejected",
+      errorMessage?: string,
+      started = true,
+    ): void => {
       if (resolved) return;
       resolved = true;
       if (killTimer) clearTimeout(killTimer);
@@ -508,6 +525,7 @@ export async function dispatch(
       const out: DispatchResult = {
         text: finalText,
         status,
+        started,
         agentName: agent.name,
         durationMs: Date.now() - start,
         exitCode,
@@ -540,7 +558,7 @@ export async function dispatch(
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      finalize("rejected", "failed to spawn pi: " + message);
+      finalize("rejected", "failed to spawn pi: " + message, false);
       return;
     }
 
@@ -607,7 +625,10 @@ export async function dispatch(
 
     proc.on("error", (err) => {
       stderrBuf += "[spawn-error] " + err.message + "\n";
-      finalize("rejected", "failed to spawn pi: " + err.message);
+      // A failed spawn (ENOENT and friends arrive here, not at the synchronous `spawn()` call)
+      // never brought a child up, so it is a refusal like the depth and concurrency gates —
+      // `started: false` is what keeps it out of the sub-call tree's `error` bucket.
+      finalize("rejected", "failed to spawn pi: " + err.message, false);
     });
   });
 }

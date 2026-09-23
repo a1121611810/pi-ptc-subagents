@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **PTC rows show what the program is doing while it runs.** Two partial-state
+  visuals on the `ptc_run_code` / `ptc_workflow` row, both absent until now:
+  - a **shimmer** on the call row — same text, one character at a time bright,
+    the highlight sweeping at 150ms — so a running row is distinguishable from a
+    settled one in a column (ADR-0020);
+  - a **sub-call tree** under it: one row per binding call the program made,
+    live from the moment the call is made, with its own five-state status
+    (`running` / `ok` / `error` / `cancelled` / `rejected`) and duration,
+    visible without expanding the row and capped at 32 with a `+N more` tail
+    (ADR-0021).
+    A failed run shows the failure text but no sub-call tree: the tool throws
+    (pi's convention), and pi builds that error result with an empty `details`,
+    so the tracked calls are dropped with it.
+
 ## [0.1.3] - 2026-09-23
 
 ### Changed

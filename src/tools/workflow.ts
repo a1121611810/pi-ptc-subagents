@@ -26,12 +26,12 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { Static, TArray, TObject, TOptional, TRecord, TString, TUnknown } from "typebox";
 import { createBuiltinBindings } from "../runtime/bindings.ts";
-import { runPtcProgram } from "../runtime/dispatcher.ts";
-import type { PtcRunOutcome } from "../runtime/dispatcher.ts";
+import { runPtcProgram, type PtcRunOutcome } from "../runtime/dispatcher.ts";
 import { describeValue } from "../runtime/protocol.ts";
 import type { WorkerPool } from "../runtime/worker-pool.ts";
 import {
   codeRunFailedError,
+  createSubCallUpdater,
   PTC_TOOL_GUIDELINES,
   PTC_WORKFLOW_SNIPPET,
   renderToolResult,
@@ -39,11 +39,7 @@ import {
   resolveToolCwd,
 } from "./common.ts";
 import type { PtcToolDetails, PtcToolOptions } from "./common.ts";
-import {
-  renderPtcToolCall,
-  renderPtcToolResultCollapsed,
-  renderPtcToolResultExpanded,
-} from "./render.ts";
+import { createPtcRenderers } from "./render.ts";
 
 const DESCRIPTION = [
   "Run a structured TypeScript workflow: a named plan that reports phases and narration as it",
@@ -233,24 +229,33 @@ export function createPtcWorkflowTool(
     promptSnippet: PTC_WORKFLOW_SNIPPET,
     promptGuidelines: [...PTC_TOOL_GUIDELINES],
     parameters: PARAMETERS,
-    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+    async execute(_toolCallId, params, signal, onUpdate, ctx) {
       validateWorkflowArgs(params.args);
       const cwd = resolveToolCwd(ctx);
       const names = resolveBindingNames(options.getBindingSourceNames?.());
       const startedAt = Date.now();
       const pool = options.getPool?.();
-      const outcome = await runPtcProgram({
-        code: params.script,
-        surface: "workflow",
-        cwd,
-        // Same surface contract as ptc_run_code: pi.dispatch is always bound (ADR-0016).
-        bindings: createBuiltinBindings({ cwd, names, includeDispatch: true }),
-        ...(params.args === undefined ? {} : { args: params.args }),
-        ...(options.depth === undefined ? {} : { depth: options.depth }),
-        ...(signal === undefined ? {} : { signal }),
-        ...(options.config === undefined ? {} : { config: options.config }),
-        ...(pool === undefined ? {} : { pool }),
-      });
+      // Live sub-call pushes: while the program runs, the tree is visible (ADR-0021 §4).
+      const updater = createSubCallUpdater({ surface: "workflow", startedAt, onUpdate });
+      let outcome: PtcRunOutcome;
+      try {
+        outcome = await runPtcProgram({
+          code: params.script,
+          surface: "workflow",
+          cwd,
+          // Same surface contract as ptc_run_code: pi.dispatch is always bound (ADR-0016).
+          bindings: createBuiltinBindings({ cwd, names, includeDispatch: true }),
+          ...(params.args === undefined ? {} : { args: params.args }),
+          ...(options.depth === undefined ? {} : { depth: options.depth }),
+          ...(signal === undefined ? {} : { signal }),
+          ...(options.config === undefined ? {} : { config: options.config }),
+          ...(pool === undefined ? {} : { pool }),
+          onSubCallChange: (snapshot) => updater.update(snapshot),
+        });
+      } finally {
+        // A throttled partial must never land after the terminal result below.
+        updater.cancel();
+      }
       if (outcome.error !== undefined) throw codeRunFailedError(outcome);
       const declared = params.meta.phases?.map((phase) => phase.name);
       return renderToolResult({
@@ -264,14 +269,6 @@ export function createPtcWorkflowTool(
     // Same renderer as `ptc_run_code`; the `workflow` label tells the two rows apart, the collapsed
     // meta adds a phase count, and the expanded view puts the phases roll-up first so a reader sees
     // the workflow plan up top.
-    renderCall(args, theme) {
-      return renderPtcToolCall(args, theme, "workflow");
-    },
-    renderResult(result, options, theme, context) {
-      if (options.expanded) {
-        return renderPtcToolResultExpanded(result, context.args, context.isError, theme);
-      }
-      return renderPtcToolResultCollapsed(result, context.isError, theme);
-    },
+    ...createPtcRenderers("workflow"),
   });
 }

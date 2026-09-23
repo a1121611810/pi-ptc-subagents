@@ -343,6 +343,33 @@ export function isPtcWorkerFrame(value: unknown): value is PtcWorkerFrame {
 }
 
 /* -------------------------------------------------------------------------- */
+/* sub-call records (ADR-0021)                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * One binding call the program made, as the dispatcher recorded it.
+ *
+ * Host-side only: this shape never crosses the wire — the existing `call` /
+ * `call-result` frames already carry every fact, and the host reconstructs the
+ * record at the seam where the facts are known (`SubCallTracker`,
+ * `src/runtime/sub-call-tracker.ts`). A snapshot reaches the renderer
+ * via `PtcToolDetails.subCalls`.
+ */
+export type SubCallStatus = "running" | "ok" | "error" | "cancelled" | "rejected";
+
+export interface SubCallRecord {
+  callId: number;
+  name: string;
+  args: unknown;
+  status: SubCallStatus;
+  startMs: number;
+  endMs?: number;
+  durationMs?: number;
+  resultSummary?: string;
+  errorMessage?: string;
+}
+
+/* -------------------------------------------------------------------------- */
 /* value description                                                          */
 /* -------------------------------------------------------------------------- */
 

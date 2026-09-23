@@ -20,11 +20,12 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { TNumber, TOptional, TObject, TString } from "typebox";
 import { createBuiltinBindings } from "../runtime/bindings.ts";
-import { runPtcProgram } from "../runtime/dispatcher.ts";
+import { runPtcProgram, type PtcRunOutcome } from "../runtime/dispatcher.ts";
 import type { WorkerPool } from "../runtime/worker-pool.ts";
 import { DEFAULT_CONFIG } from "../runtime/limits.ts";
 import {
   codeRunFailedError,
+  createSubCallUpdater,
   PTC_RUN_CODE_SNIPPET,
   PTC_TOOL_GUIDELINES,
   renderToolResult,
@@ -32,11 +33,7 @@ import {
   resolveToolCwd,
 } from "./common.ts";
 import type { PtcToolDetails, PtcToolOptions } from "./common.ts";
-import {
-  renderPtcToolCall,
-  renderPtcToolResultCollapsed,
-  renderPtcToolResultExpanded,
-} from "./render.ts";
+import { createPtcRenderers } from "./render.ts";
 
 const DESCRIPTION = [
   "Run a TypeScript program that composes pi's tools in one shot. Required arguments: `code` —",
@@ -131,38 +128,39 @@ export function createPtcRunCodeTool(
     promptSnippet: PTC_RUN_CODE_SNIPPET,
     promptGuidelines: [...PTC_TOOL_GUIDELINES],
     parameters: PARAMETERS,
-    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+    async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const cwd = resolveToolCwd(ctx);
       const names = resolveBindingNames(options.getBindingSourceNames?.());
       const startedAt = Date.now();
       const pool = options.getPool?.();
-      const outcome = await runPtcProgram({
-        code: params.code,
-        surface: "run_code",
-        cwd,
-        // The shipped surface always exposes the parallel binding (ADR-0016); the
-        // binding-source names only curate the built-in subset.
-        bindings: createBuiltinBindings({ cwd, names, includeDispatch: true }),
-        ...(options.depth === undefined ? {} : { depth: options.depth }),
-        ...(params.timeoutMs === undefined ? {} : { timeoutMs: params.timeoutMs }),
-        ...(signal === undefined ? {} : { signal }),
-        ...(options.config === undefined ? {} : { config: options.config }),
-        ...(pool === undefined ? {} : { pool }),
-      });
+      // Live sub-call pushes: while the program runs, the tree is visible (ADR-0021 §4).
+      const updater = createSubCallUpdater({ surface: "run_code", startedAt, onUpdate });
+      let outcome: PtcRunOutcome;
+      try {
+        outcome = await runPtcProgram({
+          code: params.code,
+          surface: "run_code",
+          cwd,
+          // The shipped surface always exposes the parallel binding (ADR-0016); the
+          // binding-source names only curate the built-in subset.
+          bindings: createBuiltinBindings({ cwd, names, includeDispatch: true }),
+          ...(options.depth === undefined ? {} : { depth: options.depth }),
+          ...(params.timeoutMs === undefined ? {} : { timeoutMs: params.timeoutMs }),
+          ...(signal === undefined ? {} : { signal }),
+          ...(options.config === undefined ? {} : { config: options.config }),
+          ...(pool === undefined ? {} : { pool }),
+          onSubCallChange: (snapshot) => updater.update(snapshot),
+        });
+      } finally {
+        // A throttled partial must never land after the terminal result below.
+        updater.cancel();
+      }
       if (outcome.error !== undefined) throw codeRunFailedError(outcome);
       return renderToolResult({ outcome, surface: "run_code", durationMs: Date.now() - startedAt });
     },
 
     // Compact TUI rendering — see `render.ts` and ADR-0013. `renderShell` stays at the default
     // `ToolExecutionComponent` shell so PTC rows match the visual rhythm of `read`/`bash`.
-    renderCall(args, theme) {
-      return renderPtcToolCall(args, theme, "run_code");
-    },
-    renderResult(result, options, theme, context) {
-      if (options.expanded) {
-        return renderPtcToolResultExpanded(result, context.args, context.isError, theme);
-      }
-      return renderPtcToolResultCollapsed(result, context.isError, theme);
-    },
+    ...createPtcRenderers("run_code"),
   });
 }

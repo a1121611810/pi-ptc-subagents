@@ -30,10 +30,14 @@ import {
   formatSize,
   truncateTail,
 } from "@earendil-works/pi-coding-agent";
-import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type {
+  AgentToolResult,
+  AgentToolUpdateCallback,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import type { PtcRunOutcome } from "../runtime/dispatcher.ts";
 import type { PtcConfig, PtcSurface } from "../runtime/limits.ts";
-import type { PtcJsonValue } from "../runtime/protocol.ts";
+import type { PtcJsonValue, SubCallRecord } from "../runtime/protocol.ts";
 import { renderModelValue, sanitizeText } from "./text.ts";
 
 /** Options every PTC tool factory accepts. */
@@ -132,6 +136,15 @@ export const SURFACE_TOOL_NAME: Record<PtcSurface, string> = {
 };
 
 /**
+ * Hard cap on the number of sub-call rows the renderer displays under a PTC parent row
+ * (ADR-0021 §5). The dispatcher tracks every record; the renderer shows the first N and
+ * collapses the rest into a `+N more calls` tail. 32 is the value pinned by the ADR — long
+ * enough for the longest legitimate PTC workflow, short enough to keep a transcript column
+ * scannable.
+ */
+export const MAX_SUBCALLS = 32;
+
+/**
  * Resolve the run's working directory from pi's tool execution context.
  *
  * Investigated against `@earendil-works/pi-coding-agent@0.86.1`: `execute`'s fifth parameter is
@@ -181,6 +194,108 @@ export interface PtcToolDetails {
    * to drop (it can `tools.read` it from inside the next program).
    */
   fullOutputPath?: string;
+  /**
+   * One record per binding call the program made (ADR-0021).
+   *
+   * Present only when the dispatcher tracked sub-calls for the surface in question
+   * (always, post-ADR-0021 — the dispatcher wires SubCallTracker for every run).
+   * Order is host-side dispatch order; the renderer reads it as a point-in-time snapshot.
+   */
+  subCalls?: readonly SubCallRecord[];
+}
+
+/** Throttle between live sub-call updates, matching bash's `BASH_UPDATE_THROTTLE_MS`. */
+export const SUB_CALL_UPDATE_THROTTLE_MS = 100;
+
+/** The live-result pusher both PTC tools hand to the dispatcher's `onSubCallChange`. */
+export interface SubCallUpdater {
+  /**
+   * Offer the latest state; the push is throttled and coalesced. The argument is a thunk so a
+   * dropped offer costs nothing — the tracker's snapshot copies every record, and a wide
+   * `Promise.all` offers one per call.
+   */
+  update(makeSnapshot: () => readonly SubCallRecord[]): void;
+  /**
+   * Drop any pending push. The tool calls this once the run has resolved, so a throttled
+   * partial cannot land *after* the terminal result and revert the row to its in-flight shape.
+   */
+  cancel(): void;
+}
+
+/**
+ * Build the throttled live-result emitter for one run (ADR-0021 §4).
+ *
+ * The tree has to be visible while the program is still working — a user watching a run should
+ * see which binding is in flight, not wait for settle. pi's `onUpdate` is the channel: a partial
+ * `AgentToolResult` reaches the component as `updateResult(partial, isPartial: true)`
+ * (`interactive-mode.js:2772`), so the row re-renders with the tree and the call row's shimmer
+ * still running.
+ *
+ * Throttled and coalesced like `bash`'s output pushes: leading edge fires at once, then at most
+ * one push per `SUB_CALL_UPDATE_THROTTLE_MS` carrying the newest snapshot. That matters because a
+ * program can issue a wide `Promise.all` and every start/end would otherwise be its own repaint.
+ *
+ * The partial `details` carries only what is known mid-run: the sub-calls, the elapsed time and
+ * the surface. Logs, narrations, phases, images and the completion value arrive with the terminal
+ * result — the renderer keeps them blank while `isPartial` is true.
+ */
+export function createSubCallUpdater(input: {
+  surface: PtcSurface;
+  startedAt: number;
+  onUpdate: AgentToolUpdateCallback<PtcToolDetails> | undefined;
+}): SubCallUpdater {
+  const { surface, startedAt, onUpdate } = input;
+  if (onUpdate === undefined) return { update: () => {}, cancel: () => {} };
+
+  let lastEmitAt = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let pending: (() => readonly SubCallRecord[]) | undefined;
+
+  const emit = (): void => {
+    if (pending === undefined) return;
+    const makeSnapshot = pending;
+    pending = undefined;
+    lastEmitAt = Date.now();
+    onUpdate({
+      content: [],
+      details: {
+        surface,
+        logs: [],
+        narrations: [],
+        phases: [],
+        warnings: [],
+        durationMs: Date.now() - startedAt,
+        imageCount: 0,
+        subCalls: makeSnapshot(),
+      },
+    });
+  };
+
+  return {
+    update(makeSnapshot) {
+      pending = makeSnapshot;
+      const delay = SUB_CALL_UPDATE_THROTTLE_MS - (Date.now() - lastEmitAt);
+      if (delay <= 0) {
+        if (timer !== undefined) {
+          clearTimeout(timer);
+          timer = undefined;
+        }
+        emit();
+        return;
+      }
+      timer ??= setTimeout(() => {
+        timer = undefined;
+        emit();
+      }, delay);
+    },
+    cancel() {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+      pending = undefined;
+    },
+  };
 }
 
 /**
@@ -332,6 +447,9 @@ export function renderToolResult(input: {
       durationMs: input.durationMs,
       imageCount: images.length,
       ...(fullOutputPath === undefined ? {} : { fullOutputPath }),
+      // The tracker's terminal snapshot rides the outcome (ADR-0021 §1/§2); copying it onto
+      // `details` is what lets the renderer draw the sub-call tree at all.
+      ...(outcome.subCalls === undefined ? {} : { subCalls: outcome.subCalls }),
     },
   };
 }

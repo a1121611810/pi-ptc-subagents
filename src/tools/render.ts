@@ -28,11 +28,17 @@
  * wrapped over five rows — that is the ugly report this renderer exists to fix (ADR-0013). Values
  * render through `renderModelValue`, which keeps newlines real and indents containers.
  */
-import type { Theme } from "@earendil-works/pi-coding-agent";
+import type { Theme, ThemeColor, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import type { PtcToolDetails } from "./common.ts";
-import type { PtcJsonObject, PtcJsonValue } from "../runtime/protocol.ts";
+import { MAX_SUBCALLS, type PtcToolDetails } from "./common.ts";
+import type {
+  PtcJsonObject,
+  PtcJsonValue,
+  SubCallRecord,
+  SubCallStatus,
+} from "../runtime/protocol.ts";
 import { renderModelValue, sanitizeText } from "./text.ts";
+import { DEFAULT_SHIMMER_INTERVAL_MS, type ShimmerState, withShimmer } from "./shimmer.ts";
 
 /** Call-row label per surface; `ptc_workflow` gets its own so the two rows stay tellable apart. */
 const TOOL_TITLE: Record<PtcToolDetails["surface"], string> = {
@@ -76,6 +82,7 @@ const MAX_PHASES_EXPANDED = 8;
 const MAX_WARNINGS_EXPANDED = 4;
 const MAX_RESULT_HINT_CHARS = 60;
 const MAX_ERROR_CHARS = 120;
+const MAX_SUBCALL_PREVIEW_CHARS = 40;
 
 /** One rendered row: left content, plus an optional segment pinned to the right edge. */
 interface RowLine {
@@ -86,14 +93,17 @@ interface RowLine {
 /**
  * A `Component` that right-aligns one meta segment per line.
  *
- * Stateless: it holds already-styled strings and pads them at render time, so pi can re-render at a
- * new width (terminal resize) without any invalidation bookkeeping.
+ * Stateless: it holds already-styled strings and pads them at render time, so pi can re-render
+ * at a new width (terminal resize) without any invalidation bookkeeping. The shimmer's
+ * lifecycle state lives in pi's per-call state bag (`ToolRenderContext.state`), not here — pi
+ * recreates this row on every `updateDisplay()`, so instance state would reset on every tick
+ * (`src/tools/shimmer.ts`, `ShimmerState`). The decorator attaches the `dispose()` hook.
  */
 class PtcRow {
-  private readonly lines: readonly RowLine[];
+  private readonly items: readonly RowLine[];
 
-  constructor(lines: readonly RowLine[]) {
-    this.lines = lines;
+  constructor(items: readonly RowLine[]) {
+    this.items = items;
   }
 
   /** Part of the `Component` contract; nothing is cached, so nothing has to be dropped. */
@@ -101,7 +111,7 @@ class PtcRow {
 
   render(width: number): string[] {
     const safeWidth = Math.max(1, Math.floor(width));
-    return this.lines.map((line) => alignRow(line, safeWidth));
+    return this.items.map((line) => alignRow(line, safeWidth));
   }
 }
 
@@ -211,8 +221,37 @@ function metaText(details: PtcToolDetails | undefined, theme: Theme): string | u
   }
   // pi's truncation contract cut the text block: the tail is what the model read, the file is the rest.
   if (details.fullOutputPath !== undefined) segments.push(theme.fg("warning", "truncated"));
-  segments.push(theme.fg("dim", formatDuration(details.durationMs)));
+  // A duration of 0 means nobody measured one — pi's error result carries no details at all,
+  // and `normalizeDetails` fills the field with 0. Printing "0ms" there would invent a fact.
+  if (details.durationMs > 0) segments.push(theme.fg("dim", formatDuration(details.durationMs)));
+  if (segments.length === 0) return undefined;
   return `${theme.fg("dim", "•")} ${segments.join(theme.fg("dim", " · "))}`;
+}
+
+/**
+ * Fill in the fields a `partial` details may be missing.
+ *
+ * pi hands a **throwing** tool a bare `details: {}` (its error result shape), and a live
+ * `onUpdate` push may carry only what was known at the time. Every reader here indexes the
+ * arrays directly, so normalising once at the entry point is what keeps a failed run rendering
+ * its failure line instead of throwing a second time inside the renderer.
+ */
+function normalizeDetails(
+  details: Partial<PtcToolDetails> | undefined,
+): PtcToolDetails | undefined {
+  if (details === undefined) return undefined;
+  return {
+    surface: details.surface ?? "run_code",
+    logs: details.logs ?? [],
+    narrations: details.narrations ?? [],
+    phases: details.phases ?? [],
+    warnings: details.warnings ?? [],
+    durationMs: details.durationMs ?? 0,
+    imageCount: details.imageCount ?? 0,
+    ...(details.result === undefined ? {} : { result: details.result }),
+    ...(details.fullOutputPath === undefined ? {} : { fullOutputPath: details.fullOutputPath }),
+    ...(details.subCalls === undefined ? {} : { subCalls: details.subCalls }),
+  };
 }
 
 /**
@@ -562,11 +601,25 @@ export interface PtcRenderArgs {
  * The description is the only detail that gets to sit next to the label — the previous renderer
  * appended the first code line as well, which is what made the call row read as a paragraph rather
  * than a heading. The code is one `ctrl+e` away in the expanded view.
+ *
+ * The call row wraps with `withShimmer` while the run is in flight (ADR-0020 §3, §6): the
+ * description's bright character advances at the 150ms cadence. The decorator owns the
+ * lifecycle, held in `options.state` — see `ShimmerState` for why it cannot live on this
+ * (per-render) component. When `options.isPartial` is false the decorator clears the interval
+ * and the row renders plainly, which is the settle path.
+ *
+ * `options.requestInvalidate` is the re-render trigger the interval calls on every tick —
+ * the caller owns the render tree and supplies the right invalidate path
+ * (e.g. `ToolRenderContext.invalidate` for a top-level tool row). The decorator never reaches
+ * for `ui` itself; that's the caller's seam.
+ *
+ * The result-area renderers do not shimmer — the call row owns the partial-state visual.
  */
 export function renderPtcToolCall(
   args: PtcRenderArgs,
   theme: Theme,
   surface: PtcToolDetails["surface"] = "run_code",
+  options: PtcRenderOptions = {},
 ): PtcRow {
   const description =
     (typeof args.description === "string" && args.description.trim().length > 0
@@ -576,14 +629,61 @@ export function renderPtcToolCall(
   const detail = description.length > 0 ? description : (fallback ?? "(no description)");
 
   const left = `${theme.fg("toolTitle", theme.bold(TOOL_TITLE[surface]))} ${theme.fg("accent", detail)}`;
-  return new PtcRow([{ left: `${TREE_ROOT}${left}` }]);
+  const row = new PtcRow([{ left: `${TREE_ROOT}${left}` }]);
+  return withShimmer(row, {
+    intervalMs: DEFAULT_SHIMMER_INTERVAL_MS,
+    isPartial: options.isPartial ?? false,
+    theme,
+    requestInvalidate: options.requestInvalidate ?? noop,
+    state: options.state ?? {},
+  });
 }
 
 /** The result shape both tools hand to `renderResult` (a structural subset of `AgentToolResult`). */
 export interface PtcRenderResult {
   readonly content?: ReadonlyArray<{ type: string; text?: string }>;
-  readonly details?: PtcToolDetails;
+  /**
+   * Every field is optional at this seam even though `PtcToolDetails` declares them required:
+   * pi's error result for a thrown tool is `details: {}`, and a live push may carry only what
+   * was known when it was sent. `normalizeDetails` fills the gaps at each entry point, so a
+   * failed run keeps ADR-0013's formatted failure row instead of falling through to pi's
+   * raw-text fallback.
+   */
+  readonly details?: Partial<PtcToolDetails>;
 }
+
+/** A render result whose `details` have been through `normalizeDetails` — the invariant
+ *  `resultArea` and `metaText` rely on to index the arrays directly. */
+type NormalizedRenderResult = Omit<PtcRenderResult, "details"> & { details?: PtcToolDetails };
+
+/**
+ * Options for `renderPtcToolCall` (the only consumer of this interface — the result-area
+ * renderers took a `PtcRenderOptions` for parity but read nothing from it, so the parameter
+ * was dropped; F15).
+ *
+ * `requestInvalidate` is the re-render trigger the call-row shimmer interval calls on every
+ * tick (150ms cadence). pi's tool renderers receive `ToolRenderContext.invalidate` for this —
+ * that is the value the framework expects — so the tool definitions in `run-code.ts` /
+ * `workflow.ts` pass `context.invalidate` through. When omitted (e.g. a unit test that never
+ * reads the row again), the interval still ticks but nobody repaints, so the band never
+ * advances. The decorator never reaches for `ui` itself; that's the caller's seam.
+ *
+ * `isPartial` is pi's `ToolRenderContext.isPartial`: the shimmer runs while it is true and
+ * settles when it goes false, which is how a finished run stops its own band.
+ *
+ * `state` is pi's `ToolRenderContext.state` — the per-tool-call bag that survives the row
+ * recreation pi performs on every `updateDisplay()`. The shimmer's `startedAt` and interval
+ * handle live there; see `ShimmerState`. Callers inside pi pass `context.state`; direct
+ * library callers and tests may omit it and accept a throwaway bag.
+ */
+export interface PtcRenderOptions {
+  requestInvalidate?: () => void;
+  isPartial?: boolean;
+  state?: ShimmerState;
+}
+
+/** No-op invalidate for tests and direct library callers that never read the rendered output. */
+function noop(): void {}
 
 /** Text body of a failed run — pi surfaces the thrown error in the first text block. */
 function errorText(result: PtcRenderResult): string {
@@ -591,6 +691,117 @@ function errorText(result: PtcRenderResult): string {
     (block) => block.type === "text" && (block.text ?? "").length > 0,
   );
   return firstLine(text?.text ?? "") || "failed";
+}
+
+/**
+ * Pick one short, readable argument string for a binding call, so each sub-row tells the reader
+ * what it was operating on without dumping a JSON payload (ADR-0021 §3, ADR-0013 §1's selector).
+ *
+ * The `pi.dispatch` selector returns `→ <agent>` (the binding's own `DispatchInput.agent`), so
+ * dispatch rows read as `pi.dispatch → <agent>`; the rest pluck a known args key. Falls back to
+ * `JSON.stringify(args)`
+ * capped at `MAX_SUBCALL_PREVIEW_CHARS` with embedded newlines folded to spaces — this is the one
+ * place `JSON.stringify` is acceptable on a sub-row because the input is one args object whose
+ * keys are already known.
+ */
+function previewArgs(name: string, args: unknown): string {
+  if (name === "pi.dispatch" && typeof args === "object" && args !== null && "agent" in args) {
+    return `→ ${String((args as { agent: unknown }).agent)}`;
+  }
+  if (typeof args === "object" && args !== null) {
+    const a = args as Record<string, unknown>;
+    const pick = (key: string): string | undefined =>
+      typeof a[key] === "string" ? (a[key] as string) : undefined;
+    const candidate =
+      name === "read"
+        ? pick("path")
+        : name === "bash"
+          ? pick("command")
+          : name === "grep" || name === "find"
+            ? pick("pattern")
+            : name === "ls"
+              ? pick("path")
+              : name === "edit" || name === "write"
+                ? pick("path")
+                : undefined;
+    if (typeof candidate === "string") return candidate;
+  }
+  try {
+    const s = JSON.stringify(args).replace(/\n/g, " ");
+    return s.length > MAX_SUBCALL_PREVIEW_CHARS
+      ? `${s.slice(0, MAX_SUBCALL_PREVIEW_CHARS - 1)}…`
+      : s;
+  } catch {
+    return String(args).slice(0, MAX_SUBCALL_PREVIEW_CHARS);
+  }
+}
+
+/**
+ * Per-`SubCallStatus` rendering rules: which status text to show and which theme slot to use
+ * (ADR-0021 §6). One row of the table replaces the two parallel cascading ternaries that
+ * previously fanned out over `statusText` and `statusColor` independently — adding a new state
+ * (or changing a colour slot) used to mean two edits in lockstep; the table makes it one.
+ *
+ * The table is module-private: production code reads it via `subRowsFor`, tests verify it
+ * end-to-end through `subRowsFor` (each status emits the expected text and colour slot).
+ */
+interface SubCallStatusEntry {
+  readonly text: (r: SubCallRecord) => string;
+  readonly themeSlot: ThemeColor;
+}
+
+const SUB_CALL_STATUS_TABLE: Record<SubCallStatus, SubCallStatusEntry> = {
+  running: { text: () => "running", themeSlot: "muted" },
+  ok: {
+    text: (r) => (r.durationMs !== undefined ? `ok ${formatDuration(r.durationMs)}` : "ok"),
+    themeSlot: "accent",
+  },
+  error: {
+    text: (r) => `failed: ${r.errorMessage ?? "error"}`,
+    themeSlot: "error",
+  },
+  cancelled: { text: () => "cancelled", themeSlot: "muted" },
+  rejected: {
+    text: (r) => `rejected: ${r.errorMessage ?? "concurrency"}`,
+    themeSlot: "warning",
+  },
+};
+
+/**
+ * Render `subCalls` as a flat list of sub-row lines, capped at `MAX_SUBCALLS` with a `+N more
+ * calls` tail. Each row carries the tool name, an args preview, status text in the matching
+ * colour slot, and the duration when the call settled. The list is a sibling of the result
+ * area, visible in both collapsed and expanded states (ADR-0021 §4, §5).
+ *
+ * Per US16, sub-rows do **not** shimmer — the parent's call-row shimmer is the partial-state
+ * signal, and sub-rows stay readable by carrying a static status colour while the parent row
+ * pulses. The five-state status colouring (running=muted / ok=accent / error=error /
+ * cancelled=muted / rejected=warning) is the per-row liveness signal.
+ *
+ * Returns `RowLine[]`; the orchestrator appends them to the parent `PtcRow`'s items.
+ */
+function subRowsFor(subCalls: readonly SubCallRecord[], theme: Theme): RowLine[] {
+  if (subCalls.length === 0) return [];
+  const visible = subCalls.slice(0, MAX_SUBCALLS);
+  const tail = subCalls.length > MAX_SUBCALLS ? subCalls.length - MAX_SUBCALLS : 0;
+  const rows: RowLine[] = [];
+  visible.forEach((record, idx) => {
+    const isLast = idx === visible.length - 1 && tail === 0;
+    const connector = isLast ? "└─ " : "├─ ";
+    // `padEnd` alone leaves a name longer than the gutter unpadded, which glues it to the
+    // status text (`pi.dispatchrejected: …`). The extra space keeps a separator at any length.
+    const label =
+      record.name.length >= LABEL_WIDTH ? `${record.name} ` : record.name.padEnd(LABEL_WIDTH);
+    const preview = previewArgs(record.name, record.args);
+    const entry = SUB_CALL_STATUS_TABLE[record.status];
+    rows.push({
+      left: `${TREE_INDENT}${connector}${theme.fg("toolTitle", label)}${theme.fg(entry.themeSlot, entry.text(record))}${theme.fg("dim", " " + preview)}`,
+    });
+  });
+  if (tail > 0) {
+    rows.push({ left: `${TREE_INDENT}└─ …+${tail} more calls` });
+  }
+  return rows;
 }
 
 /**
@@ -608,10 +819,11 @@ function errorText(result: PtcRenderResult): string {
  * we prepend it here so the same output works for both surfaces.
  */
 function resultArea(
-  result: PtcRenderResult,
+  result: NormalizedRenderResult,
   isError: boolean,
   theme: Theme,
   moreAfter = false,
+  isPartial = false,
 ): RowLine[] {
   const right = metaText(result.details, theme);
   const attachRight = (row: RowLine): RowLine => (right === undefined ? row : { ...row, right });
@@ -623,6 +835,11 @@ function resultArea(
       }),
     ];
   }
+
+  // While the run is in flight there is no completion value yet, so there is nothing to
+  // summarise: the sub-call tree below is the whole result area. Rendering the settled
+  // placeholder here would claim "done" about a program that is still working.
+  if (isPartial && result.details?.result === undefined) return [];
 
   const value = result.details?.result;
   if (value === undefined) {
@@ -672,8 +889,16 @@ export function renderPtcToolResultCollapsed(
   result: PtcRenderResult,
   isError: boolean,
   theme: Theme,
+  options: { isPartial?: boolean } = {},
 ): PtcRow {
-  return new PtcRow(resultArea(result, isError, theme));
+  const details = normalizeDetails(result.details);
+  const items: RowLine[] = [
+    ...resultArea({ ...result, details }, isError, theme, false, options.isPartial === true),
+  ];
+  if (details?.subCalls !== undefined) {
+    items.push(...subRowsFor(details.subCalls, theme));
+  }
+  return new PtcRow(items);
 }
 
 /**
@@ -689,21 +914,25 @@ export function renderPtcToolResultExpanded(
   args: PtcRenderArgs,
   isError: boolean,
   theme: Theme,
+  options: { isPartial?: boolean } = {},
 ): PtcRow {
+  const details = normalizeDetails(result.details);
   if (isError) {
-    const lines: RowLine[] = resultArea(result, true, theme);
+    const items: RowLine[] = [...resultArea({ ...result, details }, true, theme)];
+    if (details?.subCalls !== undefined) {
+      items.push(...subRowsFor(details.subCalls, theme));
+    }
     // The failure text is the reason the reader expanded the row at all: give it the full width
     // under the summary, no tree connectors (it is the error message, not a structured block).
     const text = sanitizeText(
       result.content?.find((block) => block.type === "text")?.text ?? errorText(result),
     );
     for (const line of text.split("\n").slice(0, MAX_LOG_LINES_EXPANDED)) {
-      lines.push({ left: `${TREE_ROOT_CONT}${theme.fg("error", line)}` });
+      items.push({ left: `${TREE_ROOT_CONT}${theme.fg("error", line)}` });
     }
-    return new PtcRow(lines);
+    return new PtcRow(items);
   }
 
-  const details = result.details;
   const children: ChildBlock[] = [];
 
   const code = args.code ?? args.script ?? "";
@@ -760,14 +989,70 @@ export function renderPtcToolResultExpanded(
     children.push({ label: "image", lines: [desc] });
   }
 
-  // Result rows first, then the labelled blocks. `moreAfter` keeps the connector chain open
-  // while blocks follow, so the value tree and the blocks read as one list of siblings.
-  const lines: RowLine[] = resultArea(result, false, theme, children.length > 0);
+  // Result rows first, then the sub-call tree, then the labelled blocks (ADR-0021 §4: sub-call
+  // rows are a sibling of the result area, visible in both collapsed and expanded states).
+  // `moreAfter` keeps the value tree's connector chain open whenever something follows — sub-call
+  // rows or labelled blocks.
+  const subCalls = details?.subCalls;
+  const hasFollowers = (subCalls !== undefined && subCalls.length > 0) || children.length > 0;
+  const items: RowLine[] = resultArea(
+    { ...result, details },
+    false,
+    theme,
+    hasFollowers,
+    options.isPartial === true,
+  );
+  if (subCalls !== undefined) {
+    items.push(...subRowsFor(subCalls, theme));
+  }
 
   for (let index = 0; index < children.length; index += 1) {
     const isLast = index === children.length - 1;
-    lines.push(...renderChildBlock(children[index] ?? { label: "", lines: [] }, isLast, theme));
+    items.push(...renderChildBlock(children[index] ?? { label: "", lines: [] }, isLast, theme));
   }
 
-  return new PtcRow(lines);
+  return new PtcRow(items);
+}
+
+/**
+ * The `renderCall` / `renderResult` pair every PTC tool registers.
+ *
+ * The two tools differ only by the surface label, so the wiring lives here once rather than
+ * being copy-pasted per tool — a duplication that had already drifted once during review.
+ *
+ * `context` is pi's `ToolRenderContext`, read structurally: the fields the renderers use are
+ * `invalidate` (the interval's re-render trigger), `isPartial` (false once the run settles),
+ * `state` (the shimmer's per-call bag), and `args` / `isError` for the result side.
+ */
+export function createPtcRenderers(
+  surface: PtcToolDetails["surface"],
+): Pick<ToolDefinition<any, PtcToolDetails>, "renderCall" | "renderResult"> {
+  return {
+    renderCall(args, theme, context) {
+      // `args` arrives as pi's widened `Static<TParams>`; `PtcRenderArgs` is the structural
+      // subset this renderer reads, and the tool's real params satisfy it.
+      return renderPtcToolCall(args as PtcRenderArgs, theme, surface, {
+        ...(context?.invalidate === undefined ? {} : { requestInvalidate: context.invalidate }),
+        ...(context?.isPartial === undefined ? {} : { isPartial: context.isPartial }),
+        ...(context?.state === undefined ? {} : { state: context.state }),
+      });
+    },
+    renderResult(result, options, theme, context) {
+      // `isPartial` is pi's flag for a live `onUpdate` push: the result area then has no
+      // completion value to summarise, so it renders the sub-call tree alone (ADR-0021 §4).
+      const isPartial = options.isPartial === true;
+      if (options.expanded === true) {
+        return renderPtcToolResultExpanded(
+          result,
+          context?.args ?? {},
+          context?.isError === true,
+          theme,
+          {
+            isPartial,
+          },
+        );
+      }
+      return renderPtcToolResultCollapsed(result, context?.isError === true, theme, { isPartial });
+    },
+  };
 }

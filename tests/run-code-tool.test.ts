@@ -9,13 +9,18 @@
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import type {
   AgentToolResult,
   ExtensionContext,
+  Theme,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import type { PtcToolDetails } from "../src/tools/common.ts";
+import {
+  createSubCallUpdater,
+  SUB_CALL_UPDATE_THROTTLE_MS,
+  type PtcToolDetails,
+} from "../src/tools/common.ts";
 import { createPtcRunCodeTool } from "../src/tools/run-code.ts";
 import {
   captureRegisteredTools,
@@ -54,6 +59,113 @@ function call(
     ctx,
   ) as Promise<AgentToolResult<PtcToolDetails>>;
 }
+
+/**
+ * `Theme` that emits real ANSI SGR sequences, the way pi's own theme does.
+ *
+ * It has to be real ANSI, not a readable tag: the shimmer anchor is matched after stripping
+ * escapes, so a marker-based fake would never match whatever the production theme emits.
+ */
+function ansiTheme(): Theme {
+  return {
+    fg: (slot: string, text: string) => {
+      if (slot === "toolTitle") return `\x1b[34m${text}\x1b[39m`;
+      if (slot === "accent") return `\x1b[36m${text}\x1b[39m`;
+      if (slot === "dim") return `\x1b[2m${text}\x1b[22m`;
+      return text;
+    },
+    bold: (text: string) => `\x1b[1m${text}\x1b[22m`,
+  } as unknown as Theme;
+}
+
+test("createSubCallUpdater coalesces rapid pushes and drops a pending one on cancel", () => {
+  // Two properties the live push depends on:
+  //  - a wide `Promise.all` must not turn every start/end into its own repaint;
+  //  - a throttled push must never land *after* the terminal result, which would revert the
+  //    row to its in-flight shape.
+  vi.useFakeTimers();
+  try {
+    const pushed: Array<Record<string, unknown>> = [];
+    const updater = createSubCallUpdater({
+      surface: "run_code",
+      startedAt: 0,
+      onUpdate: (result: unknown) => {
+        pushed.push(result as Record<string, unknown>);
+      },
+    });
+
+    // Leading edge fires at once.
+    updater.update(() => [{ callId: 1, name: "read", args: {}, status: "running", startMs: 0 }]);
+    expect(pushed).toHaveLength(1);
+
+    // Within the throttle window the pushes coalesce; only the newest survives the timer, and
+    // the dropped offer's factory is never called — that is what keeps N sequential calls from
+    // costing O(N²) record copies.
+    vi.advanceTimersByTime(10);
+    const droppedFactory = vi.fn(() => []);
+    updater.update(droppedFactory);
+    expect(droppedFactory).not.toHaveBeenCalled();
+
+    const keptFactory = vi.fn(() => [
+      { callId: 1, name: "read", args: {}, status: "running" as const, startMs: 0 },
+      { callId: 2, name: "bash", args: {}, status: "running" as const, startMs: 10 },
+    ]);
+    updater.update(keptFactory);
+    expect(keptFactory).not.toHaveBeenCalled();
+    expect(pushed).toHaveLength(1);
+
+    vi.advanceTimersByTime(SUB_CALL_UPDATE_THROTTLE_MS);
+    expect(pushed).toHaveLength(2);
+    expect(keptFactory).toHaveBeenCalledTimes(1);
+    const second = pushed[1] as { details: { subCalls: unknown[] } };
+    expect(second.details.subCalls).toHaveLength(2);
+
+    // A pending push that is cancelled never lands.
+    updater.update(() => [{ callId: 3, name: "read", args: {}, status: "running", startMs: 20 }]);
+    updater.cancel();
+    vi.advanceTimersByTime(SUB_CALL_UPDATE_THROTTLE_MS * 5);
+    expect(pushed).toHaveLength(2);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("renderCall wires pi's isPartial and state through to the shimmer (ADR-0020)", () => {
+  // The production seam: `run-code.ts`'s `renderCall` must hand the decorator the two
+  // `ToolRenderContext` fields the shimmer's lifecycle depends on. Without `isPartial` the band
+  // never settles; without `state` it restarts every tick and freezes at position 0.
+  const tool = captureRegisteredTools().get("ptc_run_code");
+  if (!tool?.renderCall) throw new Error("ptc_run_code must expose renderCall");
+  const renderCall = tool.renderCall as unknown as (
+    args: unknown,
+    theme: Theme,
+    context: Record<string, unknown>,
+  ) => { render: (width: number) => string[] };
+  const args = { description: "Verify file integrity", code: "return 1;" };
+
+  // Clock-only control: `useFakeTimers` would also stub `setTimeout`, which the worker-backed
+  // tests in this file depend on.
+  let clock = 0;
+  const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => clock);
+
+  try {
+    const state: Record<string, unknown> = {};
+    const running = renderCall(args, ansiTheme(), { isPartial: true, state });
+    expect(running.render(80)[0]).toContain("\x1b[36mV\x1b[39m");
+
+    // Same bag, later clock, fresh component — the band must have moved on, not restarted.
+    clock = 450;
+    const rebuilt = renderCall(args, ansiTheme(), { isPartial: true, state });
+    expect(rebuilt.render(80)[0]).toContain("\x1b[2mVer\x1b[22m\x1b[36mi\x1b[39m");
+
+    // isPartial false is the settle path: no band, description rendered plainly.
+    const settled = renderCall(args, ansiTheme(), { isPartial: false, state });
+    expect(settled.render(80)[0]).toContain("\x1b[36mVerify file integrity\x1b[39m");
+    expect(settled.render(80)[0]).not.toContain("\x1b[2m");
+  } finally {
+    nowSpy.mockRestore();
+  }
+});
 
 test("the extension factory registers ptc_run_code with the documented parameter surface", () => {
   const tool = captureRegisteredTools().get("ptc_run_code");
@@ -132,6 +244,101 @@ test(
     expect(textOf(result)).toBe("seen 41\n{answer: 42}");
     expect(result.details.logs).toEqual(["seen 41"]);
     expect(result.details.result).toEqual({ answer: 42 });
+  },
+  RUN_TIMEOUT_MS,
+);
+
+test(
+  "a binding call is pushed to the UI while the run is still in flight (ADR-0021 §4)",
+  async () => {
+    // US3/US21: the tree is visible *during* the run, not only once it settles. pi's `onUpdate`
+    // is the channel; the live push is what makes the row show which binding is in flight.
+    const dir = await makeTempDir();
+    try {
+      await writeFile(join(dir, "fixture.txt"), "live fixture\n");
+      const tool = createPtcRunCodeTool();
+      const updates: AgentToolResult<PtcToolDetails>[] = [];
+
+      const result = (await tool.execute(
+        "call-1",
+        { description: "live", code: 'await tools.read({ path: "fixture.txt" });\nreturn 1;' },
+        undefined,
+        (partial) => {
+          updates.push(partial as AgentToolResult<PtcToolDetails>);
+        },
+        toolContext(dir),
+      )) as AgentToolResult<PtcToolDetails>;
+
+      // At least one push landed mid-run, and it saw the binding while it was still running.
+      expect(updates.length).toBeGreaterThan(0);
+      const sawRunning = updates.some((update) =>
+        (update.details.subCalls ?? []).some((entry) => entry.status === "running"),
+      );
+      expect(sawRunning).toBe(true);
+      // The live push carries the tree but no completion value — nothing has completed yet.
+      expect(updates[0]?.details.result).toBeUndefined();
+      // The terminal result still carries the settled records.
+      expect(result.details.subCalls?.map((entry) => entry.status)).toEqual(["ok"]);
+    } finally {
+      await removeTempDir(dir);
+    }
+  },
+  RUN_TIMEOUT_MS,
+);
+
+test(
+  "a pi.dispatch the depth gate refuses is recorded 'rejected', not 'ok' (ADR-0021 §6)",
+  async () => {
+    // `pi.dispatch` never throws for its own refusals — it resolves with a rejected
+    // `DispatchResult`. Recording that as `ok` would tell the reader a dispatch succeeded when the
+    // harness declined to run it. A run stamped at depth 1 with a max of 1 refuses its own
+    // dispatches at the gate (childDepth 2 > 1), before any spawn — so the test is hermetic.
+    const result = await call(createPtcRunCodeTool({ depth: 1, config: { maxDispatchDepth: 1 } }), {
+      code:
+        'const r = await tools["pi.dispatch"]({ agent: "x", task: "y" });\n' + "return r.status;",
+    });
+    expect(result.details.result).toBe("rejected");
+    const dispatch = result.details.subCalls?.find((entry) => entry.name === "pi.dispatch");
+    expect(dispatch?.status).toBe("rejected");
+    expect(dispatch?.errorMessage).toContain("depth limit");
+    // A refusal never ran, so it has no duration to report.
+    expect(dispatch?.durationMs).toBe(0);
+  },
+  RUN_TIMEOUT_MS,
+);
+
+test(
+  "the tracked sub-calls reach the renderer's details (ADR-0021)",
+  async () => {
+    // The seam that makes the sub-call tree drawable at all: the dispatcher's tracker freezes
+    // onto the outcome, and `renderToolResult` must copy it onto `details`. Without the copy the
+    // field is always undefined and the tree never renders, however good the renderer is.
+    const dir = await makeTempDir();
+    try {
+      await writeFile(join(dir, "fixture.txt"), "sub-call fixture\n");
+
+      const result = await call(
+        createPtcRunCodeTool(),
+        {
+          code:
+            'const first = await tools.read({ path: "fixture.txt" });\n' +
+            'const second = await tools.read({ path: "fixture.txt" });\n' +
+            "return 2;",
+        },
+        { cwd: dir },
+      );
+
+      const subCalls = result.details.subCalls;
+      expect(subCalls).toBeDefined();
+      expect(subCalls).toHaveLength(2);
+      // Dispatch order, name, args and terminal status all survive the trip.
+      expect(subCalls?.map((entry) => entry.name)).toEqual(["read", "read"]);
+      expect(subCalls?.map((entry) => entry.status)).toEqual(["ok", "ok"]);
+      expect(subCalls?.[0]?.args).toEqual({ path: "fixture.txt" });
+      expect(subCalls?.[0]?.durationMs).toBeGreaterThanOrEqual(0);
+    } finally {
+      await removeTempDir(dir);
+    }
   },
   RUN_TIMEOUT_MS,
 );

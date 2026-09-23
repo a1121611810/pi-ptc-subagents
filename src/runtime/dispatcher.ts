@@ -50,7 +50,10 @@ import type {
   PtcErrorShape,
   PtcHostFrame,
   PtcJsonValue,
+  SubCallRecord,
 } from "./protocol.ts";
+import type { SubCallTracker } from "./sub-call-tracker.ts";
+import { createSubCallTracker } from "./sub-call-tracker.ts";
 import {
   WorkerPool,
   publishImageBytes,
@@ -93,6 +96,18 @@ export interface RunPtcProgramOptions {
    * `kind: workerExit`.
    */
   pool?: WorkerPool;
+  /**
+   * Called every time a sub-call starts or ends, so the caller can push a live partial result
+   * and have the tree visible while the run is in flight (ADR-0021 §4). Never called after the
+   * run settles — `finish` owns the terminal snapshot. Absent means "no live updates wanted"
+   * (direct library use, tests that only assert the terminal outcome).
+   *
+   * The argument is a **thunk**, not the snapshot itself: a wide `Promise.all` produces an
+   * event per call, and `snapshot()` copies every record. Building it eagerly would make N
+   * sequential calls cost O(N²) copies for pushes that the caller's throttle mostly drops.
+   * Call it only when a push is actually due.
+   */
+  onSubCallChange?: (snapshot: () => readonly SubCallRecord[]) => void;
 }
 
 /**
@@ -134,10 +149,73 @@ export interface PtcRunOutcome {
   images?: PtcImage[];
   /** Failure details; absent on success. */
   error?: PtcErrorShape;
+  /**
+   * One record per binding call the program made (ADR-0021).
+   *
+   * Present only when the dispatcher tracked sub-calls for the surface in question (always,
+   * post-ADR-0021 — the dispatcher wires `SubCallTracker` for every run). Order is host-side
+   * dispatch order; the renderer reads it as a point-in-time snapshot. Absent for runs that settled
+   * before the tracker was constructed (the pre-`Promise` abort and pool-acquire-failed paths).
+   */
+  subCalls?: readonly SubCallRecord[];
+}
+
+/**
+ * Classify a `pi.dispatch` return value that did not succeed.
+ *
+ * `DispatchResult.status: "rejected"` covers two different things, and the sub-call tree colours
+ * them differently (ADR-0021 §6):
+ *
+ * - `started: false` — the harness declined to run it (depth gate, concurrency gate, unknown
+ *   agent, a spawn that never happened). That is `rejected`.
+ * - `started: true` — the child ran and failed (non-zero exit, no final text, killed). That is
+ *   `error`, and it keeps the duration it actually took.
+ *
+ * Shape-checked rather than cast: this runs on any binding's resolved value, and a caller-supplied
+ * binding is free to return whatever it likes.
+ */
+function dispatchOutcome(
+  value: unknown,
+): { kind: "refused" | "failed"; message: string } | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  const candidate = value as { status?: unknown; started?: unknown; errorMessage?: unknown };
+  if (candidate.status !== "rejected") return undefined;
+  const message =
+    typeof candidate.errorMessage === "string"
+      ? candidate.errorMessage
+      : candidate.started === false
+        ? "dispatch refused"
+        : "dispatch failed";
+  return { kind: candidate.started === false ? "refused" : "failed", message };
 }
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * First non-empty line of a binding result's text content, for the sub-row's `resultSummary`.
+ *
+ * Builtins wrap their model-facing payload as `{ content: [{ type: "text", text: ... }, ...] }`;
+ * the `pi.dispatch` binding returns a flat `DispatchResult` (no `content`). Both are handled
+ * here so the tracker doesn't have to know which adapter produced the value. Returns
+ * `undefined` when nothing readable is on the record — the tracker's `resultSummary` is then
+ * simply absent, which is the same shape a tracker-only test sees.
+ */
+function firstLineOf(value: unknown): string | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  const content = (value as { content?: unknown }).content;
+  if (Array.isArray(content) && content.length > 0) {
+    const first = content[0];
+    if (first !== null && typeof first === "object") {
+      const text = (first as { text?: unknown }).text;
+      if (typeof text === "string" && text.length > 0) {
+        const newline = text.indexOf("\n");
+        return newline === -1 ? text : text.slice(0, newline);
+      }
+    }
+  }
+  return undefined;
 }
 
 /** A leaf whose bytes JSON cannot express: it is billed by `byteLength`, not by its JSON text. */
@@ -286,6 +364,31 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
 
     const bindingAbort = new AbortController();
     let settled = false;
+    /**
+     * Sub-call tracker: one record per `call` frame, mutated as the binding lifecycle progresses
+     * (ADR-0021). Wrapped so every start and end also pushes a live snapshot to the caller —
+     * that is what lets the tool emit a partial result and have the tree visible while the run
+     * is still in flight (ADR-0021 §4), not only once it settles.
+     */
+    const rawSubCallTracker = createSubCallTracker();
+    const notifySubCalls = (): void => {
+      // Nothing to say once the run is over: `finish` owns the terminal snapshot, and a
+      // post-settle partial result would resurrect a row the run already closed.
+      if (settled) return;
+      options.onSubCallChange?.(() => rawSubCallTracker.snapshot());
+    };
+    const subCallTracker: SubCallTracker = {
+      recordStart(callId, name, args) {
+        rawSubCallTracker.recordStart(callId, name, args);
+        notifySubCalls();
+      },
+      recordEnd(callId, status, summary) {
+        const record = rawSubCallTracker.recordEnd(callId, status, summary);
+        notifySubCalls();
+        return record;
+      },
+      snapshot: () => rawSubCallTracker.snapshot(),
+    };
     /** Set once a stop is under way; owns the terminal state from then on (`settleTerminal`). */
     let cancelling: PtcCancelReason | undefined;
     /**
@@ -396,7 +499,13 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
         // Cold-start path: terminate the worker. The runtime owns the lifecycle.
         void worker.terminate();
       }
-      resolve(outcome);
+      // Take the terminal snapshot once and only here: by `finish` every dispatch path has
+      // either reached its terminal record or is racing the settle and is captured as
+      // still-running. A run that never made any binding call snapshots to `[]` and we omit
+      // the field entirely — the renderer falls back to the existing
+      // `code / out / log / warn / image` blocks when `subCalls` is absent (ADR-0021 §2).
+      const subCalls = subCallTracker.snapshot();
+      resolve(subCalls.length > 0 ? { ...outcome, subCalls } : outcome);
     };
 
     const fail = (kind: PtcErrorKind, message: string, stack?: string): void => {
@@ -484,6 +593,7 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
     };
 
     const handleCall = (frame: PtcCallFrame): void => {
+      subCallTracker.recordStart(frame.callId, frame.tool, frame.args);
       pendingCalls += 1;
       if (pendingCalls > config.maxPendingCalls) {
         // Defense in depth only. The shipped worker admits calls before posting them
@@ -491,7 +601,12 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
         // wide `Promise.all` or `parallel()` fan-out — never reaches this branch: the burst
         // queues in the worker, and arrivals here stay at or below the ceiling. This fires
         // only for a worker that ignores its admission budget, which is why it fails the
-        // run instead of throttling.
+        // run instead of throttling. The record the tracker already holds for this `callId`
+        // is finalised here so the terminal snapshot does not carry a still-running entry for
+        // a frame the dispatcher never dispatched.
+        subCallTracker.recordEnd(frame.callId, "error", {
+          errorMessage: `more than maxPendingCalls (${config.maxPendingCalls}) binding calls in flight`,
+        });
         fail(
           PTC_ERROR_KIND.protocol,
           `more than maxPendingCalls (${config.maxPendingCalls}) binding calls in flight`,
@@ -506,6 +621,11 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
     const dispatchCall = async (frame: PtcCallFrame): Promise<void> => {
       const binding = options.bindings.get(frame.tool);
       if (!binding) {
+        subCallTracker.recordEnd(frame.callId, "error", {
+          errorMessage:
+            `no binding named "${frame.tool}" in this run; available bindings: ` +
+            ([...options.bindings.keys()].join(", ") || "(none)"),
+        });
         postCallResult({
           kind: HOST_FRAME_KIND.callResult,
           callId: frame.callId,
@@ -525,6 +645,9 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
         // DispatchResult (the binding never throws, §3), so a Promise.all /
         // Promise.allSettled over pi.dispatch calls sees a settled record, not a throw.
         if (activeDispatches >= config.dispatchConcurrency) {
+          subCallTracker.recordEnd(frame.callId, "rejected", {
+            errorMessage: "dispatch concurrency limit reached",
+          });
           postCallResult({
             kind: HOST_FRAME_KIND.callResult,
             callId: frame.callId,
@@ -546,6 +669,9 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
           // whose only possible outcome is the abort it cannot deliver anywhere — the
           // port is closed. The in-flight case is covered: a call that was already
           // executing when the cancel fired sees `bindingAbort` through its context.
+          subCallTracker.recordEnd(frame.callId, "cancelled", {
+            errorMessage: "run settled before binding started",
+          });
           releaseBuiltinSlot();
           return;
         }
@@ -579,6 +705,9 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
         };
         const callFrameBytes = serializedBytes(callFrame);
         if (callFrameBytes > config.maxMessageBytes) {
+          subCallTracker.recordEnd(frame.callId, "error", {
+            errorMessage: `callResult frame of ${callFrameBytes} bytes exceeds maxMessageBytes (${config.maxMessageBytes})`,
+          });
           fail(
             PTC_ERROR_KIND.protocol,
             `callResult frame of ${callFrameBytes} bytes exceeds maxMessageBytes (${config.maxMessageBytes})`,
@@ -599,7 +728,48 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
             publishImageBytes(Buffer.byteLength(image.data, "base64"));
           }
         }
+        // Mid-flight cancellation can also resolve normally: a binding that observed the abort
+        // and surfaced it through the return value (the `pi.dispatch` binding does this — its
+        // promise never rejects) lands here even when `bindingAbort.signal.aborted` is true.
+        // `bash` and the other built-ins reject on abort, so they hit the catch branch below.
+        // The discriminator is the signal itself: if the abort fired, the binding's outcome is a
+        // cancellation regardless of which way it surfaced. ADR-0021 §1.
+        if (bindingAbort.signal.aborted) {
+          subCallTracker.recordEnd(frame.callId, "cancelled", {
+            errorMessage: "binding aborted by run cancellation",
+          });
+        } else {
+          // A `pi.dispatch` that did not succeed resolves rather than throwing, so its outcome
+          // has to come off the value — recording every one of them as `ok` would tell the reader
+          // a dispatch worked when it was either declined or failed (ADR-0021 §6).
+          const outcome = isDispatch ? dispatchOutcome(value) : undefined;
+          if (outcome !== undefined) {
+            subCallTracker.recordEnd(
+              frame.callId,
+              outcome.kind === "refused" ? "rejected" : "error",
+              {
+                errorMessage: outcome.message,
+              },
+            );
+          } else {
+            subCallTracker.recordEnd(frame.callId, "ok", {
+              resultSummary: firstLineOf(value),
+            });
+          }
+        }
       } catch (error) {
+        // Same abort discriminator: a built-in that observes `signal.aborted` rejects with
+        // its own message (often `"aborted"`). The contract is "the abort fired" → cancelled,
+        // not "the binding threw" → error. ADR-0021 §1.
+        if (bindingAbort.signal.aborted) {
+          subCallTracker.recordEnd(frame.callId, "cancelled", {
+            errorMessage: messageOf(error),
+          });
+        } else {
+          subCallTracker.recordEnd(frame.callId, "error", {
+            errorMessage: messageOf(error),
+          });
+        }
         postCallResult({
           kind: HOST_FRAME_KIND.callResult,
           callId: frame.callId,
