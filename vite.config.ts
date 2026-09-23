@@ -37,6 +37,7 @@ export default defineConfig({
     dts: { sourcemap: true },
     sourcemap: true,
     clean: true,
+    minify: true,
     // `external` is deprecated in current tsdown — use `deps.neverBundle`.
     //
     // Every `@earendil-works/*` package is provided by the pi runtime, not by this package: pi's
