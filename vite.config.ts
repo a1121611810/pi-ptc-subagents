@@ -37,6 +37,9 @@ export default defineConfig({
     dts: { sourcemap: true },
     sourcemap: true,
     clean: true,
+    // ADR-0019: build still emits *.map on disk for local stack traces; the
+    // npm tarball excludes them via the `files` whitelist in package.json.
+    // See also `minify: true` below — both decisions land together.
     minify: true,
     // `external` is deprecated in current tsdown — use `deps.neverBundle`.
     //
