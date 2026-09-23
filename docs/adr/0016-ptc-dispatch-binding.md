@@ -4,6 +4,8 @@ A PTC program is a single-threaded JS program; a Promise.all over tools.X(...) c
 
 Status: accepted (2026-09-23). Behavior change on the program-visible side (a new binding, pi.dispatch(...), returning a structured DispatchResult); no protocol, dispatcher-contract or worker-visible change.
 
+Amendment (same day): Decision §2 initially described the cap as a rename of the existing `maxParallelSubCalls` knob. The implementation keeps two independent caps instead — `dispatchConcurrency` for `pi.dispatch`, `maxParallelSubCalls` for ordinary binding fan-out — and §2/§3 below are corrected to say so.
+
 ## What we add
 
 1. A new binding, pi.dispatch({...}), exposed alongside tools.<name>(args) in every PTC worker. Its return type is a structured object (see Decision section 4) so a PTC program can branch on status, aggregate usage, and compose with the Promise.allSettled combinator.
@@ -22,11 +24,11 @@ Status: accepted (2026-09-23). Behavior change on the program-visible side (a ne
 
 1. New binding name and shape. Add pi.dispatch to the binding table, with input fields { agent, task, cwd?, agentScope?, model?, thinkingLevel? } and result fields { text, status, agentName, durationMs, exitCode, usage?, stderr?, errorMessage? } (see CONTEXT.md for canonical terms).
 
-2. Concurrency cap. Default dispatchConcurrency = 8, exposed via PtcConfig.dispatchConcurrency and capped at the existing dispatcher.acquireDispatchSlot site (config.maxParallelSubCalls in the current code base). The cap is per-run, hard, not per-turn. Rationale: dispatch spawns a fresh pi subprocess; allowing unbounded concurrent subprocesses from one PTC run would let a runaway program exhaust the host's process table. The cap is shared with the existing maxParallelSubCalls knob, which is renamed in the implementation; the _behaviour_ is hard cap on concurrent in-flight dispatch calls from one PTC run, which today is the only kind of dispatch.
+2. Concurrency cap. Default dispatchConcurrency = 8, exposed via PtcConfig.dispatchConcurrency and enforced at the dispatcher on the pi.dispatch branch. The cap is per-run, hard, not per-turn. Rationale: dispatch spawns a fresh pi subprocess; allowing unbounded concurrent subprocesses from one PTC run would let a runaway program exhaust the host's process table. The cap is independent of the existing maxParallelSubCalls knob (ADR-0004), which continues to govern ordinary binding fan-out with its queueing semantics; the two use separate counters, so in-flight ordinary calls never consume dispatch slots.
 
 3. Promise semantics for pi.dispatch. Each pi.dispatch call resolves to a DispatchResult whose status field is fulfilled or rejected. The binding never throws: a rejected child subprocess yields a DispatchResult with status rejected, exitCode set, stderr and errorMessage populated, and usage possibly absent. This is the same shape as the Promise.allSettled combinator's settled records, so PTC programs compose naturally: a Promise.all over pi.dispatch calls yields the same shape, no try/catch required.
 
-The program's _ordinary_ binding calls (e.g. tools.read, tools.grep) keep their existing semantics: a Promise.all over tools.X calls invokes pi's parallel tool execution (preflight sequentially, execute concurrently, each tool's result delivered independently). The dispatcher already enforces maxPendingCalls (ADR-0004) and maxParallelSubCalls (the rename target); no change to that path.
+The program's _ordinary_ binding calls (e.g. tools.read, tools.grep) keep their existing semantics: a Promise.all over tools.X calls invokes pi's parallel tool execution (preflight sequentially, execute concurrently, each tool's result delivered independently). The dispatcher already enforces maxPendingCalls (ADR-0004) and maxParallelSubCalls; no change to that path.
 
 4. Cancellation. When the PTC run's signal fires (deadline, abort), every in-flight pi.dispatch subprocess receives SIGTERM, then SIGKILL after a 5-second grace window (mirroring examples/extensions/subagent/index.ts runSingleAgent's signal handling). The dispatch binding's Promise resolves with { status: rejected, errorMessage: dispatch cancelled } after the kill; the surrounding Promise.all / Promise.allSettled is not invalidated.
 
