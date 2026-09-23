@@ -1,0 +1,34 @@
+# The type checks and the test suite, on every PR and on main. Until this file existed,
+# the only place CI ran them was the release job (see ADR-0018 §3 and its Consequences).
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# `checkout` needs read access to this private repository (the docs' samples
+# assume a public repo where `permissions: {}` is enough).
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      # pnpm/action-setup reads `packageManager: pnpm@…` from package.json and
+      # prepares the matching pnpm version.
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: lts/*
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run typecheck
+      # `tests/tool-visibility.test.ts` loads the built `dist/index.js` under a real `pi`,
+      # so the build has to happen before the tests — ADR-0018 §3.
+      - run: pnpm run build
+      - run: pnpm test

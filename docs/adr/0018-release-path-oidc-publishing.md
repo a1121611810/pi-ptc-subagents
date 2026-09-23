@@ -54,9 +54,10 @@ body message: …") — so the release log carries the evidence rather than hidi
 log its per-gate granularity (a red run currently names the gate that failed) or cost a
 local publish its gate; keeping both means a failure that only reproduces under
 `prepublishOnly` is still caught. Worth stating plainly, since it is the kind of
-duplication a later reader would otherwise "clean up": today neither of the other
-workflows runs `typecheck` or `test` at all, so this job is the only place CI exercises
-them.
+duplication a later reader would otherwise "clean up": `ci.yml` and `oxlint.yml` run the
+formatter and the linter only, and the PR gate that does run these five
+(`.github/workflows/test.yml`, added 2026-09-23) does not retire this copy — a release has
+to gate the tree it publishes, and a tag can be pushed on a commit no PR ever ran.
 
 **`build` precedes `test` in both places, and it has to.** `tests/tool-visibility.test.ts`
 drives the _built_ bundle — it loads `dist/index.js` under a real `pi` and asserts what the
@@ -72,7 +73,7 @@ the one place where a stale cache must not be able to change what ships;
 `pnpm install --frozen-lockfile` still pins the dependency graph exactly.
 
 **5. §5 · Node is pinned, not `lts/*`.** The job requests Node 24 rather than
-`lts/*` (the other two workflows' choice). Trusted publishing requires npm CLI
+`lts/*` (what the gate workflows ask for). Trusted publishing requires npm CLI
 ≥ 11.5.1, and the CLI ships with the runtime, so a release job's runtime is part of
 its credential path. `lts/*` remains right for a gate that should track the ecosystem.
 
@@ -102,10 +103,9 @@ cost §1 exists to remove.
   release record.
 - Every version published this way is missing the provenance badge, for as long as the
   repository is private. Expected, not a defect (§7).
-- The first gate that runs `typecheck` and the test suite in CI is the release itself.
-  A red test therefore surfaces at release time, not at PR time. Moving the same steps
-  into a `pull_request` job is a separate, smaller decision this ADR deliberately does
-  not sneak in.
+- `typecheck` and the test suite also run on every `pull_request` and on `push: main`
+  (`.github/workflows/test.yml`, added 2026-09-23), so a red test surfaces on the PR
+  rather than at release time. The release job keeps its own copy of the gates — see §3.
 - Deployments of the credential are unchanged in kind: there is no secret to rotate,
   and nothing to revoke when a maintainer leaves.
 
