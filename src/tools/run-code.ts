@@ -140,7 +140,10 @@ export function createPtcRunCodeTool(
         code: params.code,
         surface: "run_code",
         cwd,
-        bindings: createBuiltinBindings({ cwd, names }),
+        // The shipped surface always exposes the parallel binding (ADR-0016); the
+        // binding-source names only curate the built-in subset.
+        bindings: createBuiltinBindings({ cwd, names, includeDispatch: true }),
+        ...(options.depth === undefined ? {} : { depth: options.depth }),
         ...(params.timeoutMs === undefined ? {} : { timeoutMs: params.timeoutMs }),
         ...(signal === undefined ? {} : { signal }),
         ...(options.config === undefined ? {} : { config: options.config }),

@@ -57,6 +57,28 @@ export interface PtcToolOptions {
    * asserts the full built-in surface.
    */
   getBindingSourceNames?: () => readonly string[];
+  /**
+   * Depth baseline for PTC runs this tool starts inside a child pi process: the depth of
+   * the run that dispatched them, 0 for the parent turn's run (ADR-0016 Recursive
+   * section). The extension entrypoint derives it from `PI_PTC_DEPTH` (stamped on the
+   * child environment by `dispatch()`); direct library users omit it.
+   */
+  depth?: number;
+}
+
+/**
+ * Read the depth baseline pi-ptc was started with inside a child pi process.
+ *
+ * `dispatch()` stamps `PI_PTC_DEPTH` (the child's own depth) onto the spawned subprocess's
+ * environment, and the extension entrypoint reads it back here so a child PTC run's binding
+ * context starts at the dispatched depth instead of at 0 — otherwise the recursion bound in
+ * `dispatch()` could never bite below the first level. Only a pure non-negative integer is
+ * accepted; a missing or malformed value means "not a dispatched child" and yields 0.
+ */
+export function resolveDepthFromEnv(source: NodeJS.ProcessEnv = process.env): number {
+  const raw = source.PI_PTC_DEPTH;
+  if (raw === undefined || !/^\d+$/.test(raw)) return 0;
+  return Number.parseInt(raw, 10);
 }
 
 /**

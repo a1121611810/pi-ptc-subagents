@@ -10,7 +10,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AgentToolResult, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { BUILTIN_BINDING_NAMES } from "../src/runtime/bindings.ts";
-import { resolveBindingNames } from "../src/tools/common.ts";
+import { resolveBindingNames, resolveDepthFromEnv } from "../src/tools/common.ts";
 import type { PtcToolDetails } from "../src/tools/common.ts";
 import { createPtcRunCodeTool } from "../src/tools/run-code.ts";
 import { RUN_TIMEOUT_MS, makeTempDir, removeTempDir, toolContext } from "./helpers/ptc.ts";
@@ -20,6 +20,16 @@ test("resolveBindingNames intersects the active set with the built-in factories"
   expect([...resolveBindingNames([])]).toEqual([]);
   expect([...resolveBindingNames(["read", "grep"])]).toEqual(["read", "grep"]);
   expect([...resolveBindingNames(["read", "teleport", "bash"])]).toEqual(["read", "bash"]);
+});
+
+test("resolveDepthFromEnv parses PI_PTC_DEPTH (positive integer; invalid or absent → 0)", () => {
+  expect(resolveDepthFromEnv({ PI_PTC_DEPTH: "3" })).toBe(3);
+  expect(resolveDepthFromEnv({ PI_PTC_DEPTH: "1" })).toBe(1);
+  expect(resolveDepthFromEnv({})).toBe(0);
+  expect(resolveDepthFromEnv({ PI_PTC_DEPTH: "x" })).toBe(0);
+  expect(resolveDepthFromEnv({ PI_PTC_DEPTH: "2n" })).toBe(0);
+  expect(resolveDepthFromEnv({ PI_PTC_DEPTH: "-2" })).toBe(0);
+  expect(resolveDepthFromEnv({ PI_PTC_DEPTH: "0" })).toBe(0);
 });
 
 function executeTool(
@@ -60,9 +70,11 @@ test(
       );
       expect(textOf(allowed)).toBe("policy-marker");
 
+      // The shipped surface always binds pi.dispatch (ADR-0016), so the curated built-in
+      // list is what the restriction removes from the error message.
       await expect(
         executeTool(tool, `return await tools.write({ path: "x.txt", content: "nope" });`, dir),
-      ).rejects.toThrow(/no binding named "write".*available bindings: read/);
+      ).rejects.toThrow(/no binding named "write".*available bindings: read, pi\.dispatch/);
     } finally {
       await removeTempDir(dir);
     }
@@ -71,7 +83,7 @@ test(
 );
 
 test(
-  "an empty active set yields no bindings, yet Node and console still work",
+  "an empty active set still binds the dispatch surface, and Node and console still work",
   async () => {
     const dir = await makeTempDir();
     try {
@@ -79,7 +91,7 @@ test(
 
       await expect(
         executeTool(tool, `return await tools.read({ path: "data.txt" });`, dir),
-      ).rejects.toThrow(/available bindings: \(none\)/);
+      ).rejects.toThrow(/available bindings: pi\.dispatch/);
 
       const bare = await executeTool(tool, `console.log("no-tools"); return 40 + 2;`, dir);
       expect(bare.details.result).toBe(42);

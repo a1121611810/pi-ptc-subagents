@@ -11,6 +11,10 @@
  *   the dispatcher's job (see `serializedBytes` usage there).
  * - Error kinds are R1 §3's taxonomy minus `sandbox-unavailable` (ADR-0007 ships no OS
  *   sandbox) and minus any `agent`-related kind (there is no `agent()` helper).
+ *
+ * This module also carries the small message-formatting helpers both ends share
+ * (`describeValue`), since both bundles (host `dist/index.js`, worker `dist/worker.js`)
+ * import it statically and the wire strings must stay aligned anyway.
  */
 import { MessagePort } from "node:worker_threads";
 import type { PtcSurface } from "./limits.ts";
@@ -336,6 +340,21 @@ export function isPtcWorkerFrame(value: unknown): value is PtcWorkerFrame {
     isPtcResultFrame(value) ||
     isPtcErrorFrame(value)
   );
+}
+
+/* -------------------------------------------------------------------------- */
+/* value description                                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * One-phrase description of an arbitrary value for error messages. Shared by the
+ * worker-side helpers (`log(message) expects a string, received …`) and the host-side
+ * workflow-args validator, so both ends word their rejection reasons identically.
+ */
+export function describeValue(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "an array";
+  return `a ${typeof value}`;
 }
 
 /* -------------------------------------------------------------------------- */

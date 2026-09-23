@@ -1,14 +1,62 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
+import { EventEmitter } from "node:events";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
   appendDepthHint,
   buildArgv,
   decideCloseOutcome,
   discoverAgent,
+  dispatch,
   parseAgentEvent,
   parseAgentMarkdown,
   safeKill,
   type AgentConfigLike,
 } from "../src/runtime/dispatch.ts";
+import { makeTempDir, removeTempDir } from "./helpers/ptc.ts";
+
+/**
+ * Spawn observation seam: `dispatch()` spawns the `pi` binary through `node:child_process`,
+ * so the mock wraps the real module and records every spawn while returning a fake child
+ * that closes cleanly. Only this file observes dispatch's spawn path; every assertion reads
+ * the recorded `options` (in particular the environment).
+ */
+const spawnRecorder = vi.hoisted(() => ({
+  calls: [] as Array<{
+    command: string;
+    args: readonly string[];
+    options: Record<string, unknown>;
+  }>,
+}));
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  const fakeSpawn = (
+    command: string,
+    args: readonly string[],
+    options: Record<string, unknown>,
+  ) => {
+    spawnRecorder.calls.push({ command, args, options });
+    const proc = new EventEmitter() as EventEmitter & {
+      stdout: EventEmitter;
+      stderr: EventEmitter;
+      pid: number;
+      killed: boolean;
+      kill: (signal: string) => boolean;
+    };
+    proc.stdout = new EventEmitter();
+    proc.stderr = new EventEmitter();
+    proc.pid = 4242;
+    proc.killed = false;
+    proc.kill = () => true;
+    // Close cleanly with no events: enough for dispatch() to resolve promptly.
+    queueMicrotask(() => {
+      proc.emit("close", 0);
+    });
+    return proc;
+  };
+  return { ...actual, spawn: fakeSpawn as unknown as typeof actual.spawn };
+});
 
 describe("parseAgentMarkdown", () => {
   test("parses a complete frontmatter", () => {
@@ -231,5 +279,46 @@ describe("safeKill", () => {
       },
     };
     expect(safeKill(proc, "SIGKILL")).toBe(false);
+  });
+});
+
+describe("dispatch depth propagation (ADR-0016 Recursive section)", () => {
+  test("spawn stamps PI_PTC_DEPTH=childDepth on the child environment", async () => {
+    const dir = await makeTempDir();
+    try {
+      await mkdir(join(dir, ".pi", "agents"), { recursive: true });
+      await writeFile(
+        join(dir, ".pi", "agents", "env-probe.md"),
+        "---\nname: env-probe\n---\nYou probe.\n",
+      );
+      spawnRecorder.calls.length = 0;
+      const result = await dispatch(
+        { agent: "env-probe", task: "ping", agentScope: "project" },
+        { callId: 7, cwd: dir, depth: 2, maxDispatchDepth: 3 },
+      );
+      expect(spawnRecorder.calls).toHaveLength(1);
+      const env = spawnRecorder.calls[0]?.options.env as Record<string, string>;
+      // depth 2 → childDepth 3 ≤ maxDispatchDepth 3: the spawn happened, and the child run's
+      // depth baseline travels in the environment (the pi-ptc extension inside the child
+      // reads it back). The rest of the environment is inherited from the host.
+      expect(env.PI_PTC_DEPTH).toBe("3");
+      expect(env.PATH).toBe(process.env.PATH);
+      // The fake child closed cleanly with no assistant text.
+      expect(result.exitCode).toBe(0);
+    } finally {
+      await removeTempDir(dir);
+    }
+  });
+
+  test("a dispatch at the depth limit rejects with 'dispatch depth limit reached' and never spawns", async () => {
+    spawnRecorder.calls.length = 0;
+    const result = await dispatch(
+      { agent: "anyone", task: "ping" },
+      { callId: 8, cwd: process.cwd(), depth: 3, maxDispatchDepth: 3 },
+    );
+    expect(result.status).toBe("rejected");
+    // Verbatim per the hint block appendDepthHint promises the child program.
+    expect(result.errorMessage).toBe("dispatch depth limit reached");
+    expect(spawnRecorder.calls).toHaveLength(0);
   });
 });

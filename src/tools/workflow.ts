@@ -28,6 +28,7 @@ import type { Static, TArray, TObject, TOptional, TRecord, TString, TUnknown } f
 import { createBuiltinBindings } from "../runtime/bindings.ts";
 import { runPtcProgram } from "../runtime/dispatcher.ts";
 import type { PtcRunOutcome } from "../runtime/dispatcher.ts";
+import { describeValue } from "../runtime/protocol.ts";
 import type { WorkerPool } from "../runtime/worker-pool.ts";
 import {
   codeRunFailedError,
@@ -106,12 +107,6 @@ const PARAMETERS: WorkflowParameters = Type.Object({
 
 /** Parameters after pi's schema validation; `args` is still unvalidated plain JSON to be checked. */
 export type PtcWorkflowParams = Static<typeof PARAMETERS>;
-
-function describeValue(value: unknown): string {
-  if (value === null) return "null";
-  if (Array.isArray(value)) return "an array";
-  return `a ${typeof value}`;
-}
 
 /**
  * Reject anything that is not plain JSON, with a path-qualified reason.
@@ -248,8 +243,10 @@ export function createPtcWorkflowTool(
         code: params.script,
         surface: "workflow",
         cwd,
-        bindings: createBuiltinBindings({ cwd, names }),
+        // Same surface contract as ptc_run_code: pi.dispatch is always bound (ADR-0016).
+        bindings: createBuiltinBindings({ cwd, names, includeDispatch: true }),
         ...(params.args === undefined ? {} : { args: params.args }),
+        ...(options.depth === undefined ? {} : { depth: options.depth }),
         ...(signal === undefined ? {} : { signal }),
         ...(options.config === undefined ? {} : { config: options.config }),
         ...(pool === undefined ? {} : { pool }),

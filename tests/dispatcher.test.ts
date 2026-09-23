@@ -3,6 +3,8 @@ import { join } from "node:path";
 import { expect, test, vi } from "vitest";
 import { createBuiltinBindings } from "../src/runtime/bindings.ts";
 import type { BindingTable } from "../src/runtime/bindings.ts";
+import { DISPATCH_BINDING_NAME } from "../src/runtime/bindings.ts";
+import { DISPATCH_CONCURRENCY_LIMIT_MESSAGE } from "../src/runtime/dispatch.ts";
 import { runPtcProgram } from "../src/runtime/dispatcher.ts";
 import type { PtcRunOutcome } from "../src/runtime/dispatcher.ts";
 import { createWorkerEnv, DEFAULT_CONFIG, WORKER_ENV_ALLOW_LIST } from "../src/runtime/limits.ts";
@@ -173,27 +175,185 @@ test(
 );
 
 test(
-  "dispatch forwarding is capped at maxParallelSubCalls",
+  "builtin fan-out is capped at maxParallelSubCalls and the overflow queues FIFO",
   async () => {
+    // ADR-0004 consequence: DSH's maxParallelSubCalls = 10 is the builtin forwarding cap.
+    // The overflow waits for a slot and runs when one frees up — never an error. (Only
+    // pi.dispatch gets the immediate-rejection hard cap; see the dispatchConcurrency tests.)
     let active = 0;
     let peak = 0;
+    let releaseAll: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseAll = resolve;
+    });
     const bindings = makeBindings({
-      probe: async () => {
+      probe: async (args) => {
         active += 1;
         peak = Math.max(peak, active);
-        await new Promise((resolve) => setTimeout(resolve, 10));
+        await gate;
         active -= 1;
-        return active;
+        return (args as { i: number }).i;
       },
     });
-    const count = DEFAULT_CONFIG.maxParallelSubCalls * 3;
+    const cap = DEFAULT_CONFIG.maxParallelSubCalls;
+    const count = cap + 1;
+    const runPromise = run(
+      `return await Promise.all(Array.from({ length: ${count} }, (_, i) => tools.probe({ i })));`,
+      { bindings },
+    );
+    // Sample the invariant directly: the first `cap` calls occupy the slots (peak == cap)
+    // while the last one waits host-side for a slot.
+    const deadline = Date.now() + 5_000;
+    while (peak < cap && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(peak).toBe(cap);
+    releaseAll();
+    const outcome = await runPromise;
+    expect(outcome.error).toBeUndefined();
+    // The queued call ran after the release: every call fulfilled, in call order.
+    expect(outcome.value).toEqual(Array.from({ length: count }, (_, i) => i));
+  },
+  RUN_TIMEOUT_MS,
+);
+
+test(
+  "pi.dispatch overflow resolves immediately with the verbatim concurrency message (no queueing)",
+  async () => {
+    // ADR-0016 §2: the per-run cap on in-flight pi.dispatch calls is a hard cap. The 9th
+    // concurrent call resolves immediately with { status: "rejected", errorMessage:
+    // "dispatch concurrency limit reached" } — it is neither queued nor spawned. The
+    // binding never throws, so the program sees a settled DispatchResult, not a rejection.
+    let started = 0;
+    let markAllStarted: () => void = () => {};
+    const allStarted = new Promise<void>((resolve) => {
+      markAllStarted = resolve;
+    });
+    const bindings = makeBindings({
+      [DISPATCH_BINDING_NAME]: async () => {
+        started += 1;
+        if (started === DEFAULT_CONFIG.dispatchConcurrency) markAllStarted();
+        await allStarted;
+        // Stay in flight long enough that an immediate rejection provably beats every
+        // executed call to the wire (a queued call would settle last instead).
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        return { text: "ok", status: "fulfilled", agentName: "stub", durationMs: 1, exitCode: 0 };
+      },
+    });
+    const cap = DEFAULT_CONFIG.dispatchConcurrency;
+    const toolName = JSON.stringify(DISPATCH_BINDING_NAME);
     const outcome = await run(
-      `const rs = await Promise.all(Array.from({ length: ${count} }, (_, i) => tools.probe({ i }))); return rs.length;`,
+      [
+        "const order = [];",
+        `const calls = Array.from({ length: ${cap + 1} }, (_, i) =>`,
+        `  tools[${toolName}]({ i }).then((r) => {`,
+        "    order.push({ i, status: r.status, errorMessage: r.errorMessage ?? null });",
+        "    return { status: r.status, errorMessage: r.errorMessage ?? null };",
+        "  }));",
+        "const results = await Promise.all(calls);",
+        "return { order, results };",
+      ].join("\n"),
       { bindings },
     );
     expect(outcome.error).toBeUndefined();
-    expect(outcome.value).toBe(count);
-    expect(peak).toBe(DEFAULT_CONFIG.maxParallelSubCalls);
+    const value = outcome.value as {
+      order: Array<{ i: number; status: string; errorMessage: string | null }>;
+      results: Array<{ status: string; errorMessage: string | null }>;
+    };
+    // Exactly `cap` calls executed the binding; the overflow call never did.
+    expect(started).toBe(cap);
+    const fulfilledResults = value.results.filter((r) => r.status === "fulfilled");
+    const rejectedResults = value.results.filter((r) => r.status === "rejected");
+    expect(fulfilledResults).toHaveLength(cap);
+    expect(rejectedResults).toHaveLength(1);
+    // Verbatim ADR-0016 §2 message.
+    expect(rejectedResults[0]?.errorMessage).toBe(DISPATCH_CONCURRENCY_LIMIT_MESSAGE);
+    // Settled first: no queueing. A queued call would have settled after the calls ahead
+    // of it; the rejected record must be the very first event the program observed.
+    expect(value.order).toHaveLength(cap + 1);
+    expect(value.order[0]?.status).toBe("rejected");
+    expect(value.order[0]?.errorMessage).toBe(DISPATCH_CONCURRENCY_LIMIT_MESSAGE);
+  },
+  RUN_TIMEOUT_MS,
+);
+
+test(
+  "the dispatch and builtin caps are independent: in-flight reads do not consume dispatch slots",
+  async () => {
+    // ADR-0016 §2/§3: dispatchConcurrency caps pi.dispatch only, maxParallelSubCalls caps
+    // builtin fan-out — two independent counters, neither throttles the other. Eight
+    // in-flight builtin calls must leave all eight dispatch slots free.
+    let readsInFlight = 0;
+    let dispatchesInFlight = 0;
+    let releaseAll: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseAll = resolve;
+    });
+    const bindings = makeBindings({
+      read: async () => {
+        readsInFlight += 1;
+        await gate;
+        return { content: [{ type: "text", text: "read!" }] };
+      },
+      [DISPATCH_BINDING_NAME]: async () => {
+        dispatchesInFlight += 1;
+        await gate;
+        return { text: "ok", status: "fulfilled", agentName: "stub", durationMs: 1, exitCode: 0 };
+      },
+    });
+    const cap = DEFAULT_CONFIG.dispatchConcurrency;
+    const toolName = JSON.stringify(DISPATCH_BINDING_NAME);
+    const runPromise = run(
+      [
+        `const reads = Array.from({ length: ${cap} }, () => tools.read({}));`,
+        `const settled = await Promise.all(Array.from({ length: ${cap + 1} }, () =>`,
+        `  tools[${toolName}]({}).then((r) => ({ status: r.status, errorMessage: r.errorMessage ?? null }))));`,
+        "await Promise.all(reads);",
+        "return settled;",
+      ].join("\n"),
+      { bindings },
+    );
+    // The program posts the read frames before the dispatch frames, so all 8 reads hold
+    // builtin slots while the dispatches are being handled.
+    const deadline = Date.now() + 5_000;
+    while (readsInFlight < cap && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(readsInFlight).toBe(cap);
+    releaseAll();
+    const outcome = await runPromise;
+    expect(outcome.error).toBeUndefined();
+    const results = outcome.value as Array<{ status: string; errorMessage: string | null }>;
+    // All 8 dispatch slots were free: 8 dispatches executed, the 9th rejected immediately.
+    expect(dispatchesInFlight).toBe(cap);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(cap);
+    const rejected = results.filter((r) => r.status === "rejected");
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.errorMessage).toBe(DISPATCH_CONCURRENCY_LIMIT_MESSAGE);
+  },
+  RUN_TIMEOUT_MS,
+);
+
+test(
+  "dispatchConcurrency override: the cap+1th concurrent call is rejected immediately",
+  async () => {
+    const bindings = makeBindings({
+      [DISPATCH_BINDING_NAME]: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return { text: "ok", status: "fulfilled", agentName: "stub", durationMs: 1, exitCode: 0 };
+      },
+    });
+    const toolName = JSON.stringify(DISPATCH_BINDING_NAME);
+    const outcome = await run(
+      `return await Promise.all(Array.from({ length: 3 }, () => tools[${toolName}]({}).then((r) => ({ status: r.status, errorMessage: r.errorMessage ?? null }))));`,
+      { bindings, config: { dispatchConcurrency: 2 } },
+    );
+    expect(outcome.error).toBeUndefined();
+    const results = outcome.value as Array<{ status: string; errorMessage: string | null }>;
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(2);
+    const rejected = results.filter((r) => r.status === "rejected");
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.errorMessage).toBe(DISPATCH_CONCURRENCY_LIMIT_MESSAGE);
   },
   RUN_TIMEOUT_MS,
 );
@@ -483,21 +643,61 @@ test(
 );
 
 test(
-  "a call still queued for a dispatch slot when the run settles is dropped, not executed",
+  "maxParallelSubCalls caps builtin fan-out (queueing), independent of dispatchConcurrency",
   async () => {
-    // The `settled` guard in `dispatchCall` is only reachable through slot contention: a call
-    // whose frame arrived before the cancel but whose `acquireDispatchSlot()` was still waiting.
-    // Executing the binding there would start host-side work after the caller was already told
-    // the run is over — for `pi.dispatch` that means spawning a pi subprocess only to SIGTERM it
-    // (`dispatch.ts` spawns, then checks `signal.aborted`) — and the result could not be
-    // delivered anyway, because the run's port is closed.
+    // ADR-0004 consequence: maxParallelSubCalls = 10 caps concurrent builtin binding
+    // dispatches, FIFO-queueing the overflow. The override throttles builtin calls only —
+    // the dispatch cap is a separate knob with a separate counter.
+    let active = 0;
+    let peak = 0;
+    let releaseAll: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseAll = resolve;
+    });
+    const bindings = makeBindings({
+      probe: async () => {
+        active += 1;
+        peak = Math.max(peak, active);
+        await gate;
+        active -= 1;
+        return null;
+      },
+    });
+    const runPromise = run(
+      "await Promise.all([tools.probe({}), tools.probe({}), tools.probe({})]); return 1;",
+      { bindings, config: { maxParallelSubCalls: 2, graceMs: 5_000 } },
+    );
+    // At most 2 builtin calls run concurrently; the third waits for a slot.
+    const deadline = Date.now() + 5_000;
+    while (peak < 2 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(peak).toBe(2);
+    releaseAll();
+    const outcome = await runPromise;
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.value).toBe(1);
+  },
+  RUN_TIMEOUT_MS,
+);
+
+test(
+  "a builtin call still queued for a slot when the run settles is dropped, not executed",
+  async () => {
+    // The `settled` guard in `dispatchCall`'s builtin branch is only reachable through
+    // builtin slot contention: a call whose frame arrived before the cancel but whose
+    // `acquireBuiltinSlot()` was still waiting. (`pi.dispatch` calls have no queue — the
+    // dispatch branch takes the immediate-reject path — so they can never reach this
+    // guard.) Executing the binding there would start host-side work after the caller
+    // was already told the run is over, and the result could not be delivered anyway,
+    // because the port is closed.
     const holdStarted = deferred<void>();
     const releaseHold = deferred<void>();
     let probeCalled = false;
     const bindings = makeBindings({
       hold: async () => {
         holdStarted.resolve(undefined);
-        // The test keeps the single dispatch slot occupied across the run's end.
+        // The test keeps the single builtin slot occupied across the run's end.
         await releaseHold.promise;
         return null;
       },
@@ -513,14 +713,15 @@ test(
       config: { maxParallelSubCalls: 1, graceMs: 5_000 },
     });
     await holdStarted.promise;
-    // Drain the event loop before aborting: `probe`'s call frame is the very next message the
-    // worker sent, so it is queued host-side (waiting for the slot) by the time the cancel lands.
+    // Drain the event loop before aborting: `probe`'s call frame is the very next message
+    // the worker sent, so it is queued host-side (waiting for the slot) by the time the
+    // cancel lands.
     await new Promise((resolve) => setTimeout(resolve, 25));
     controller.abort();
     const outcome = await runPromise;
     expect(outcome.error?.kind).toBe("abort");
-    // The slot frees only now, after the run has settled: the queued call resumes exactly in the
-    // state this test is about.
+    // The slot frees only now, after the run has settled: the queued call resumes exactly
+    // in the state this test is about.
     releaseHold.resolve(undefined);
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(probeCalled, "the queued call must not run after the run settled").toBe(false);
@@ -625,6 +826,35 @@ test(
     expect(second.value).toBe("b");
     expect(first.logs).toEqual(["first"]);
     expect(second.logs).toEqual(["second"]);
+  },
+  RUN_TIMEOUT_MS,
+);
+
+test(
+  "runPtcProgram hands its depth option to the binding context (default 0)",
+  async () => {
+    // ADR-0016 Recursive section: a child PTC run starts at the depth it was dispatched
+    // at, not at 0, or the recursion bound can never bite. The depth option is the seam
+    // the extension entrypoint feeds PI_PTC_DEPTH through.
+    const seen: number[] = [];
+    const bindings = makeBindings({
+      probe: async (_args, context) => {
+        seen.push(context.depth);
+        return null;
+      },
+    });
+    const explicit = await runPtcProgram({
+      code: "await tools.probe({}); return 1;",
+      surface: "run_code",
+      cwd: process.cwd(),
+      bindings,
+      depth: 2,
+    });
+    expect(explicit.error).toBeUndefined();
+    expect(seen).toEqual([2]);
+    const defaulted = await run("await tools.probe({}); return 1;", { bindings });
+    expect(defaulted.error).toBeUndefined();
+    expect(seen).toEqual([2, 0]);
   },
   RUN_TIMEOUT_MS,
 );

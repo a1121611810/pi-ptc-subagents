@@ -27,16 +27,24 @@ export interface PtcConfig {
   maxMessageBytes: number;
   /** Admission control for simultaneously in-flight worker→host binding calls (ADR-0004). */
   maxPendingCalls: number;
-  /** Concurrent binding dispatches; DSH's `maxParallelSubCalls` (ADR-0004 consequence).
-   *  Renamed in spirit by ADR-0016 section 2: the cap that really matters for
-   *  resource safety is the per-run `dispatchConcurrency` below. This field
-   *  is kept for backward compatibility (and for the in-process builtin
-   *  binding fan-out) but is no longer the authoritative limit on the
-   *  parallel binding `pi.dispatch`. */
+  /**
+   * Concurrent builtin binding dispatches; DSH's `maxParallelSubCalls`
+   * (ADR-0004 consequence), mirrored verbatim (10). The overflow
+   * FIFO-queues for a slot instead of failing. This is the authoritative
+   * cap for the builtin fan-out path — independent of
+   * `dispatchConcurrency`, with its own counter: neither cap throttles
+   * the other.
+   */
   maxParallelSubCalls: number;
-  /** Per-run hard cap on concurrently in-flight `pi.dispatch(...)` calls.
-   *  Default 8, matches pi's `subagent` extension `MAX_PARALLEL_TASKS`.
-   *  ADR-0016 section 2. */
+  /**
+   * Per-run hard cap on concurrently in-flight `pi.dispatch(...)` calls,
+   * enforced by the dispatcher: the next concurrent call resolves
+   * immediately with `{ status: "rejected", errorMessage: "dispatch
+   * concurrency limit reached" }` — never queued, never spawned.
+   * Default 8, matches pi's `subagent` extension `MAX_PARALLEL_TASKS`.
+   * ADR-0016 section 2. Independent of `maxParallelSubCalls`: builtin
+   * calls never consume a dispatch slot and vice versa.
+   */
   dispatchConcurrency: number;
   /** Maximum recursion depth for `pi.dispatch`. The child PTC run spawned by
    *  the (depth+1)-th dispatch is allowed only when childDepth <= maxDispatchDepth.
@@ -53,9 +61,10 @@ export interface PtcConfig {
   /** V8 young-generation cap handed to `new Worker({ resourceLimits })` (F2). */
   maxYoungGenerationSizeMb: number;
   /**
-   * Per-turn worker pool capacity (ADR-0017 §3). Decoupled from `maxParallelSubCalls`
-   * because pool capacity is "resident workers" while `maxParallelSubCalls` is
-   * "in-flight calls" — two different ceilings. Default 4.
+   * Per-turn worker pool capacity (ADR-0017 §3). Decoupled from
+   * `dispatchConcurrency` because pool capacity is "resident workers" while
+   * `dispatchConcurrency` is "in-flight calls" — two different ceilings.
+   * Default 4.
    */
   poolSize: number;
   /**

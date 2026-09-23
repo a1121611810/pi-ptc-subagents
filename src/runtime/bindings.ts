@@ -41,6 +41,9 @@ export const BUILTIN_BINDING_NAMES = [
 ] as const;
 export type BuiltinBindingName = (typeof BUILTIN_BINDING_NAMES)[number];
 
+/** Parallel binding name (ADR-0016). */
+export const DISPATCH_BINDING_NAME = "pi.dispatch" as const;
+
 /**
  * Bindings exposed when the caller does not pass an explicit name list.
  *
@@ -50,12 +53,6 @@ export type BuiltinBindingName = (typeof BUILTIN_BINDING_NAMES)[number];
  * out would silently shrink the surface relative to DSH. Callers that want a read-only
  * PTC surface pass an explicit subset.
  */
-/** Parallel binding name (ADR-0016). Always bound alongside the builtin set;
- * opt-out is the callers responsibility via an explicit subset to
- * createBuiltinBindings (today the subset is restricted to builtin names,
- * so opt-out is effectively use a future flag). */
-export const DISPATCH_BINDING_NAME = "pi.dispatch" as const;
-
 export const DEFAULT_BINDING_NAMES: readonly BuiltinBindingName[] = BUILTIN_BINDING_NAMES;
 
 export interface BindingContext {
@@ -113,6 +110,16 @@ export interface CreateBuiltinBindingsOptions {
   cwd: string;
   /** Subset of {@link BUILTIN_BINDING_NAMES}; defaults to all of them (bash included). */
   names?: readonly string[];
+  /**
+   * Whether the parallel binding `pi.dispatch` (ADR-0016) joins the table. Defaults to
+   * "did the caller curate the surface": `true` when `names` is omitted, `false` when an
+   * explicit list is passed (R3's read-only PTC surface pattern). Deciding on whether
+   * `names` was provided — not on array identity with {@link DEFAULT_BINDING_NAMES} —
+   * matters because production callers resolve names through a `.filter()` that always
+   * returns a fresh array. The two shipped tools pass `true` explicitly: the dispatch
+   * binding is part of every production surface.
+   */
+  includeDispatch?: boolean;
 }
 
 /**
@@ -124,6 +131,8 @@ export interface CreateBuiltinBindingsOptions {
  */
 export function createBuiltinBindings(options: CreateBuiltinBindingsOptions): BindingTable {
   const names = options.names ?? DEFAULT_BINDING_NAMES;
+  // ADR-0016: `pi.dispatch` joins the table unless the caller curated an explicit name list.
+  const includeDispatch = options.includeDispatch ?? options.names === undefined;
   const table = new Map<string, Binding>();
   for (const name of names) {
     const factory = BUILTIN_TOOL_FACTORIES[name as BuiltinBindingName];
@@ -159,12 +168,11 @@ export function createBuiltinBindings(options: CreateBuiltinBindingsOptions): Bi
       },
     });
   }
-  // Register the parallel binding alongside the builtin set (ADR-0016).
-  // The binding is added unconditionally when the caller accepts the default set,
-  // but an explicit subset (the read-only PTC surface pattern, R3) is honoured:
-  // `pi.dispatch` is not mixed into a caller-curated list, because the caller
-  // has signalled they want a specific surface.
-  if (names === DEFAULT_BINDING_NAMES) {
+  // Register the parallel binding alongside the builtin set (ADR-0016). The default
+  // surface (no explicit `names`) and any caller passing `includeDispatch: true` get it;
+  // an explicit caller-curated list does not, because the caller has signalled they want
+  // a specific surface.
+  if (includeDispatch) {
     table.set(DISPATCH_BINDING_NAME, {
       name: DISPATCH_BINDING_NAME,
       execute: async (args, context) => {
@@ -173,7 +181,7 @@ export function createBuiltinBindings(options: CreateBuiltinBindingsOptions): Bi
           callId: context.callId,
           cwd: options.cwd,
           depth: context.depth,
-          maxDepth: context.maxDispatchDepth,
+          maxDispatchDepth: context.maxDispatchDepth,
         });
       },
     });

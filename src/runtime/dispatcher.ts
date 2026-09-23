@@ -14,7 +14,12 @@
  *   hardening itself is defined once, in `workerSpawnOptions` (`worker-pool.ts`),
  * - complete the `MessageChannel` handshake and send the `init` frame,
  * - route `tools.*` calls to the binding table — concurrently, with DSH's
- *   `maxParallelSubCalls` forwarding cap and `maxPendingCalls` admission control,
+ *   `maxPendingCalls` admission control, the `maxParallelSubCalls` builtin
+ *   forwarding cap (ADR-0004 consequence: the overflow FIFO-queues for a
+ *   slot), and the per-run `dispatchConcurrency` hard cap on in-flight
+ *   `pi.dispatch` calls (ADR-0016 §2: the overflow resolves immediately as
+ *   rejected, it is never queued). The two caps have independent counters:
+ *   neither throttles the other.
  * - collect logs / narration / phases and enforce the joint output budget,
  * - enforce the deadline, honour caller cancellation, and settle the run: hand the worker
  *   back (pooled) or tear it down (cold).
@@ -25,7 +30,8 @@
 import { randomUUID } from "node:crypto";
 import { MessageChannel, Worker } from "node:worker_threads";
 import type { MessagePort } from "node:worker_threads";
-import { BUILTIN_BINDING_NAMES, type BindingTable } from "./bindings.ts";
+import { BUILTIN_BINDING_NAMES, DISPATCH_BINDING_NAME, type BindingTable } from "./bindings.ts";
+import { dispatchConcurrencyLimitReached } from "./dispatch.ts";
 import { createWorkerEnv, effectiveTimeoutMs, resolveConfig } from "./limits.ts";
 import type { PtcConfig, PtcSurface } from "./limits.ts";
 import {
@@ -69,6 +75,14 @@ export interface RunPtcProgramOptions {
   config?: Partial<PtcConfig>;
   /** Cancels the run; the worker gets a cooperative cancel window before termination. */
   signal?: AbortSignal;
+  /**
+   * Depth of this run in the `pi.dispatch` recursion chain (ADR-0016 Recursive section):
+   * 0 for the parent turn's run, 1+ for a run inside a child spawned by `pi.dispatch`.
+   * Handed to the binding context so the dispatch binding can bound recursion. The
+   * extension entrypoint derives it from `PI_PTC_DEPTH`; direct library use defaults
+   * to 0.
+   */
+  depth?: number;
   /** Identifier carried to the worker; generated when omitted. */
   runId?: string;
   /**
@@ -283,13 +297,26 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
     let workerReady = false;
     let pendingCalls = 0;
     let outputBytes = 0;
+    /**
+     * Concurrently in-flight `pi.dispatch` calls, counted so the per-run hard cap
+     * (ADR-0016 §2) can reject the overflow immediately. There is deliberately no
+     * waiter queue behind this counter: the N+1th concurrent call resolves as
+     * rejected instead of waiting for a slot. Independent of `activeBuiltinCalls`.
+     */
     let activeDispatches = 0;
-    const dispatchWaiters: Array<() => void> = [];
+    /**
+     * Concurrently in-flight builtin binding calls, counted against
+     * `maxParallelSubCalls` (ADR-0004 consequence). Unlike the dispatch cap,
+     * the overflow FIFO-queues for a slot — DSH's semantics for builtin fan-out.
+     * Independent of `activeDispatches`.
+     */
+    let activeBuiltinCalls = 0;
+    const builtinWaiters: Array<() => void> = [];
     // Per-run depth for `pi.dispatch` (ADR-0016 Recursive section).
-    // The parent turn's PTC run is depth 0; a child spawned by `pi.dispatch`
-    // is depth 1, and so on. The depth is read by the binding's `execute`;
-    // the dispatcher itself does not change it within a single run.
-    const runDepth = 0;
+    // The parent turn's PTC run is depth 0; a run inside a child spawned by `pi.dispatch`
+    // starts at the depth the child was stamped with (`PI_PTC_DEPTH` → the `depth`
+    // option). The dispatcher itself does not change it within a single run.
+    const runDepth = options.depth ?? 0;
     /** Deadline timer: fires `timeoutMs` after the run started. A cancel does not disarm it. */
     let runTimer: NodeJS.Timeout | undefined;
     /** The cancel's cooperative window: armed and re-armed by `armGraceTimer` only. */
@@ -434,24 +461,26 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
       return false;
     };
 
-    const acquireDispatchSlot = async (): Promise<void> => {
-      if (activeDispatches < config.maxParallelSubCalls) {
-        activeDispatches += 1;
+    /* ---------------------- builtin fan-out cap (ADR-0004) ---------------------- */
+
+    const acquireBuiltinSlot = async (): Promise<void> => {
+      if (activeBuiltinCalls < config.maxParallelSubCalls) {
+        activeBuiltinCalls += 1;
         return;
       }
       await new Promise<void>((slot) => {
-        dispatchWaiters.push(slot);
+        builtinWaiters.push(slot);
       });
     };
 
-    const releaseDispatchSlot = (): void => {
-      const next = dispatchWaiters.shift();
+    const releaseBuiltinSlot = (): void => {
+      const next = builtinWaiters.shift();
       if (next) {
-        // Hand the slot over directly; `activeDispatches` is unchanged.
+        // Hand the slot over directly; `activeBuiltinCalls` is unchanged.
         next();
         return;
       }
-      activeDispatches -= 1;
+      activeBuiltinCalls -= 1;
     };
 
     const handleCall = (frame: PtcCallFrame): void => {
@@ -488,16 +517,38 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
         });
         return;
       }
-      await acquireDispatchSlot();
-      if (settled) {
-        // Late arrival: the run settled (deadline/abort) while this call was waiting for a
-        // dispatch slot, so the worker that asked is gone and `bindingAbort` has already fired.
-        // Do NOT execute the binding: it would start host-side work whose only possible outcome
-        // is the abort it cannot deliver anywhere — the port is closed. The in-flight case is the
-        // one that needs the signal, and it is covered: a call that was already executing when
-        // the cancel fired sees `bindingAbort` through the context it was handed.
-        releaseDispatchSlot();
-        return;
+      const isDispatch = frame.tool === DISPATCH_BINDING_NAME;
+      if (isDispatch) {
+        /* dispatch cap (ADR-0016 §2) */
+        // Hard cap: at `dispatchConcurrency` in-flight calls the next one is rejected
+        // immediately — never queued, never executed. The rejection is a settled
+        // DispatchResult (the binding never throws, §3), so a Promise.all /
+        // Promise.allSettled over pi.dispatch calls sees a settled record, not a throw.
+        if (activeDispatches >= config.dispatchConcurrency) {
+          postCallResult({
+            kind: HOST_FRAME_KIND.callResult,
+            callId: frame.callId,
+            tool: frame.tool,
+            ok: true,
+            value: dispatchConcurrencyLimitReached(),
+          });
+          return;
+        }
+        activeDispatches += 1;
+      } else {
+        // Builtin fan-out cap (ADR-0004 consequence): the overflow waits for a slot
+        // instead of failing.
+        await acquireBuiltinSlot();
+        if (settled) {
+          // Late arrival: the run settled (deadline/abort) while this call was waiting
+          // for a builtin slot, so the worker that asked is gone and `bindingAbort` has
+          // already fired. Do NOT execute the binding: it would start host-side work
+          // whose only possible outcome is the abort it cannot deliver anywhere — the
+          // port is closed. The in-flight case is covered: a call that was already
+          // executing when the cancel fired sees `bindingAbort` through its context.
+          releaseBuiltinSlot();
+          return;
+        }
       }
       try {
         const value = await binding.execute(frame.args, {
@@ -557,7 +608,11 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
           message: messageOf(error),
         });
       } finally {
-        releaseDispatchSlot();
+        if (isDispatch) {
+          activeDispatches -= 1;
+        } else {
+          releaseBuiltinSlot();
+        }
       }
     };
 

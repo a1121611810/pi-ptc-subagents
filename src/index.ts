@@ -19,7 +19,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { createPtcRunCodeTool } from "./tools/run-code.ts";
 import { createPtcWorkflowTool } from "./tools/workflow.ts";
-import { resolveBindingNames } from "./tools/common.ts";
+import { resolveBindingNames, resolveDepthFromEnv } from "./tools/common.ts";
 import { TurnPools } from "./runtime/turn-pools.ts";
 import {
   bindingSource,
@@ -153,16 +153,25 @@ export default function ptcSubagents(pi: ExtensionAPI): void {
    */
   const getBindingSourceNames = (): readonly string[] => bindingSource(mode, pi.getActiveTools());
 
+  /**
+   * Depth baseline for PTC runs this pi process starts (ADR-0016 Recursive section).
+   * Inside a pi process spawned by `pi.dispatch`, the env carries `PI_PTC_DEPTH`; a
+   * normal pi session has none, and the parent turn's runs stay at depth 0.
+   */
+  const ptcDepth = resolveDepthFromEnv();
+
   pi.registerTool(
     createPtcRunCodeTool({
       getBindingSourceNames,
       getPool: () => turnPools.get("run_code"),
+      depth: ptcDepth,
     }),
   );
   pi.registerTool(
     createPtcWorkflowTool({
       getBindingSourceNames,
       getPool: () => turnPools.get("workflow"),
+      depth: ptcDepth,
     }),
   );
 

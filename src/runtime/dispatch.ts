@@ -1,12 +1,13 @@
 /**
- * pi.dispatch: a parallel binding that spawns a fresh pi subprocess per call.
+ * pi.dispatch: the parallel binding that spawns a fresh pi subprocess per call.
  *
- * ADR-0016 (2026-09-23) is the contract. This file is the type surface and the spawn
- * skeleton; the actual subprocess plumbing (agent-md resolution, JSON-line parser,
- * usage accumulator, signal propagation across worker_threads / child_process) is a
- * follow-up. The stubs here are typed against the contract so call sites can land
- * before the spawn path is finalised, and so a wrong shape is a compile error rather
- * than a runtime one.
+ * ADR-0016 (2026-09-23) is the contract, and this file is the whole implementation:
+ * agent-markdown discovery (`discoverAgent`, with the agentScope user/project split),
+ * the recursion-depth hint appended to the child's system prompt (`appendDepthHint`),
+ * the argv the child pi is launched with (`buildArgv`), and `dispatch()` itself —
+ * spawn, JSON-line event parsing, usage accumulation, the close-outcome decision
+ * (`decideCloseOutcome`), and SIGTERM → SIGKILL signal propagation when the run that
+ * issued the dispatch is cancelled.
  *
  * Behaviourally compatible with pi's examples/extensions/subagent/index.ts reference
  * (--mode json, -p, --no-session, --append-system-prompt <tmpfile>), but not cooperative:
@@ -85,7 +86,7 @@ export interface DispatchContext {
   /** Depth of the calling PTC run: 0 for the parent turn, 1+ for a child of `pi.dispatch`. */
   depth: number;
   /** Maximum allowed depth for any run reachable from this dispatch (ADR-0016 Recursive section). */
-  maxDepth: number;
+  maxDispatchDepth: number;
 }
 
 /**
@@ -114,16 +115,36 @@ export function appendDepthHint(systemPrompt: string, depth: number, maxDepth: n
   return systemPrompt.length === 0 ? hint : systemPrompt + "\n\n" + hint;
 }
 
-/** Default error returned when the depth limit is exceeded. */
-export function dispatchDepthLimitReached(currentDepth: number): DispatchResult {
+/** Result returned when the depth limit is exceeded. */
+export function dispatchDepthLimitReached(): DispatchResult {
   return {
     text: "",
     status: "rejected",
     agentName: "unknown",
     durationMs: 0,
     exitCode: -1,
-    errorMessage:
-      "dispatch depth limit reached (current depth " + currentDepth + ", max-depth exceeded)",
+    // Verbatim: the hint block appendDepthHint appends to the child's system
+    // prompt promises the program exactly this errorMessage.
+    errorMessage: "dispatch depth limit reached",
+  };
+}
+
+/**
+ * Verbatim ADR-0016 §2 message for the per-run dispatch concurrency cap. Exported as a
+ * named constant so the contract string has one definition and cannot drift (tests pin
+ * it character for character).
+ */
+export const DISPATCH_CONCURRENCY_LIMIT_MESSAGE = "dispatch concurrency limit reached";
+
+/** Result returned when the per-run dispatch concurrency cap is exceeded (ADR-0016 §2). */
+export function dispatchConcurrencyLimitReached(): DispatchResult {
+  return {
+    text: "",
+    status: "rejected",
+    agentName: "unknown",
+    durationMs: 0,
+    exitCode: -1,
+    errorMessage: DISPATCH_CONCURRENCY_LIMIT_MESSAGE,
   };
 }
 
@@ -441,8 +462,8 @@ export async function dispatch(
 ): Promise<DispatchResult> {
   // ADR-0016 Recursive dispatch: bound recursion explicitly.
   const childDepth = ctx.depth + 1;
-  if (childDepth > ctx.maxDepth) {
-    return dispatchDepthLimitReached(ctx.depth);
+  if (childDepth > ctx.maxDispatchDepth) {
+    return dispatchDepthLimitReached();
   }
 
   const cwd = input.cwd ?? ctx.cwd;
@@ -462,7 +483,7 @@ export async function dispatch(
     };
   }
 
-  const fullPrompt = appendDepthHint(agent.systemPrompt, childDepth, ctx.maxDepth);
+  const fullPrompt = appendDepthHint(agent.systemPrompt, childDepth, ctx.maxDispatchDepth);
   const tmp = await writePromptToTempFile(agent.name, fullPrompt);
 
   const argv = buildArgv(input, agent, tmp.filePath);
@@ -511,6 +532,11 @@ export async function dispatch(
         cwd,
         shell: false,
         stdio: ["ignore", "pipe", "pipe"],
+        // ADR-0016 Recursive section: the child run's depth baseline travels in the
+        // environment so the pi-ptc extension loaded inside the child starts its PTC
+        // runs at childDepth instead of at 0; the rest of the environment is inherited
+        // from the host (the child needs the same PATH and provider config as pi itself).
+        env: { ...process.env, PI_PTC_DEPTH: String(childDepth) },
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

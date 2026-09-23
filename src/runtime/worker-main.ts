@@ -47,6 +47,7 @@
  * SELF-CONTAINMENT RULE that previously gated this module — `Function.prototype.toString()`
  * of `workerMain` into a `data:` URL — is retired.
  */
+import { describeValue } from "./protocol.ts";
 import type {
   PtcCancelReason,
   PtcErrorKind,
@@ -175,12 +176,6 @@ export function workerMain(deps: WorkerMainDeps): void {
     }
     return kept.join("\n");
   };
-  const describeValue = (value: unknown): string => {
-    if (value === null) return "null";
-    if (Array.isArray(value)) return "an array";
-    return `a ${typeof value}`;
-  };
-
   /**
    * Post a frame through `port` — the control port the caller's run belongs to — defaulting to
    * the port the worker is currently connected to.

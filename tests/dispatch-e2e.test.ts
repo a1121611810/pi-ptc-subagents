@@ -40,7 +40,7 @@ describe("dispatch end-to-end smoke", () => {
     try {
       const result = await dispatch(
         { agent: "smoke-echo", task: "ping" },
-        { callId: 1, cwd: tmp, depth: 0, maxDepth: 3, signal: controller.signal },
+        { callId: 1, cwd: tmp, depth: 0, maxDispatchDepth: 3, signal: controller.signal },
       );
       console.log("[e2e] status=", result.status);
       console.log("[e2e] text=", JSON.stringify(result.text));

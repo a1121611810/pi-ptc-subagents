@@ -7,6 +7,7 @@ import {
   DEFAULT_BINDING_NAMES,
   DISPATCH_BINDING_NAME,
 } from "../src/runtime/bindings.ts";
+import { resolveBindingNames } from "../src/tools/common.ts";
 import { makeTempDir, removeTempDir, RUN_TIMEOUT_MS } from "./helpers/ptc.ts";
 
 const options = RUN_TIMEOUT_MS;
@@ -41,6 +42,33 @@ test("createBuiltinBindings rejects unknown binding names", () => {
   }
   expect(caught).toBeInstanceOf(TypeError);
   expect((caught as Error).message).toMatch(/unknown PTC binding "teleport"/);
+});
+
+test("createBuiltinBindings mirrors the production shape: resolved names plus includeDispatch expose pi.dispatch", () => {
+  // Production never passes `names: undefined`: both tools resolve the binding source through
+  // `resolveBindingNames()` (a .filter() that always returns a fresh array), and ADR-0016
+  // requires pi.dispatch in every shipped surface, so both tools pass `includeDispatch: true`.
+  // This test pins that full chain so a reference-equality regression cannot ship green again.
+  const names = resolveBindingNames([...BUILTIN_BINDING_NAMES]);
+  const table = createBuiltinBindings({ cwd: process.cwd(), names, includeDispatch: true });
+  expect(table.has(DISPATCH_BINDING_NAME)).toBe(true);
+});
+
+test("an explicit full name set without includeDispatch opts out of pi.dispatch", () => {
+  // R3's read-only PTC surface pattern: an explicit `names` list is a caller-curated surface,
+  // so the parallel binding stays out unless the caller asks for it explicitly.
+  const table = createBuiltinBindings({ cwd: process.cwd(), names: [...BUILTIN_BINDING_NAMES] });
+  expect([...table.keys()]).toEqual([...BUILTIN_BINDING_NAMES]);
+  expect(table.has(DISPATCH_BINDING_NAME)).toBe(false);
+});
+
+test("includeDispatch: true mixes pi.dispatch into an explicit subset", () => {
+  const table = createBuiltinBindings({
+    cwd: process.cwd(),
+    names: ["read"],
+    includeDispatch: true,
+  });
+  expect([...table.keys()]).toEqual(["read", DISPATCH_BINDING_NAME]);
 });
 
 test(
