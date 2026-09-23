@@ -34,7 +34,10 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org
+          # No `registry-url`: it would write `_authToken=${NODE_AUTH_TOKEN}` into
+          # `.npmrc` with setup-node's placeholder value, and npm then treats that
+          # placeholder as a real credential — so a failed OIDC exchange comes out as a
+          # misleading 404 on PUT instead of "requires you to be logged in". ADR-0018 §2.
           package-manager-cache: false # npm docs: never cache in release builds
       - run: pnpm install --frozen-lockfile
       - name: Verify the tag matches package.json
@@ -57,5 +60,7 @@ jobs:
       - run: pnpm run build
       - run: pnpm test
       # No `--provenance`: npm generates attestations only for public source
-      # repositories, and this repository is private (ADR-0018 §7).
-      - run: npm publish
+      # repositories, and this repository is private (ADR-0018 §7). Verbose is the level
+      # at which npm reports the OIDC exchange, so the release log records it instead of
+      # hiding both success and failure (ADR-0018 §2).
+      - run: npm publish --loglevel verbose

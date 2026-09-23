@@ -35,6 +35,19 @@ Consequence to expect in npm's version metadata: `_npmUser` reads `GitHub Action
 <npm-oidc-no-reply@github.com>` for versions published this way, where 0.1.0 read the
 maintainer's account.
 
+**The job deliberately does not pass `registry-url` to `setup-node`, unlike npm's sample.**
+That input writes `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}` into `.npmrc`,
+and with no token supplied `setup-node` fills in the placeholder `XXXXX-XXXXX-XXXXX-XXXXX`.
+The npm CLI then finds a credential it can use, which masks the OIDC helper's failure
+(`lib/utils/oidc.js` is documented as never throwing) and turns it into
+`npm error 404 Not Found - PUT https://registry.npmjs.org/<pkg>` — a permissions failure
+wearing a missing-package costume. Both of this release's first two runs failed exactly
+that way (35810906655, and its rerun). Drop the input, and a failed exchange surfaces
+instead as npm's own "This command requires you to be logged in". The publish step also
+runs at `--loglevel verbose`, because that is the level at which the helper reports both
+outcomes ("Successfully retrieved and set token" / "Failed token exchange request with
+body message: …") — so the release log carries the evidence rather than hiding it.
+
 **3. §3 · The gates run twice, on purpose.** The workflow runs `typecheck`, `lint`,
 `fmt:check`, `build` and `test` as explicit steps; `npm publish` then runs
 `prepublishOnly`, which runs the same five again. Collapsing the two would cost the CI
