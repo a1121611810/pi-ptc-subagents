@@ -145,3 +145,5 @@ Typecheck (`vp check --typecheck`) has been verified to be safe (uses local `tsc
 ### See also
 
 ADR-0009 — Vitest adoption decision (the 2026-09-22 Vitest migration; reopens the earlier deferment language in ADR-0008 §Phases / §Considered options above). The `pnpm test` runner, coverage config, and watch/UI scripts are recorded there.
+
+ADR-0019 — Build pipeline: enable minification + exclude source maps from npm tarball. `vite-plus` + `rolldown` shipped under ADR-0008 with minification disabled (tsdown's `minify` defaults to `false`); ADR-0019 flips it on and pairs it with a `package.json#files` whitelist so the npm tarball no longer carries `*.map`. The two halves of the change are discoverable together via the `vite.config.ts` comment that points to ADR-0019.
