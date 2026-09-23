@@ -200,6 +200,25 @@ export function toolContext(cwd: string): ExtensionContext {
 export const ONE_PIXEL_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
 
+/**
+ * A valid 1×1 PNG as a fresh `ArrayBuffer`.
+ *
+ * This is the compatibility path in `captureImages`: a binding that produces raw `ArrayBuffer`
+ * bytes (rather than the `data: <base64>` shape pi's own tools emit) has its bytes encoded to
+ * base64 once, host-side. Tests feed it through a real worker so the normalisation is exercised
+ * end to end. The `ArrayBuffer` is allocated per call so two tests get distinct buffers.
+ */
+export function onePixelPngBytes(): ArrayBuffer {
+  return Uint8Array.from(Buffer.from(ONE_PIXEL_PNG_BASE64, "base64")).buffer;
+}
+
+/**
+ * The decoded PNG content as a `Uint8Array` view (for byte-equality assertions).
+ */
+export const ONE_PIXEL_PNG_UINT8: Uint8Array = Uint8Array.from(
+  Buffer.from(ONE_PIXEL_PNG_BASE64, "base64"),
+);
+
 /** Build a binding table; keys become the `tools.<name>` namespace in the worker. */
 export function makeBindings(entries: Record<string, Binding["execute"]>): BindingTable {
   const table = new Map<string, Binding>();

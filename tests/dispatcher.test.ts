@@ -1,9 +1,10 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { createBuiltinBindings } from "../src/runtime/bindings.ts";
 import type { BindingTable } from "../src/runtime/bindings.ts";
 import { runPtcProgram } from "../src/runtime/dispatcher.ts";
+import type { PtcRunOutcome } from "../src/runtime/dispatcher.ts";
 import { createWorkerEnv, DEFAULT_CONFIG, WORKER_ENV_ALLOW_LIST } from "../src/runtime/limits.ts";
 import type { PtcConfig } from "../src/runtime/limits.ts";
 import {
@@ -14,6 +15,53 @@ import {
   removeTempDir,
   RUN_TIMEOUT_MS,
 } from "./helpers/ptc.ts";
+
+/* --------------------------------------------------------------------------------------------
+ * Seam: a worker frozen in BOOTING
+ *
+ * The dispatcher's settle path has to hold when the worker never becomes reachable — a spawn that
+ * fails after `new Worker` returned, a module load that wedges, a thread the OS stops scheduling.
+ * Every other worker in this suite reaches `ready`, so the two tests at the bottom of the cancel
+ * section need to control the entry the dispatcher loads.
+ *
+ * `buildWorkerUrl()` has no injection point: `RunPtcProgramOptions` carries no worker-URL field,
+ * and `worker-source.ts` resolves the entry from disk. The mock therefore wraps the real resolver
+ * and only diverts while a test has armed `hungWorker.url`, so every other test in this file keeps
+ * spawning the real worker.
+ * ------------------------------------------------------------------------------------------ */
+
+const hungWorker = vi.hoisted(() => ({ url: undefined as URL | undefined }));
+
+vi.mock("../src/runtime/worker-source.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/runtime/worker-source.ts")>();
+  return {
+    ...actual,
+    buildWorkerUrl: () => hungWorker.url ?? actual.buildWorkerUrl(),
+  };
+});
+
+/**
+ * A worker that boots and then does nothing: it never posts the `ready` frame the handshake
+ * waits for. The self-exit is test hygiene — a failing (red) run would otherwise leak a live
+ * thread past the end of the test — and is late enough never to rescue a red run.
+ */
+const BOOTING_FOREVER_WORKER_URL = new URL(
+  `data:text/javascript,${encodeURIComponent("setTimeout(() => process.exit(0), 3_000);")}`,
+);
+
+/** Sentinel for "the run's promise was still pending when the ceiling elapsed". */
+const HUNG = Symbol("the run never settled");
+
+const hungAfter = (ms: number): Promise<typeof HUNG> =>
+  new Promise((resolve) => {
+    setTimeout(() => resolve(HUNG), ms);
+  });
+
+/** Render the raced result so a failure names the leak instead of a bare `undefined`. */
+const settleKindOf = (raced: PtcRunOutcome | typeof HUNG): string =>
+  raced === HUNG
+    ? "the run never settled — the host leaked a pending run promise"
+    : (raced.error?.kind ?? "(settled without an error)");
 
 const empty = makeBindings({});
 const run = (
@@ -399,8 +447,13 @@ test(
   "aborting the caller's signal cancels the run and aborts in-flight bindings",
   async () => {
     let bindingSawAbort = false;
+    let markBindingStarted: () => void = () => {};
+    const bindingStarted = new Promise<void>((resolve) => {
+      markBindingStarted = resolve;
+    });
     const bindings: BindingTable = makeBindings({
       slow: async (_args, context) => {
+        markBindingStarted();
         await new Promise((_resolve, reject) => {
           context.signal?.addEventListener("abort", () => {
             bindingSawAbort = true;
@@ -411,14 +464,111 @@ test(
       },
     });
     const controller = new AbortController();
-    setTimeout(() => controller.abort(), 100);
-    const outcome = await run("await tools.slow({}); return 1;", {
+    const runPromise = run("await tools.slow({}); return 1;", {
       bindings,
       signal: controller.signal,
-      config: { graceMs: 500 },
+      config: { graceMs: 5_000 },
     });
+    // Deterministic, not timing-based: wait until the binding is actually executing, then
+    // abort. The old `setTimeout(…, 100)` raced worker spawn under file-level parallelism.
+    // The grace window is what lets the in-flight binding observe the abort before the run
+    // terminates.
+    await bindingStarted;
+    controller.abort();
+    const outcome = await runPromise;
     expect(outcome.error?.kind).toBe("abort");
     expect(bindingSawAbort, "the binding received the run's abort signal").toBe(true);
+  },
+  RUN_TIMEOUT_MS,
+);
+
+test(
+  "a call still queued for a dispatch slot when the run settles is dropped, not executed",
+  async () => {
+    // The `settled` guard in `dispatchCall` is only reachable through slot contention: a call
+    // whose frame arrived before the cancel but whose `acquireDispatchSlot()` was still waiting.
+    // Executing the binding there would start host-side work after the caller was already told
+    // the run is over — for `pi.dispatch` that means spawning a pi subprocess only to SIGTERM it
+    // (`dispatch.ts` spawns, then checks `signal.aborted`) — and the result could not be
+    // delivered anyway, because the run's port is closed.
+    const holdStarted = deferred<void>();
+    const releaseHold = deferred<void>();
+    let probeCalled = false;
+    const bindings = makeBindings({
+      hold: async () => {
+        holdStarted.resolve(undefined);
+        // The test keeps the single dispatch slot occupied across the run's end.
+        await releaseHold.promise;
+        return null;
+      },
+      probe: async () => {
+        probeCalled = true;
+        return null;
+      },
+    });
+    const controller = new AbortController();
+    const runPromise = run("await Promise.all([tools.hold({}), tools.probe({})]); return 1;", {
+      bindings,
+      signal: controller.signal,
+      config: { maxParallelSubCalls: 1, graceMs: 5_000 },
+    });
+    await holdStarted.promise;
+    // Drain the event loop before aborting: `probe`'s call frame is the very next message the
+    // worker sent, so it is queued host-side (waiting for the slot) by the time the cancel lands.
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    controller.abort();
+    const outcome = await runPromise;
+    expect(outcome.error?.kind).toBe("abort");
+    // The slot frees only now, after the run has settled: the queued call resumes exactly in the
+    // state this test is about.
+    releaseHold.resolve(undefined);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(probeCalled, "the queued call must not run after the run settled").toBe(false);
+  },
+  RUN_TIMEOUT_MS,
+);
+
+test(
+  "a deadline that fires while the worker is stuck in BOOTING still settles the run",
+  async () => {
+    hungWorker.url = BOOTING_FOREVER_WORKER_URL;
+    try {
+      // The worker never sends `ready`, so the deadline is the only thing that can start the
+      // cancel and the grace window is the only thing that can end it. Before the fix the
+      // deadline timer was cleared by `beginCancel` and the grace timer was waiting for a
+      // `ready` frame that never arrives: `finish()` was never called and the run's promise
+      // stayed pending forever.
+      const raced = await Promise.race([
+        run("return 1;", { timeoutMs: 50, config: { graceMs: 200 } }),
+        hungAfter(1_000),
+      ]);
+      expect(settleKindOf(raced)).toBe("timeout");
+    } finally {
+      hungWorker.url = undefined;
+    }
+  },
+  RUN_TIMEOUT_MS,
+);
+
+test(
+  "an abort that lands while the worker is stuck in BOOTING still settles the run",
+  async () => {
+    hungWorker.url = BOOTING_FOREVER_WORKER_URL;
+    const controller = new AbortController();
+    try {
+      const runPromise = run("return 1;", {
+        signal: controller.signal,
+        config: { graceMs: 200 },
+      });
+      // The listener is registered before `run()` returns (the dispatcher's body is synchronous
+      // up to the handshake), so this abort lands after the run started and before any `ready`
+      // frame could arrive: the path that used to clear the deadline timer and arm nothing else.
+      controller.abort();
+      const raced = await Promise.race([runPromise, hungAfter(1_000)]);
+      expect(settleKindOf(raced)).toBe("abort");
+    } finally {
+      hungWorker.url = undefined;
+    }
   },
   RUN_TIMEOUT_MS,
 );
@@ -499,12 +649,16 @@ test(
 );
 
 /* --------------------------------------------------------------------------------------------
- * Hoisted images (ADR-0014)
+ * Hoisted images (ADR-0014, ADR-0017 §8)
  *
  * DSH attaches the content of a successful image-bearing subtool result to the caller's context in
  * its scheduler's commit step (`dsh-tools`: `exec.deferContext(createUserMessage(...))`). pi-ptc
- * hoists at the same seam — the host, before the result is posted to the worker — and the tool layer
+ * hoists at the same seam — the host, after the result is posted to the worker — and the tool layer
  * forwards the images as image blocks on the PTC tool result.
+ *
+ * Image bytes ride the run outcome as base64 (`PtcImage.data`) — the same representation pi's own
+ * `read` returns, so the tool layer forwards them without re-encoding. A binding that emits raw
+ * `bytes` instead is normalised host-side (covered by `tests/image-wire.test.ts`).
  * ------------------------------------------------------------------------------------------ */
 
 const imageBindings = makeBindings({
@@ -526,7 +680,11 @@ test(
     expect(outcome.error).toBeUndefined();
     // The program still sees the whole content: the hoist is additive, it does not strip the image.
     expect(outcome.value).toBe(2);
-    expect(outcome.images).toEqual([{ data: ONE_PIXEL_PNG_BASE64, mimeType: "image/png" }]);
+    expect(outcome.images).toHaveLength(1);
+    const image = outcome.images?.[0];
+    expect(image?.mimeType).toBe("image/png");
+    // Character-for-character equality with what the binding emitted: no decode/encode round trip.
+    expect(image?.data).toBe(ONE_PIXEL_PNG_BASE64);
   },
   RUN_TIMEOUT_MS,
 );
@@ -538,6 +696,8 @@ test(
       bindings: imageBindings,
     });
     expect(outcome.images).toHaveLength(2);
+    expect(outcome.images?.[0]?.data).toBe(ONE_PIXEL_PNG_BASE64);
+    expect(outcome.images?.[1]?.data).toBe(ONE_PIXEL_PNG_BASE64);
   },
   RUN_TIMEOUT_MS,
 );
@@ -560,13 +720,37 @@ test(
 );
 
 test(
+  "a failed run attaches no images (ADR-0014 §2)",
+  async () => {
+    const bindings = makeBindings({
+      shot: async () => ({
+        content: [
+          { type: "text", text: "Read image file [image/png]" },
+          { type: "image", data: ONE_PIXEL_PNG_BASE64, mimeType: "image/png" },
+        ],
+        details: null,
+      }),
+    });
+    // The program hoists an image, then throws: the outcome must carry the error and no images.
+    const outcome = await run('await tools.shot({}); throw new Error("boom");', { bindings });
+    expect(outcome.error).toBeDefined();
+    expect(outcome.images).toBeUndefined();
+  },
+  RUN_TIMEOUT_MS,
+);
+
+test(
   "no cap: every image the program's calls produced is attached, in order",
   async () => {
     let seen = 0;
     const bindings = makeBindings({
       shot: async () => {
-        const data = Buffer.from(`image number ${seen++}`).toString("base64");
-        return { content: [{ type: "image", data, mimeType: "image/png" }], details: null };
+        // A distinct base64 payload per call so the hoist can be compared by content.
+        const payload = Buffer.from(`image number ${seen++}`).toString("base64");
+        return {
+          content: [{ type: "image", data: payload, mimeType: "image/png" }],
+          details: null,
+        };
       },
     });
     const count = 25;
@@ -574,10 +758,10 @@ test(
     const outcome = await run(program, { bindings });
     expect(outcome.images).toHaveLength(count);
     // Order is the call order, so the meta can be trusted as a record of what the program did.
-    expect(outcome.images?.[0]?.data).toBe(Buffer.from("image number 0").toString("base64"));
-    expect(outcome.images?.[count - 1]?.data).toBe(
-      Buffer.from(`image number ${count - 1}`).toString("base64"),
-    );
+    const first = Buffer.from(outcome.images?.[0]?.data ?? "", "base64").toString("utf8");
+    const last = Buffer.from(outcome.images?.[count - 1]?.data ?? "", "base64").toString("utf8");
+    expect(first).toBe("image number 0");
+    expect(last).toBe(`image number ${count - 1}`);
   },
   RUN_TIMEOUT_MS,
 );

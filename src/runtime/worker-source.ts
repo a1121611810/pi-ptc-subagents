@@ -1,41 +1,47 @@
 /**
- * Worker bootstrap assembly.
+ * Worker source location.
  *
- * The worker code is composed at spawn time from three parts:
+ * The previous bootstrap assembled a `data:text/javascript,…` URL from
+ * `Function.prototype.toString()` of `workerMain` plus a protocol literal —
+ * a single self-contained file but with no V8 code-cache reuse across spawns
+ * (ADR-0017 §7). The rolldown dual-entry build now emits `dist/worker.js`
+ * alongside `dist/index.js`; the host loads that file directly, which lets
+ * V8's code cache and Node's module cache survive across warm-reuse spawns.
  *
- *   1. a tiny ES-module preamble that imports the Node builtins the surface needs,
- *   2. the protocol tables and limits as a JSON literal,
- *   3. `workerMain.toString()` — the worker runtime itself (`worker-main.ts`).
+ * The two candidates the resolver tries:
  *
- * Two Node behaviours this relies on, both verified against v24.18.0:
- * - `new Worker(<data: URL>)` runs the payload as an ES module ("the data is interpreted
- *   based on MIME type using the ECMAScript module loader"). The `type: 'module'` option
- *   is undocumented for `Worker`, and `eval: true` workers are CommonJS, so a data URL is
- *   the documented way to get an ESM worker from an in-memory string.
- * - `Function.prototype.toString()` returns usable source for a function that came
- *   through Node's type stripping (dev/tests) and through rolldown (dist), which is what
- *   lets the bundle stay a single self-contained `dist/index.js` with no second entry
- *   file to publish.
- *
- * Because the composed source is evaluated in a fresh realm, `workerMain` must be
- * self-contained — see the rule at the top of `worker-main.ts`.
+ * 1. `dist/worker.js` — the rolldown output, sibling of `dist/index.js`. The
+ *    production path used by `pi install npm:pi-ptc-subagents`.
+ * 2. `src/runtime/worker-entry.ts` — the source, used by `vitest` runs
+ *    (vitest's transformer handles `.ts` and the worker is launched in-process
+ *    so the relative path resolves).
  */
-import type { WorkerProtocolSpec } from "./protocol.ts";
-import { workerMain } from "./worker-main.ts";
+import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-/** Build the worker module source for one spawn. */
-export function buildWorkerSource(protocol: WorkerProtocolSpec): string {
-  const deps = JSON.stringify({ protocol });
-  return [
-    `import { parentPort, workerData } from "node:worker_threads";`,
-    `import { inspect } from "node:util";`,
-    `import { stripTypeScriptTypes } from "node:module";`,
-    `const ptcDeps = ${deps};`,
-    `(${workerMain.toString()})({ ...ptcDeps, parentPort, workerData, inspect, stripTypes: stripTypeScriptTypes });`,
-  ].join("\n");
-}
-
-/** The worker entry as a `data:` module URL, ready for `new Worker(url, options)`. */
-export function buildWorkerUrl(protocol: WorkerProtocolSpec): URL {
-  return new URL(`data:text/javascript,${encodeURIComponent(buildWorkerSource(protocol))}`);
+/**
+ * Resolve the worker entry's `file://` URL.
+ *
+ * The function takes no arguments: the protocol tables now travel through the
+ * worker file itself (rolldown bundles `./protocol.ts` into `dist/worker.js`),
+ * so the host has nothing to compose at URL-build time.
+ */
+export function buildWorkerUrl(): URL {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    // Production: rolldown outputs `dist/worker.js` next to `dist/index.js`,
+    // which is what the host's `import.meta.url` resolves to when it loaded
+    // `dist/index.js`.
+    resolve(here, "worker.js"),
+    // Fallback: the source file in the same directory. Vitest loads
+    // `src/runtime/dispatcher.ts` directly (no `dist/` involved), so the
+    // worker entry is `src/runtime/worker-entry.ts` and lives beside the
+    // host file.
+    resolve(here, "worker-entry.ts"),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return pathToFileURL(candidate);
+  }
+  throw new Error(`worker entry not found; tried: ${candidates.join(", ")}`);
 }

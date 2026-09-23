@@ -286,7 +286,10 @@ export function renderToolResult(input: {
     text += `\n\n${truncationFooter(truncation, fullOutputPath)}`;
   }
   // The text block is the model's copy; hoisted images ride the same result as image blocks, which
-  // is how pi's own `read` hands a picture to the model (ADR-0014).
+  // is how pi's own `read` hands a picture to the model (ADR-0014). `PtcImage.data` is already
+  // base64 — the shape the binding emitted, the shape the worker's JSON channel carried, and the
+  // shape pi's image adapter (`getImageDimensions(img.data, img.mimeType)`) requires — so the
+  // block is forwarded verbatim, with no re-encoding anywhere on the path.
   const content: (TextContent | ImageContent)[] = [
     { type: "text", text },
     ...images.map((image): ImageContent => ({

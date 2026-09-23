@@ -260,9 +260,9 @@ test(
     expect(outcome.error?.message).toBe("exploded");
     expect(outcome.error?.stack?.includes("exploded"), "stack keeps the message line").toBe(true);
     expect(
-      outcome.error?.stack?.includes("data:text/javascript"),
-      "worker bootstrap frames are dropped",
-    ).toBe(false);
+      outcome.error?.stack ?? "",
+      "stack points at a worker file rather than the bootstrap payload",
+    ).toMatch(/worker(-entry\.ts|\.js|-main\.ts)/);
     expect((outcome.error?.stack?.split("\n").length ?? 0) <= 6, "stack depth is capped").toBe(
       true,
     );

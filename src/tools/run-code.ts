@@ -21,6 +21,7 @@ import { Type } from "typebox";
 import type { TNumber, TOptional, TObject, TString } from "typebox";
 import { createBuiltinBindings } from "../runtime/bindings.ts";
 import { runPtcProgram } from "../runtime/dispatcher.ts";
+import type { WorkerPool } from "../runtime/worker-pool.ts";
 import { DEFAULT_CONFIG } from "../runtime/limits.ts";
 import {
   codeRunFailedError,
@@ -83,13 +84,45 @@ const PARAMETERS: RunCodeParameters = Type.Object({
 });
 
 /**
+ * `PtcToolOptions` plus this tool's per-turn pool seam (ADR-0017 §1).
+ *
+ * The extension owns one `TurnPools` per agent turn and passes a getter for the
+ * `run_code` surface's pool. The getter is read **per execute**, not at registration,
+ * because the pool is replaced at every turn boundary. Omitting it means one fresh
+ * worker per run — the pre-pool behaviour, and what direct library use gets.
+ *
+ * With a pool, consecutive runs of the same turn **share one warm worker**: that is
+ * what pooling buys, and it is why "every run gets a fresh worker" is no longer true
+ * on this path. What that sharing does and does not guarantee is worth being exact
+ * about. `acquire()` guarantees *ownership*: a worker is in flight to exactly one run
+ * until that run releases it, and a second acquire at capacity queues behind the wait
+ * list rather than reusing an occupied worker (ADR-0017 §4). It does **not** guarantee
+ * that only one program is physically executing in the isolate — the host abandons a
+ * run by closing its control port and releasing the worker without waiting for the
+ * program to unwind, so a **superseded** run's program can still be finishing inside
+ * the worker while the next run is already in flight (ADR-0017 §10(a) / §10(h)). What
+ * the pool promises is "one run at a time owns a worker's control port and result
+ * channel", not "one program at a time".
+ *
+ * Isolation of the shared realm therefore does not come from the ending run's reset
+ * handshake — a superseded run's `reset()` is a generation-guarded no-op (ADR-0017 §5 /
+ * §10(a)). It comes from the next run's init-side clearing, which unconditionally
+ * reinstalls the frozen env and console, restores `globalThis` to the boot-time warm
+ * baseline and resets the run bookkeeping before the program starts (ADR-0017 §10(d)).
+ */
+export interface PtcRunCodeToolOptions extends PtcToolOptions {
+  getPool?: () => WorkerPool | undefined;
+}
+
+/**
  * Build the `ptc_run_code` tool definition.
  *
- * Called once by the extension factory. Every run gets a fresh worker and a fresh binding table
- * built against the run's own cwd, so two concurrent calls cannot share state.
+ * Called once by the extension factory. Each execute builds its own binding table against the
+ * run's own cwd and reads `getPool()` for the surface's (possibly absent) pool — see
+ * `PtcRunCodeToolOptions` for what pooling does and does not change about isolation.
  */
 export function createPtcRunCodeTool(
-  options: PtcToolOptions = {},
+  options: PtcRunCodeToolOptions = {},
 ): ToolDefinition<RunCodeParameters, PtcToolDetails> {
   return defineTool({
     name: "ptc_run_code",
@@ -102,6 +135,7 @@ export function createPtcRunCodeTool(
       const cwd = resolveToolCwd(ctx);
       const names = resolveBindingNames(options.getBindingSourceNames?.());
       const startedAt = Date.now();
+      const pool = options.getPool?.();
       const outcome = await runPtcProgram({
         code: params.code,
         surface: "run_code",
@@ -110,6 +144,7 @@ export function createPtcRunCodeTool(
         ...(params.timeoutMs === undefined ? {} : { timeoutMs: params.timeoutMs }),
         ...(signal === undefined ? {} : { signal }),
         ...(options.config === undefined ? {} : { config: options.config }),
+        ...(pool === undefined ? {} : { pool }),
       });
       if (outcome.error !== undefined) throw codeRunFailedError(outcome);
       return renderToolResult({ outcome, surface: "run_code", durationMs: Date.now() - startedAt });

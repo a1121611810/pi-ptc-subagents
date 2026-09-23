@@ -1,5 +1,15 @@
 # `tests/dispatcher.test.ts:93` — why `started === 0` after 50ms
 
+> **Historical note (added 2026-09-23).** This is a snapshot of a diagnosis made while the
+> suite still ran on `node:test` and the worker bootstrapped from a `data:` URL. **Both
+> halves of that context are gone**: the suite is on Vitest (ADR-0009) and ADR-0017 retired
+> `buildWorkerSource` / the data-URL bootstrap in favour of a real `dist/worker.js` loaded
+> by file path, so the references below to `worker-source.ts`'s `buildWorkerSource` no
+> longer resolve. The **reasoning is still sound** and its recommendation is the one that
+> was eventually taken: a fixed `setTimeout` racing a cold start should be replaced by
+> polling for the invariant, which is how the remaining timing-sensitive tests in
+> `tests/dispatcher.test.ts` are written today. Read the line numbers as historical.
+
 ## Verdict (3 lines)
 
 - **Root cause:** the 50ms `setTimeout` is racy against the worker's cold-start budget (process spawn + data-URL module load + connect/ready/init IPC). On a loaded Mac it can take >50ms before the first `call` frame even reaches the host, so `started` is still 0 when the assertion fires.

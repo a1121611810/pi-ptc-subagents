@@ -1,7 +1,7 @@
 /**
  * `ptc_workflow` — the structured PTC surface.
  *
- * Same worker, same bindings, same Node surface as `ptc_run_code`; what it adds is a plan
+ * Same worker program, same bindings, same Node surface as `ptc_run_code`; what it adds is a plan
  * (`meta` with an ordered phase list), plain-JSON input (`args`, bound as the program's `args`
  * global) and the four workflow helpers: `log` / `phase` / `parallel` / `pipeline` (G1 #13 →
  * decision B — there is no `agent()`, not even a stub).
@@ -28,6 +28,7 @@ import type { Static, TArray, TObject, TOptional, TRecord, TString, TUnknown } f
 import { createBuiltinBindings } from "../runtime/bindings.ts";
 import { runPtcProgram } from "../runtime/dispatcher.ts";
 import type { PtcRunOutcome } from "../runtime/dispatcher.ts";
+import type { WorkerPool } from "../runtime/worker-pool.ts";
 import {
   codeRunFailedError,
   PTC_TOOL_GUIDELINES,
@@ -204,13 +205,31 @@ export function unlistedPhaseWarnings(
 }
 
 /**
+ * `PtcToolOptions` plus this tool's per-turn pool seam (ADR-0017 §1). See
+ * `createPtcRunCodeTool`'s options for why the getter is read per execute and what
+ * omitting it means.
+ *
+ * The pooling story is the same as `ptc_run_code`'s, on this surface's own pool (ADR-0017
+ * §2): consecutive runs of one turn share a warm worker, and isolation between them comes
+ * from the **next** run's init-side cleanup (ADR-0017 §10(d)) — not from the previous run's
+ * reset handshake, which is a no-op for a superseded run (ADR-0017 §10(a)). `acquire()`
+ * guarantees one run holds the worker at a time (ADR-0017 §4), though a superseded run's
+ * program may still be unwinding inside it. The worker program differs — it has the
+ * workflow helpers installed — which is why the two surfaces do not share a pool.
+ */
+export interface PtcWorkflowToolOptions extends PtcToolOptions {
+  getPool?: () => WorkerPool | undefined;
+}
+
+/**
  * Build the `ptc_workflow` tool definition.
  *
- * `args` is validated before `runPtcProgram` is called, so a malformed payload never spawns a
- * worker. Everything after dispatch is identical to `ptc_run_code`, plus the phase roll-up.
+ * `args` is validated before `runPtcProgram` is called, so a malformed payload never acquires or
+ * spawns a worker. Everything after dispatch is identical to `ptc_run_code`, plus the phase
+ * roll-up.
  */
 export function createPtcWorkflowTool(
-  options: PtcToolOptions = {},
+  options: PtcWorkflowToolOptions = {},
 ): ToolDefinition<WorkflowParameters, PtcToolDetails> {
   return defineTool({
     name: "ptc_workflow",
@@ -224,6 +243,7 @@ export function createPtcWorkflowTool(
       const cwd = resolveToolCwd(ctx);
       const names = resolveBindingNames(options.getBindingSourceNames?.());
       const startedAt = Date.now();
+      const pool = options.getPool?.();
       const outcome = await runPtcProgram({
         code: params.script,
         surface: "workflow",
@@ -232,6 +252,7 @@ export function createPtcWorkflowTool(
         ...(params.args === undefined ? {} : { args: params.args }),
         ...(signal === undefined ? {} : { signal }),
         ...(options.config === undefined ? {} : { config: options.config }),
+        ...(pool === undefined ? {} : { pool }),
       });
       if (outcome.error !== undefined) throw codeRunFailedError(outcome);
       const declared = params.meta.phases?.map((phase) => phase.name);

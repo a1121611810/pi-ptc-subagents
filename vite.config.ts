@@ -21,7 +21,17 @@ import { defineConfig } from "vite-plus";
  */
 export default defineConfig({
   pack: {
-    entry: ["./src/index.ts"],
+    // ADR-0017 §7: rolldown dual-entry — `dist/index.js` is the pi extension
+    // entry, `dist/worker.js` is what the host loads for `new Worker(...)`.
+    // The worker file lets V8's code cache and Node's module cache survive
+    // across warm-reuse spawns (the previous `data:text/javascript,…`
+    // bootstrap paid a fresh parse every time). tsdown accepts multiple
+    // entries via the `{name: input}` record shape; the per-file output
+    // extension is forced to `.js` by the `outExtensions` callback below.
+    entry: {
+      index: "./src/index.ts",
+      worker: "./src/runtime/worker-entry.ts",
+    },
     format: ["esm"],
     platform: "node",
     dts: { sourcemap: true },

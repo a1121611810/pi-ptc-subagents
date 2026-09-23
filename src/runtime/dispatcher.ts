@@ -1,14 +1,23 @@
 /**
- * Host-side dispatcher: one `runPtcProgram()` call = one worker = one program.
+ * Host-side dispatcher: one `runPtcProgram()` call = one program in one worker.
+ *
+ * The worker's lifecycle depends on the path (ADR-0017 §1):
+ * - **cold** (no `pool`): the dispatcher spawns a worker for the run and terminates it when the
+ *   run settles — one run, one worker;
+ * - **pooled** (`pool` set): the dispatcher acquires a warm worker from the turn's pool and
+ *   releases it back when the run settles. The worker outlives the run — the turn's later runs
+ *   reuse it, and the pool's `drain()` retires it at turn end, not this file.
  *
  * Responsibilities:
  * - spawn a hardened worker (F1 env scrub, F2 V8 caps, F3 frozen per-run env in
- *   `workerData`, F4 `cwd` carried in the run config and handed to the bindings),
+ *   `workerData`, F4 `cwd` carried in the run config and handed to the bindings) — the
+ *   hardening itself is defined once, in `workerSpawnOptions` (`worker-pool.ts`),
  * - complete the `MessageChannel` handshake and send the `init` frame,
  * - route `tools.*` calls to the binding table — concurrently, with DSH's
  *   `maxParallelSubCalls` forwarding cap and `maxPendingCalls` admission control,
  * - collect logs / narration / phases and enforce the joint output budget,
- * - enforce the deadline, honour caller cancellation, and always tear the worker down.
+ * - enforce the deadline, honour caller cancellation, and settle the run: hand the worker
+ *   back (pooled) or tear it down (cold).
  *
  * Everything the worker can influence is treated as untrusted input: every frame goes
  * through the protocol guards, is size-checked, and can only ever end the run.
@@ -25,7 +34,6 @@ import {
   isPtcWorkerFrame,
   PTC_ERROR_KIND,
   WORKER_FRAME_KIND,
-  workerProtocolSpec,
 } from "./protocol.ts";
 import type {
   PtcCallFrame,
@@ -37,6 +45,12 @@ import type {
   PtcHostFrame,
   PtcJsonValue,
 } from "./protocol.ts";
+import {
+  WorkerPool,
+  publishImageBytes,
+  publishResetTime,
+  workerSpawnOptions,
+} from "./worker-pool.ts";
 import { buildWorkerUrl } from "./worker-source.ts";
 
 export interface RunPtcProgramOptions {
@@ -57,13 +71,27 @@ export interface RunPtcProgramOptions {
   signal?: AbortSignal;
   /** Identifier carried to the worker; generated when omitted. */
   runId?: string;
+  /**
+   * Optional worker pool (ADR-0017). Absent = spawn a fresh worker and terminate it
+   * at run end (the original cold-start path). Present = the dispatcher acquires a
+   * worker from the pool at run start and releases it back at run end. Acquire waits
+   * are bounded by `config.poolAcquireTimeoutMs`; on timeout the run fails with
+   * `kind: workerExit`.
+   */
+  pool?: WorkerPool;
 }
 
 /**
- * One image hoisted out of a successful binding result (DSH parity — see ADR-0014).
+ * One image hoisted out of a successful binding result (DSH parity — see ADR-0014,
+ * ADR-0017 §8).
  *
- * `data` is base64 exactly as pi's own `read` tool returns it, so the tool layer can forward it as
- * an `ImageContent` block without re-encoding.
+ * `data` is base64 exactly as pi's own `read` tool returns it, so the tool layer can
+ * forward it as an `ImageContent` block without re-encoding. The host↔worker wire carries
+ * base64 too: the worker's channel is lossless JSON (a program may return part of a
+ * binding result), and a `MessagePort` transferList of raw bytes could not survive that
+ * contract — a transferred `ArrayBuffer` would be unusable as a program's return value.
+ * Keeping one representation end to end means zero conversions between the binding and
+ * pi's image adapter.
  */
 export interface PtcImage {
   data: string;
@@ -83,9 +111,11 @@ export interface PtcRunOutcome {
    * Images hoisted out of successful binding results, in call order.
    *
    * Every image a program's tool calls produced, with no cap and no dedupe: how many images a run
-   * attaches is the program's business, exactly as it is in DSH. Present only when at least one was
-   * hoisted — a failed or cancelled run attaches nothing, because the tool layer throws for it
-   * (`codeRunFailedError`) and its image would never reach the model.
+   * attaches is the program's business, exactly as it is in DSH. Each entry carries base64 `data`,
+   * the representation pi's image adapter consumes, so the tool layer forwards it untouched.
+   * Present only when at least one was hoisted — a failed or cancelled run attaches nothing
+   * (ADR-0014 §2), because the tool layer throws for it (`codeRunFailedError`) and its image would
+   * never reach the model.
    */
   images?: PtcImage[];
   /** Failure details; absent on success. */
@@ -96,12 +126,84 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Serialized byte size of a frame, the unit both the output and message budgets use. */
+/** A leaf whose bytes JSON cannot express: it is billed by `byteLength`, not by its JSON text. */
+function isBinaryLeaf(value: unknown): value is ArrayBuffer | ArrayBufferView {
+  return value instanceof ArrayBuffer || ArrayBuffer.isView(value);
+}
+
+/**
+ * Walk a value tree, calling `onBinary` on every binary leaf (`ArrayBuffer` and any
+ * `ArrayBufferView`). Cycles and shared sub-objects are visited once, so a pathological frame
+ * cannot wedge or inflate the walk.
+ *
+ * Binary leaves are billed here rather than by their JSON text for two reasons: `JSON.stringify`
+ * serialises an `ArrayBuffer` as `{}` (the size vanishes) and explodes a typed-array view into
+ * one key per element (the size is overstated by ~6 bytes per element). The walk therefore stops
+ * at the leaf and never recurses into a view's `.buffer`, which would count the same bytes twice.
+ * ADR-0017 W-6 spells out the refactor; this is its binary half.
+ */
+function walkBinaryLeaves(
+  value: unknown,
+  onBinary: (binaryLeaf: ArrayBuffer | ArrayBufferView) => void,
+): void {
+  const seen = new WeakSet<object>();
+  const visit = (candidate: unknown): void => {
+    if (candidate === null || candidate === undefined) return;
+    if (candidate instanceof ArrayBuffer) {
+      onBinary(candidate);
+      return;
+    }
+    if (ArrayBuffer.isView(candidate)) {
+      onBinary(candidate);
+      return;
+    }
+    if (typeof candidate !== "object") return;
+    if (seen.has(candidate)) return;
+    seen.add(candidate);
+    if (Array.isArray(candidate)) {
+      for (const item of candidate) visit(item);
+      return;
+    }
+    for (const key of Object.keys(candidate as Record<string, unknown>)) {
+      visit((candidate as Record<string, unknown>)[key]);
+    }
+  };
+  visit(value);
+}
+
+/**
+ * Serialized byte size of a frame, the unit both the output and message budgets use.
+ *
+ * The count is the JSON text the frame becomes — every brace, bracket, separator, key name and
+ * scalar — plus the bytes of any binary leaf, which that text cannot express. Two passes:
+ *
+ * 1. the whole value through `JSON.stringify` with binary leaves substituted by `null`: every
+ *    structural character, key name and scalar is billed the way the old helper billed it, and a
+ *    cyclic value throws here (as before);
+ * 2. the binary leaves by `byteLength`, added on top.
+ *
+ * A frame with binary leaves therefore counts 4 bytes (its substituted `null`) more than the JSON
+ * text it would have if the bytes vanished. That residue is deliberate and the safe direction:
+ * under-counting the payload is the hole ADR-0017 W-6 closes, and the worker's channel clones
+ * those bytes for real.
+ *
+ * A frame with no binary leaf produces exactly the previous helper's number — the substituter is
+ * a no-op when there is nothing to substitute — and a cyclic or otherwise unaccountable payload
+ * still reports `Number.POSITIVE_INFINITY` so the caller fails the run.
+ */
 function serializedBytes(value: unknown): number {
   try {
-    return Buffer.byteLength(JSON.stringify(value) ?? "", "utf8");
+    const text = Buffer.byteLength(
+      JSON.stringify(value, (_key, item) => (isBinaryLeaf(item) ? null : item)) ?? "",
+      "utf8",
+    );
+    let binary = 0;
+    walkBinaryLeaves(value, (leaf) => {
+      binary += leaf.byteLength;
+    });
+    return text + binary;
   } catch {
-    // Cyclic or otherwise unserializable payload: report as unbounded so the caller fails the run.
+    // Cyclic or otherwise unaccountable payload: report as unbounded so the caller fails the run.
     return Number.POSITIVE_INFINITY;
   }
 }
@@ -115,7 +217,6 @@ function serializedBytes(value: unknown): number {
  */
 export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcRunOutcome> {
   const config = resolveConfig(options.config);
-  const protocol = workerProtocolSpec();
   const env = createWorkerEnv();
   const runId = options.runId ?? randomUUID();
   const timeoutMs = effectiveTimeoutMs(options.timeoutMs, config);
@@ -133,26 +234,53 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
     };
   }
 
-  return await new Promise<PtcRunOutcome>((resolve) => {
-    const worker = new Worker(buildWorkerUrl(protocol), {
-      name: `ptc-${options.surface}`,
-      // F1: allow-list only — never the host's full environment.
-      env,
-      // F3: the same frozen snapshot is the worker's recorded environment.
-      workerData: { runId, env },
-      // F2: V8 caps (ADR-0005).
-      resourceLimits: {
-        maxOldGenerationSizeMb: config.maxOldGenerationSizeMb,
-        maxYoungGenerationSizeMb: config.maxYoungGenerationSizeMb,
+  // Acquire the worker before entering the Promise constructor: pool acquires are
+  // async (they queue when the pool is full and time out per `poolAcquireTimeoutMs`),
+  // and the constructor callback cannot `await`. Cold-start falls back to `new Worker`
+  // when no pool is configured. ADR-0017 §1.
+  let worker: Worker;
+  try {
+    if (options.pool) {
+      worker = await options.pool.acquire();
+    } else {
+      // Cold path: one run owns this worker outright, so it carries the run's own `runId`.
+      // The hardening (F1–F3) has one definition for both paths — `workerSpawnOptions`.
+      worker = new Worker(
+        buildWorkerUrl(),
+        workerSpawnOptions({ surface: options.surface, env, limits: config, runId }),
+      );
+    }
+  } catch (error) {
+    // Pool acquire timed out (or another acquire-side failure): surface as workerExit
+    // so the tool layer renders a coherent "the harness could not get me a worker"
+    // message rather than a stack trace.
+    return {
+      logs,
+      narrations,
+      phases,
+      error: {
+        kind: PTC_ERROR_KIND.workerExit,
+        message: `pool acquire failed: ${messageOf(error)}`,
       },
-    });
+    };
+  }
+
+  return await new Promise<PtcRunOutcome>((resolve) => {
     const channel = new MessageChannel();
     const control: MessagePort = channel.port1;
     const workerPort: MessagePort = channel.port2;
 
     const bindingAbort = new AbortController();
     let settled = false;
+    /** Set once a stop is under way; owns the terminal state from then on (`settleTerminal`). */
     let cancelling: PtcCancelReason | undefined;
+    /**
+     * Whether the worker has emitted its first `ready` frame. A cancel that lands before it does
+     * still arms the grace window (the settle time must be bounded even for a worker that never
+     * becomes reachable); the `ready` handler restarts that window, so a merely slow spawn gets
+     * its full `graceMs` from the moment it can actually react.
+     */
+    let workerReady = false;
     let pendingCalls = 0;
     let outputBytes = 0;
     let activeDispatches = 0;
@@ -162,37 +290,50 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
     // is depth 1, and so on. The depth is read by the binding's `execute`;
     // the dispatcher itself does not change it within a single run.
     const runDepth = 0;
+    /** Deadline timer: fires `timeoutMs` after the run started. A cancel does not disarm it. */
     let runTimer: NodeJS.Timeout | undefined;
+    /** The cancel's cooperative window: armed and re-armed by `armGraceTimer` only. */
     let graceTimer: NodeJS.Timeout | undefined;
 
-    /* --------------------------- hoisted images (ADR-0014) --------------------------- */
+    /* --------------------------- hoisted images (ADR-0014 / ADR-0017 §8) --------------------------- */
 
     const images: PtcImage[] = [];
 
     /**
-     * Hoist the images out of one successful binding result.
+     * Capture the image blocks from one binding result.
      *
-     * DSH does this in its scheduler's commit step: a subtool result whose content carries an image
-     * block has that content attached to the caller's context after the run, so the picture reaches
-     * the model without travelling through the program's lossless-JSON return value (`dsh-tools`:
-     * `exec.deferContext(createUserMessage(...))`). The host sees every binding result before it is
-     * posted to the worker, so this is the same seam.
+     * `PtcImage` has exactly one representation — base64 `data`, the same shape pi's own `read`
+     * returns and the same shape the JSON-only worker channel carries. A binding that emits
+     * `data: <base64>` passes through untouched (no decode/encode round trip); a binding that
+     * produces raw bytes is normalised here, once, host-side.
      *
-     * Everything is hoisted: no count cap, no byte cap, no dedupe. How much context a run spends on
-     * images is the program's call, and hiding a cap behind a warning would make this layer a
-     * gatekeeper DSH does not have. pi's per-model resize (`inputLimits.images.resize`) still bounds
-     * what a single attachment costs at the provider.
+     * The caller (`dispatchCall`) only keeps the captured list when `postCallResult` returned
+     * true: a frame the port rejected was not a successful subtool result (ADR-0014 §2).
      */
-    const hoistImages = (value: unknown): void => {
+    const captureImages = (value: unknown): PtcImage[] => {
+      const captured: PtcImage[] = [];
       const content = (value as { content?: unknown } | null)?.content;
-      if (!Array.isArray(content)) return;
+      if (!Array.isArray(content)) return captured;
       for (const block of content) {
         if (block === null || typeof block !== "object") continue;
-        const candidate = block as { type?: unknown; data?: unknown; mimeType?: unknown };
+        const candidate = block as {
+          type?: unknown;
+          data?: unknown;
+          bytes?: unknown;
+          mimeType?: unknown;
+        };
         if (candidate.type !== "image") continue;
-        const data = typeof candidate.data === "string" ? candidate.data : "";
-        if (data.length === 0) continue;
-        images.push({
+        let data: string | undefined;
+        if (typeof candidate.data === "string" && candidate.data.length > 0) {
+          // The shape pi's own tools emit, and the shape the wire carries: pass through.
+          data = candidate.data;
+        } else if (candidate.bytes instanceof ArrayBuffer && candidate.bytes.byteLength > 0) {
+          // A binding that produces raw bytes (no pi tool does today) is normalised here, so
+          // `PtcImage` has exactly one representation downstream.
+          data = Buffer.from(candidate.bytes).toString("base64");
+        }
+        if (data === undefined) continue;
+        captured.push({
           data,
           mimeType:
             typeof candidate.mimeType === "string"
@@ -200,10 +341,15 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
               : "application/octet-stream",
         });
       }
+      return captured;
     };
 
     const cancelMessage = (reason: PtcCancelReason): string =>
       reason === "timeout" ? `run timed out after ${timeoutMs} ms` : "run cancelled";
+
+    /** The error kind a stop reports: whichever reason asked for it. */
+    const cancelErrorKind = (reason: PtcCancelReason): PtcErrorKind =>
+      reason === "timeout" ? PTC_ERROR_KIND.timeout : PTC_ERROR_KIND.abort;
 
     const finish = (outcome: PtcRunOutcome): void => {
       if (settled) return;
@@ -213,7 +359,16 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
       options.signal?.removeEventListener("abort", onAbortSignal);
       bindingAbort.abort();
       control.close();
-      void worker.terminate();
+      if (options.pool) {
+        // Warm-reuse path: hand the worker back to the pool. The pool retires it
+        // if it has already exited (Node marks a terminated worker with
+        // `threadId === -1`); otherwise it parks the worker in `idle` or hands it
+        // to the next waiter. ADR-0017 §1.
+        options.pool.release(worker);
+      } else {
+        // Cold-start path: terminate the worker. The runtime owns the lifecycle.
+        void worker.terminate();
+      }
       resolve(outcome);
     };
 
@@ -335,6 +490,12 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
       }
       await acquireDispatchSlot();
       if (settled) {
+        // Late arrival: the run settled (deadline/abort) while this call was waiting for a
+        // dispatch slot, so the worker that asked is gone and `bindingAbort` has already fired.
+        // Do NOT execute the binding: it would start host-side work whose only possible outcome
+        // is the abort it cannot deliver anywhere — the port is closed. The in-flight case is the
+        // one that needs the signal, and it is covered: a call that was already executing when
+        // the cancel fired sees `bindingAbort` through the context it was handed.
         releaseDispatchSlot();
         return;
       }
@@ -345,16 +506,48 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
           depth: runDepth,
           maxDispatchDepth: config.maxDispatchDepth,
         });
-        const posted = postCallResult({
+        // Capture image blocks before the callResult post so the hoist can never race the
+        // worker's view of the result; the captures are committed only once the post
+        // returned true.
+        const captured = captureImages(value);
+        // Per-frame byte accounting before the post, as for every other frame: a `callResult` is
+        // the other host→worker control frame, so it answers to the same `maxMessageBytes` cap as
+        // the `init` frame and every inbound frame ("cap on a single control frame, either
+        // direction", limits.ts / R1 §1). Over the cap is excessive control traffic — DSH's own
+        // wording for `kind: protocol`, R1 §error kinds — so it ends the run here instead of
+        // shipping a 128 MiB structured clone. Compare `postCallResult`: a value the *port*
+        // rejects is a per-call failure (the program can catch a `ToolCallError`); a frame over
+        // the documented cap is not, it is the same run-level failure the other three frame
+        // checks produce.
+        const callFrame: PtcHostFrame = {
           kind: HOST_FRAME_KIND.callResult,
           callId: frame.callId,
           tool: frame.tool,
           ok: true,
           value,
-        });
+        };
+        const callFrameBytes = serializedBytes(callFrame);
+        if (callFrameBytes > config.maxMessageBytes) {
+          fail(
+            PTC_ERROR_KIND.protocol,
+            `callResult frame of ${callFrameBytes} bytes exceeds maxMessageBytes (${config.maxMessageBytes})`,
+          );
+          return;
+        }
+        const posted = postCallResult(callFrame);
         // Hoist only a result the worker actually received: DSH's condition is a *successful*
-        // subtool result, and a payload the port rejected was not one (ADR-0014).
-        if (posted) hoistImages(value);
+        // subtool result, and a payload the port rejected was not one (ADR-0014 §2).
+        if (posted) {
+          // Images do not pass ADR-0003's output budget (ADR-0014 Consequences: "Images are not
+          // output ... That is deliberate"). The per-frame `maxMessageBytes` guard above still
+          // bounds what a single callResult may carry, so a pathological binding cannot smuggle
+          // unbounded payload in one frame. Volume stays observable: `ptc:image:hoist-bytes`
+          // publishes every hoisted block and the PTC row's meta carries the count.
+          for (const image of captured) {
+            images.push(image);
+            publishImageBytes(Buffer.byteLength(image.data, "base64"));
+          }
+        }
       } catch (error) {
         postCallResult({
           kind: HOST_FRAME_KIND.callResult,
@@ -397,13 +590,15 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
     const settleTerminal = (outcome: PtcRunOutcome): PtcRunOutcome => {
       if (!cancelling) return outcome;
       // Once cancelled, the caller asked for a stop: the run reports the stop, not the
-      // value the program managed to produce inside the grace window.
+      // value the program managed to produce inside the grace window. A failed run
+      // attaches nothing (ADR-0014 §2): the tool layer throws for it, so images could
+      // never reach the model anyway.
       return {
         logs,
         narrations,
         phases,
         error: {
-          kind: cancelling === "timeout" ? PTC_ERROR_KIND.timeout : PTC_ERROR_KIND.abort,
+          kind: cancelErrorKind(cancelling),
           message: cancelMessage(cancelling),
         },
       };
@@ -429,9 +624,36 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
       }
 
       switch (frame.kind) {
-        case WORKER_FRAME_KIND.ready:
+        case WORKER_FRAME_KIND.ready: {
+          // Warm-reuse signal: a worker that has been through at least one run reports
+          // "ready" again after clearing per-run state. The gap since the previous
+          // release is the per-run reset cost, which is what ADR-0017 measures to
+          // verify the warm path actually saves time.
+          if (options.pool) {
+            const previousSettled = options.pool.lastSettledAt(worker);
+            if (previousSettled !== undefined) {
+              publishResetTime(Date.now() - previousSettled);
+            }
+          }
+          if (!workerReady) {
+            workerReady = true;
+            if (cancelling) {
+              // The cancel arrived while this worker was still booting, so it armed the fallback
+              // window (see `beginCancel`). The worker can react now: restart the window so it
+              // gets its full `graceMs` to observe the cancel. Still bounded — the run's deadline
+              // timer stays armed through a cancel, and the fallback never waited for `ready`.
+              armGraceTimer(cancelling);
+              // Do **not** hand a cancelled run a program: `init` would start work whose result
+              // nobody is waiting for, and the worker would spend the grace window running it.
+              // A worker that was cancelled while booting reports the cancel instead of a
+              // `ready` (see `reportIdleCancel`); this branch is the belt-and-braces path for a
+              // `ready` and a `cancel` that crossed on the wire.
+              return;
+            }
+          }
           sendInit();
           return;
+        }
         case WORKER_FRAME_KIND.call:
           handleCall(frame);
           return;
@@ -446,8 +668,9 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
           return;
         case WORKER_FRAME_KIND.result: {
           if (!accountOutput(bytes, "completion value")) return;
-          // `settleTerminal` rebuilds the outcome when a cancel owns the terminal state, which
-          // drops these fields — the same "a failed run attaches nothing" rule as above.
+          // A cancel owns the terminal state and takes the images with it: `settleTerminal`
+          // rebuilds the outcome without them, which is ADR-0014 §2's "a failed run attaches
+          // nothing" rule.
           const base = {
             logs,
             narrations,
@@ -460,6 +683,8 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
           return;
         }
         case WORKER_FRAME_KIND.error:
+          // A failed run attaches nothing (ADR-0014 §2): the tool layer throws for it, so an
+          // image hoisted earlier in the run could never reach the model anyway.
           finish(settleTerminal({ logs, narrations, phases, error: frame.error }));
           return;
         default:
@@ -473,21 +698,53 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
       beginCancel("abort");
     }
 
+    /**
+     * Arm the cooperative-cancel window: `graceMs` from now the run settles with `reason`, unless
+     * the worker settles it first. Re-arming replaces the pending window.
+     *
+     * The invariant this guards: **from the moment a run starts, it settles in bounded time.**
+     * The window is therefore armed by `beginCancel` itself, not by the worker's `ready` frame —
+     * a worker that never becomes reachable (spawn failure, wedged module load, a thread the OS
+     * stopped scheduling) can no longer leave the run pending forever.
+     */
+    const armGraceTimer = (reason: PtcCancelReason): void => {
+      if (graceTimer) clearTimeout(graceTimer);
+      graceTimer = setTimeout(() => {
+        fail(cancelErrorKind(reason), cancelMessage(reason));
+      }, config.graceMs);
+    };
+
     function beginCancel(reason: PtcCancelReason): void {
-      if (settled || cancelling) return;
-      cancelling = reason;
-      if (runTimer) {
-        clearTimeout(runTimer);
-        runTimer = undefined;
+      if (settled) return;
+      if (cancelling) {
+        // A stop arrived while one was already pending — either the deadline landing on an
+        // in-flight cancel, or the caller's abort landing after the deadline already fired (the
+        // abort listener is registered `once`, so it can only ever be the first abort). This
+        // branch is reached whether or not the worker became reachable: a worker that is mid-run
+        // when the second stop arrives takes it too.
+        //
+        // Settle now rather than waiting out another `graceMs`. The run is already stopping and a
+        // second stop must not extend that wait: in the cancel-first ordering the deadline has
+        // just arrived, so the run must not stay unsettled past it, and in the deadline-first
+        // ordering that deadline has already fired and is winding down through its own grace
+        // window. The reason reported is the stop that arrived first — it is why the run is
+        // ending; the second one only confirmed there was nothing left to wait for.
+        fail(cancelErrorKind(cancelling), cancelMessage(cancelling));
+        return;
       }
+      cancelling = reason;
+      // The deadline timer is deliberately left armed: while it is still pending it bounds a
+      // cancelled run — if it fires with a cancel in flight, the branch above settles the run
+      // right there, with the reason the caller asked for — so a caller's abort cannot outlive
+      // the run's own deadline. The converse ordering has no deadline bound, and is not meant to:
+      // see `runTimer` below for why a timed-out run settles at `timeoutMs + graceMs`.
       bindingAbort.abort();
       sendControl({ kind: HOST_FRAME_KIND.cancel, reason });
-      graceTimer = setTimeout(() => {
-        fail(
-          reason === "timeout" ? PTC_ERROR_KIND.timeout : PTC_ERROR_KIND.abort,
-          cancelMessage(reason),
-        );
-      }, config.graceMs);
+      // Arm the window immediately rather than waiting for the worker's first `ready` frame. The
+      // window is about "time the worker has had to react"; the `ready` handler restarts it for a
+      // worker that turns out to be merely slow. What it must never do is refuse to arm — that
+      // left a worker stuck in BOOTING with no timer at all.
+      armGraceTimer(reason);
     }
 
     worker.on("error", (error: Error) => {
@@ -502,6 +759,13 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
     });
 
     options.signal?.addEventListener("abort", onAbortSignal, { once: true });
+    // The run's deadline. It is one-shot: when it fires by itself the timer is spent, so what ends
+    // a timed-out run is the cancel it starts — `beginCancel("timeout")` arms a `graceMs` window of
+    // its own, and that window's expiry is the settle. A run that times out therefore settles by
+    // `timeoutMs + graceMs` ("the program gets `timeoutMs`, then `graceMs` to wind down"), which is
+    // the intended semantics, not a leak. While this timer is still pending it also bounds a run
+    // the caller has already cancelled: a cancel never disarms it (see `beginCancel`), so that
+    // ordering settles at the deadline.
     runTimer = setTimeout(() => {
       beginCancel("timeout");
     }, timeoutMs);

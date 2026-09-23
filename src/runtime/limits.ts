@@ -13,7 +13,7 @@
  * - `sandbox-unavailable` is not an error kind either: ADR-0007 ships no OS sandbox.
  */
 
-/** The two worker surfaces. Each run gets a fresh worker with exactly one of them. */
+/** The two worker surfaces. A worker is spawned with exactly one of them and keeps it. */
 export type PtcSurface = "run_code" | "workflow";
 
 export interface PtcConfig {
@@ -52,6 +52,28 @@ export interface PtcConfig {
   maxOldGenerationSizeMb: number;
   /** V8 young-generation cap handed to `new Worker({ resourceLimits })` (F2). */
   maxYoungGenerationSizeMb: number;
+  /**
+   * Per-turn worker pool capacity (ADR-0017 §3). Decoupled from `maxParallelSubCalls`
+   * because pool capacity is "resident workers" while `maxParallelSubCalls` is
+   * "in-flight calls" — two different ceilings. Default 4.
+   */
+  poolSize: number;
+  /**
+   * How long `runPtcProgram({ pool })` will wait for an available worker before
+   * failing the run with `kind: workerExit`. Decoupled from `timeoutMs` because
+   * acquire-wait is bounded by the pool's responsiveness, not the run's overall
+   * deadline. Default 30 000 ms.
+   */
+  poolAcquireTimeoutMs: number;
+  /**
+   * Ceiling on how long a pool's `drain()` waits for in-flight workers to release
+   * themselves before terminating them outright: a worker whose `release()` never
+   * arrives (a stuck dispatcher promise, an unobserved crash) must bound the turn-end
+   * hook rather than hang it. Not `graceMs` above, which is a *run's* cooperative-cancel
+   * window; this one is the *pool's* window at retirement, and drain resolves either way.
+   * Default 5 000 ms.
+   */
+  drainGraceMs: number;
 }
 
 export const DEFAULT_CONFIG: Readonly<PtcConfig> = Object.freeze({
@@ -67,6 +89,9 @@ export const DEFAULT_CONFIG: Readonly<PtcConfig> = Object.freeze({
   graceMs: 3_000,
   maxOldGenerationSizeMb: 512,
   maxYoungGenerationSizeMb: 64,
+  poolSize: 4,
+  poolAcquireTimeoutMs: 30_000,
+  drainGraceMs: 5_000,
 });
 
 /**

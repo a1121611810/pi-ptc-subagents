@@ -34,6 +34,16 @@ test("resolveConfig applies overrides and rejects invalid ones", () => {
   expect(resolveConfig({ nope: 1 } as never)).toEqual({ ...DEFAULT_CONFIG });
 });
 
+test("drainGraceMs is a first-class limit, validated like the rest of the pool fields", () => {
+  expect(DEFAULT_CONFIG.drainGraceMs).toBe(5_000);
+  expect(resolveConfig().drainGraceMs).toBe(DEFAULT_CONFIG.drainGraceMs);
+  expect(resolveConfig({ drainGraceMs: 250 }).drainGraceMs).toBe(250);
+  for (const invalid of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+    expect(() => resolveConfig({ drainGraceMs: invalid })).toThrow(TypeError);
+  }
+  expect(() => resolveConfig({ drainGraceMs: "soon" as unknown as number })).toThrow(TypeError);
+});
+
 test("createWorkerEnv keeps only allow-listed names (F1)", () => {
   const source = {
     PATH: "/usr/bin",

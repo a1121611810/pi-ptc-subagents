@@ -163,6 +163,26 @@ version exposes `ptc_run_code` to avoid collision with pi's hypothetical
 future native `run_code`, plus a sidekick `ptc_workflow` for structured
 (with `meta` + `args`) runs.
 
+## Worker lifecycle (ADR-0017)
+
+**worker pool** — the per-surface collection of warm `worker_threads` workers
+owned by the parent turn, held by a `TurnPools` holder. Created lazily by the
+first PTC run of the turn, passed to `runPtcProgram()` via
+`RunPtcProgramOptions.pool`, retired by the extension's `turn_end` hook.
+Default `poolSize` 4, `poolAcquireTimeoutMs` 30s. `run_code` and `workflow` do
+not share a pool. _Avoid_: "singleton" (this is per turn), "thread pool" (Node
+idiom for something else).
+
+**warm worker** — a `worker_threads` Worker that has been retained after a
+run settled and may be reused for a future run in the same pool. The worker's
+internal state machine is `CREATED → BOOTING → READY ↔ RUNNING`; only
+`READY`-state workers are eligible for warm reuse.
+
+**reset handshake** — the extended meaning of the `ready` worker frame: on
+warm reuse, `ready` means "this worker has cleared all per-run state and is
+ready for the next `init` frame". On cold start, `ready` keeps its original
+meaning ("booted"). No new frame kind.
+
 ## Out-of-glossary (do not confuse)
 
 - **DSH `subagent`** (a separate dsh concept: continuable sub-agent with

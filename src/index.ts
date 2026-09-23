@@ -20,6 +20,7 @@ import type {
 import { createPtcRunCodeTool } from "./tools/run-code.ts";
 import { createPtcWorkflowTool } from "./tools/workflow.ts";
 import { resolveBindingNames } from "./tools/common.ts";
+import { TurnPools } from "./runtime/turn-pools.ts";
 import {
   bindingSource,
   buildModeInstruction,
@@ -106,7 +107,14 @@ export type {
   CreateBuiltinBindingsOptions,
 } from "./runtime/bindings.ts";
 export { runPtcProgram } from "./runtime/dispatcher.ts";
-export type { PtcRunOutcome, RunPtcProgramOptions } from "./runtime/dispatcher.ts";
+export type { PtcRunOutcome, PtcImage, RunPtcProgramOptions } from "./runtime/dispatcher.ts";
+export {
+  WorkerPool,
+  type WorkerPoolOptions,
+  type WorkerPoolStats,
+  type WorkerPoolWorkerOptions,
+} from "./runtime/worker-pool.ts";
+export { TurnPools, type TurnPoolsOptions } from "./runtime/turn-pools.ts";
 export {
   createWorkerEnv,
   DEFAULT_CONFIG,
@@ -130,6 +138,14 @@ export default function ptcSubagents(pi: ExtensionAPI): void {
   let briefingPending = false;
 
   /**
+   * Per-turn worker pools (ADR-0017 §1–§2): one warm set per surface, created lazily by the
+   * first PTC run of the turn and retired at the turn's end. The holder is swapped rather
+   * than mutated so a `turn_end` drain can never race a run that is still holding a worker —
+   * the outgoing holder owns everything the ending turn created.
+   */
+  let turnPools = new TurnPools();
+
+  /**
    * Bindings come from the mode's base snapshot while PTC mode is on, and from the live loadout
    * otherwise (T7, #21). See `src/mode/ptc-mode.ts` for why the snapshot is required: the mode
    * hides the built-ins, which would otherwise empty the binding table and make every
@@ -137,8 +153,30 @@ export default function ptcSubagents(pi: ExtensionAPI): void {
    */
   const getBindingSourceNames = (): readonly string[] => bindingSource(mode, pi.getActiveTools());
 
-  pi.registerTool(createPtcRunCodeTool({ getBindingSourceNames }));
-  pi.registerTool(createPtcWorkflowTool({ getBindingSourceNames }));
+  pi.registerTool(
+    createPtcRunCodeTool({
+      getBindingSourceNames,
+      getPool: () => turnPools.get("run_code"),
+    }),
+  );
+  pi.registerTool(
+    createPtcWorkflowTool({
+      getBindingSourceNames,
+      getPool: () => turnPools.get("workflow"),
+    }),
+  );
+
+  /**
+   * Retire the turn's pools. `drain()` terminates the warm workers, so nothing outlives the
+   * turn that spawned it; the next PTC run starts a fresh, lazily-created set. Idle workers are
+   * already `unref()`-ed by the pool, so a turn that ends without this hook firing can never
+   * keep the process alive either.
+   */
+  pi.on("turn_end", async () => {
+    const draining = turnPools;
+    turnPools = new TurnPools();
+    await draining.drain();
+  });
 
   const paintStatus = (ctx: ExtensionContext): void => {
     ctx.ui.setStatus(
