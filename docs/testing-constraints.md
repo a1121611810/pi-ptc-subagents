@@ -1,0 +1,124 @@
+# Testing Constraints (pi-ptc-subagents)
+
+本仓库的 6 条测试硬约束。任何新增 / 修改测试必须满足。`tests/test-meta-discipline.test.ts` 自动扫其中部分违反模式。
+
+## 约束一览
+
+| #   | 约束                                                                                     | 反例                            |
+| --- | ---------------------------------------------------------------------------------------- | ------------------------------- |
+| 1   | IO 边界成功/失败双路径都有单测                                                           | 只测 happy path,失败路径留白    |
+| 2   | Mock / fixture 数据来自真实样例(响应快照、线上文件、字面量常量)                          | 手写字段或从被测实现反推        |
+| 3   | 失败路径有 warn 或显式错误状态 — 不留静默失败                                            | catch 块空 / resolve(undefined) |
+| 4   | 期望值能指向独立来源(spec 行号 / 真实样例 / 字面量 / 不变量 / 差分测试)                  | 实现反推 / 同义反复断言         |
+| 5   | 反事实判据:把实现改成显然错误但符合该断言的版本,测试必须红                               | 改坏实现测试还绿                |
+| 6   | characterization vs specification 区分:防回归 ≠ 防错误;snapshot / 实现输出抄写只能防回归 | 用 snapshot 断言 '实现正确'     |
+
+## 各条详细
+
+### 1. IO 边界成功/失败双路径都有单测
+
+任何读取外部资源(fs / net / worker / child process / clock)的代码路径,必须有 happy path 单测 + 至少一个失败路径单测(权限错 / 不存在 / 超时 / EOF / ENOENT 任一)。
+
+**反例**:`dispatch()` 只测一个 agent 能跑通,不测 agent 不存在 / spawn 失败 / 子进程超时 / 子进程退出码非 0 / abort signal。
+
+**正例**:`tests/dispatch-helpers.test.ts` 覆盖 `discoverAgent()` 三种 scope + `decideCloseOutcome()` 的三种结局;`tests/dispatch-e2e.test.ts`(修正后)需要覆盖 happy + agent-not-found + spawn-failure + timeout + abort。
+
+### 2. Mock / fixture 数据来自真实样例
+
+写 mock 时,**禁止**对着被测实现凑字段。允许来源:
+
+- **真实响应快照**:从 dev / staging / 线上抓取,固化在 fixture 文件
+- **字面量常量**:从规范 / 第三方文档直接抄录(如 PTC 协议 frame kind 字符串)
+- **不变量 / 性质**:如 'tree 深度 ≤ 4' 这种结构性质
+- **差分 oracle**:双实现互为 oracle
+
+**反例**:测试反推 `expect(decideCloseOutcome({...})).toEqual({status: 'fulfilled'})`,而 `decideCloseOutcome` 的源码就在隔壁 — 实现改了测试跟着改,毫无 oracle 意义。
+
+### 3. 失败路径有 warn 或显式错误状态
+
+任何 catch / onError / abort handler 必须留下可观察信号:
+
+- `console.warn` / `console.error` 或 logger 输出
+- 返回带 `errorMessage` 的 rejected 结构
+- 设置状态字段(`status: 'rejected'` / `kind: 'workerExit'`)
+- 抛出显式 error
+
+**禁止**空 catch、`catch { /* ignore */ }`、静默 `resolve(undefined)`。
+
+### 4. 期望值能指向独立来源
+
+每个 `expect(...)` 的 right-hand-side 都能回答:
+
+> 这个值从哪来?能指到 spec 行号 / 真实样例 / 字面量 / 不变量 / 差分测试吗?
+
+合法 5 类来源:
+
+1. **规格 / 需求原文** — 引用 spec 行号或 ticket 验收条件
+2. **可执行验收样例** — ticket 附的输入 → 期望输出样例
+3. **真实数据 / 字面量** — 真实响应快照、第三方文档常量、线上文件
+4. **性质 / 不变量** — property-based(幂等、round-trip、守恒)
+5. **差分测试** — 双实现互为 oracle
+
+非法 3 类(标嫌疑):
+
+1. **从被测实现反推** — 先看实现再写期望值
+2. **自洽 mock 字段** — 手写 mock 与实现共享同一错误假设
+3. **同义反复断言** — `expect(add(a, b)).toBe(a + b)`
+
+### 5. 反事实判据
+
+每个断言都要跑这个心智实验:
+
+> 把被测实现改成 '显然错误但符合该断言' 的版本,测试会红吗?
+>
+> - 会红 = specification(防错误)。OK
+> - 不会红 = characterization(防回归)或根本没覆盖。X
+
+**典型反例**:`expect(result.status).toMatch(/^(fulfilled|rejected)$/)`(dispatch-e2e.test.ts 当前状态)。把 `dispatch()` 改成永远返回 `status: 'rejected', text: ''` — 测试还过。false-pass。
+
+**修复**:期望值必须是具体值之一,不是 '两者皆可':
+expect(result.status).toBe('fulfilled'); // OK
+
+### 6. characterization vs specification
+
+| 类型                         | 防什么                | 来源                              | 例子                               |
+| ---------------------------- | --------------------- | --------------------------------- | ---------------------------------- |
+| **characterization**(防回归) | '上次这样,这次也这样' | 快照、从实现抄                    | `toMatchSnapshot()`                |
+| **specification**(防错误)    | '必须是这样'          | spec / 真实样例 / 字面量 / 不变量 | `expect(result.text).toBe('PONG')` |
+
+characterization 测试**只能**作为 '实现行为未意外变化' 的证据;**不能**作为 '实现正确' 的证据。
+
+**反例**:用 snapshot 锁定 dispatch 返回结构,然后说 'dispatch 是对的' — snapshot 是从第一次跑出来的输出抄的,实现可能本来就有 bug。
+
+**正例**:用 spec 中的 'spawn pi subprocess with agent X, expect text to contain PONG' 作为断言,字符级对比 spec 原文。
+
+## F1/F2/F3(自动扫描模式)
+
+`tests/test-meta-discipline.test.ts` fixture 扫这 3 类 false-pass 模式:
+
+### F1: accept-both 断言
+
+    expect(result.X).toMatch(/^(A|B)$/)      // X
+    expect(result.X).toMatch(/^(\d+|null)$/) // X
+
+期望值要么是 A 要么是 B,**不能接受两者**。
+
+### F2: conditional assertion
+
+    if (result.status === 'fulfilled') {
+      expect(...)   // X 仅 success path 真验证
+    }
+
+失败路径被静默放过。改为无条件断言或拆成两个测试。
+
+### F3: opt-in gate + early return without assert
+
+    if (process.env.<GATE> !== '1') { return; }   // X vitest 视为 pass
+
+改为 `test.skipIf(...)` 让 CI 看到 SKIPPED,或去掉 gate 默认必跑。
+
+## 与 code-review skill 的关系
+
+本文件被 `.agents/skills/code-review/SKILL.md` 的 spec 轴 audit 2 引用为 Oracle check 的判定依据。
+OCR `.opencodereview/rules/test-discipline.md` 承载 F1/F2/F3 的细节 + 实例,本文件承载 6 条约束的完整描述。
+两者必须保持同步;改一处必须改另一处。
