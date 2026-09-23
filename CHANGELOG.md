@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-09-23
+
+### Fixed
+
+- **`pi.dispatch` is registered in production again.** The injection check compared the
+  binding-name array by reference against `DEFAULT_BINDING_NAMES`; production resolves
+  names through a `.filter()` that always returns a fresh array, so the comparison never
+  held and shipped sessions had no `pi.dispatch` at all. Injection now keys off a new
+  `includeDispatch` option (defaulting to "the caller passed no explicit `names`"), and
+  both shipped tools pass it explicitly. ADR-0016.
+- **The dispatch concurrency cap honours `dispatchConcurrency` (default 8) and rejects
+  immediately instead of queueing.** The dispatcher used to read `maxParallelSubCalls`
+  (default 10) and FIFO-queue the overflow; per ADR-0016 §2 the N+1th concurrent
+  `pi.dispatch` now resolves at once with `{ status: "rejected", errorMessage:
+"dispatch concurrency limit reached" }`. The cap applies to `pi.dispatch` only and
+  has its own counter; builtin binding fan-out keeps DSH's `maxParallelSubCalls` (10)
+  FIFO-queueing semantics (ADR-0004), so in-flight builtin calls never consume
+  dispatch slots.
+- **The depth-limit rejection message is verbatim again.** The program receives
+  exactly `dispatch depth limit reached`, matching what the child's
+  `<pi-ptc-context>` hint promises — the diagnostic suffix is gone.
+- **`maxDispatchDepth` bounds recursion again.** Every run reported depth 0 and
+  children never inherited it, so the depth check could never fire. `dispatch()` now
+  stamps `PI_PTC_DEPTH` on the child subprocess's environment, the extension
+  entrypoint reads it back, and `runPtcProgram()` accepts a `depth` baseline that
+  reaches the binding context. ADR-0016 Recursive section.
+
 ## [0.1.1] - 2026-09-23
 
 PTC runs inside one agent turn no longer pay a cold start each. Nothing changes in
