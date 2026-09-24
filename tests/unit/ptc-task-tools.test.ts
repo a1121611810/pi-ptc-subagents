@@ -254,6 +254,8 @@ describe("ptc_task_output", () => {
     expect(result.details.taskId).toBe(TASK_1);
     expect(result.details.output).toBe(SMALL_OUTPUT);
     expect(result.details.outputBytes).toBe(12);
+    // ADR-0022 §7: 12 <= 2048, so the inline preview is present and is the stored text.
+    expect(result.details.outputPreview).toBe(SMALL_OUTPUT);
     expect(result.details.outputTruncated).toBe(false);
     expect(result.details.outputFullPath).toBeUndefined();
   });
@@ -267,6 +269,8 @@ describe("ptc_task_output", () => {
     const result = await callTool<PtcTaskOutputDetails>(tool, { taskId: TASK_1 });
 
     expect(result.details.outputBytes).toBe(Buffer.byteLength(LARGE_OUTPUT, "utf8"));
+    // ADR-0022 §7: the ~24 KB output is above the 2048-byte ceiling -> no inline preview.
+    expect(result.details.outputPreview).toBeUndefined();
     expect(result.details.outputTruncated).toBe(true);
     const fullPath = result.details.outputFullPath as string;
     tempFullPaths.push(fullPath);
@@ -358,6 +362,8 @@ describe("ptc_task_stop", () => {
     });
 
     expect(result.details.task.status).toBe("stopping");
+    // ADR-0022 §8: the stop tool reports the observed source state with the post record.
+    expect(result.details.fromStatus).toBe("running");
     expect(result.details.task.stopReason).toBe("user asked");
     expect(result.details.task.transitionAt).toBe(1500);
     expect(result.details.task.finishedAt).toBeUndefined();
@@ -390,6 +396,7 @@ describe("ptc_task_stop", () => {
     const second = await callTool<PtcTaskStopDetails>(tool, { taskId: TASK_1, reason: "second" });
 
     expect(second.details.task.status).toBe("stopping");
+    expect(second.details.fromStatus).toBe("stopping");
     expect(second.details.task.stopReason).toBe("first");
     expect(second.details.task.transitionAt).toBe(1000);
     const log = await h.registry.loadEventLog(CALLER as ULID);
@@ -479,5 +486,26 @@ describe("applyAdr0015Truncation", () => {
     const fullPath = result.fullPath as string;
     tempFullPaths.push(fullPath);
     expect(readFileSync(fullPath, "utf8")).toBe(huge);
+  });
+});
+
+// ---------------------------------------------------------------------------
+//  BG-09 renderer wiring (ADR-0022 §7)
+// ---------------------------------------------------------------------------
+
+describe("task panel renderer wiring", () => {
+  test("each ptc_task_* tool registers the BG-09 renderCall/renderResult pair", () => {
+    const h = createHarness(1000);
+    const tools = [
+      createPtcTaskListTool(h.registry),
+      createPtcTaskOutputTool(h.registry, h.outputs),
+      createPtcTaskStopTool(h.registry, h.lifecycle),
+    ];
+
+    for (const tool of tools) {
+      // Removing the createTaskPanelRenderers spread leaves these undefined (counterfactual).
+      expect(typeof tool.renderCall).toBe("function");
+      expect(typeof tool.renderResult).toBe("function");
+    }
   });
 });

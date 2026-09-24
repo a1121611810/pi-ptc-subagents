@@ -33,8 +33,9 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { ChildProcessLifecycle } from "../runtime/child-process-lifecycle.ts";
 import { applyAdr0015Truncation, type OutputStorage } from "../runtime/output-storage.ts";
-import type { TaskRegistry } from "../runtime/task-registry.ts";
-import type { TaskRecord, ULID } from "../runtime/task-storage.ts";
+import { OUTPUT_PREVIEW_MAX_BYTES, type TaskRegistry } from "../runtime/task-registry.ts";
+import type { TaskRecord, TaskStatus, ULID } from "../runtime/task-storage.ts";
+import { createTaskPanelRenderers } from "./task-panel-render.ts";
 import { sanitizeText } from "./text.ts";
 
 /**
@@ -146,6 +147,8 @@ export function createPtcTaskListTool(registry: TaskRegistry): AnyTool {
         details: { tasks: records, count: records.length },
       };
     },
+
+    ...createTaskPanelRenderers("task-list"),
   });
 }
 
@@ -182,6 +185,11 @@ export interface PtcTaskOutputDetails {
   output: string;
   /** Total bytes stored for the task, regardless of `sinceBytes` or truncation. */
   outputBytes: number;
+  /**
+   * ADR-0022 §7: inline preview of the stored output, present only when `outputBytes` is at
+   * or below the 2048-byte Map+preview ceiling (OUTPUT_PREVIEW_MAX_BYTES).
+   */
+  outputPreview?: string;
   outputTruncated: boolean;
   /** The full-output temp file; present only when `outputTruncated` is true. */
   outputFullPath?: string;
@@ -238,10 +246,13 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
       const slice =
         sinceBytes === 0 ? full : Buffer.from(full, "utf8").subarray(sinceBytes).toString("utf8");
       const truncation = applyAdr0015Truncation(slice);
+      // ADR-0022 §7: inline the preview only at or below the 2048-byte ceiling.
+      const outputPreview = outputBytes <= OUTPUT_PREVIEW_MAX_BYTES ? full : undefined;
       const details: PtcTaskOutputDetails = {
         taskId,
         output: truncation.text,
         outputBytes,
+        ...(outputPreview === undefined ? {} : { outputPreview }),
         outputTruncated: truncation.truncated,
         ...(truncation.fullPath === undefined ? {} : { outputFullPath: truncation.fullPath }),
       };
@@ -251,6 +262,8 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
           : `(no output yet; task ${taskId} is ${record.status})`;
       return { content: [{ type: "text", text }], details };
     },
+
+    ...createTaskPanelRenderers("task-output"),
   });
 }
 
@@ -261,6 +274,11 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
 /** Structured `details` for `ptc_task_stop`. */
 export interface PtcTaskStopDetails {
   task: TaskRecord;
+  /**
+   * ADR-0022 §8: the status observed before the stop command. `running` for a fresh stop,
+   * `stopping` for the idempotent late-arrival path.
+   */
+  fromStatus: TaskStatus;
 }
 
 /** Injection seams a deterministic caller (or a test) needs; both have production defaults. */
@@ -320,7 +338,7 @@ export function createPtcTaskStopTool(
       if (existing.status === "stopping") {
         return {
           content: [{ type: "text", text: `${existing.id}  stopping (already stopping)` }],
-          details: { task: existing },
+          details: { task: existing, fromStatus: existing.status },
         };
       }
       const callerId =
@@ -335,8 +353,10 @@ export function createPtcTaskStopTool(
         record.stopReason === undefined ? "" : `  reason=${sanitizeText(record.stopReason)}`;
       return {
         content: [{ type: "text", text: `${record.id}  ${record.status}${reason}` }],
-        details: { task: record },
+        details: { task: record, fromStatus: existing.status },
       };
     },
+
+    ...createTaskPanelRenderers("task-stop"),
   });
 }

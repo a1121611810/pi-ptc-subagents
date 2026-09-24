@@ -570,6 +570,30 @@ describe("TaskRegistry.query", () => {
 });
 
 // ---------------------------------------------------------------------------
+//  get (ADR-0022 §3 read side)
+// ---------------------------------------------------------------------------
+
+describe("TaskRegistry.get", () => {
+  test("returns the persisted record by id", async () => {
+    const h = createHarness(1000);
+    await seedQueryTasks(h);
+
+    const record = await h.registry.get(TASK_1);
+
+    expect(record?.id).toBe(TASK_1);
+    expect(record?.label).toBe("research X");
+    expect(record?.status).toBe("running");
+  });
+
+  test("returns null for an unknown id and for an empty id", async () => {
+    const h = createHarness(1000);
+
+    expect(await h.registry.get("01JBZ000000000000000000404" as ULID)).toBeNull();
+    expect(await h.registry.get("" as ULID)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 //  advanceCursor + loadEventLog (ADR-0022 §5/§7)
 // ---------------------------------------------------------------------------
 
@@ -806,6 +830,7 @@ describe("TaskRegistry counterfactual", () => {
         cursor: "01JBZ0000000000000000000ZZ" as ULID,
       }),
       query: async () => [],
+      get: async () => record,
       advanceCursor: async () => undefined,
       loadEventLog: async () => [],
       reconcileLostTasks: async () => [],

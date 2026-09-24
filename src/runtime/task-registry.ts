@@ -107,6 +107,13 @@ export type LostReason =
   | "user_killed_via_esc"
   | "lost_on_session_restart";
 
+/**
+ * ADR-0022 §3/§7: the largest output payload that is inlined as a record/event preview.
+ * Above it the renderer must dereference `outputRef`; the literal 2048 is the Map+preview
+ * rule from §3 ("≤2 KB inline preview") and §7 ("output-preview only when outputBytes <= 2048").
+ */
+export const OUTPUT_PREVIEW_MAX_BYTES = 2048;
+
 /** All state mutations The TaskRegistry accepts (ADR-0022 §3 single terminal writer). */
 export type TaskCommand =
   | {
@@ -123,6 +130,14 @@ export type TaskCommand =
       stopReason?: string;
       errorMessage?: string;
       exitCode?: number;
+      /**
+       * ADR-0022 §3: the child's captured-output projection written on the terminal
+       * transition. The BG-04 pump drains stdout, persists it through `OutputStorage`, and
+       * passes these three so `ptc_task_output` can find it.
+       */
+      outputRef?: string;
+      outputBytes?: number;
+      outputPreview?: string;
     }
   | { kind: "stop"; taskId: ULID; reason: string }
   | { kind: "reconcile-lost"; taskId: ULID; reason: LostReason };
@@ -147,6 +162,12 @@ export interface TaskQuery {
 export interface TaskRegistry {
   transition(command: TaskCommand, ctx: TransitionContext): Promise<TransitionResult>;
   query(view: TaskQuery): Promise<TaskRecord[]>;
+  /**
+   * Load one TaskRecord by id; `null` when the id is unknown. The O(1) complement of `query`,
+   * used by the background pump to see whether a stop was requested before it writes the
+   * terminal transition (ADR-0022 §8).
+   */
+  get(taskId: ULID): Promise<TaskRecord | null>;
   advanceCursor(subscriberId: ULID, taskId: ULID, cursor: ULID, events: TaskEvent[]): Promise<void>;
   loadEventLog(subscriptionId: ULID, since?: ULID): Promise<TaskEvent[]>;
   reconcileLostTasks(): Promise<TaskRecord[]>;
@@ -303,6 +324,12 @@ export class DefaultTaskRegistry implements TaskRegistry {
     throw new Error(
       `transition: unknown command kind ${String((command as { kind: unknown }).kind)}`,
     );
+  }
+
+  /** O(1) single-record read; the read side of the same storage seam `query` uses. */
+  async get(taskId: ULID): Promise<TaskRecord | null> {
+    if (!isUsableTaskId(taskId)) return null;
+    return await this.#storage.loadTask(taskId);
   }
 
   /** Read-only query; storage iteration order is stabilized by an explicit createdAt sort. */
@@ -464,6 +491,9 @@ export class DefaultTaskRegistry implements TaskRegistry {
       stopReason: command.stopReason,
       errorMessage: command.errorMessage,
       exitCode: command.exitCode,
+      outputRef: command.outputRef,
+      outputBytes: command.outputBytes,
+      outputPreview: command.outputPreview,
     });
   }
 
@@ -507,6 +537,9 @@ export class DefaultTaskRegistry implements TaskRegistry {
       stopReason?: string;
       errorMessage?: string;
       exitCode?: number;
+      outputRef?: string;
+      outputBytes?: number;
+      outputPreview?: string;
     },
   ): Promise<TransitionResult> {
     const now = Math.max(0, Math.floor(ctx.clock()));
@@ -518,6 +551,9 @@ export class DefaultTaskRegistry implements TaskRegistry {
     if (fields.stopReason !== undefined) updated.stopReason = fields.stopReason;
     if (fields.errorMessage !== undefined) updated.errorMessage = fields.errorMessage;
     if (fields.exitCode !== undefined) updated.exitCode = fields.exitCode;
+    if (fields.outputRef !== undefined) updated.outputRef = fields.outputRef;
+    if (fields.outputBytes !== undefined) updated.outputBytes = fields.outputBytes;
+    if (fields.outputPreview !== undefined) updated.outputPreview = fields.outputPreview;
     if (fields.reason !== undefined) {
       // The generic `reason` lands in the field ADR-0022 §8 gives that state: stopReason for
       // the stop states, errorMessage for the failure states. Explicit fields win.
@@ -603,7 +639,9 @@ export class DefaultTaskRegistry implements TaskRegistry {
   ): TaskEvent {
     const outputBytes = record.outputBytes;
     const outputPreview =
-      outputBytes !== undefined && outputBytes <= 2048 ? record.outputPreview : undefined;
+      outputBytes !== undefined && outputBytes <= OUTPUT_PREVIEW_MAX_BYTES
+        ? record.outputPreview
+        : undefined;
     return {
       eventId: this.#nextUlid(),
       subscriptionId: subscriberId,
