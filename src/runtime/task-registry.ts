@@ -26,9 +26,9 @@
  * - **ULIDs are registry-generated and monotonic.** IDs must sort lexically in emission
  *   order (ADR-0022 §5: "The cursor is a monotonic ULID that advances on every event
  *   delivered"; TaskStorage orders the event log by `eventId`). {@link DefaultTaskRegistry}
- *   keeps a per-instance 80-bit sequence so two event IDs minted in the same millisecond still
- *   compare strictly increasing, and clamps the time component so a non-monotonic clock cannot
- *   invert order.
+ *   holds a private {@link UlidMinter} (from `ulid.ts`, WS-ULID / R-M2) bound to the injected
+ *   clock, so two event IDs minted in the same millisecond compare strictly increasing and a
+ *   non-monotonic clock cannot invert order — with no module-global minting state.
  *
  * - **The spawn id comes from the handle.** The brief's spawn `record` is
  *   `Omit<TaskRecord, "id" | "status" | "createdAt" | "transitionAt">`, i.e. it deliberately
@@ -56,9 +56,9 @@
  * §5 (Subscription cursor), §7 (event payload), §8 (signal layering).
  */
 
-import { randomBytes } from "node:crypto";
 import type { TaskEvent, TaskFilter, TaskRecord, TaskStorage, TaskStatus } from "./task-storage.ts";
 import type { ULID } from "./task-storage.ts";
+import { createUlidMinter, type UlidMinter } from "./ulid.ts";
 
 // Re-export the BG-01-owned schema next to the registry so consumers of the lifecycle have
 // one import site. These are re-exports, not redefinitions.
@@ -250,15 +250,6 @@ const TERMINAL_STATUSES: ReadonlySet<TaskStatus> = new Set<TaskStatus>([
  */
 const RECOVERY_SOURCES: ReadonlySet<TaskStatus> = new Set<TaskStatus>(["running", "stopping"]);
 
-// ---------------------------------------------------------------------------
-//  ULID minting (lexically sortable, monotonic, no Date.now)
-// ---------------------------------------------------------------------------
-
-/** Crockford base32 (excludes I, L, O, U), the ULID alphabet. */
-const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-const SEQUENCE_BITS = 80n;
-const SEQUENCE_MASK = (1n << SEQUENCE_BITS) - 1n;
-
 /** Runtime narrowing for the runtime-untrusted `to` field of a transition command. */
 function isTaskStatus(value: unknown): value is TaskStatus {
   return (
@@ -304,37 +295,6 @@ function emitKey(taskId: ULID, status: TaskStatus): string {
   return `${prefix}:->${status}`;
 }
 
-/** Encode the 48-bit ms timestamp into the first 10 Crockford chars (48 bits < 50 bits). */
-function encodeTime(ms: number): string {
-  let remaining = Math.max(0, Math.floor(ms));
-  let out = "";
-  for (let i = 0; i < 10; i++) {
-    out = (CROCKFORD[remaining % 32] ?? "0") + out;
-    remaining = Math.floor(remaining / 32);
-  }
-  return out;
-}
-
-/** Encode the low 80 bits of a sequence into 16 Crockford chars. */
-function encodeSequence(sequence: bigint): string {
-  let remaining = sequence & SEQUENCE_MASK;
-  let out = "";
-  for (let i = 0; i < 16; i++) {
-    out = (CROCKFORD[Number(remaining & 31n)] ?? "0") + out;
-    remaining >>= 5n;
-  }
-  return out;
-}
-
-/** 80 random bits, so two registry instances cannot mint the same id in the same millisecond. */
-function seedSequence(): bigint {
-  let seed = 0n;
-  for (const byte of randomBytes(10)) {
-    seed = (seed << 8n) | BigInt(byte);
-  }
-  return seed & SEQUENCE_MASK;
-}
-
 // ---------------------------------------------------------------------------
 //  DefaultTaskRegistry
 // ---------------------------------------------------------------------------
@@ -344,8 +304,8 @@ export class DefaultTaskRegistry implements TaskRegistry {
   readonly #storage: TaskStorage;
   readonly #clock: () => number;
   readonly #logger: RegistryLogger | undefined;
-  #lastTime: number;
-  #sequence: bigint;
+  /** Per-instance monotonic id minter (ulid.ts); its state is not shared module-globally. */
+  readonly #ulid: UlidMinter;
   /** Registered in-process transition observers (issue #68 §1). */
   readonly #observers = new Set<TaskTransitionObserver>();
   /**
@@ -359,8 +319,7 @@ export class DefaultTaskRegistry implements TaskRegistry {
     this.#storage = storage;
     this.#clock = options.clock;
     this.#logger = options.logger;
-    this.#lastTime = -1;
-    this.#sequence = seedSequence();
+    this.#ulid = createUlidMinter({ now: () => this.#clock() });
   }
 
   // -- public interface ------------------------------------------------------
@@ -523,7 +482,7 @@ export class DefaultTaskRegistry implements TaskRegistry {
       throw new Error(`spawn: handle.status must be "running", got ${String(handle.status)}`);
     }
     const adopted = isUsableTaskId(handle.taskId);
-    const taskId: ULID = adopted ? handle.taskId : this.#nextUlid();
+    const taskId: ULID = adopted ? handle.taskId : this.#ulid.next();
     const existing = await this.#storage.loadTask(taskId);
     if (existing !== null) {
       throw new Error(`spawn: task ${taskId} already exists (duplicate spawn)`);
@@ -810,7 +769,7 @@ export class DefaultTaskRegistry implements TaskRegistry {
         ? record.outputPreview
         : undefined;
     return {
-      eventId: this.#nextUlid(),
+      eventId: this.#ulid.next(),
       subscriptionId: subscriberId,
       taskId,
       type: emitKey(taskId, status),
@@ -825,20 +784,6 @@ export class DefaultTaskRegistry implements TaskRegistry {
   #ownerSubscriber(record: TaskRecord): string {
     const callerId = record.spawnSource.callerId;
     return callerId.length > 0 ? callerId : record.id;
-  }
-
-  /**
-   * Mint the next lexically-sortable id. The time component is clamped to the high-water mark
-   * (a regressing clock cannot invert order) and the 80-bit sequence strictly increases within
-   * a millisecond, so two events emitted at the same `clock()` value still compare in emission
-   * order.
-   */
-  #nextUlid(): ULID {
-    const requested = Math.max(0, Math.floor(this.#clock()));
-    const time = requested > this.#lastTime ? requested : this.#lastTime;
-    this.#lastTime = time;
-    this.#sequence = (this.#sequence + 1n) & SEQUENCE_MASK;
-    return `${encodeTime(time)}${encodeSequence(this.#sequence)}` as ULID;
   }
 }
 

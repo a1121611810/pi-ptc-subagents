@@ -672,7 +672,7 @@ async function dispatchBackground(
 
     // ADR-0022 §4: mint the fresh task id; the registry adopts it as the TaskRecord id, so
     // the handle the program carries and the persisted record agree at creation.
-    const taskId = createULID() as ULID;
+    const taskId = createULID();
     const label = input.label ?? input.task.slice(0, 64);
     const fullPrompt = appendDepthHint(agent.systemPrompt, childDepth, ctx.maxDispatchDepth);
     const written = await writePromptToTempFile(agent.name, fullPrompt);
