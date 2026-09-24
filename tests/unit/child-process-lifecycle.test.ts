@@ -244,14 +244,32 @@ describe("RealChildProcessLifecycle", () => {
       // registering one makes Node throw `uv_signal_start EINVAL`, crashing the child
       // with code 1 before kill() is ever called.
       'process.on("SIGTERM", () => { clearInterval(t); process.exit(0); });',
+      // Deterministic readiness handshake. A fixed `setTimeout` before `kill()` races
+      // Node's boot: under load the signal can arrive before the handler above is
+      // installed, so the process dies from SIGTERM's default action and the assertion
+      // below fails intermittently. Announcing readiness AFTER the handler is installed
+      // makes the kill land on the handled path every time.
+      'process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");',
     ].join("");
     const { lifecycle, handle } = spawnNode(js);
-    // Give the child a beat to actually start.
-    await new Promise((r) => setTimeout(r, 100));
-    // `kill()` returns void per the interface contract; the assertion is that the
-    // child closes within a bounded time, not on the return value.
-    lifecycle.kill(handle, "SIGTERM");
-    for await (const _ of lifecycle.events(handle)) { /* drain */ }
+    // Kill only once the child has announced it installed the handler; keep draining the
+    // same iterator to completion afterwards (it ends when the child exits).
+    let killed = false;
+    let announceReady: () => void = () => {};
+    const ready = new Promise<void>((resolve) => {
+      announceReady = resolve;
+    });
+    const pump = (async () => {
+      for await (const event of lifecycle.events(handle)) {
+        if (event.type === "ready" && !killed) {
+          killed = true;
+          lifecycle.kill(handle, "SIGTERM");
+          announceReady();
+        }
+      }
+    })();
+    await ready;
+    await pump;
     const exit = await lifecycle.exit(handle);
     // The child registered a SIGTERM handler that clears its interval and exits 0, so a
     // correct kill() path lands on a clean exit. This concrete-value assertion (rather
