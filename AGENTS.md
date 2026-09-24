@@ -34,6 +34,13 @@ PY
 
 Anything important left in `SYSTEM-ONLY` (other than config/JSON) is a missing anchor — add it, with `merge_system_rule: true` when the file is not contract-specific so the generic checks survive alongside the project rule.
 
+## Review rounds and closure discipline
+
+A review of a large change is one round; its findings are recorded in a ledger under `docs/reviews/` (finding → evidence → disposition → the commit that closed it), and the next round is a **delta** over the fix commits. Two rules come from real over-claims in this repo:
+
+- **A closure is only genuine when reverting the fix turns a named test red.** "The wire exists" is not closure, and neither is a green suite: the first review-1 pass marked R-m12 closed on a grep that found the new helper, but the helper had **zero production callers** and a test even asserted the field was `undefined`. Cite the test by name and state the counterfactual, or leave the row open.
+- **When a reviewer challenges a finding you wrote, measure or refute with evidence, and record the correction in the ledger.** A parent-side O(N²) claim against `FileTaskStorage.appendEvents` was refuted by a counting-fs test (50 subscriptions → exactly 1 read) and the ledger now marks that row `REFUTED` rather than quietly dropping it. Over-claimed closures and un-refuted findings both cost the next round more than they save.
+
 ## Testing constraints
 
 All new / modified tests must satisfy the 6 hard constraints in `docs/testing-constraints.md`:
