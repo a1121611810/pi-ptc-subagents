@@ -93,32 +93,6 @@ describe("buildSpawnArgv — background branch (ADR-0022 §1 / R1)", () => {
     ]);
     expect(argv).not.toContain("--no-session");
   });
-
-  test("appends argv_extra after the session flags", () => {
-    const argv = buildSpawnArgv(
-      ["pi", "--mode", "json", "-p", "--no-session"],
-      baseOpts({
-        sessionDir: "/sessions/s1",
-        sessionId: TASK_ID,
-        sessionName: "bgdispatch:" + TASK_ID,
-        argv_extra: ["--foo", "bar"],
-      }),
-    );
-    expect(argv).toEqual([
-      "pi",
-      "--mode",
-      "json",
-      "-p",
-      "--session-dir",
-      "/sessions/s1",
-      "--session-id",
-      TASK_ID,
-      "--name",
-      "bgdispatch:" + TASK_ID,
-      "--foo",
-      "bar",
-    ]);
-  });
 });
 
 describe("RealChildProcessLifecycle.spawn translates the opts into argv", () => {

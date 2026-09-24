@@ -24,17 +24,13 @@
  * pointer the model receives never names a partial file.
  */
 
-import { randomUUID } from "node:crypto";
-import { writeFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  DEFAULT_MAX_BYTES,
-  DEFAULT_MAX_LINES,
-  formatSize,
-  truncateTail,
-} from "@earendil-works/pi-coding-agent";
+  applyAdr0015Truncation as applySharedAdr0015Truncation,
+  TASK_SCALE_TEMP_PREFIX,
+  type Adr0015Truncation,
+} from "./adr0015-truncation.ts";
 import type { ULID } from "./task-storage.ts";
 
 /**
@@ -121,46 +117,16 @@ export class FileOutputStorage implements OutputStorage {
   }
 }
 
-/** The result of applying ADR-0015's tail rule to one text block. */
-export interface Adr0015Truncation {
-  /** The text the model reads (the tail plus the `[Showing …]` footer when truncated). */
-  text: string;
-  truncated: boolean;
-  /** Where the untruncated text was written; present only when `truncated` is true. */
-  fullPath?: string;
-}
-
-/** Write the untruncated text to a temp file and return its path (ADR-0015 §2). */
-function writeFullOutput(text: string): string {
-  const filePath = join(tmpdir(), `pi-ptc-task-output-${randomUUID()}.txt`);
-  writeFileSync(filePath, text, "utf8");
-  return filePath;
-}
+export type { Adr0015Truncation } from "./adr0015-truncation.ts";
 
 /**
- * Apply ADR-0015's truncateTail contract to `text`: keep the last
- * {@link DEFAULT_MAX_LINES} lines / {@link DEFAULT_MAX_BYTES} bytes, and when anything was cut,
- * write the complete text to a temp file and append pi's `[Showing …]` footer.
+ * Apply ADR-0015's truncateTail contract to `text` (the task-scale call site).
  *
- * The exact tail bias, ceilings and footer wording mirror `src/tools/common.ts`'s
- * `renderToolResult`, which is the same contract for the run-scale text block; both trace to
- * ADR-0015 §1/§2. Small text passes through byte-for-byte with `truncated: false` and no file.
+ * The implementation — tail bias, ceilings, footer wording and the write-before-cut temp file —
+ * lives once in `./adr0015-truncation.ts`; this wrapper only pins the `pi-ptc-task-output-`
+ * prefix ADR-0022 §3 / `docs/usage/bgdispatch.md` document. The signature is unchanged so
+ * `src/tools/ptc-task.ts` keeps importing it from here (R-m13 / R2-3).
  */
 export function applyAdr0015Truncation(text: string): Adr0015Truncation {
-  const truncation = truncateTail(text, {
-    maxLines: DEFAULT_MAX_LINES,
-    maxBytes: DEFAULT_MAX_BYTES,
-  });
-  if (!truncation.truncated) {
-    return { text, truncated: false };
-  }
-  const fullPath = writeFullOutput(text);
-  const startLine = truncation.totalLines - truncation.outputLines + 1;
-  const endLine = truncation.totalLines;
-  const footer = truncation.lastLinePartial
-    ? `[Showing last ${formatSize(truncation.outputBytes)} of line ${endLine}. Full output: ${fullPath}]`
-    : truncation.truncatedBy === "lines"
-      ? `[Showing lines ${startLine}-${endLine} of ${truncation.totalLines}. Full output: ${fullPath}]`
-      : `[Showing lines ${startLine}-${endLine} of ${truncation.totalLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Full output: ${fullPath}]`;
-  return { text: `${truncation.content}\n\n${footer}`, truncated: true, fullPath };
+  return applySharedAdr0015Truncation(text, TASK_SCALE_TEMP_PREFIX);
 }

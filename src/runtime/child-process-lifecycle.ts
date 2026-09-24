@@ -92,9 +92,8 @@ export interface ChildHandle {
 
 /**
  * Spawn options shared by both adapters. `promptFile` / `sessionDir` / `sessionId` /
- * `sessionName` / `argv_extra` are the R1 fields the background dispatch will consume
- * (ADR-0022). The foreground `pi.dispatch` path passes only `cwd` / `env` / `signal`
- * / `promptFile`.
+ * `sessionName` are the R1 fields the background dispatch consumes (ADR-0022 §1/R1). The
+ * foreground `pi.dispatch` path passes only `cwd` / `env` / `signal` / `promptFile`.
  */
 export interface ChildSpawnOptions {
   cwd: string;
@@ -104,7 +103,6 @@ export interface ChildSpawnOptions {
   sessionDir?: string;
   sessionId?: string;
   sessionName?: string;
-  argv_extra?: readonly string[];
 }
 
 /** Process-exit shape the `close` event on `node:child_process.ChildProcess` produces. */
@@ -263,7 +261,7 @@ export const NO_SESSION_FLAG = "--no-session";
  * `--no-session` flag intact: every child is an ephemeral session. Background dispatch has a
  * session dir and must instead carry the R1 triple — `--session-dir <dir>`,
  * `--session-id <taskId>` (retry idempotence) and `--name bgdispatch:<taskId>` (audit) — so
- * the no-session flag is removed. `argv_extra` is appended verbatim after the session flags.
+ * the no-session flag is removed.
  *
  * Pure on purpose: the Real adapter calls it and tests pin the exact argv for both branches
  * without spawning a process.
@@ -276,7 +274,6 @@ export function buildSpawnArgv(argv: readonly string[], opts: ChildSpawnOptions)
     if (opts.sessionId !== undefined) effective.push("--session-id", opts.sessionId);
     if (opts.sessionName !== undefined) effective.push("--name", opts.sessionName);
   }
-  if (opts.argv_extra !== undefined) effective.push(...opts.argv_extra);
   return effective;
 }
 
@@ -292,10 +289,52 @@ interface RealChildHandleState extends BaseHandleState {
 }
 
 /**
+ * Minimal warn seam for a stdout line the adapter could not parse. Structurally identical to
+ * `NotificationPipelineLogger` (a single `warn(msg)` method) so any logger in this module set —
+ * including a `RegistryLogger` — can be passed without an adapter.
+ */
+export interface ChildLifecycleLogger {
+  warn(msg: string): void;
+}
+
+/** Default warn surface: a dropped line must not look like a silent no-op (testing-constraints #3). */
+const DEFAULT_LIFECYCLE_LOGGER: ChildLifecycleLogger = {
+  warn: (msg: string): void => {
+    console.warn("[pi-ptc.lifecycle] " + msg);
+  },
+};
+
+/** Construction seams for the production adapter. */
+export interface RealChildProcessLifecycleOptions {
+  /**
+   * Warn seam for a non-empty stdout line that is not JSON. Defaults to a `console.warn` logger;
+   * the foreground `dispatch.ts` singleton uses the default and `background-runtime.ts` injects
+   * the session logger, so a malformed child stream is visible on both paths instead of silently
+   * dropped.
+   */
+  logger?: ChildLifecycleLogger;
+}
+
+/** Max characters of a dropped line echoed in the warning; the rest is elided (bounded log). */
+export const DROPPED_LINE_PREVIEW_MAX_CHARS = 200;
+
+/** Bounded preview of one dropped stdout line, so the warning cannot flood the log. */
+function previewDroppedLine(line: string): string {
+  if (line.length <= DROPPED_LINE_PREVIEW_MAX_CHARS) return line;
+  return line.slice(0, DROPPED_LINE_PREVIEW_MAX_CHARS) + "…";
+}
+
+/**
  * Production adapter: wraps `node:child_process.spawn`. One instance is shared across
  * all dispatches in a process (it carries no per-dispatch state of its own).
  */
 export class RealChildProcessLifecycle implements ChildProcessLifecycle {
+  readonly #logger: ChildLifecycleLogger;
+
+  constructor(options: RealChildProcessLifecycleOptions = {}) {
+    this.#logger = options.logger ?? DEFAULT_LIFECYCLE_LOGGER;
+  }
+
   spawn(argv: readonly string[], opts: ChildSpawnOptions): ChildHandle {
     if (argv.length === 0) {
       throw new TypeError("RealChildProcessLifecycle.spawn: argv must include the command");
@@ -338,6 +377,7 @@ export class RealChildProcessLifecycle implements ChildProcessLifecycle {
           state.lineBuffer = state.lineBuffer.slice(nl + 1);
           const ev = parseAgentEvent(line);
           if (ev) pushEvent(state, ev);
+          else if (line.trim().length > 0) this.#warnDroppedLine(handle, line);
           nl = state.lineBuffer.indexOf("\n");
         }
       });
@@ -358,6 +398,7 @@ export class RealChildProcessLifecycle implements ChildProcessLifecycle {
       if (trailing.length > 0) {
         const ev = parseAgentEvent(trailing);
         if (ev) pushEvent(state, ev);
+        else this.#warnDroppedLine(handle, trailing);
         state.lineBuffer = "";
       }
       markExited(state, { code, signal });
@@ -418,6 +459,18 @@ export class RealChildProcessLifecycle implements ChildProcessLifecycle {
     return new Promise((resolve) => {
       state.stderrWaiters.push(resolve);
     });
+  }
+
+  /**
+   * Warn once about one non-empty stdout line that `parseAgentEvent` could not read. The handle id
+   * and a bounded preview name the source without echoing an unbounded malformed line
+   * (testing-constraints #3: a dropped line must leave an observable signal, not vanish).
+   */
+  #warnDroppedLine(handle: ChildHandle, line: string): void {
+    this.#logger.warn(
+      `child ${handle.id}: dropped a non-JSON stdout line (${line.length} chars): ` +
+        previewDroppedLine(line),
+    );
   }
 }
 

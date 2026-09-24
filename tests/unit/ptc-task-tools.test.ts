@@ -19,7 +19,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { DEFAULT_MAX_BYTES } from "@earendil-works/pi-coding-agent";
-import { InMemoryTaskStorage, type TaskRecord, type ULID } from "../../src/runtime/task-storage.ts";
+import {
+  InMemoryTaskStorage,
+  type TaskEvent,
+  type TaskRecord,
+  type ULID,
+} from "../../src/runtime/task-storage.ts";
 import {
   createTaskRegistry,
   type DispatchHandle,
@@ -104,6 +109,19 @@ function createHarness(start = 1000): Harness {
     lifecycle: new MockChildProcessLifecycle(),
     clock,
   };
+}
+
+/**
+ * Materialize the per-subscriber event buffer through the storage seam the registry writes into
+ * (R-m11 removed `TaskRegistry.loadEventLog`; the tool assertions below only need the emitted
+ * event order, not a registry inspection helper).
+ */
+async function eventLog(h: Harness, subscriberId: string): Promise<TaskEvent[]> {
+  const events: TaskEvent[] = [];
+  for await (const event of h.storage.loadEvents(subscriberId as ULID)) {
+    events.push(event);
+  }
+  return events;
 }
 
 type RecordInput = Omit<TaskRecord, "id" | "status" | "createdAt" | "transitionAt">;
@@ -405,7 +423,7 @@ describe("ptc_task_stop", () => {
     // SIGTERM -> grace -> SIGKILL ladder. The stopping transition asserted above is the tool's
     // whole observable effect, and the tool itself must never signal the process.
     expect(killSpy).not.toHaveBeenCalled();
-    const log = await h.registry.loadEventLog(CALLER as ULID);
+    const log = await eventLog(h, CALLER);
     expect(log.map((event) => event.type)).toEqual([
       "task:01JBZ000000000000000000001:running",
       "task:01JBZ000000000000000000001:stopping",
@@ -435,7 +453,7 @@ describe("ptc_task_stop", () => {
     expect(second.details.fromStatus).toBe("stopping");
     expect(second.details.task.stopReason).toBe("first");
     expect(second.details.task.transitionAt).toBe(1000);
-    const log = await h.registry.loadEventLog(CALLER as ULID);
+    const log = await eventLog(h, CALLER);
     expect(log.filter((event) => event.type.endsWith(":stopping"))).toHaveLength(1);
   });
 
@@ -477,7 +495,7 @@ describe("ptc_task_stop", () => {
       "running",
       "stopping",
     ]);
-    const log = await h.registry.loadEventLog(CALLER as ULID);
+    const log = await eventLog(h, CALLER);
     expect(log.filter((event) => event.type.endsWith(":stopping"))).toHaveLength(1);
     // The tool still never signals; the dispatcher pump owns the ladder.
     expect(killSpy).not.toHaveBeenCalled();

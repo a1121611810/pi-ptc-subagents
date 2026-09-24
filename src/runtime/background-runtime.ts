@@ -199,19 +199,6 @@ class StableTaskRegistry implements TaskRegistry {
     return this.#current.onTransition(observer);
   }
 
-  advanceCursor(
-    subscriberId: ULID,
-    taskId: ULID,
-    cursor: ULID,
-    events: TaskEvent[],
-  ): Promise<void> {
-    return this.#current.advanceCursor(subscriberId, taskId, cursor, events);
-  }
-
-  loadEventLog(subscriptionId: ULID, since?: ULID): Promise<TaskEvent[]> {
-    return this.#current.loadEventLog(subscriptionId, since);
-  }
-
   reconcileLostTasks(): Promise<TaskRecord[]> {
     return this.#current.reconcileLostTasks();
   }
@@ -380,8 +367,14 @@ class DefaultBackgroundTaskRuntime implements BackgroundTaskRuntime {
     this.registry = new StableTaskRegistry(initialRegistry);
     this.outputStorage = new StableOutputStorage(new InMemoryOutputStorage());
     this.pipeline = new StableNotificationPipeline(initialPipeline);
+    // The session logger is threaded into the production lifecycle so a child that emits a
+    // non-JSON stdout line warns through the same surface as every other background failure
+    // (testing-constraints #3) instead of being silently dropped.
     this.lifecycle = new TrackingLifecycle(
-      (options.createLifecycle ?? ((): ChildProcessLifecycle => new RealChildProcessLifecycle()))(),
+      (
+        options.createLifecycle ??
+        ((): ChildProcessLifecycle => new RealChildProcessLifecycle({ logger: this.#logger }))
+      )(),
     );
     this.slots = new DispatchSlotCounter(options.concurrency ?? DEFAULT_CONFIG.dispatchConcurrency);
     this.dispatchDeps = {
