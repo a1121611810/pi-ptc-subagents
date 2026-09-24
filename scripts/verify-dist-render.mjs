@@ -30,9 +30,34 @@ const fakePi = {
 };
 dist.default(fakePi);
 
-if (registered.size !== 2 || !registered.has("ptc_run_code") || !registered.has("ptc_workflow")) {
-  console.error("FAIL: expected ptc_run_code + ptc_workflow, got:", [...registered.keys()]);
-  process.exit(1);
+// The extension registers the two PTC tools plus the three always-on background-task tools
+// (ADR-0022). An exact-set assertion is deliberate: a tool silently disappearing from the built
+// dist is exactly the regression this gate exists to catch.
+const EXPECTED_TOOLS = [
+  "ptc_run_code",
+  "ptc_workflow",
+  "ptc_task_list",
+  "ptc_task_output",
+  "ptc_task_stop",
+];
+{
+  const missing = EXPECTED_TOOLS.filter((name) => !registered.has(name));
+  const extra = [...registered.keys()].filter((name) => !EXPECTED_TOOLS.includes(name));
+  if (missing.length > 0 || extra.length > 0) {
+    console.error("FAIL: registered tools differ from the expected set.", {
+      missing,
+      extra,
+      got: [...registered.keys()],
+    });
+    process.exit(1);
+  }
+  for (const name of EXPECTED_TOOLS) {
+    const tool = registered.get(name);
+    if (typeof tool.renderCall !== "function" || typeof tool.renderResult !== "function") {
+      console.error(`FAIL: ${name} has no renderCall/renderResult in the built dist`);
+      process.exit(1);
+    }
+  }
 }
 
 // --- stub theme -----------------------------------------------------------------------
@@ -79,6 +104,8 @@ if (workflow.renderCall === undefined || workflow.renderResult === undefined) {
   process.exit(1);
 }
 
+const taskList = registered.get("ptc_task_list");
+
 let checks = 0;
 
 // ── 1. renderCall: label + description only (the code lives in the expanded view) ─────
@@ -104,6 +131,38 @@ if (wfCallOut.includes("return 1;")) {
   failures.push("renderCall/workflow: code preview leaked into the call row");
 }
 checks += 1;
+
+// ── 2b. ptc_task_list: call row + a record row from the built renderer ────────────────
+const taskRecord = {
+  id: "01JBZ000000000000000000002",
+  label: "dist smoke",
+  agentName: "researcher",
+  depth: 1,
+  status: "succeeded",
+  createdAt: 1_700_000_000_000,
+  startedAt: 1_700_000_000_000,
+  finishedAt: 1_700_000_001_000,
+  durationMs: 1_000,
+  transitionAt: 1_700_000_001_000,
+  outputBytes: 913,
+};
+const taskListCall = show("renderCall · ptc_task_list", taskList.renderCall({}, theme));
+expect("renderCall/task_list", taskListCall, ["PTC task list"]);
+const taskListOut = show(
+  "renderResult · ptc_task_list",
+  taskList.renderResult(
+    {
+      content: [{ type: "text", text: "01JBZ000000000000000000002  succeeded" }],
+      details: { tasks: [taskRecord], count: 1 },
+    },
+    { expanded: false, isPartial: false },
+    theme,
+    { args: {}, isError: false },
+  ),
+);
+// The row shows the record's content and the status GLYPH (succeeded -> success check), not the
+// status word, so both the content fields and the status mapping are asserted.
+expect("renderResult/task_list", taskListOut, ["dist smoke", "researcher", "913B", "✓"]);
 
 // ── 3. renderResult collapsed: result preview + duration ──────────────────────────────
 const okDetails = {
