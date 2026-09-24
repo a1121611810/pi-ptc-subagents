@@ -19,15 +19,13 @@
  * that join explicit in the type ({@link TaskNotificationItem}) rather than re-reading the
  * record internally, which keeps the function pure and the data dependency visible.
  *
- * ### Byte budget: ADR §7 prose vs the shipped constant
+ * ### Byte budget: one constant, cited from the ADR
  *
- * ADR-0022 §7 prose says the TaskRegistry splits "when a single-batch content exceeds
- * **200 K tokens**". The shipped, single-sourced constant is
- * {@link DEFAULT_MAX_BATCH_BYTES} = 100 KiB (100 * 1024 bytes) from
- * `notification-pipeline.ts`. The constant is authoritative (the ticket names it as the
- * split point); the "200 K tokens" sentence is stale prose and would be ~2 orders of
- * magnitude larger anyway. {@link splitTaskNotificationBatches} consumes
- * `DEFAULT_MAX_BATCH_BYTES`, not a re-declared number.
+ * ADR-0022 §7 (`docs/adr/0022-background-dispatch.md:190`) names the byte budget
+ * `DEFAULT_MAX_BATCH_BYTES = 100 * 1024` (100 KiB) and the split-along-event-boundaries
+ * rule. That export from `notification-pipeline.ts` is the only declaration of the
+ * number; {@link splitTaskNotificationBatches} consumes it and never re-declares it, so the
+ * renderer's split is the single source of the batching rule.
  *
  * ### Delivery policy lives in one place
  *
@@ -123,8 +121,8 @@ export function renderTaskNotifications(
  * assumes the ADR's 26-char ULID `batch-id` and a 13-digit ms epoch. A caller that renders
  * with a longer `batch-id` loosens that bound slightly; the ULID is the spec shape.
  *
- * NOTE on the ADR prose: §7 says "200 K tokens" while the shipped constant is 100 KiB.
- * The constant is authoritative (see the module doc); this function never re-declares it.
+ * The budget defaults to {@link DEFAULT_MAX_BATCH_BYTES} (ADR-0022 §7,
+ * `docs/adr/0022-background-dispatch.md:190`); this function never re-declares the number.
  */
 export function splitTaskNotificationBatches(
   items: readonly TaskNotificationItem[],

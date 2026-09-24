@@ -81,16 +81,33 @@ export function truncationFooter(truncation: TailTruncation, fullOutputPath: str
   return `[Showing lines ${startLine}-${endLine} of ${truncation.totalLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Full output: ${fullOutputPath}]`;
 }
 
+/** Options for {@link applyAdr0015Truncation}. */
+export interface Adr0015TruncationOptions {
+  /**
+   * The text written to the temp file when `text` is truncated. Defaults to `text`.
+   *
+   * Set this when the displayed text is a page of a larger body (e.g. `ptc_task_output` with
+   * `sinceBytes`): the pointer must name the COMPLETE body, never the page. Truncation and the
+   * footer's line numbers still derive from `text`, so the display stays a faithful tail.
+   */
+  fullText?: string;
+}
+
 /**
  * Apply ADR-0015's truncateTail contract to `text`: keep the last
  * {@link DEFAULT_MAX_LINES} lines / {@link DEFAULT_MAX_BYTES} bytes, and when anything was cut,
  * write the complete text to a temp file and append the `[Showing …]` footer.
  *
  * Small text passes through byte-for-byte with `truncated: false` and no file.
+ *
+ * By default the file receives `text` itself. A caller whose `text` is a page of a larger body
+ * passes {@link Adr0015TruncationOptions.fullText} so the pointer names the complete body while
+ * the model still reads the truncated page.
  */
 export function applyAdr0015Truncation(
   text: string,
   prefix: string = RUN_SCALE_TEMP_PREFIX,
+  options: Adr0015TruncationOptions = {},
 ): Adr0015Truncation {
   const truncation = truncateTail(text, {
     maxLines: DEFAULT_MAX_LINES,
@@ -99,7 +116,7 @@ export function applyAdr0015Truncation(
   if (!truncation.truncated) {
     return { text, truncated: false };
   }
-  const fullPath = writeFullOutput(text, prefix);
+  const fullPath = writeFullOutput(options.fullText ?? text, prefix);
   return {
     text: `${truncation.content}\n\n${truncationFooter(truncation, fullPath)}`,
     truncated: true,

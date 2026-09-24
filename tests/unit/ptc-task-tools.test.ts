@@ -343,6 +343,31 @@ describe("ptc_task_output", () => {
     expect(result.details.outputBytes).toBe(6);
   });
 
+  test("paging that truncates still writes the FULL stored output to the temp file (ADR-0015 §2)", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    await h.outputs.writeOutput(TASK_1, LARGE_OUTPUT);
+    const tool = createPtcTaskOutputTool(h.registry, h.outputs);
+    // Skip "line-0\n" (7 bytes). The page is still 2499 lines, over the 2000-line ceiling, so it
+    // truncates and must point at a temp file holding the WHOLE stored output — the guide says
+    // "the complete text is written" (docs/usage/bgdispatch.md:310-312).
+    const skip = Buffer.byteLength("line-0\n", "utf8");
+
+    const result = await callTool<PtcTaskOutputDetails>(tool, { taskId: TASK_1, sinceBytes: skip });
+
+    // (a) the returned text is the truncated PAGE (lines 500-2499 of the page).
+    expect(result.details.outputBytes).toBe(Buffer.byteLength(LARGE_OUTPUT, "utf8"));
+    expect(result.details.outputTruncated).toBe(true);
+    expect(result.details.output).toContain("line-500");
+    expect(result.details.output).toContain("line-2499");
+    expect(result.details.output).not.toContain("line-499");
+    // (b) the pointer names the complete stored output, not the page. Counterfactual (#5):
+    // truncating the slice and writing it here makes this red (the file would be the page).
+    const fullPath = result.details.outputFullPath as string;
+    tempFullPaths.push(fullPath);
+    expect(readFileSync(fullPath, "utf8")).toBe(LARGE_OUTPUT);
+  });
+
   test("rejects a sinceBytes offset that splits a UTF-8 character (R-m16)", async () => {
     const h = createHarness(1000);
     await spawnTask(h, TASK_1);
@@ -563,6 +588,20 @@ describe("applyAdr0015Truncation", () => {
     const fullPath = result.fullPath as string;
     tempFullPaths.push(fullPath);
     expect(readFileSync(fullPath, "utf8")).toBe(huge);
+  });
+
+  test("writes an explicit fullText while truncating a smaller display page", () => {
+    const page = "p".repeat(DEFAULT_MAX_BYTES + 1);
+    const full = "F".repeat(DEFAULT_MAX_BYTES * 2);
+
+    const result = applyAdr0015Truncation(page, full);
+
+    expect(result.truncated).toBe(true);
+    const fullPath = result.fullPath as string;
+    tempFullPaths.push(fullPath);
+    // The pointer's file is the complete body, never the displayed page. Counterfactual (#5):
+    // dropping the second argument writes the page and makes this red.
+    expect(readFileSync(fullPath, "utf8")).toBe(full);
   });
 });
 

@@ -330,6 +330,18 @@ describe("splitTaskNotificationBatches (ADR-0022 §7)", () => {
       }
     }
   });
+
+  test("the pipeline module is the single source: one budget constant, no second splitter", async () => {
+    const pipelineModule = await import("../../src/runtime/notification-pipeline.ts");
+
+    // ADR-0022 §7 line: `DEFAULT_MAX_BATCH_BYTES = 100 * 1024` (100 KiB). The pipeline module
+    // is the only place that number is declared; the renderer consumes the same export.
+    expect(pipelineModule.DEFAULT_MAX_BATCH_BYTES).toBe(100 * 1024);
+    // Contract rule 6 (split is single-sourced): no competing event-level splitter remains in
+    // the pipeline. Counterfactual: re-adding `splitBatch`/`estimateEventBytes` makes this red.
+    expect("splitBatch" in pipelineModule).toBe(false);
+    expect("estimateEventBytes" in pipelineModule).toBe(false);
+  });
 });
 
 // --- shouldDeliverTaskNotification (T4.4 suppression) ----------------------------------------
