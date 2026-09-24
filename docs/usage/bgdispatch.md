@@ -258,17 +258,24 @@ Signal handling is layered by who asked:
 
 ## On disk
 
-In this tree, the registry's v1 backend is `InMemoryTaskStorage`: `TaskRecord` rows and
-`Subscription` cursors live in process memory. ADR-0022/R1 define the file-backed layout a future
-adapter uses, and the paths the rest of the code assumes:
+The task state goes through the `TaskStorage` seam. There are two adapters: an in-memory one
+(process-local, used when no session directory is available) and `FileTaskStorage`, which persists
+under the session directory so a restart can reconcile:
 
 ```text
-<sessionDir>/tasks/<taskId>.json                                 # the 21-field TaskRecord
-<sessionDir>/subscriptions/<subscriberId>-<taskId>.json          # the per-subscriber cursor
-<sessionDir>/event-log/<eventId>.json                            # append-only, indexed by (subscriptionId, cursor)
+<sessionDir>/tasks/<taskId>.json                                 # the 21-field TaskRecord (atomic temp+rename)
+<sessionDir>/subscriptions/<subscriberId>-<taskId>.json          # the per-subscriber cursor (atomic temp+rename)
+<sessionDir>/events/<subscriberId>-<taskId>.jsonl                # append-only newline-delimited events
 <sessionDir>/tasks/<taskId>/output.log                           # the captured output
 <sessionDir>/tasks/<taskId>.pi-*                                 # the child's pi session file
 ```
+
+A missing file is "absent" (`null` / no events); a file that exists but does not parse throws a
+path-naming error rather than being reported as absent. The event log deviates from ADR-0022
+"What we add" #5 (which named `event-log/<eventId>.json`): it is partitioned by
+`(subscriberId, taskId)` so an append is one file append and the subscriber's stream is a merge of
+its own per-task logs. One caveat: `listTasks` throws on a corrupt record, so startup reconcile is
+best-effort and visible rather than per-record tolerant.
 
 Output goes through the `OutputStorage` seam. `FileOutputStorage` writes
 `<base>/tasks/<taskId>/output.log` and reports that path as `outputRef`; the in-memory adapter
