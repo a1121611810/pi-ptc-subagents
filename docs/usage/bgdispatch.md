@@ -299,7 +299,9 @@ pi --mode json -p \
 ### Pagination and truncation
 
 `ptc_task_output` reads the stored bytes, slices from `sinceBytes` (default `0`; must be a
-non-negative integer no larger than `outputBytes`), and then applies pi's truncation contract
+non-negative integer no larger than `outputBytes`, and on a UTF-8 character boundary — an offset
+that would split a multi-byte character is rejected with an explicit error rather than decoded
+into U+FFFD), and then applies pi's truncation contract
 ([ADR-0015](../adr/0015-pi-truncation-contract.md)):
 
 - `outputBytes` always reports the **full** stored size, regardless of `sinceBytes` or truncation.

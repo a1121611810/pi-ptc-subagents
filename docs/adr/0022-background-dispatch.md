@@ -237,12 +237,14 @@ What changes: the **result tree** now contains a `DispatchHandle` (background) o
 - **`ptc_task_*` tools**: new surface. They live alongside `ptc_run_code` etc. in the same `tools.<name>(args)` table; they are **constant on** -- not gated by `/ptc off`. Map Notes clause 5.
 - **`pi.dispatch` foreground**: unchanged. They return `DispatchResult`. Background is an _additive_ opt.
 
-## Implementation outline (deferred to follow-up commits)
+## Delivery status (implemented)
 
-- New files as shipped: `src/runtime/task-storage.ts` (TaskStorage + InMemoryTaskStorage; TaskRecord / DispatchHandle / TaskStatus / Subscription / TaskEvent), `src/runtime/task-registry.ts`, `src/runtime/child-process-lifecycle.ts`, `src/runtime/notification-pipeline.ts`, `src/runtime/output-storage.ts`, `src/runtime/task-notification.ts` (notification renderer), `src/tools/ptc-task.ts` (the three tools), `src/tools/task-panel-render.ts`.
-- Modified files as shipped: `src/runtime/dispatch.ts` (background opt path; `DispatchHandle` return type), `src/runtime/dispatcher.ts` (per-run `DispatchSlotCounter` + `dispatchDeps` threading), `src/runtime/bindings.ts` (`callerId` / `sessionDir` / `dispatchDeps` on the binding context), `src/index.ts` (session runtime + always-on `ptc_task_*` registration + notification delivery), `src/tools/run-code.ts` / `src/tools/workflow.ts` (session dir threading). No `subscriptionPollIntervalMs` / `notificationCadenceMs` / `notificationRateLimit` config field ships in v1.
-- Tests: unit-test TaskRecord state machine transitions (G1: explicit transition table); integration-test the binding through `runPtcProgram` with a small agent script; e2e-test the 12-scenario G2 prototype as a regression suite.
-- Schema validator: T5 implementation ticket.
+Shipped on `main` as BG-01…BG-17. Commits: the module batch (`bf62cbf`, `42f12ec`), then the code-review-1 fix pass (`9f53e14` notification renderer, `fe68018` durable storage, `800c70c` append-cost evidence, `407baa2` stop ladder / race-free terminal / lost-reason guard, `cb8137e` single ULID module, `d63a755` session runtime + always-on registration) and the test/doc hardening.
+
+- New modules: `src/runtime/task-storage.ts` (TaskStorage + InMemoryTaskStorage; TaskRecord / DispatchHandle / TaskStatus / Subscription / TaskEvent), `task-storage-file.ts` (durable adapter), `task-registry.ts` (state machine, single terminal writer, transition observers), `child-process-lifecycle.ts`, `notification-pipeline.ts`, `task-notification.ts` (the §7 renderer), `output-storage.ts` (ADR-0015 truncation + file adapter), `ulid.ts` (the single id minter), `background-runtime.ts` (session-scoped holder), `src/tools/ptc-task.ts` (the three tools), `src/tools/task-panel-render.ts`.
+- Modified: `src/runtime/dispatch.ts` (background opt path, `DispatchHandle`, detached pump, the one shared SIGTERM→grace→SIGKILL ladder, `PI_PTC_TASK_ID` stamping), `src/runtime/dispatcher.ts` (a session-`dispatchDeps`-injectable `DispatchSlotCounter`; `callerId` / `sessionDir`), `src/runtime/bindings.ts`, `src/index.ts` (bind → reconcile → deliver on `session_start`; always-on `ptc_task_*` registration outside the mode loadout; `session_shutdown` reclaim), `src/tools/run-code.ts` / `workflow.ts` / `common.ts` (dispatch-deps forwarding).
+- No `subscriptionPollIntervalMs` / `notificationCadenceMs` / `notificationRateLimit` config field ships in v1: delivery is event-driven with no cadence, per Decision §6.
+- Tests: a unit suite per module; `tests/integration/bgdispatch/` holds the 12-scenario + anomaly regression suite against the real modules with mock lifecycle / in-memory-or-file storage / fake clock; `tests/e2e/bgdispatch.test.ts` is the env-gated real-spawn end-to-end. There is no separate runtime record validator in v1 — the TypeBox parameter schemas plus the compile-time `TaskRecord` type are the validation.
 
 ## Cross-references
 
