@@ -36,6 +36,26 @@
       "merge_system_rule": false
     },
     {
+      "path": "src/runtime/background-runtime.ts",
+      "rule": ".opencodereview/rules/ptc-bgdispatch-contract.md",
+      "merge_system_rule": true
+    },
+    {
+      "path": "src/runtime/ulid.ts",
+      "rule": ".opencodereview/rules/ptc-bgdispatch-contract.md",
+      "merge_system_rule": true
+    },
+    {
+      "path": "src/runtime/bindings.ts",
+      "rule": ".opencodereview/rules/ptc-bgdispatch-contract.md",
+      "merge_system_rule": true
+    },
+    {
+      "path": "src/index.ts",
+      "rule": ".opencodereview/rules/ptc-bgdispatch-contract.md",
+      "merge_system_rule": true
+    },
+    {
       "path": "src/runtime/output-storage.ts",
       "rule": ".opencodereview/rules/ptc-render-bounds.md",
       "merge_system_rule": false
@@ -71,9 +91,14 @@
       "merge_system_rule": false
     },
     {
-      "path": "tests/integration/**/*.test.ts",
+      "path": "tests/integration/**",
       "rule": ".opencodereview/rules/test-discipline-oracle.md",
-      "merge_system_rule": false
+      "merge_system_rule": true
+    },
+    {
+      "path": "tests/helpers/**",
+      "rule": ".opencodereview/rules/test-discipline.md",
+      "merge_system_rule": true
     },
     {
       "path": "tests/**/*.test.ts",
