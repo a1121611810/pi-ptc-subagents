@@ -260,6 +260,20 @@ describe("ptc_task_output", () => {
     expect(result.details.outputFullPath).toBeUndefined();
   });
 
+  test("reads the record through registry.get, not a MAX_SAFE_INTEGER query scan (§3 O(1) read)", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    await h.outputs.writeOutput(TASK_1, "hi");
+    const getSpy = vi.spyOn(h.registry, "get");
+    const querySpy = vi.spyOn(h.registry, "query");
+    const tool = createPtcTaskOutputTool(h.registry, h.outputs);
+
+    await callTool<PtcTaskOutputDetails>(tool, { taskId: TASK_1 });
+
+    expect(getSpy).toHaveBeenCalledWith(TASK_1);
+    expect(querySpy).not.toHaveBeenCalled();
+  });
+
   test("tails a 2500-line output to the last 2000 lines and points at the full file (ADR-0015 §1)", async () => {
     const h = createHarness(1000);
     await spawnTask(h, TASK_1);
@@ -309,6 +323,26 @@ describe("ptc_task_output", () => {
 
     expect(result.details.output).toBe("cdef");
     expect(result.details.outputBytes).toBe(6);
+  });
+
+  test("rejects a sinceBytes offset that splits a UTF-8 character (R-m16)", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    // 'a' is 1 byte, 'é' is 2 bytes: 3 bytes total, a codepoint boundary at offset 1 only.
+    await h.outputs.writeOutput(TASK_1, "aé");
+    const tool = createPtcTaskOutputTool(h.registry, h.outputs);
+
+    const onBoundary = await callTool<PtcTaskOutputDetails>(tool, {
+      taskId: TASK_1,
+      sinceBytes: 1,
+    });
+    expect(onBoundary.details.output).toBe("é");
+    // outputBytes still reports the FULL stored byte length.
+    expect(onBoundary.details.outputBytes).toBe(3);
+
+    await expect(callTool(tool, { taskId: TASK_1, sinceBytes: 2 })).rejects.toThrow(
+      /splits a UTF-8 character/,
+    );
   });
 
   test("emits an explicit empty-output line for a known task with no bytes yet", async () => {
@@ -367,7 +401,9 @@ describe("ptc_task_stop", () => {
     expect(result.details.task.stopReason).toBe("user asked");
     expect(result.details.task.transitionAt).toBe(1500);
     expect(result.details.task.finishedAt).toBeUndefined();
-    // ADR-0022 §8: the tool never signals the process; the dispatcher pump owns kill().
+    // ADR-0022 §8: the tool drives only running -> stopping; the dispatcher pump owns the
+    // SIGTERM -> grace -> SIGKILL ladder. The stopping transition asserted above is the tool's
+    // whole observable effect, and the tool itself must never signal the process.
     expect(killSpy).not.toHaveBeenCalled();
     const log = await h.registry.loadEventLog(CALLER as ULID);
     expect(log.map((event) => event.type)).toEqual([
@@ -422,6 +458,29 @@ describe("ptc_task_stop", () => {
     const tool = createPtcTaskStopTool(h.registry, h.lifecycle, { clock: h.clock.clock });
 
     await expect(callTool(tool, { taskId: TASK_1 })).rejects.toThrow(/illegal transition for task/);
+  });
+
+  test("two concurrent stops emit exactly one stopping event and report the atomic fromStatus (§8)", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    const killSpy = vi.spyOn(h.lifecycle, "kill");
+    const tool = createPtcTaskStopTool(h.registry, h.lifecycle, { clock: h.clock.clock });
+
+    const [first, second] = await Promise.all([
+      callTool<PtcTaskStopDetails>(tool, { taskId: TASK_1, reason: "one" }),
+      callTool<PtcTaskStopDetails>(tool, { taskId: TASK_1, reason: "two" }),
+    ]);
+
+    expect(first.details.task.status).toBe("stopping");
+    expect(second.details.task.status).toBe("stopping");
+    expect([first.details.fromStatus, second.details.fromStatus].sort()).toEqual([
+      "running",
+      "stopping",
+    ]);
+    const log = await h.registry.loadEventLog(CALLER as ULID);
+    expect(log.filter((event) => event.type.endsWith(":stopping"))).toHaveLength(1);
+    // The tool still never signals; the dispatcher pump owns the ladder.
+    expect(killSpy).not.toHaveBeenCalled();
   });
 });
 

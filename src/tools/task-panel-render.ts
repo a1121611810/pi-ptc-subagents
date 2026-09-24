@@ -89,6 +89,14 @@ const MAX_OUTPUT_LINE_CHARS = 160;
 const MAX_OUTPUT_PREVIEW_LINES = 6;
 
 /**
+ * Hard cap on the number of task rows `ptc_task_list` renders in one panel. This is the flat-list
+ * analogue of `MAX_SUBCALLS` (render.ts), not the README's "6 children per container" rule — that
+ * one caps object / array *value* containers. The registry still returns up to
+ * `DEFAULT_TASK_LIST_LIMIT` records; the renderer withholds the tail behind a `…+N more` marker.
+ */
+export const MAX_TASK_PANEL_ROWS = 32;
+
+/**
  * Per-tool-call state bag, held in `ToolRenderContext.state` so the interval outlives the row
  * pi recreates on every `updateDisplay()` (see `shimmer.ts` for the same pattern).
  */
@@ -295,9 +303,16 @@ function renderTaskList(details: unknown, ctx: RenderContext): TaskPanelRow {
     });
   }
   const hasLive = tasks.some((task) => isLiveStatus(task.status));
-  const rows = tasks.map((task, index) =>
-    taskRecordRow(task, index === tasks.length - 1, ctx.theme, ctx.now),
+  const visible = tasks.slice(0, MAX_TASK_PANEL_ROWS);
+  const tail = tasks.length - visible.length;
+  const rows = visible.map((task, index) =>
+    taskRecordRow(task, index === visible.length - 1 && tail === 0, ctx.theme, ctx.now),
   );
+  if (tail > 0) {
+    rows.push({
+      left: `${TREE_INDENT}└─ ${ctx.theme.fg("dim", `…+${tail} more tasks`)}`,
+    });
+  }
   return withAgeTimer(new TaskPanelRow(rows), {
     isLive: ctx.partial && hasLive,
     state: ctx.state,
@@ -372,10 +387,11 @@ function renderTaskOutput(details: unknown, ctx: RenderContext): TaskPanelRow {
 }
 
 /**
- * `task-stop`: the transition the stop tool drove. The tool only ever moves `running -> stopping`
- * (ADR-0022 §8), so a `stopping` record reads as that transition; any other state is rendered as
- * a bare arrow because `PtcTaskStopDetails` carries only the post-transition record and not the
- * source state.
+ * `task-stop`: the transition the stop tool drove. `PtcTaskStopDetails.fromStatus` is the tool's
+ * atomic record of the source state (ADR-0022 §8), so the arrow is `fromStatus → status` — an
+ * idempotent late stop renders `stopping → stopping`, not the `running → stopping` transition
+ * that never happened (R-m3). Only a details payload without `fromStatus` falls back to deriving
+ * the arrow from `task.status`.
  */
 function renderTaskStop(details: unknown, ctx: RenderContext): TaskPanelRow {
   const raw = asRecord(details);
@@ -385,7 +401,14 @@ function renderTaskStop(details: unknown, ctx: RenderContext): TaskPanelRow {
   }
   const color = STATUS_COLOR[task.status] ?? "muted";
   const glyph = ctx.theme.fg(color, STATUS_GLYPH[task.status] ?? "?");
-  const transition = task.status === "stopping" ? "running → stopping" : `→ ${String(task.status)}`;
+  const fromStatus =
+    typeof raw.fromStatus === "string" ? (raw.fromStatus as TaskStatus) : undefined;
+  const transition =
+    fromStatus !== undefined
+      ? `${fromStatus} → ${task.status}`
+      : task.status === "stopping"
+        ? "running → stopping"
+        : `→ ${String(task.status)}`;
   const segments = [
     `${glyph} ${ctx.theme.fg("text", sanitizeText(task.id))}`,
     ctx.theme.fg(color, transition),

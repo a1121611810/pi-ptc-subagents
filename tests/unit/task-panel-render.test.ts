@@ -195,6 +195,28 @@ describe("task-list row shape", () => {
     expect(out).toContain("1234B");
   });
 
+  test("caps the rendered task list at 32 rows with a retention marker (R-m8)", () => {
+    const tasks = Array.from({ length: 40 }, (_unused, index) =>
+      makeRecord({
+        id: ("01JBZ0000000000000000000" + String(index).padStart(2, "0")) as TaskRecord["id"],
+        // Unique zero-padded labels: task-list rows render the label, not the id.
+        label: "task-" + String(index).padStart(2, "0"),
+        status: "succeeded",
+        createdAt: BASE + index,
+        durationMs: 1000,
+        finishedAt: BASE + index + 1000,
+      }),
+    );
+
+    const out = renderResult("task-list", { tasks, count: tasks.length });
+
+    for (const task of tasks.slice(0, 32)) expect(out).toContain(task.label);
+    const withheld = tasks.slice(32);
+    expect(withheld).toHaveLength(8);
+    for (const task of withheld) expect(out).not.toContain(task.label);
+    expect(out).toContain("…+8 more tasks");
+  });
+
   test("empty list renders the placeholder", () => {
     const out = renderResult("task-list", { tasks: [], count: 0 });
     expect(out).toContain("(no background tasks)");
@@ -274,6 +296,17 @@ describe("task-stop", () => {
     });
     expect(out).toContain("running → stopping");
     expect(out).not.toContain("reason=");
+  });
+
+  test("uses fromStatus as the arrow's source (R-m3)", () => {
+    // An idempotent late stop reports fromStatus='stopping' with a post record that is also
+    // 'stopping'; rendering the invented 'running → stopping' would contradict the tool result.
+    const out = renderResult("task-stop", {
+      task: makeRecord({ status: "stopping", stopReason: "first" }),
+      fromStatus: "stopping",
+    });
+    expect(out).toContain("stopping → stopping");
+    expect(out).not.toContain("running → stopping");
   });
 });
 

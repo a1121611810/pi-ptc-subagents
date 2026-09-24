@@ -19,13 +19,10 @@
  * Always-on (ADR-0022 "What we deliberately don't add" 1 + map Notes clause 5): `/ptc off` gates
  * *new spawn*, not in-flight lifecycle, so these tools are not part of PTC mode's gated loadout.
  *
- * TODO(BG-04 integration): the extension entrypoint (`src/index.ts`) has no session-level
- * TaskRegistry / OutputStorage to construct these tools against yet — that wiring lands with the
- * background branch of `pi.dispatch`. Register them there with
- * `pi.registerTool(createPtcTaskListTool(registry))` etc., outside the `/ptc` mode loadout so
- * they stay active when the mode is off. If the program-facing binding table
- * (`src/runtime/bindings.ts`) should also expose them as `tools.ptc_task_*`, add an explicit
- * `includeTaskTools` option there (keeping `includeDispatch` semantics untouched).
+ * Integration state: the background branch of `pi.dispatch` shipped (BG-04), so the session
+ * TaskRegistry / OutputStorage seams these factories take exist. Constructing them against the
+ * session registry and registering them with `pi.registerTool(...)` outside the `/ptc` mode
+ * loadout is the entrypoint wiring step owned by BG-14; this module is only the factory layer.
  */
 
 import { defineTool } from "@earendil-works/pi-coding-agent";
@@ -55,9 +52,6 @@ export const DEFAULT_STOP_REASON = "model stop";
 
 /** Subscriber fallback when a record's `spawnSource.callerId` is empty (see `#ownerSubscriber`). */
 const STOP_CALLER_FALLBACK = "ptc_task_stop";
-
-/** A query cap large enough to find one record in a session's list (registry has no get-by-id). */
-const ALL_TASKS_LIMIT = Number.MAX_SAFE_INTEGER;
 
 /** Shared guidance for the three tools (they are one surface and should read that way). */
 export const PTC_TASK_TOOL_GUIDELINES: readonly string[] = [
@@ -153,25 +147,23 @@ export function createPtcTaskListTool(registry: TaskRegistry): AnyTool {
 }
 
 // ---------------------------------------------------------------------------
-//  shared: find one record (the registry exposes no get-by-id)
+//  shared: load one record by id
 // ---------------------------------------------------------------------------
 
 /**
- * The registry's read surface has no `get(taskId)` (BG-02 owns its shape), so a single-record
- * read is a bounded query + `find`. `limit` is pushed to `Number.MAX_SAFE_INTEGER` so the
- * scan never misses an old record behind the default 100.
+ * Read one record through the registry's O(1) `get(taskId)` and fail loudly for an unknown id,
+ * so each tool keeps its own explicit "unknown taskId" error instead of a silent empty result.
  */
 async function loadTaskOrThrow(
   registry: TaskRegistry,
   taskId: ULID,
   toolName: string,
 ): Promise<TaskRecord> {
-  const records = await registry.query({ limit: ALL_TASKS_LIMIT });
-  const found = records.find((record) => record.id === taskId);
-  if (found === undefined) {
+  const record = await registry.get(taskId);
+  if (record === null) {
     throw new Error(`${toolName}: unknown taskId ${taskId}`);
   }
-  return found;
+  return record;
 }
 
 // ---------------------------------------------------------------------------
@@ -243,8 +235,16 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
           `ptc_task_output: sinceBytes ${sinceBytes} exceeds the ${outputBytes}-byte output of task ${taskId}`,
         );
       }
-      const slice =
-        sinceBytes === 0 ? full : Buffer.from(full, "utf8").subarray(sinceBytes).toString("utf8");
+      // R-m16: a byte offset inside a UTF-8 codepoint would decode to U+FFFD. Reject it
+      // explicitly (rather than silently advancing) so the caller pages on a character boundary;
+      // `outputBytes` still reports the full stored byte length.
+      const rawBytes = Buffer.from(full, "utf8");
+      if (sinceBytes < outputBytes && ((rawBytes[sinceBytes] ?? 0) & 0xc0) === 0x80) {
+        throw new Error(
+          `ptc_task_output: sinceBytes ${sinceBytes} splits a UTF-8 character in task ${taskId}; use a byte offset on a character boundary`,
+        );
+      }
+      const slice = sinceBytes === 0 ? full : rawBytes.subarray(sinceBytes).toString("utf8");
       const truncation = applyAdr0015Truncation(slice);
       // ADR-0022 §7: inline the preview only at or below the 2048-byte ceiling.
       const outputPreview = outputBytes <= OUTPUT_PREVIEW_MAX_BYTES ? full : undefined;
@@ -334,18 +334,14 @@ export function createPtcTaskStopTool(
     async execute(_toolCallId, params) {
       const taskId = params.taskId as ULID;
       const existing = await loadTaskOrThrow(registry, taskId, "ptc_task_stop");
-      // ADR-0022 §8 late-arrival stop: re-stopping a task already asking to stop is a no-op.
-      if (existing.status === "stopping") {
-        return {
-          content: [{ type: "text", text: `${existing.id}  stopping (already stopping)` }],
-          details: { task: existing, fromStatus: existing.status },
-        };
-      }
       const callerId =
         existing.spawnSource.callerId.length > 0
           ? existing.spawnSource.callerId
           : STOP_CALLER_FALLBACK;
-      const { record } = await registry.transition(
+      // ADR-0022 §8 late-arrival stop: the registry owns the idempotence check under its write
+      // lock, so two concurrent stops cannot both emit a stopping event. `fromStatus` comes from
+      // the registry's atomic result, not a second (racing) read of the record.
+      const { record, fromStatus } = await registry.transition(
         { kind: "stop", taskId, reason: params.reason ?? DEFAULT_STOP_REASON },
         { clock, callerId },
       );
@@ -353,7 +349,7 @@ export function createPtcTaskStopTool(
         record.stopReason === undefined ? "" : `  reason=${sanitizeText(record.stopReason)}`;
       return {
         content: [{ type: "text", text: `${record.id}  ${record.status}${reason}` }],
-        details: { task: record, fromStatus: existing.status },
+        details: { task: record, fromStatus: fromStatus ?? existing.status },
       };
     },
 

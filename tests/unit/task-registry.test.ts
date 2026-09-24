@@ -18,7 +18,7 @@
  * no-op cursor) is shown to violate what the spec requires.
  */
 
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   InMemoryTaskStorage,
   type TaskRecord,
@@ -178,7 +178,16 @@ async function seedStatus(h: Harness, from: TaskStatus, taskId: ULID): Promise<v
     return;
   }
   h.clock.set(1200);
-  await h.registry.transition({ kind: "transition", taskId, to: from }, callContext(h, CALLER));
+  await h.registry.transition(
+    {
+      kind: "transition",
+      taskId,
+      to: from,
+      // ADR-0022 §8: the lost edge carries one of the three auditable reasons.
+      ...(from === "lost" ? { reason: "lost_on_session_restart" } : {}),
+    },
+    callContext(h, CALLER),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -287,7 +296,6 @@ const ALLOWED_CASES: Array<{ from: TaskStatus; to: TaskStatus }> = [
   { from: "running", to: "succeeded" },
   { from: "running", to: "failed" },
   { from: "running", to: "canceled" },
-  { from: "running", to: "lost" },
   { from: "stopping", to: "succeeded" },
   { from: "stopping", to: "failed" },
   { from: "stopping", to: "canceled" },
@@ -499,6 +507,253 @@ describe("TaskRegistry.stop", () => {
     expect(result.record.finishedAt).toBeUndefined();
     expect(result.events[0]?.type).toBe("task:01JBZ000000000000000000001:stopping");
     expect(result.events[0]?.status).toBe("stopping");
+  });
+
+  /**
+   * R-M1 / issue #68: a stop that lands while the idempotent read-then-write check is in flight
+   * must not emit a second `stopping` event. The registry's own serialization + idempotent
+   * `#stop` is the guard; the tool no longer owns the check.
+   */
+  test("two concurrent stop commands emit exactly one stopping event (§8)", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+
+    const [first, second] = await Promise.all([
+      h.registry.transition(
+        { kind: "stop", taskId: TASK_1, reason: "one" },
+        callContext(h, CALLER),
+      ),
+      h.registry.transition(
+        { kind: "stop", taskId: TASK_1, reason: "two" },
+        callContext(h, CALLER),
+      ),
+    ]);
+
+    expect(first.record.status).toBe("stopping");
+    expect(second.record.status).toBe("stopping");
+    const log = await h.registry.loadEventLog(CALLER as ULID);
+    expect(log.filter((event) => event.type.endsWith(":stopping"))).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+//  resolve-exit: the terminal decision lives inside the single writer (R-M1, #68)
+// ---------------------------------------------------------------------------
+
+describe("TaskRegistry.resolve-exit", () => {
+  test("running + exit 0 resolves succeeded and running + exit 1 resolves failed", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    await spawnTask(h, TASK_2);
+
+    const ok = await h.registry.transition(
+      { kind: "resolve-exit", taskId: TASK_1, exitCode: 0 },
+      callContext(h, CALLER),
+    );
+    const bad = await h.registry.transition(
+      { kind: "resolve-exit", taskId: TASK_2, exitCode: 1 },
+      callContext(h, CALLER),
+    );
+
+    expect(ok.record.status).toBe("succeeded");
+    expect(ok.record.exitCode).toBe(0);
+    expect(ok.fromStatus).toBe("running");
+    expect(bad.record.status).toBe("failed");
+    expect(bad.record.exitCode).toBe(1);
+  });
+
+  /**
+   * ADR-0022 §8 line 184: "ptc_task_stop ... running -> stopping -> canceled". A stop that
+   * lands before the terminal write therefore resolves canceled even when the child exited 0.
+   */
+  test("stopping + exit 0 resolves canceled, never succeeded (ADR-0022 §8)", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    await h.registry.transition(
+      { kind: "stop", taskId: TASK_1, reason: "model stop" },
+      callContext(h, CALLER),
+    );
+
+    const resolved = await h.registry.transition(
+      { kind: "resolve-exit", taskId: TASK_1, exitCode: 0 },
+      callContext(h, CALLER),
+    );
+
+    expect(resolved.record.status).toBe("canceled");
+    expect(resolved.record.stopReason).toBe("model stop");
+    expect(resolved.fromStatus).toBe("stopping");
+  });
+
+  test("carries outputRef/outputBytes/outputPreview onto the terminal record (§3/§7)", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+
+    const resolved = await h.registry.transition(
+      {
+        kind: "resolve-exit",
+        taskId: TASK_1,
+        exitCode: 0,
+        outputRef: "memory:tasks/x/output.log",
+        outputBytes: 4,
+        outputPreview: "PONG",
+      },
+      callContext(h, CALLER),
+    );
+
+    expect(resolved.record.outputRef).toBe("memory:tasks/x/output.log");
+    expect(resolved.record.outputBytes).toBe(4);
+    expect(resolved.record.outputPreview).toBe("PONG");
+  });
+
+  test("rejects a resolve-exit on a terminal task with an explicit error (no silent overwrite)", async () => {
+    const h = createHarness(1000);
+    await seedStatus(h, "succeeded", TASK_1);
+
+    await expect(
+      h.registry.transition(
+        { kind: "resolve-exit", taskId: TASK_1, exitCode: 0 },
+        callContext(h, CALLER),
+      ),
+    ).rejects.toThrow(/resolve-exit: task .* is terminal \(succeeded\)/);
+
+    expect((await h.storage.loadTask(TASK_1))?.status).toBe("succeeded");
+  });
+});
+
+// ---------------------------------------------------------------------------
+//  transition observer (issue #68 §1)
+// ---------------------------------------------------------------------------
+
+describe("TaskRegistry.onTransition", () => {
+  test("fires synchronously after the transition is persisted and passes the post record + event", async () => {
+    const h = createHarness(1000);
+    const order: string[] = [];
+    const originalAppend = h.storage.appendEvents.bind(h.storage);
+    vi.spyOn(h.storage, "appendEvents").mockImplementation(async (subscriptionId, events) => {
+      order.push("persist");
+      await originalAppend(subscriptionId, events);
+    });
+    const seen: Array<{ status: string; type: string }> = [];
+    h.registry.onTransition((record, event) => {
+      order.push("observe");
+      seen.push({ status: record.status, type: event.type });
+    });
+
+    await spawnTask(h, TASK_1);
+
+    // RED source: the observer must not run before the event is persisted.
+    expect(order).toEqual(["persist", "observe"]);
+    expect(seen).toEqual([{ status: "running", type: "task:01JBZ000000000000000000001:running" }]);
+  });
+
+  test("does not fire for an illegal transition", async () => {
+    const h = createHarness(1000);
+    const seen: string[] = [];
+    h.registry.onTransition((_record, event) => {
+      seen.push(event.type);
+    });
+    await spawnTask(h, TASK_1);
+
+    await expect(
+      h.registry.transition(
+        { kind: "transition", taskId: TASK_1, to: "running" },
+        callContext(h, CALLER),
+      ),
+    ).rejects.toThrow(/illegal transition/);
+
+    expect(seen).toEqual(["task:01JBZ000000000000000000001:running"]);
+  });
+
+  test("unsubscribe is idempotent and stops delivery", async () => {
+    const h = createHarness(1000);
+    const seen: string[] = [];
+    const unsubscribe = h.registry.onTransition((_record, event) => {
+      seen.push(event.type);
+    });
+    unsubscribe();
+    unsubscribe();
+
+    await spawnTask(h, TASK_1);
+
+    expect(seen).toEqual([]);
+  });
+
+  test("an observer that throws does not break the transition and is warned", async () => {
+    const h = createHarness(1000);
+    h.registry.onTransition(() => {
+      throw new Error("observer exploded");
+    });
+
+    const result = await spawnTask(h, TASK_1);
+
+    expect(result.record.status).toBe("running");
+    expect(await h.storage.loadTask(TASK_1)).not.toBeNull();
+    expect(h.logger.warn.some((line) => line.includes("observer exploded"))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+//  lost requires a LostReason (R-M4, ADR-0022 §8)
+// ---------------------------------------------------------------------------
+
+const LOST_REASONS = [
+  "session_ended_while_running",
+  "user_killed_via_esc",
+  "lost_on_session_restart",
+] as const;
+
+describe("TaskRegistry lost reasons (ADR-0022 §8)", () => {
+  test('a to:"lost" transition with no reason is rejected with a descriptive error', async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+
+    await expect(
+      h.registry.transition(
+        { kind: "transition", taskId: TASK_1, to: "lost" },
+        callContext(h, CALLER),
+      ),
+    ).rejects.toThrow(/to "lost" requires a LostReason/);
+
+    expect((await h.storage.loadTask(TASK_1))?.status).toBe("running");
+  });
+
+  test.each(LOST_REASONS)("round-trips the %s reason into errorMessage", async (reason) => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+
+    const result = await h.registry.transition(
+      { kind: "transition", taskId: TASK_1, to: "lost", reason },
+      callContext(h, CALLER),
+    );
+
+    expect(result.record.status).toBe("lost");
+    expect(result.record.errorMessage).toBe(reason);
+  });
+});
+
+// ---------------------------------------------------------------------------
+//  spawn write order: a partial failure must not leave a running orphan (R-m7)
+// ---------------------------------------------------------------------------
+
+describe("TaskRegistry.spawn write order", () => {
+  test("an event-log write failure leaves no running record (IO failure path)", async () => {
+    const h = createHarness(1000);
+    vi.spyOn(h.storage, "appendEvents").mockRejectedValueOnce(new Error("event log write failed"));
+
+    await expect(spawnTask(h, TASK_1)).rejects.toThrow(/event log write failed/);
+
+    expect(await h.storage.loadTask(TASK_1)).toBeNull();
+  });
+
+  test("a subscription write failure leaves no running record (IO failure path)", async () => {
+    const h = createHarness(1000);
+    vi.spyOn(h.storage, "saveSubscription").mockRejectedValueOnce(
+      new Error("subscription write failed"),
+    );
+
+    await expect(spawnTask(h, TASK_1)).rejects.toThrow(/subscription write failed/);
+
+    expect(await h.storage.loadTask(TASK_1)).toBeNull();
   });
 });
 
@@ -831,6 +1086,7 @@ describe("TaskRegistry counterfactual", () => {
       }),
       query: async () => [],
       get: async () => record,
+      onTransition: () => () => undefined,
       advanceCursor: async () => undefined,
       loadEventLog: async () => [],
       reconcileLostTasks: async () => [],
