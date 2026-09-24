@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-09-24
+
+### Added
+
+- **Background dispatch: PTC programs can fan out to long-lived children.**
+  `pi.dispatch(...)` gains an opt-in `{ background: true }` path: instead of
+  awaiting the child, the binding returns a `DispatchHandle`
+  (`{ taskId, label, status: "running" }`) immediately, and a detached pump
+  drives a session-level `TaskRecord` through
+  `running / stopping / succeeded / failed / canceled / lost`, past the end of
+  the program and of the turn. The handle is a frozen spawn-time projection;
+  live state comes from three model-facing tools that stay on when PTC mode is
+  off (`/ptc off` only blocks new spawns):
+  - **`ptc_task_list`** — list this session's tasks (`status?`, `limit?`,
+    default 100, newest first);
+  - **`ptc_task_output`** — read a task's captured output (`taskId`,
+    `sinceBytes?`), tail-truncated to pi's 50 KB / 2000-line contract
+    (ADR-0015) with the full text written to a temp file;
+  - **`ptc_task_stop`** — ask a running task to stop (`taskId`, `reason?`,
+    default `"model stop"`), moving it `running -> stopping -> canceled`.
+
+  Lifecycle changes arrive as user-role `<bg-task-notification>` events under a
+  `<bg-task-notifications>` batch, cursor-delivered per subscriber with a
+  2048-byte inline-preview ceiling. Background tasks count against the existing
+  `dispatchConcurrency` (8) for their whole lifetime and share the
+  `maxDispatchDepth` (3) recursion bound. Existing foreground `pi.dispatch`
+  keeps its `DispatchResult` shape unchanged. ADR-0022.
+
 ## [0.1.3] - 2026-09-23
 
 ### Added
