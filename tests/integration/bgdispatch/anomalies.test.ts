@@ -1,18 +1,18 @@
 /**
  * BG-10 anomaly suite: the 6 exception scenarios from the G2 prototype, against the real
- * modules (ADR-0022 §5/§6/§7). Each test pins the recovery contract rather than a happy path:
- * cursor replay after a dropped ack, a zombie subscriber that never acks, a fork during
- * delivery, a large cursor replay, malformed child events, and a payload above the 2048-byte
- * preview ceiling.
+ * modules (ADR-0022 §5/§6/§7). This is a deterministic IN-PROCESS INTEGRATION suite (see
+ * ./harness.ts); it never spawns `pi`. Each test pins the recovery contract rather than a
+ * happy path: cursor replay after a dropped ack, a zombie subscriber that never acks, a fork
+ * during delivery, a large cursor replay, malformed child events, and a payload above the
+ * 2048-byte preview ceiling.
  */
 import { describe, expect, test } from "vitest";
 import { parseAgentEvent } from "../../../src/runtime/child-process-lifecycle.ts";
 import { DefaultNotificationPipeline } from "../../../src/runtime/notification-pipeline.ts";
+import type { OutputStorage } from "../../../src/runtime/output-storage.ts";
+import type { RegistryLogger } from "../../../src/runtime/task-registry.ts";
 import type { TaskEvent, ULID } from "../../../src/runtime/task-storage.ts";
-import {
-  createPtcTaskOutputTool,
-  type PtcTaskOutputDetails,
-} from "../../../src/tools/ptc-task.ts";
+import { createPtcTaskOutputTool, type PtcTaskOutputDetails } from "../../../src/tools/ptc-task.ts";
 import {
   callerFor,
   completeTask,
@@ -117,18 +117,23 @@ describe("bgdispatch anomalies", () => {
     // The real terminal event precedes the synthetic backlog (ULID lexical order).
     expect(drained).toHaveLength(1_001);
     expect(drained[0]?.type).toBe("task:" + String(taskId) + ":->succeeded");
-    expect(drained[drained.length - 1]?.type).toBe(
-      "task:" + String(taskId) + ":synthetic-999",
-    );
+    expect(drained[drained.length - 1]?.type).toBe("task:" + String(taskId) + ":synthetic-999");
 
-    await h.pipeline.acknowledgeEvents(caller, taskId, drained[drained.length - 1]?.eventId as ULID);
+    await h.pipeline.acknowledgeEvents(
+      caller,
+      taskId,
+      drained[drained.length - 1]?.eventId as ULID,
+    );
     expect(await h.pipeline.drainPending(caller, taskId)).toHaveLength(0);
   });
 
-  test("malformed_event: unparseable and irrelevant child events are dropped, the task still succeeds", async () => {
-    // The adapter's parse boundary drops anything that is not JSON.
+  test("malformed_event: unparseable child events are explicitly dropped, never counted as output", async () => {
+    // The adapter's parse boundary is the failure surface: an unparseable line yields an
+    // explicit `null` (never a throw, never a fabricated event) and is dropped.
     expect(parseAgentEvent("not json")).toBeNull();
     expect(parseAgentEvent("   ")).toBeNull();
+    expect(parseAgentEvent("{'type':'message_end'}")).toBeNull();
+    expect(parseAgentEvent('{"type":"message_end"')).toBeNull();
 
     const h = createHarness({ concurrency: 1 });
     const spawned = await spawnTask(h, { task: "malformed" });
@@ -141,7 +146,8 @@ describe("bgdispatch anomalies", () => {
 
     const record = await completeTask(h, spawned, 0);
     expect(record.status).toBe("succeeded");
-    // Only assistant message_end text is captured; the junk events contribute 0 bytes.
+    // Only assistant message_end text is captured; the junk events contribute 0 bytes, so the
+    // run's explicit outcome is an empty preview rather than a fabricated payload.
     expect(record.outputBytes).toBe(0);
     expect(record.outputPreview).toBe("");
   });
@@ -177,5 +183,42 @@ describe("bgdispatch anomalies", () => {
     expect(result.details.outputBytes).toBe(3_000);
     expect(result.details.outputTruncated).toBe(false);
     expect(result.details.outputPreview).toBeUndefined();
+  });
+
+  test("huge_payload persistence failure: the failure is warned about, not swallowed (§3)", async () => {
+    // The pump persists a task's drained stdout before the terminal transition. When that write
+    // fails it must surface a warning and still write the record (testing-constraints #3).
+    const warnings: string[] = [];
+    const logger: RegistryLogger = {
+      info: (_message: string): void => undefined,
+      warn: (message: string): void => {
+        warnings.push(message);
+      },
+    };
+    const failingStorage: OutputStorage = {
+      readOutput: async (): Promise<string | null> => null,
+      writeOutput: async (): Promise<void> => {
+        throw new Error("disk full (simulated)");
+      },
+      outputRef: (taskId): string => "memory:tasks/" + String(taskId) + "/output.log",
+    };
+    const h = createHarness({ concurrency: 1, outputStorage: failingStorage, logger });
+    const spawned = await spawnTask(h, { task: "persist-fail" });
+    const huge = "H".repeat(3_000);
+
+    const record = await completeTask(h, spawned, 0, huge);
+    // The terminal state is still written (the run is not lost to a storage failure) ...
+    expect(record.status).toBe("succeeded");
+    expect(record.outputBytes).toBe(3_000);
+    expect(record.outputPreview).toBeUndefined();
+    // ... but it must not claim an outputRef whose bytes were never persisted, and the failure
+    // must be observable through the injected logger.
+    expect(record.outputRef).toBeUndefined();
+    expect(
+      warnings.some(
+        (message) =>
+          message.includes("output persistence") && message.includes(spawned.handle.taskId),
+      ),
+    ).toBe(true);
   });
 });
