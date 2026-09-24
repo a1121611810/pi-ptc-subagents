@@ -46,9 +46,11 @@ the next program can `tools.read`; the collapsed row then shows `truncated` in i
 
 PTC programs can spawn a fresh `pi` subprocess per call via the **`pi.dispatch(...)`** binding ([ADR-0016](./docs/adr/0016-ptc-dispatch-binding.md)). Use it to fan out to a specialist agent — the child subprocess loads the named agent's markdown from `~/.pi/agent/agents/<name>.md` (or `.pi/agents/<name>.md` for project-scope agents), runs that agent's tool set and system prompt in isolation, and returns a structured result.
 
+Bindings are reached through the one `tools` table — there is no `pi` global in the worker — so the binding named `pi.dispatch` is called as `tools["pi.dispatch"]({ … })` with a single object argument.
+
 ```ts
 // inside a ptc_run_code program
-const result = await pi.dispatch({
+const result = await tools["pi.dispatch"]({
   agent: "scout",
   task: "find all auth code in src/",
   cwd: process.cwd(),
@@ -65,8 +67,8 @@ const result = await pi.dispatch({
 ```ts
 const [read, scoutA, scoutB] = await Promise.all([
   tools.read({ path: "package.json" }),
-  pi.dispatch({ agent: "scout", task: "review auth" }),
-  pi.dispatch({ agent: "scout", task: "review db" }),
+  tools["pi.dispatch"]({ agent: "scout", task: "review auth" }),
+  tools["pi.dispatch"]({ agent: "scout", task: "review db" }),
 ]);
 ```
 
@@ -81,7 +83,7 @@ const [read, scoutA, scoutB] = await Promise.all([
 ```ts
 // in a hypothetical runner that wants to keep reads-only:
 createBuiltinBindings({ cwd: "/abs/path", names: ["read", "grep"] });
-// `pi.dispatch` is NOT in the resulting table.
+// `pi.dispatch` is NOT in the resulting `tools` table.
 ```
 
 **Not a subagent.** The term _subagent_ is overloaded in this field (DSH's `subagent` is a different thing; pi's `examples/extensions/subagent/` extension is also a different thing). pi-ptc uses _parallel binding_ and _concurrent tool call_ throughout; see `CONTEXT.md` for the canonical terms.

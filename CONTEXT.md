@@ -66,7 +66,11 @@ and registers the extension in `~/.pi/agent/settings.json` automatically.
 **Not** a postinstall hook. **Not** a manual `pi-ptc install` CLI command.
 
 **binding** — a function callable from within a PTC program as
-`tools.<name>(args)` (builtin) or `pi.<name>(args)` (parallel binding). Two
+`tools["<name>"](args)`. Every binding lives in the one `tools` table —
+there is no `pi` global in the worker — so the parallel binding named
+`pi.dispatch` is reached as `tools["pi.dispatch"](args)` and takes a single
+object (`{ agent, task, cwd?, agentScope?, model?, thinkingLevel?, background?, label? }`),
+not a positional argument list. Two
 kinds:
 
 - _builtin binding_ — a pi built-in tool whose `execute()` is invoked
@@ -330,16 +334,20 @@ tasks left `running` at shutdown are marked `lost` (reason
 
 **Subscription** — per-subscriber cursor for one `TaskRecord`.
 Persisted to `<sessionDir>/subscriptions/<subscriberId>-<taskId>.json`.
-Default fork cursor is `max(parent, child)` (child observes post-fork
-events only); `ptc_task_resubscribe(taskId, since: "initial")` resets
-to task-creation. See ADR-0022.
+The ADR's fork-cursor rule is `max(parent, child)` (child observes
+post-fork events only) and it names an explicit-reset surface
+`ptc_task_resubscribe(taskId, since: "initial")`; neither the helper nor that
+tool ships in v1 — the caller supplies `since` and a resubscribe tool is
+deferred to v2. See ADR-0022.
 
 **`ptc_task_*` (model-facing management tools)** — three tools always
 on (not gated by `/ptc off`, per ADR-0022 + map Notes clause 5):
-`ptc_task_list(filter?, opts?)` returns matching TaskRecords;
-`ptc_task_output(taskId, opts?)` dereferences `outputRef` and applies
-ADR-0015 truncateTail; `ptc_task_stop(taskId, opts?)` triggers
-`running → stopping → canceled`. See ADR-0022.
+`ptc_task_list({ status?, limit? })` returns matching TaskRecords
+(newest first, default limit 100); `ptc_task_output({ taskId, sinceBytes? })`
+dereferences `outputRef` and applies ADR-0015 truncateTail;
+`ptc_task_stop({ taskId, reason? })` triggers
+`running → stopping → canceled` (the dispatcher delivers the signal).
+See ADR-0022.
 
 **`<bg-task-notification>` (event schema)** — user-role XML emitted to
 the model when a `TaskRecord` changes. Batch parent `<bg-task-notifications>`
