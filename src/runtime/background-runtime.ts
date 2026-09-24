@@ -203,6 +203,13 @@ function ownerOf(record: TaskRecord): ULID {
 /** `TaskRegistry` whose concrete delegate is swapped by `bindSession` (never re-created). */
 class StableTaskRegistry implements TaskRegistry {
   #current: TaskRegistry;
+  /**
+   * Owning registry per task, captured at spawn. A task's later transitions (notably the detached
+   * pump's resolve-exit) route to the registry that persisted it, so a session rebind cannot
+   * re-route an in-flight terminal write to a registry that never knew the task (S9). Reads
+   * (query/get) intentionally stay on the current session.
+   */
+  readonly #owners = new Map<ULID, TaskRegistry>();
 
   constructor(initial: TaskRegistry) {
     this.#current = initial;
@@ -212,8 +219,14 @@ class StableTaskRegistry implements TaskRegistry {
     this.#current = next;
   }
 
-  transition(command: TaskCommand, ctx: TransitionContext): Promise<TransitionResult> {
-    return this.#current.transition(command, ctx);
+  async transition(command: TaskCommand, ctx: TransitionContext): Promise<TransitionResult> {
+    const owner =
+      command.kind === "spawn"
+        ? this.#current
+        : (this.#owners.get(command.taskId) ?? this.#current);
+    const result = await owner.transition(command, ctx);
+    if (command.kind === "spawn") this.#owners.set(result.record.id, owner);
+    return result;
   }
 
   query(view: TaskQuery): Promise<TaskRecord[]> {

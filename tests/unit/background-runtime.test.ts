@@ -131,6 +131,19 @@ function asHandle(value: DispatchHandle | DispatchResult): DispatchHandle {
   return value;
 }
 
+/** Wait until the pump persists a terminal status in the given storage. */
+async function waitForTerminalRecord(
+  storage: InMemoryTaskStorage,
+  taskId: ULID,
+): Promise<TaskRecord> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const record = await storage.loadTask(taskId);
+    if (record !== null && TERMINAL.has(record.status)) return record;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  throw new Error("task " + taskId + " did not reach a terminal state");
+}
+
 // ---------------------------------------------------------------------------
 //  Session-less usability (the tools / dispatch path must work before a session)
 // ---------------------------------------------------------------------------
@@ -530,5 +543,44 @@ describe("default durable storage", () => {
     } finally {
       await removeTempDir(sessionDir);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+//  session rebind: an in-flight task keeps writing to its owning registry (S9)
+// ---------------------------------------------------------------------------
+
+describe("session rebind pins an in-flight task to its owning registry", () => {
+  test("the terminal write lands in the original session after bindSession moves on", async () => {
+    await withAgent(async (dir) => {
+      const storageA = new InMemoryTaskStorage();
+      const storageB = new InMemoryTaskStorage();
+      const lifecycle = new RecordingLifecycle();
+      const runtime = createBackgroundTaskRuntime({
+        createLifecycle: () => lifecycle,
+        createStorage: (sessionDir) => (sessionDir === "/sessions/a" ? storageA : storageB),
+        createOutputStorage: () => new InMemoryOutputStorage(),
+      });
+      await runtime.bindSession("/sessions/a");
+
+      const handle = asHandle(
+        await dispatch(
+          { agent: AGENT, task: "across rebind", background: true, agentScope: "project" },
+          { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3, callerId: "run-1" },
+          runtime.dispatchDeps,
+        ),
+      );
+      expect((await storageA.loadTask(handle.taskId))?.status).toBe("running");
+
+      // Rebind to a different session while the pump is still in flight. The stable registry now
+      // points at storageB, but the pump must keep writing to the registry that persisted it.
+      await runtime.bindSession("/sessions/b");
+
+      lifecycle.resolveExit(lifecycle.handleAt(0), 0, null);
+      const terminal = await waitForTerminalRecord(storageA, handle.taskId);
+      expect(terminal.status).toBe("succeeded");
+      // The terminal write never reaches the new session's registry.
+      expect(await storageB.loadTask(handle.taskId)).toBeNull();
+    });
   });
 });
