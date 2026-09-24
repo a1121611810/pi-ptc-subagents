@@ -18,15 +18,16 @@ import { EventEmitter } from "node:events";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  DISPATCH_KILL_GRACE_MS,
   DispatchSlotCounter,
   dispatch,
-  dispatchConcurrencyLimitReached,
   dispatchDepthLimitReached,
   type DispatchDeps,
   type DispatchResult,
 } from "../../src/runtime/dispatch.ts";
 import {
   MockChildProcessLifecycle,
+  buildSpawnArgv,
   type ChildHandle,
   type ChildSpawnOptions,
 } from "../../src/runtime/child-process-lifecycle.ts";
@@ -80,6 +81,17 @@ vi.mock("node:child_process", async (importOriginal) => {
 
 const AGENT = "bg-probe";
 const AGENT_MD = "---\nname: bg-probe\n---\nYou probe.\n";
+
+/**
+ * Background refusal copy (issue #68 part 4 / wayfinder T4.4): a refused *background* spawn
+ * teaches the model to inspect the management surface. The foreground ADR-0016 wording is pinned
+ * independently by tests/dispatch-helpers.test.ts; these literals are authored from the
+ * requirement, not read back from the implementation.
+ */
+const BG_DEPTH_REFUSAL =
+  "dispatch depth limit reached; next_step: call ptc_task_list to inspect the in-flight background tasks";
+const BG_CONCURRENCY_REFUSAL =
+  "dispatch concurrency limit reached; next_step: call ptc_task_list to inspect running tasks and ptc_task_stop to free a slot";
 
 /** The terminal states from ADR-0022 §2; used to poll the pump without a real timer. */
 const TERMINAL_STATUSES: ReadonlySet<TaskStatus> = new Set<TaskStatus>([
@@ -150,9 +162,7 @@ function createHarness(options: { limit?: number; start?: number } = {}): Harnes
 }
 
 /** Write a project-scope agent markdown into a fresh temp cwd and run `body`. */
-async function withAgent<T>(
-  body: (dir: string) => Promise<T>,
-): Promise<T> {
+async function withAgent<T>(body: (dir: string) => Promise<T>): Promise<T> {
   const dir = await makeTempDir();
   try {
     await mkdir(join(dir, ".pi", "agents"), { recursive: true });
@@ -289,13 +299,21 @@ describe("dispatch background spawn", () => {
       expect(opts.sessionId).toBe(handle.taskId);
       expect(opts.sessionName).toBe("bgdispatch:" + handle.taskId);
       expect(opts.env?.PI_PTC_DEPTH).toBe("1");
+      // issue #68 part 2: the child carries its own task id so a nested dispatch can stamp
+      // TaskRecord.parentTaskId instead of leaving it permanently undefined.
+      expect(opts.env?.PI_PTC_TASK_ID).toBe(handle.taskId);
 
       const argv = h.lifecycle.getRecordedArgv(h.lifecycle.handleAt(0));
       expect(argv[0]).toBe("pi");
       expect(argv).toContain("--mode");
       expect(argv).toContain("json");
       expect(argv).toContain("-p");
-      expect(argv).toContain("--no-session");
+      // The mock records the PRE-translation argv; the real adapter drops `--no-session` and
+      // appends the R1 triple (buildSpawnArgv). The `--no-session` contract for a sessionDir is
+      // pinned by child-process-lifecycle-session-argv.test.ts, so assert the translated form.
+      const translated = buildSpawnArgv(argv, opts);
+      expect(translated).not.toContain("--no-session");
+      expect(translated).toContain("--session-dir");
       expect(argv[argv.length - 1]).toBe("Task: ping");
     });
   });
@@ -315,6 +333,7 @@ describe("dispatch background spawn", () => {
       expect(opts.sessionDir).toBeUndefined();
       expect(opts.sessionId).toBeUndefined();
       expect(opts.sessionName).toBeUndefined();
+      expect(opts.env?.PI_PTC_TASK_ID).toBe(handle.taskId);
     });
   });
 });
@@ -332,7 +351,11 @@ describe("dispatch background gates", () => {
       h.deps,
     );
 
-    expect(asResult(result)).toEqual(dispatchDepthLimitReached());
+    const refused = asResult(result);
+    expect(refused.status).toBe("rejected");
+    expect(refused.started).toBe(false);
+    expect(refused.exitCode).toBe(-1);
+    expect(refused.errorMessage).toBe(BG_DEPTH_REFUSAL);
     expect(h.lifecycle.spawnCount).toBe(0);
     expect(h.slots.active).toBe(0);
     expect(await allTasks(h.storage)).toEqual([]);
@@ -357,7 +380,12 @@ describe("dispatch background gates", () => {
         { callId: 2, cwd: dir, depth: 0, maxDispatchDepth: 3 },
         h.deps,
       );
-      expect(asResult(second)).toEqual(dispatchConcurrencyLimitReached());
+      const refused = asResult(second);
+      expect(refused.status).toBe("rejected");
+      expect(refused.errorMessage).toBe(BG_CONCURRENCY_REFUSAL);
+      // The teaching copy points the model at the management surface (issue #68 part 4).
+      expect(refused.errorMessage).toContain("ptc_task_list");
+      expect(refused.errorMessage).toContain("ptc_task_stop");
       expect(h.lifecycle.spawnCount).toBe(1);
 
       // Terminal transition releases the slot for the next spawn.
@@ -451,7 +479,7 @@ describe("dispatch background pump", () => {
       const transitionSpy = vi
         .spyOn(h.registry, "transition")
         .mockImplementation(async (command, ctx) => {
-          if (command.kind === "transition") {
+          if (command.kind === "resolve-exit") {
             throw new Error("simulated terminal transition failure");
           }
           return await originalTransition(command, ctx);
@@ -485,6 +513,165 @@ describe("dispatch background pump", () => {
       expect((await h.storage.loadTask(handle.taskId))?.status).toBe("running");
       transitionSpy.mockRestore();
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+//  stop signal ladder: SIGTERM -> grace -> SIGKILL (issue #68 §1, ADR-0022 §8)
+// ---------------------------------------------------------------------------
+
+describe("background stop signal ladder", () => {
+  test("a model stop while the child is live delivers SIGTERM, then SIGKILL after the grace window", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await withAgent(async (dir) => {
+        const h = createHarness({ start: 1000 });
+        const callerId = "owner-1";
+        const handle = asHandle(
+          await dispatch(
+            { agent: AGENT, task: "long", background: true, agentScope: "project" },
+            { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3, callerId },
+            h.deps,
+          ),
+        );
+        const child = h.lifecycle.handleAt(0);
+
+        await h.registry.transition(
+          { kind: "stop", taskId: handle.taskId, reason: "model stop" },
+          { clock: h.clock.clock, callerId },
+        );
+
+        // ADR-0022 §8: the pump observes stopping and delivers SIGTERM at once.
+        expect(h.lifecycle.getKillSignals(child)).toEqual(["SIGTERM"]);
+        // The escalation reuses the foreground abort path's 5000ms grace (DISPATCH_KILL_GRACE_MS).
+        vi.advanceTimersByTime(DISPATCH_KILL_GRACE_MS - 1);
+        expect(h.lifecycle.getKillSignals(child)).toEqual(["SIGTERM"]);
+        vi.advanceTimersByTime(1);
+        expect(h.lifecycle.getKillSignals(child)).toEqual(["SIGTERM", "SIGKILL"]);
+
+        h.lifecycle.resolveExit(child, null, "SIGKILL");
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a child that closes within the grace window receives no SIGKILL", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await withAgent(async (dir) => {
+        const h = createHarness({ start: 1000 });
+        const callerId = "owner-1";
+        const handle = asHandle(
+          await dispatch(
+            { agent: AGENT, task: "quick", background: true, agentScope: "project" },
+            { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3, callerId },
+            h.deps,
+          ),
+        );
+        const child = h.lifecycle.handleAt(0);
+
+        await h.registry.transition(
+          { kind: "stop", taskId: handle.taskId, reason: "model stop" },
+          { clock: h.clock.clock, callerId },
+        );
+        expect(h.lifecycle.getKillSignals(child)).toEqual(["SIGTERM"]);
+
+        h.clock.set(1100);
+        h.lifecycle.resolveExit(child, 0, null);
+        const record = await waitForTerminal(h.storage, handle.taskId);
+        // ADR-0022 §8 line 184: stopping -> canceled even on a clean child exit.
+        expect(record.status).toBe("canceled");
+
+        // The close cleared the escalation timer, so no SIGKILL can fire against a reaped handle.
+        vi.advanceTimersByTime(DISPATCH_KILL_GRACE_MS * 2);
+        expect(h.lifecycle.getKillSignals(child)).toEqual(["SIGTERM"]);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a stop that arrives after the child exited sends no signal", async () => {
+    await withAgent(async (dir) => {
+      const h = createHarness({ start: 1000 });
+      const callerId = "owner-1";
+      let releaseWrite!: () => void;
+      const writeGate = new Promise<void>((resolve) => {
+        releaseWrite = resolve;
+      });
+      let writeStarted = false;
+      const deps: DispatchDeps = {
+        ...h.deps,
+        outputStorage: {
+          readOutput: async () => null,
+          writeOutput: async () => {
+            writeStarted = true;
+            await writeGate;
+          },
+          outputRef: (taskId) => "memory:tasks/" + taskId + "/output.log",
+        },
+      };
+      const handle = asHandle(
+        await dispatch(
+          { agent: AGENT, task: "late", background: true, agentScope: "project" },
+          { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3, callerId },
+          deps,
+        ),
+      );
+      const child = h.lifecycle.handleAt(0);
+
+      h.lifecycle.resolveExit(child, 0, null);
+      // The pump marks the child exited, then parks on the gated output write, so the stop below
+      // observes an already-exited child.
+      await waitFor(() => writeStarted);
+
+      await h.registry.transition(
+        { kind: "stop", taskId: handle.taskId, reason: "too late" },
+        { clock: h.clock.clock, callerId },
+      );
+      expect(h.lifecycle.getKillSignals(child)).toEqual([]);
+
+      releaseWrite();
+      const record = await waitForTerminal(h.storage, handle.taskId);
+      // The stop still wins the terminal decision (R-M1), but no signal was sent.
+      expect(record.status).toBe("canceled");
+      expect(h.lifecycle.getKillSignals(child)).toEqual([]);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+//  background failure-path reap escalates too (R-M5)
+// ---------------------------------------------------------------------------
+
+describe("background failure-path reap", () => {
+  test("uses the shared kill ladder: SIGTERM, then SIGKILL after the grace window", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await withAgent(async (dir) => {
+        const h = createHarness();
+        // Registration failure after the child is up drives the failure-path catch.
+        vi.spyOn(h.registry, "transition").mockRejectedValueOnce(
+          new Error("registration exploded"),
+        );
+        const result = await dispatch(
+          { agent: AGENT, task: "boom", background: true, agentScope: "project" },
+          { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3, callerId: "owner-1" },
+          h.deps,
+        );
+        const refused = asResult(result);
+        expect(refused.status).toBe("rejected");
+        expect(refused.started).toBe(true);
+
+        const child = h.lifecycle.handleAt(0);
+        expect(h.lifecycle.getKillSignals(child)).toEqual(["SIGTERM"]);
+        vi.advanceTimersByTime(DISPATCH_KILL_GRACE_MS);
+        expect(h.lifecycle.getKillSignals(child)).toEqual(["SIGTERM", "SIGKILL"]);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

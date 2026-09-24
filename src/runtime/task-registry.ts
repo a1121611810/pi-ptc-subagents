@@ -5,8 +5,8 @@
  * This module is the *only* legal writer of a TaskRecord's lifecycle. Every producer
  * (the background branch of `pi.dispatch`, the `ptc_task_stop` tool, the restart
  * reconciler) routes through {@link TaskRegistry.transition}; the single-terminal-writer
- * rule from ADR-0022 §3 ("single terminal writer") is enforced by the explicit transition
- * table in this file, not by convention.
+ * rule — this file's own invariant that exactly one writer applies the terminal state — is
+ * enforced by the explicit transition table in this file, not by convention.
  *
  * Layer: 2 (core) — depends only on the Layer-1 `TaskStorage` seam (BG-01). It owns *state*
  * (TaskRecord progression + per-subscriber cursor) and deliberately does not own *delivery*
@@ -114,7 +114,7 @@ export type LostReason =
  */
 export const OUTPUT_PREVIEW_MAX_BYTES = 2048;
 
-/** All state mutations The TaskRegistry accepts (ADR-0022 §3 single terminal writer). */
+/** All state mutations the TaskRegistry accepts (single-terminal-writer invariant, this file). */
 export type TaskCommand =
   | {
       kind: "spawn";
@@ -140,7 +140,21 @@ export type TaskCommand =
       outputPreview?: string;
     }
   | { kind: "stop"; taskId: ULID; reason: string }
-  | { kind: "reconcile-lost"; taskId: ULID; reason: LostReason };
+  | { kind: "reconcile-lost"; taskId: ULID; reason: LostReason }
+  /**
+   * ADR-0022 §8 / R-M1: the terminal decision for a child close lives *inside* the registry so
+   * the read-and-write is serialized against a concurrent `stop`. The registry resolves
+   * `stopping -> canceled`, otherwise `running -> {succeeded | failed}` from `exitCode`; a
+   * terminal record is rejected rather than overwritten.
+   */
+  | {
+      kind: "resolve-exit";
+      taskId: ULID;
+      exitCode: number;
+      outputRef?: string;
+      outputBytes?: number;
+      outputPreview?: string;
+    };
 
 /** Outcome of one successful command: the persisted record, emitted events, and cursor. */
 export interface TransitionResult {
@@ -148,7 +162,22 @@ export interface TransitionResult {
   events: TaskEvent[];
   /** The event id of the last emitted event; equal to the subscription's new cursor. */
   cursor: ULID;
+  /**
+   * The status the record held *before* this command applied. Absent on `spawn` (there is no
+   * prior state); present on every transition/stop/resolve so a caller can report the source
+   * state without a second, racing read (ADR-0022 §8 late-arrival stop).
+   */
+  fromStatus?: TaskStatus;
 }
+
+/**
+ * In-process transition observer (issue #68 §1). Fired synchronously by
+ * {@link TaskRegistry.transition} **after** the new record and its event have been persisted,
+ * with the post-transition record and the emitted event. Observers are best-effort: a throwing
+ * observer is warned about and never corrupts the transition. Registration returns an
+ * idempotent unsubscribe.
+ */
+export type TaskTransitionObserver = (record: TaskRecord, event: TaskEvent) => void;
 
 /** Read-side filter (ADR-0022 §3). `limit` defaults to 100; `orderBy` defaults to desc. */
 export interface TaskQuery {
@@ -168,6 +197,12 @@ export interface TaskRegistry {
    * terminal transition (ADR-0022 §8).
    */
   get(taskId: ULID): Promise<TaskRecord | null>;
+  /**
+   * Subscribe to every successfully persisted state write (spawn included). Returns an
+   * idempotent unsubscribe. Observers run synchronously, in-process; see
+   * {@link TaskTransitionObserver} for the best-effort contract and single-writer ordering.
+   */
+  onTransition(observer: TaskTransitionObserver): () => void;
   advanceCursor(subscriberId: ULID, taskId: ULID, cursor: ULID, events: TaskEvent[]): Promise<void>;
   loadEventLog(subscriptionId: ULID, since?: ULID): Promise<TaskEvent[]>;
   reconcileLostTasks(): Promise<TaskRecord[]>;
@@ -242,6 +277,22 @@ function isUsableTaskId(value: unknown): value is ULID {
 }
 
 /**
+ * The three `lost` reasons ADR-0022 §8 keeps distinct in `errorMessage` for auditability. The
+ * generic `transition({to:"lost"})` edge must carry one of these; `reconcile-lost` types its
+ * `reason` as {@link LostReason} directly.
+ */
+const LOST_REASONS: ReadonlySet<string> = new Set<string>([
+  "session_ended_while_running",
+  "user_killed_via_esc",
+  "lost_on_session_restart",
+]);
+
+/** Runtime narrowing for the lost-reason guard (R-M4). */
+function isLostReason(value: unknown): value is LostReason {
+  return typeof value === "string" && LOST_REASONS.has(value);
+}
+
+/**
  * Emit key per ADR-0022 §2 + §8. Entry states use `task:<id>:<status>`; state changes use
  * `task:<id>:-><status>` (the arrow form appears verbatim in the §8 signal-layering table).
  */
@@ -295,6 +346,14 @@ export class DefaultTaskRegistry implements TaskRegistry {
   readonly #logger: RegistryLogger | undefined;
   #lastTime: number;
   #sequence: bigint;
+  /** Registered in-process transition observers (issue #68 §1). */
+  readonly #observers = new Set<TaskTransitionObserver>();
+  /**
+   * Tail of the write queue. Every state write is chained here so a load-check-write cannot
+   * interleave with a concurrent command (R-M1). Each task is cheap and this is a session-level
+   * registry, so one queue is simpler than per-task locks and keeps the single-writer guarantee.
+   */
+  #writeTail: Promise<void> = Promise.resolve();
 
   constructor(storage: TaskStorage, options: TaskRegistryOptions) {
     this.#storage = storage;
@@ -311,6 +370,29 @@ export class DefaultTaskRegistry implements TaskRegistry {
    * (possible only through untrusted runtime data) throw rather than fall through.
    */
   async transition(command: TaskCommand, ctx: TransitionContext): Promise<TransitionResult> {
+    const result = await this.#serialize(() => this.#run(command, ctx));
+    const event = result.events[result.events.length - 1];
+    if (event !== undefined) {
+      // Fired after persistence and after the write lock releases, so an observer may call back
+      // into the registry without deadlocking; see TaskTransitionObserver.
+      this.#notifyObservers(result.record, event, ctx.logger);
+    }
+    return result;
+  }
+
+  /** Register a best-effort observer; the returned unsubscribe is idempotent. */
+  onTransition(observer: TaskTransitionObserver): () => void {
+    this.#observers.add(observer);
+    let active = true;
+    return () => {
+      if (!active) return;
+      active = false;
+      this.#observers.delete(observer);
+    };
+  }
+
+  /** Route one command (the body of {@link transition}, run under the write lock). */
+  async #run(command: TaskCommand, ctx: TransitionContext): Promise<TransitionResult> {
     switch (command.kind) {
       case "spawn":
         return this.#spawn(command, ctx);
@@ -320,6 +402,8 @@ export class DefaultTaskRegistry implements TaskRegistry {
         return this.#stop(command, ctx);
       case "reconcile-lost":
         return this.#reconcileOne(command, ctx);
+      case "resolve-exit":
+        return this.#resolveExit(command, ctx);
     }
     throw new Error(
       `transition: unknown command kind ${String((command as { kind: unknown }).kind)}`,
@@ -462,7 +546,9 @@ export class DefaultTaskRegistry implements TaskRegistry {
     }
     const subscriberId = ctx.callerId as ULID;
     const event = this.#makeEvent(taskId, subscriberId, "running", now, record);
-    await this.#storage.saveTask(record);
+    // R-m7: subscription + event first, TaskRecord last. `appendEvents` requires the
+    // subscription to exist, and writing the record last means a failed later write cannot
+    // leave a persisted `running` orphan behind.
     await this.#storage.saveSubscription({
       subscriberId,
       taskId,
@@ -471,6 +557,7 @@ export class DefaultTaskRegistry implements TaskRegistry {
       createdAt: now,
     });
     await this.#storage.appendEvents(subscriberId, [event]);
+    await this.#storage.saveTask(record);
     const logger = ctx.logger ?? this.#logger;
     logger?.info(`spawn: task ${taskId} (${record.label}) running for subscriber ${subscriberId}`);
     return { record, events: [event], cursor: event.eventId };
@@ -486,6 +573,15 @@ export class DefaultTaskRegistry implements TaskRegistry {
     }
     const record = await this.#loadOrThrow(command.taskId);
     this.#assertAllowed(record, command.to);
+    if (command.to === "lost" && !isLostReason(command.reason)) {
+      // R-M4 / ADR-0022 §8: after the edge is proven legal, the lost edge must name one of the
+      // three auditable reasons (an illegal edge keeps its illegal-transition error).
+      throw new Error(
+        'transition: to "lost" requires a LostReason ' +
+          "(session_ended_while_running | user_killed_via_esc | lost_on_session_restart)" +
+          (command.reason === undefined ? "" : `, got ${String(command.reason)}`),
+      );
+    }
     return this.#apply(record, command.to, ctx, {
       reason: command.reason,
       stopReason: command.stopReason,
@@ -506,8 +602,46 @@ export class DefaultTaskRegistry implements TaskRegistry {
     ctx: TransitionContext,
   ): Promise<TransitionResult> {
     const record = await this.#loadOrThrow(command.taskId);
+    if (record.status === "stopping") {
+      // ADR-0022 §8 late-arrival stop: idempotent, no second event. This runs under the write
+      // lock, so two concurrent stop commands cannot both emit a stopping event (R-M1).
+      const subscription = await this.#storage.loadSubscription(ctx.callerId as ULID, record.id);
+      return {
+        record,
+        events: [],
+        cursor: subscription?.cursor ?? record.id,
+        fromStatus: record.status,
+      };
+    }
     this.#assertAllowed(record, "stopping");
     return this.#apply(record, "stopping", ctx, { stopReason: command.reason });
+  }
+
+  /**
+   * ADR-0022 §8 / R-M1: resolve one child close to its terminal state inside the writer. A
+   * `stopping` record always resolves `canceled` (the model stop wins over the exit code); a
+   * `running` record resolves from `exitCode`; a terminal record is rejected, never overwritten.
+   */
+  async #resolveExit(
+    command: Extract<TaskCommand, { kind: "resolve-exit" }>,
+    ctx: TransitionContext,
+  ): Promise<TransitionResult> {
+    const record = await this.#loadOrThrow(command.taskId);
+    if (record.status !== "running" && record.status !== "stopping") {
+      throw new Error(
+        `resolve-exit: task ${record.id} is terminal (${record.status}); ` +
+          "the single terminal writer refuses to overwrite it",
+      );
+    }
+    const to: TaskStatus =
+      record.status === "stopping" ? "canceled" : command.exitCode === 0 ? "succeeded" : "failed";
+    this.#assertAllowed(record, to);
+    return this.#apply(record, to, ctx, {
+      exitCode: command.exitCode,
+      outputRef: command.outputRef,
+      outputBytes: command.outputBytes,
+      outputPreview: command.outputPreview,
+    });
   }
 
   /** Recovery edge: force a non-terminal record to `lost` with an auditable reason. */
@@ -574,7 +708,40 @@ export class DefaultTaskRegistry implements TaskRegistry {
     logger?.info(
       `transition: task ${record.id} ${record.status} -> ${to} (subscriber ${subscriberId})`,
     );
-    return { record: updated, events: [event], cursor: event.eventId };
+    return { record: updated, events: [event], cursor: event.eventId, fromStatus: record.status };
+  }
+
+  /**
+   * Serialize one write. The next command waits for this one (success or failure) so the
+   * registry's load-check-write is atomic with respect to other commands; the caller still sees
+   * its own rejection. See {@link #writeTail}.
+   */
+  async #serialize<T>(work: () => Promise<T>): Promise<T> {
+    const run = this.#writeTail.then(work, work);
+    this.#writeTail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return await run;
+  }
+
+  /**
+   * Best-effort, synchronous observer fan-out. A throwing observer is warned about and never
+   * corrupts the already-persisted transition (issue #68 §1); when no logger is injected the
+   * warning goes to `console.warn` so it is never silently swallowed.
+   */
+  #notifyObservers(record: TaskRecord, event: TaskEvent, logger?: RegistryLogger): void {
+    for (const observer of this.#observers) {
+      try {
+        observer(record, event);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const warning = `transition observer threw for task ${record.id}: ${message}`;
+        const activeLogger = logger ?? this.#logger;
+        if (activeLogger !== undefined) activeLogger.warn(warning);
+        else console.warn("[task-registry] " + warning);
+      }
+    }
   }
 
   #assertAllowed(record: TaskRecord, to: TaskStatus): void {

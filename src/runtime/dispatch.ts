@@ -37,12 +37,7 @@ import {
   type TaskRegistry,
 } from "./task-registry.ts";
 import type { OutputStorage } from "./output-storage.ts";
-import {
-  InMemoryTaskStorage,
-  type TaskSpawnSource,
-  type TaskStatus,
-  type ULID,
-} from "./task-storage.ts";
+import { InMemoryTaskStorage, type TaskSpawnSource, type ULID } from "./task-storage.ts";
 
 // Re-exports keep existing imports working after BG-03 moved these definitions.
 // `tests/dispatch-helpers.test.ts` imports `parseAgentEvent` / `safeKill` from this
@@ -324,6 +319,57 @@ export function dispatchConcurrencyLimitReached(): DispatchResult {
 }
 
 /**
+ * Grace window between SIGTERM and SIGKILL for every kill site (ADR-0022 §8). The foreground
+ * abort path introduced the literal 5000ms; the background stop watcher and the background
+ * failure-path reap reuse this one constant so there is a single ladder, not a second number.
+ */
+export const DISPATCH_KILL_GRACE_MS = 5000;
+
+/**
+ * Send SIGTERM to `handle`, schedule SIGKILL after {@link DISPATCH_KILL_GRACE_MS}, and return a
+ * function that cancels a pending escalation. `isDone` is checked when the escalation fires, so
+ * a child that closed in the meantime is never signalled again; `unref` keeps a detached
+ * escalation from holding the host process open.
+ */
+export function killWithEscalation(
+  lifecycle: ChildProcessLifecycle,
+  handle: ChildHandle,
+  options: { isDone?: () => boolean; unref?: boolean } = {},
+): () => void {
+  lifecycle.kill(handle, "SIGTERM");
+  const timer = setTimeout(() => {
+    if (options.isDone?.() === true) return;
+    lifecycle.kill(handle, "SIGKILL");
+  }, DISPATCH_KILL_GRACE_MS);
+  if (options.unref === true) timer.unref();
+  return () => clearTimeout(timer);
+}
+
+/**
+ * Background-specific refusal copy (issue #68 part 4 / wayfinder T4.4): a refused *background*
+ * spawn points the model at the management surface, exactly as ADR-0022 §3 expects it to inspect
+ * and free in-flight tasks. The shared foreground helpers keep the ADR-0016 wording byte-for-byte.
+ */
+export const BACKGROUND_DEPTH_LIMIT_MESSAGE =
+  "dispatch depth limit reached; next_step: call ptc_task_list to inspect the in-flight background tasks";
+
+export const BACKGROUND_CONCURRENCY_LIMIT_MESSAGE =
+  "dispatch concurrency limit reached; next_step: call ptc_task_list to inspect running tasks and ptc_task_stop to free a slot";
+
+/** Background depth refusal: same machine fields as the foreground one, teaching copy added. */
+export function backgroundDispatchDepthLimitReached(): DispatchResult {
+  return { ...dispatchDepthLimitReached(), errorMessage: BACKGROUND_DEPTH_LIMIT_MESSAGE };
+}
+
+/** Background concurrency refusal: same machine fields, teaching copy added. */
+export function backgroundDispatchConcurrencyLimitReached(): DispatchResult {
+  return {
+    ...dispatchConcurrencyLimitReached(),
+    errorMessage: BACKGROUND_CONCURRENCY_LIMIT_MESSAGE,
+  };
+}
+
+/**
  * Inputs to {@link decideCloseOutcome}: the shape the child's `close` event
  * hands the host, distilled to the fields that drive the resolve decision.
  */
@@ -556,7 +602,8 @@ function cleanupTmp(tmp: { dir: string; filePath: string }): void {
  * Extract the assistant text from one child event, mirroring the foreground final-text rule
  * (`message_end` assistant text parts; the last part wins). The detached background pump
  * drains the child's stdout through this so a chatty child cannot back-pressure the spawn
- * turn, even though the current TaskRecord command surface has nowhere to persist it yet.
+ * turn, keeps the last text, and persists it through OutputStorage on the terminal
+ * transition (ADR-0022 §3/§7).
  */
 function assistantText(event: ParsedAgentEvent): string | undefined {
   if (event.type !== "message_end" || event.message?.role !== "assistant") return undefined;
@@ -588,11 +635,12 @@ async function dispatchBackground(
 ): Promise<DispatchHandle | DispatchResult> {
   const childDepth = ctx.depth + 1;
   if (childDepth > ctx.maxDispatchDepth) {
-    return dispatchDepthLimitReached();
+    // Background refusal (issue #68 part 4): teach the model to inspect in-flight tasks.
+    return backgroundDispatchDepthLimitReached();
   }
   const slots = deps.slots ?? FALLBACK_DISPATCH_SLOTS;
   if (!slots.tryAcquire()) {
-    return dispatchConcurrencyLimitReached();
+    return backgroundDispatchConcurrencyLimitReached();
   }
 
   const clock = deps.clock ?? ((): number => Date.now());
@@ -636,7 +684,9 @@ async function dispatchBackground(
       // ADR-0016 Recursive section: the child run's depth baseline travels in the
       // environment so the pi-ptc extension loaded inside the child starts its PTC runs at
       // childDepth instead of at 0.
-      env: { ...process.env, PI_PTC_DEPTH: String(childDepth) },
+      // ADR-0016 Recursive section + issue #68 part 2: the child carries its own depth and its
+      // own task id, so a nested background dispatch can stamp TaskRecord.parentTaskId.
+      env: { ...process.env, PI_PTC_DEPTH: String(childDepth), PI_PTC_TASK_ID: taskId },
       promptFile: written.filePath,
     };
     // R1 session-file flags travel through the lifecycle options. When no sessionDir is
@@ -676,11 +726,26 @@ async function dispatchBackground(
       { clock, callerId, logger },
     );
 
+    // Stop watcher (ADR-0022 §8, issue #68 §1): the tool only writes running -> stopping; the
+    // pump owns the signal. Subscribe right after the spawn is persisted and deliver SIGTERM to
+    // the live child, escalating to SIGKILL after the shared grace window.
+    let childExited = false;
+    let cancelStopEscalation: (() => void) | undefined;
+    const unsubscribeStopObserver = registry.onTransition((record, event) => {
+      if (record.id !== taskId || event.status !== "stopping") return;
+      // A stop that arrives after the child closed is a no-op (no signal, no double kill).
+      if (childExited || cancelStopEscalation !== undefined) return;
+      cancelStopEscalation = killWithEscalation(lifecycle, handle, {
+        isDone: () => childExited,
+        unref: true,
+      });
+    });
+
     // Detached pump (ADR-0022 §2/§3/§8): drain the child's stdout so it cannot back-pressure,
-    // persist it through the OutputStorage seam, then drive the terminal transition from the
-    // close event (exit 0 -> succeeded / anything else -> failed, or -> canceled when a stop
-    // was requested while the child ran). It is deliberately not awaited, so the spawn turn
-    // returns the handle at once.
+    // persist it through the OutputStorage seam, then resolve the terminal state from the close
+    // event. The terminal decision lives in the registry so a stop that lands between the close
+    // and the write still wins (R-M1). It is deliberately not awaited, so the spawn turn returns
+    // the handle at once.
     void (async (): Promise<void> => {
       let output = "";
       try {
@@ -688,6 +753,11 @@ async function dispatchBackground(
           const text = assistantText(event);
           if (text !== undefined) output = text;
         }
+        // The child has closed: no further signal may be delivered, and a pending escalation is
+        // cleared before it can fire against a reaped handle (issue #68 §1).
+        childExited = true;
+        cancelStopEscalation?.();
+
         const exitValue: ChildExitValue = await lifecycle.exit(handle);
         const exitCode = exitValue.code ?? -1;
 
@@ -707,20 +777,19 @@ async function dispatchBackground(
             const persistMessage =
               persistError instanceof Error ? persistError.message : String(persistError);
             logger.warn(
-              "background dispatch output persistence for task " + taskId + " failed: " + persistMessage,
+              "background dispatch output persistence for task " +
+                taskId +
+                " failed: " +
+                persistMessage,
             );
           }
         }
 
-        // ADR-0022 §8 signal layering: a model stop wrote running -> stopping; the child's
-        // close is the writer of the terminal canceled state, so re-read the record (O(1) via
-        // registry.get) rather than mapping the exit code alone.
-        const currentRecord = await registry.get(taskId);
-        const currentStatus = currentRecord?.status;
-        const to: TaskStatus =
-          currentStatus === "stopping" ? "canceled" : exitCode === 0 ? "succeeded" : "failed";
+        // ADR-0022 §8 signal layering / R-M1: the registry resolves the terminal state under its
+        // write lock — a model stop already at `stopping` wins and resolves `canceled`, while
+        // a running child resolves from the exit code. No read-then-write race in the pump.
         await registry.transition(
-          { kind: "transition", taskId, to, exitCode, outputRef, outputBytes, outputPreview },
+          { kind: "resolve-exit", taskId, exitCode, outputRef, outputBytes, outputPreview },
           { clock, callerId, logger },
         );
       } catch (err) {
@@ -736,6 +805,8 @@ async function dispatchBackground(
             message,
         );
       } finally {
+        unsubscribeStopObserver();
+        cancelStopEscalation?.();
         cleanupTmp(written);
         slots.release();
       }
@@ -747,7 +818,10 @@ async function dispatchBackground(
     // and keep the ADR-0016 "never throws" contract with a rejected DispatchResult.
     const message = err instanceof Error ? err.message : String(err);
     if (childHandle !== undefined) {
-      lifecycle.kill(childHandle, "SIGTERM");
+      // R-M5: the failure-path reap shares the SIGTERM -> grace -> SIGKILL ladder with the
+      // foreground abort and the stop watcher; unref keeps the detached escalation off the
+      // host's event loop.
+      killWithEscalation(lifecycle, childHandle, { unref: true });
     }
     if (tmp !== undefined) cleanupTmp(tmp);
     slots.release();
@@ -840,7 +914,7 @@ export async function dispatch(
     let exitCode = -1;
     let stderrText = "";
     let resolved = false;
-    let killTimer: NodeJS.Timeout | undefined;
+    let cancelKillEscalation: (() => void) | undefined;
     let handle: ChildHandle | undefined;
     let aborted = false;
 
@@ -851,7 +925,7 @@ export async function dispatch(
     ): void => {
       if (resolved) return;
       resolved = true;
-      if (killTimer) clearTimeout(killTimer);
+      cancelKillEscalation?.();
       if (ctx.signal) ctx.signal.removeEventListener("abort", onAbort);
       cleanupTmp(tmp);
       const out: DispatchResult = {
@@ -871,13 +945,12 @@ export async function dispatch(
     const onAbort = (): void => {
       if (!handle || resolved) return;
       aborted = true;
-      DISPATCH_LIFECYCLE.kill(handle, "SIGTERM");
-      killTimer = setTimeout(() => {
-        // The lifecycle adapter's kill() absorbs "process already gone" throws via
-        // safeKill, so we don't need to gate on `proc.killed` here any more — the
-        // adapter does the right thing either way.
-        if (handle && !resolved) DISPATCH_LIFECYCLE.kill(handle, "SIGKILL");
-      }, 5000);
+      // ADR-0016 §4: SIGTERM, then SIGKILL after the shared grace window. The lifecycle
+      // adapter's kill() absorbs "process already gone" throws via safeKill, so the escalation
+      // is safe to schedule unconditionally; `isDone` stops it after finalize clears it.
+      cancelKillEscalation = killWithEscalation(DISPATCH_LIFECYCLE, handle, {
+        isDone: () => resolved,
+      });
     };
 
     // Hand the spawn to the lifecycle adapter (BG-03). The adapter wires stdout /
