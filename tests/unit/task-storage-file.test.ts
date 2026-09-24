@@ -763,6 +763,55 @@ describe("FileTaskStorage: explicit errors, not silent reads", () => {
   });
 });
 
+describe("FileTaskStorage: append ownership check is O(1) (no per-append subscription scan)", () => {
+  test("one append reads exactly one ownership file, not all N subscriptions", async () => {
+    const base = await makeBase();
+    try {
+      const subscriberId = "01JBZ00000000000000000010S" as ULID;
+      const taskIds: ULID[] = [];
+      // Seed 50 real subscription files through the adapter, all owned by one run-level
+      // subscriber (one per task). This is the production shape the O(N^2) concern is about.
+      const seeder = new FileTaskStorage(base);
+      for (let index = 0; index < 50; index += 1) {
+        const taskId = ("01JBZ".padEnd(23, "0") + String(index).padStart(3, "0")) as ULID;
+        taskIds.push(taskId);
+        await seeder.saveSubscription({
+          subscriberId,
+          taskId,
+          cursor: "01JBZ00000000000000000020C" as ULID,
+          status: "active",
+          createdAt: 1_700_000_000_500,
+        });
+      }
+      let readFileCalls = 0;
+      const counting: TaskStorageFs = {
+        ...realFs(),
+        readFile: (path, options) => {
+          readFileCalls += 1;
+          return readFile(path, options);
+        },
+      };
+      const storage = new FileTaskStorage(base, { fs: counting });
+
+      readFileCalls = 0;
+      await storage.appendEvents(subscriberId, [
+        fixtureEvent({
+          eventId: "01JBZ00000000000000000009E" as ULID,
+          subscriptionId: subscriberId,
+          taskId: taskIds[0] as ULID,
+        }),
+      ]);
+
+      // SPECIFICATION: the ownership check for one append is one direct read of
+      // subscriptions/<subscriberId>-<taskId>.json. Counterfactual: an implementation that
+      // scanned subscriptions/ (the pre-fix shape) would read all 50 files and fail this.
+      expect(readFileCalls).toBe(1);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("FileTaskStorage: atomic writes (constraint #1 + issue #65 requirement 3)", () => {
   test("saveTask writes a temp file then renames it onto the target", async () => {
     const base = await makeBase();
