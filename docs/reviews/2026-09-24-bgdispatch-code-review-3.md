@@ -49,3 +49,12 @@ Rule applied: a closure is genuine only if reverting the fix turns the named tes
 - Docs match the code: `sessionFile` unset, two emitted `lost` reasons, the event-log path, and the `tools["pi.dispatch"]({...})` surface.
 
 **Axis 2 verdict: 2 minor findings (P1, P2). No blocker, no major.**
+
+## Disposition
+
+| #   | Disposition                            | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| --- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1  | **FIXED** (`63efdb2`)                  | `StableNotificationPipeline.current()` exposes the concrete session pipeline; `drainNotifications` captures it once and reads through it; `NotificationAck` carries it; `acknowledgeNotifications` acks through the ack's sink. New test spans a rebind between drain and ack and asserts no warning, that session A's cursor advanced to the drained event, and that B has no subscription. Revert->red captured (1 failed / 12 passed) then restored. |
+| P2  | **ACCEPTED v1 limitation** (`12d6468`) | `#owners` is one small entry per spawned task for the process lifetime; it is only consulted for non-spawn transitions, which end at the task's terminal write. Pruning on a terminal transition has no observable effect a test could pin, so it is documented at the declaration rather than changed untested -- consistent with the closure rule in AGENTS.md.                                                                                       |
+
+Post-fix state: **696 passed / 3 skipped (44 files)**, `tsc` / `oxlint` / `oxfmt` clean.
