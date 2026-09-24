@@ -47,15 +47,7 @@
 
 import { ok as assertPresent } from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import {
-  appendFile,
-  mkdir,
-  readFile,
-  readdir,
-  rename,
-  unlink,
-  writeFile,
-} from "node:fs/promises";
+import { appendFile, mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type {
   Subscription,
@@ -220,8 +212,8 @@ export class FileTaskStorage implements TaskStorage {
     }
     await this.#fs.mkdir(this.#eventsDir(), { recursive: true });
     for (const [taskId, group] of byTask) {
-      const ordered = group.every((event, index) =>
-        index === 0 || compareEventId(group[index - 1] as TaskEvent, event) <= 0,
+      const ordered = group.every(
+        (event, index) => index === 0 || compareEventId(group[index - 1] as TaskEvent, event) <= 0,
       )
         ? group
         : [...group].sort(compareEventId);
@@ -309,9 +301,7 @@ export class FileTaskStorage implements TaskStorage {
       try {
         value = JSON.parse(trimmed);
       } catch (error) {
-        throw new Error(
-          "FileTaskStorage: corrupt event JSON in " + path + ": " + errorText(error),
-        );
+        throw new Error("FileTaskStorage: corrupt event JSON in " + path + ": " + errorText(error));
       }
       if (typeof value !== "object" || value === null || Array.isArray(value)) {
         throw new Error(

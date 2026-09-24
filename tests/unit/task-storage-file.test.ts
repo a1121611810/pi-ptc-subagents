@@ -33,10 +33,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import {
-  FileTaskStorage,
-  type TaskStorageFs,
-} from "../../src/runtime/task-storage-file.ts";
+import { FileTaskStorage, type TaskStorageFs } from "../../src/runtime/task-storage-file.ts";
 import type {
   Subscription,
   TaskEvent,
@@ -279,9 +276,9 @@ describe("FileTaskStorage: task CRUD (loadTask / saveTask / deleteTask)", () => 
     const base = await makeBase();
     try {
       const storage = new FileTaskStorage(base);
-      await expect(
-        storage.deleteTask("01JBZ000000000000000DELETEME" as ULID),
-      ).rejects.toThrow(/deleteTask: unknown taskId/);
+      await expect(storage.deleteTask("01JBZ000000000000000DELETEME" as ULID)).rejects.toThrow(
+        /deleteTask: unknown taskId/,
+      );
     } finally {
       await rm(base, { recursive: true, force: true });
     }
@@ -314,7 +311,10 @@ describe("FileTaskStorage: listTasks(filter)", () => {
     try {
       const storage = new FileTaskStorage(base);
       const running = fixtureTask({ id: "01JBZ00000000000000000001A" as ULID, status: "running" });
-      const succeeded = fixtureTask({ id: "01JBZ00000000000000000002B" as ULID, status: "succeeded" });
+      const succeeded = fixtureTask({
+        id: "01JBZ00000000000000000002B" as ULID,
+        status: "succeeded",
+      });
       const failed = fixtureTask({ id: "01JBZ00000000000000000003C" as ULID, status: "failed" });
       await storage.saveTask(running);
       await storage.saveTask(succeeded);
@@ -667,7 +667,7 @@ describe("FileTaskStorage: appendEvents / loadEvents", () => {
       await mkdir(join(base, "events"), { recursive: true });
       await writeFile(
         join(base, "events", sub.subscriberId + "-" + sub.taskId + ".jsonl"),
-        JSON.stringify(fixtureEvent()) + "\n{\"eventId\": \"broken\n",
+        JSON.stringify(fixtureEvent()) + '\n{"eventId": "broken\n',
         "utf8",
       );
 
