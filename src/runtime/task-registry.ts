@@ -619,9 +619,12 @@ export class DefaultTaskRegistry implements TaskRegistry {
 
     const subscriberId = ctx.callerId as ULID;
     const event = this.#makeEvent(record.id, subscriberId, to, now, updated);
-    await this.#storage.saveTask(updated);
+    // R-m7/R-B8: subscription + event BEFORE the record, exactly like #spawn. A terminal
+    // record must never exist without the event that announces it; an append failure here
+    // leaves the record non-terminal (retryable) instead of persisting a state no observer saw.
     await this.#ensureSubscription(subscriberId, record.id, now, event.eventId);
     await this.#storage.appendEvents(subscriberId, [event]);
+    await this.#storage.saveTask(updated);
     const logger = ctx.logger ?? this.#logger;
     logger?.info(
       `transition: task ${record.id} ${record.status} -> ${to} (subscriber ${subscriberId})`,
