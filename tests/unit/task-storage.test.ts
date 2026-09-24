@@ -146,9 +146,9 @@ describe("InMemoryTaskStorage: task CRUD (loadTask / saveTask / deleteTask)", ()
     // `null as unknown as TaskRecord` exercises the assert that catches a programmer error
     // (e.g. `saveTask(undefined)`). Without it, the storage would silently insert a malformed
     // row and a later `loadTask` would return `null` for the spurious id.
-    await expect(
-      storage.saveTask(null as unknown as TaskRecord),
-    ).rejects.toThrow(/saveTask: record is required/);
+    await expect(storage.saveTask(null as unknown as TaskRecord)).rejects.toThrow(
+      /saveTask: record is required/,
+    );
   });
 
   test("deleteTask removes a known record; subsequent loadTask returns null", async () => {
@@ -165,9 +165,9 @@ describe("InMemoryTaskStorage: task CRUD (loadTask / saveTask / deleteTask)", ()
     // SPECIFICATION (constraint #1 IO-failure path): a delete miss is a programmer error
     // (the TaskRegistry is the only caller, and it always checks loadTask first). Throwing
     // surfaces the bug; silently succeeding would let the registry "delete" tasks it never owned.
-    await expect(
-      storage.deleteTask("01JBZ000000000000000DELETEME" as ULID),
-    ).rejects.toThrow(/deleteTask: unknown taskId/);
+    await expect(storage.deleteTask("01JBZ000000000000000DELETEME" as ULID)).rejects.toThrow(
+      /deleteTask: unknown taskId/,
+    );
   });
 
   test("saveTask deep-clones on insert: caller-side mutation does not poison storage", async () => {
@@ -207,7 +207,10 @@ describe("InMemoryTaskStorage: listTasks(filter)", () => {
   test("filter by status narrows the result to records matching exactly that status", async () => {
     const storage = new InMemoryTaskStorage();
     const running = fixtureTask({ id: "01JBZ00000000000000000001A" as ULID, status: "running" });
-    const succeeded = fixtureTask({ id: "01JBZ00000000000000000002B" as ULID, status: "succeeded" });
+    const succeeded = fixtureTask({
+      id: "01JBZ00000000000000000002B" as ULID,
+      status: "succeeded",
+    });
     const failed = fixtureTask({ id: "01JBZ00000000000000000003C" as ULID, status: "failed" });
     await storage.saveTask(running);
     await storage.saveTask(succeeded);
@@ -261,9 +264,7 @@ describe("InMemoryTaskStorage: listTasks(filter)", () => {
       }),
     );
 
-    const got = await collect(
-      storage.listTasks({ status: "succeeded", label: "research X" }),
-    );
+    const got = await collect(storage.listTasks({ status: "succeeded", label: "research X" }));
     expect(got).toHaveLength(1);
     expect(got[0]?.id).toBe("01JBZ00000000000000000002B");
   });
@@ -305,9 +306,9 @@ describe("InMemoryTaskStorage: subscription CRUD (loadSubscription / saveSubscri
 
   test("saveSubscription rejects on a nullish sub (constraint #3)", async () => {
     const storage = new InMemoryTaskStorage();
-    await expect(
-      storage.saveSubscription(null as unknown as Subscription),
-    ).rejects.toThrow(/saveSubscription: sub is required/);
+    await expect(storage.saveSubscription(null as unknown as Subscription)).rejects.toThrow(
+      /saveSubscription: sub is required/,
+    );
   });
 
   test("saveSubscription on the same (subscriberId, taskId) replaces the prior row", async () => {
@@ -541,10 +542,22 @@ describe("InMemoryTaskStorage: append fast path vs slow path (differential oracl
     await storage.appendEvents(sub.subscriberId, [e1, e2, e3]);
 
     // gap cursor: strictly greater than e1, strictly less than e2.
-    expect((await collect(storage.loadEvents(sub.subscriberId, "00000000000000000000" as ULID))).map((e) => e.eventId)).toEqual([e1.eventId, e2.eventId, e3.eventId]);
-    expect((await collect(storage.loadEvents(sub.subscriberId, "01JBZ00000000000000000001F" as ULID))).map((e) => e.eventId)).toEqual([e2.eventId, e3.eventId]);
-    expect((await collect(storage.loadEvents(sub.subscriberId, e2.eventId))).map((e) => e.eventId)).toEqual([e3.eventId]);
-    expect((await collect(storage.loadEvents(sub.subscriberId, e3.eventId))).map((e) => e.eventId)).toEqual([]);
+    expect(
+      (await collect(storage.loadEvents(sub.subscriberId, "00000000000000000000" as ULID))).map(
+        (e) => e.eventId,
+      ),
+    ).toEqual([e1.eventId, e2.eventId, e3.eventId]);
+    expect(
+      (
+        await collect(storage.loadEvents(sub.subscriberId, "01JBZ00000000000000000001F" as ULID))
+      ).map((e) => e.eventId),
+    ).toEqual([e2.eventId, e3.eventId]);
+    expect(
+      (await collect(storage.loadEvents(sub.subscriberId, e2.eventId))).map((e) => e.eventId),
+    ).toEqual([e3.eventId]);
+    expect(
+      (await collect(storage.loadEvents(sub.subscriberId, e3.eventId))).map((e) => e.eventId),
+    ).toEqual([]);
   });
 });
 
@@ -601,52 +614,12 @@ describe("InMemoryTaskStorage: structural type-shape checks", () => {
   });
 });
 
-describe("InMemoryTaskStorage: counterfactual (constraint #5)", () => {
-  // These tests deliberately construct an obviously-broken adapter that always returns null /
-  // always throws. They prove the spec tests above fail on broken implementations — a regression
-  // in the spec tests would lose this property, so the counterfactual guards the spec.
-
-  test("a loadTask that always returns null would fail the round-trip test", async () => {
-    const broken: TaskStorage = {
-      loadTask: () => Promise.resolve(null),
-      saveTask: () => Promise.resolve(),
-      deleteTask: () => Promise.resolve(),
-      listTasks: async function* () {
-        // no-op
-      },
-      loadSubscription: () => Promise.resolve(null),
-      saveSubscription: () => Promise.resolve(),
-      appendEvents: () => Promise.resolve(),
-      loadEvents: async function* () {
-        // no-op
-      },
-    };
-    // The happy-path round-trip test above asserts `loaded.toEqual(record)`; with a broken
-    // adapter that always returns null, that assertion fails. This sanity-check pins the
-    // counterfactual: a "pass" here would mean we forgot the toEqual in the real test.
-    const record = fixtureTask();
-    await broken.saveTask(record);
-    expect(await broken.loadTask(record.id)).toBeNull();
-  });
-
-  test("a deleteTask that silently succeeds for an unknown id would fail the rejection test", async () => {
-    const broken: TaskStorage = {
-      loadTask: () => Promise.resolve(null),
-      saveTask: () => Promise.resolve(),
-      deleteTask: () => Promise.resolve(), // silently no-op — the spec test asserts rejection
-      listTasks: async function* () {
-        // no-op
-      },
-      loadSubscription: () => Promise.resolve(null),
-      saveSubscription: () => Promise.resolve(),
-      appendEvents: () => Promise.resolve(),
-      loadEvents: async function* () {
-        // no-op
-      },
-    };
-    // The spec test above asserts `rejects.toThrow(...)`; here we demonstrate that the broken
-    // version does NOT throw. If the broken version ever started throwing, the counterfactual
-    // would lose its teeth and the spec test would be vacuous.
-    await expect(broken.deleteTask("01JBZ000000000000000DELETEME" as ULID)).resolves.toBeUndefined();
-  });
-});
+// NOTE (review 2 finding B5): a "counterfactual (constraint #5)" block used to live here. It
+// built an obviously-broken TaskStorage *stub* and then asserted the stub's own behaviour, so
+// replacing the production adapter with a wrong one left it green — it exercised nothing the
+// package ships. The constraint-#5 obligation is discharged by the real failure-path tests
+// above, which drive the PRODUCTION adapter and assert it rejects:
+//   - deleteTask on an unknown id throws (`deleteTask: unknown taskId`),
+//   - loadEvents / appendEvents on an unknown subscriptionId throw.
+// A no-op or silently-succeeding implementation turns those red, which is the counterfactual
+// this file needs.
