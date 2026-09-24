@@ -25,5 +25,6 @@ ADRs for pi-ptc-subagents, per `docs/agents/domain.md` (single-context repo).
 | [0019](./0019-minify-and-source-map-exclusion.md)      | Build pipeline: enable minification + exclude source maps from npm tarball       | accepted |
 | [0020](./0020-ptc-row-pulse.md)                        | PTC partial-state render: DSH TextShimmer (moving highlight band)                | accepted |
 | [0021](./0021-ptc-sub-call-tree.md)                    | PTC sub-call tree: always visible, dispatcher-tracked, capped at 32              | accepted |
+| [0022](./0022-background-dispatch.md)                  | Background dispatch: long-lived children + model-visible `ptc_task_*` lifecycle  | accepted |
 
 Numbering gaps are deliberate: 0001/0006 were reserved while wayfinder map #7 was charting and dropped when G1 resolved; keeping their slots means every cross-reference in the map and its tickets stays valid.
