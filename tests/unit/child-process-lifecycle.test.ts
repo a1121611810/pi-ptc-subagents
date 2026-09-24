@@ -51,7 +51,10 @@ import {
  * `events()` / `exit()` against it. We use `process.execPath` (not `node`) so the
  * test works on every OS the host supports.
  */
-function spawnNode(js: string, opts: { extraArgs?: readonly string[] } = {}): {
+function spawnNode(
+  js: string,
+  opts: { extraArgs?: readonly string[] } = {},
+): {
   lifecycle: RealChildProcessLifecycle;
   handle: ChildHandle;
 } {
@@ -116,7 +119,13 @@ describe("safeKill (moved from dispatch.ts)", () => {
   test("returns true and invokes kill when pid is set", () => {
     const calls: string[] = [];
     const result = safeKill(
-      { pid: 1234, kill: (s) => { calls.push(s); return true; } },
+      {
+        pid: 1234,
+        kill: (s) => {
+          calls.push(s);
+          return true;
+        },
+      },
       "SIGTERM",
     );
     expect(result).toBe(true);
@@ -126,7 +135,13 @@ describe("safeKill (moved from dispatch.ts)", () => {
   test("returns false and skips kill when pid is undefined", () => {
     const calls: string[] = [];
     const result = safeKill(
-      { pid: undefined, kill: (s) => { calls.push(s); return true; } },
+      {
+        pid: undefined,
+        kill: (s) => {
+          calls.push(s);
+          return true;
+        },
+      },
       "SIGKILL",
     );
     expect(result).toBe(false);
@@ -135,7 +150,12 @@ describe("safeKill (moved from dispatch.ts)", () => {
 
   test("returns false when proc.kill throws (ESRCH etc.)", () => {
     const result = safeKill(
-      { pid: 9, kill: () => { throw new Error("ESRCH"); } },
+      {
+        pid: 9,
+        kill: () => {
+          throw new Error("ESRCH");
+        },
+      },
       "SIGTERM",
     );
     expect(result).toBe(false);
@@ -145,9 +165,9 @@ describe("safeKill (moved from dispatch.ts)", () => {
 describe("RealChildProcessLifecycle", () => {
   test("spawn() throws when argv is empty (constraint #1: invalid input)", () => {
     const lifecycle = new RealChildProcessLifecycle();
-    expect(() =>
-      lifecycle.spawn([], { cwd: process.cwd(), promptFile: "/tmp/x.md" }),
-    ).toThrow(/argv must include the command/);
+    expect(() => lifecycle.spawn([], { cwd: process.cwd(), promptFile: "/tmp/x.md" })).toThrow(
+      /argv must include the command/,
+    );
   });
 
   test("spawn() launches argv[0] as the command and the rest as args", async () => {
@@ -193,6 +213,37 @@ describe("RealChildProcessLifecycle", () => {
     expect(events[0]?.message?.content?.[0]?.text).toBe("PONG");
   });
 
+  test("a non-empty unparseable stdout line is dropped with one bounded warning (constraint #3)", async () => {
+    const warnings: string[] = [];
+    const lifecycle = new RealChildProcessLifecycle({
+      logger: { warn: (msg: string): void => void warnings.push(msg) },
+    });
+    // A line that is clearly not JSON and long enough to prove the warning is bounded.
+    const garbage = "not-json-" + "x".repeat(400);
+    const js = [
+      'process.stdout.write(JSON.stringify({type:"good"})+"\\n");',
+      `process.stdout.write(${JSON.stringify(garbage)} + "\\n");`,
+      "process.exit(0);",
+    ].join("");
+    const handle = lifecycle.spawn([process.execPath, "-e", js], {
+      cwd: process.cwd(),
+      promptFile: "/tmp/bg-03-test-no-such-file.md",
+    });
+
+    const events: ParsedAgentEvent[] = [];
+    for await (const ev of lifecycle.events(handle)) events.push(ev);
+    const exit = await lifecycle.exit(handle);
+
+    // The valid line still reaches the run, and the child still exits cleanly.
+    expect(exit).toEqual({ code: 0, signal: null });
+    expect(events.map((event) => event.type)).toEqual(["good"]);
+    // Exactly one warning for the one dropped line, naming the child and a bounded preview.
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(handle.id);
+    expect(warnings[0]).toContain(garbage.slice(0, 64));
+    expect(warnings[0]?.length).toBeLessThan(garbage.length);
+  });
+
   test("events() yields multiple events in arrival order (FIFO)", async () => {
     const js = [
       'process.stdout.write(JSON.stringify({type:"a"})+"\\n");',
@@ -208,16 +259,20 @@ describe("RealChildProcessLifecycle", () => {
   });
 
   test("exit() resolves with code=0 after a clean child exit", async () => {
-    const { lifecycle, handle } = spawnNode('process.exit(0);');
-    for await (const _ of lifecycle.events(handle)) { /* drain */ }
+    const { lifecycle, handle } = spawnNode("process.exit(0);");
+    for await (const _ of lifecycle.events(handle)) {
+      /* drain */
+    }
     const exit = await lifecycle.exit(handle);
     expect(exit.code).toBe(0);
     expect(exit.signal).toBeNull();
   });
 
   test("exit() resolves with the non-zero code when the child fails", async () => {
-    const { lifecycle, handle } = spawnNode('process.exit(7);');
-    for await (const _ of lifecycle.events(handle)) { /* drain */ }
+    const { lifecycle, handle } = spawnNode("process.exit(7);");
+    for await (const _ of lifecycle.events(handle)) {
+      /* drain */
+    }
     const exit = await lifecycle.exit(handle);
     expect(exit.code).toBe(7);
     expect(exit.signal).toBeNull();
@@ -227,10 +282,12 @@ describe("RealChildProcessLifecycle", () => {
     const js = [
       'process.stderr.write("warn-a");',
       'process.stderr.write("warn-b");',
-      'process.exit(0);',
+      "process.exit(0);",
     ].join("");
     const { lifecycle, handle } = spawnNode(js);
-    for await (const _ of lifecycle.events(handle)) { /* drain */ }
+    for await (const _ of lifecycle.events(handle)) {
+      /* drain */
+    }
     await lifecycle.exit(handle);
     const stderr = await lifecycle.stderr(handle);
     expect(stderr).toBe("warn-awarn-b");
@@ -282,11 +339,13 @@ describe("RealChildProcessLifecycle", () => {
     // Use a binary that surely does not exist on PATH. Use an absolute path that
     // cannot resolve to avoid OS-level "command not found" rewriting the marker.
     const lifecycle = new RealChildProcessLifecycle();
-    const handle = lifecycle.spawn(
-      ["/this/path/definitely/does/not/exist/bg-03-no-such-binary"],
-      { cwd: process.cwd(), promptFile: "/tmp/x.md" },
-    );
-    for await (const _ of lifecycle.events(handle)) { /* drain */ }
+    const handle = lifecycle.spawn(["/this/path/definitely/does/not/exist/bg-03-no-such-binary"], {
+      cwd: process.cwd(),
+      promptFile: "/tmp/x.md",
+    });
+    for await (const _ of lifecycle.events(handle)) {
+      /* drain */
+    }
     const exit = await lifecycle.exit(handle);
     expect(exit.code).toBeNull();
     expect(exit.signal).toBeNull();

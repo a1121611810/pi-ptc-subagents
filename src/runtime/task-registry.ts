@@ -1,6 +1,6 @@
 /**
- * TaskRegistry: the session-level state machine + subscription-cursor owner for
- * background dispatch (ADR-0022, BG-02).
+ * TaskRegistry: the session-level TaskRecord state machine for background dispatch
+ * (ADR-0022, BG-02).
  *
  * This module is the *only* legal writer of a TaskRecord's lifecycle. Every producer
  * (the background branch of `pi.dispatch`, the `ptc_task_stop` tool, the restart
@@ -9,10 +9,11 @@
  * enforced by the explicit transition table in this file, not by convention.
  *
  * Layer: 2 (core) — depends only on the Layer-1 `TaskStorage` seam (BG-01). It owns *state*
- * (TaskRecord progression + per-subscriber cursor) and deliberately does not own *delivery*
- * (batch rendering / idle wake live in the BG-05 NotificationPipeline) or *IO* (TaskStorage
- * adapters). The types `TaskRecord`, `TaskStatus`, `Subscription`, `TaskEvent`, `ULID`
- * and the `TaskStorage` interface are imported from `./task-storage.ts`; this file must
+ * (TaskRecord progression) and deliberately does not own *delivery*, the *subscription cursor*
+ * (the BG-05 NotificationPipeline is the single production cursor writer, via its
+ * `acknowledgeEvents`), or *IO* (TaskStorage adapters). The types `TaskRecord`, `TaskStatus`,
+ * `Subscription`, `TaskEvent`, `ULID` and the `TaskStorage` interface are imported from
+ * `./task-storage.ts`; this file must
  * never redefine them (BG-01 owns the persisted schema).
  *
  * Design notes:
@@ -203,8 +204,6 @@ export interface TaskRegistry {
    * {@link TaskTransitionObserver} for the best-effort contract and single-writer ordering.
    */
   onTransition(observer: TaskTransitionObserver): () => void;
-  advanceCursor(subscriberId: ULID, taskId: ULID, cursor: ULID, events: TaskEvent[]): Promise<void>;
-  loadEventLog(subscriptionId: ULID, since?: ULID): Promise<TaskEvent[]>;
   reconcileLostTasks(): Promise<TaskRecord[]>;
 }
 
@@ -396,46 +395,6 @@ export class DefaultTaskRegistry implements TaskRegistry {
       orderBy === "createdAt-asc" ? a.createdAt - b.createdAt : b.createdAt - a.createdAt,
     );
     return matched.slice(0, limit);
-  }
-
-  /**
-   * Persist a delivered cursor (ADR-0022 §5). Advancing to a cursor that is not strictly newer
-   * than the stored one is an idempotent no-op, never an error — the delivery layer may replay
-   * a batch after a crash. The `events` batch is logged for observability.
-   */
-  async advanceCursor(
-    subscriberId: ULID,
-    taskId: ULID,
-    cursor: ULID,
-    events: TaskEvent[],
-  ): Promise<void> {
-    const subscription = await this.#storage.loadSubscription(subscriberId, taskId);
-    if (subscription === null) {
-      throw new Error(
-        `advanceCursor: unknown subscription (subscriber ${subscriberId}, task ${taskId})`,
-      );
-    }
-    if (cursor <= subscription.cursor) {
-      this.#logger?.info(
-        `advanceCursor: no-op for ${subscriberId}/${taskId} (requested ${cursor} <= current ` +
-          `${subscription.cursor}); ${events.length} delivered event(s) ignored`,
-      );
-      return;
-    }
-    await this.#storage.saveSubscription({ ...subscription, cursor });
-    this.#logger?.info(
-      `advanceCursor: ${subscriberId}/${taskId} cursor ${subscription.cursor} -> ${cursor} ` +
-        `(${events.length} event(s))`,
-    );
-  }
-
-  /** Materialize the per-subscriber event buffer (strictly newer than `since`). */
-  async loadEventLog(subscriptionId: ULID, since?: ULID): Promise<TaskEvent[]> {
-    const events: TaskEvent[] = [];
-    for await (const event of this.#storage.loadEvents(subscriptionId, since)) {
-      events.push(event);
-    }
-    return events;
   }
 
   /**

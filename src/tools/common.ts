@@ -18,18 +18,9 @@
  * ANSI stripped, control characters dropped, strings with real newlines kept multi-line) while
  * `details` stays raw for the TUI. See ADR-0012.
  */
-import { randomUUID } from "node:crypto";
-import { writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
+import { applyAdr0015Truncation } from "../runtime/adr0015-truncation.ts";
 import { BUILTIN_BINDING_NAMES } from "../runtime/bindings.ts";
-import {
-  DEFAULT_MAX_BYTES,
-  DEFAULT_MAX_LINES,
-  formatSize,
-  truncateTail,
-} from "@earendil-works/pi-coding-agent";
 import type {
   AgentToolResult,
   AgentToolUpdateCallback,
@@ -365,40 +356,6 @@ export function codeRunFailedError(outcome: PtcRunOutcome): Error {
   return failure;
 }
 
-/** Structural view of pi's `truncateTail` outcome, so the footer does not re-derive the numbers. */
-type TailTruncation = ReturnType<typeof truncateTail>;
-
-/**
- * Write the untruncated text block to a temp file and return its path.
- *
- * Mirrors what pi's own `bash` does with a long output (its `fullOutputPath`): the run is the only
- * place the text ever existed, so a file under the OS temp dir is the difference between "the rest is
- * gone" and "the rest is one `tools.read` away".
- */
-function writeFullOutput(text: string): string {
-  const filePath = join(tmpdir(), `pi-ptc-output-${randomUUID()}.txt`);
-  writeFileSync(filePath, text, "utf8");
-  return filePath;
-}
-
-/**
- * The `[Showing … Full output: path]` footer pi's built-ins use, worded for the same numbers.
- *
- * `truncatedBy` decides the wording: a line cut reports the line range, a byte cut also names the
- * ceiling, and a single oversized last line reports its own size — exactly what `bash` prints.
- */
-function truncationFooter(truncation: TailTruncation, fullOutputPath: string): string {
-  const startLine = truncation.totalLines - truncation.outputLines + 1;
-  const endLine = truncation.totalLines;
-  if (truncation.lastLinePartial) {
-    return `[Showing last ${formatSize(truncation.outputBytes)} of line ${endLine}. Full output: ${fullOutputPath}]`;
-  }
-  if (truncation.truncatedBy === "lines") {
-    return `[Showing lines ${startLine}-${endLine} of ${truncation.totalLines}. Full output: ${fullOutputPath}]`;
-  }
-  return `[Showing lines ${startLine}-${endLine} of ${truncation.totalLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Full output: ${fullOutputPath}]`;
-}
-
 /**
  * Render one successful outcome as pi's tool result.
  *
@@ -437,18 +394,11 @@ export function renderToolResult(input: {
       : `(${SURFACE_TOOL_NAME[surface]} completed with no output)`;
   // pi's rule for a tool's model-facing text is "Tools MUST truncate their output" — 50 KB / 2000
   // lines, keeping the tail, with the remainder pointed at — and this package's own 64 MiB run
-  // budget (ADR-0003) is what makes it bite. `fullOutputPath` is written before the tail is cut, so
-  // the pointer never names a partial file.
-  const truncation = truncateTail(built, {
-    maxLines: DEFAULT_MAX_LINES,
-    maxBytes: DEFAULT_MAX_BYTES,
-  });
-  let fullOutputPath: string | undefined;
-  let text = truncation.content;
-  if (truncation.truncated) {
-    fullOutputPath = writeFullOutput(built);
-    text += `\n\n${truncationFooter(truncation, fullOutputPath)}`;
-  }
+  // budget (ADR-0003) is what makes it bite. The shared ADR-0015 helper writes the temp file before
+  // the tail is cut, so the pointer never names a partial file (R-m13).
+  const truncation = applyAdr0015Truncation(built);
+  const text = truncation.text;
+  const fullOutputPath = truncation.truncated ? truncation.fullPath : undefined;
   // The text block is the model's copy; hoisted images ride the same result as image blocks, which
   // is how pi's own `read` hands a picture to the model (ADR-0014). `PtcImage.data` is already
   // base64 — the shape the binding emitted, the shape the worker's JSON channel carried, and the

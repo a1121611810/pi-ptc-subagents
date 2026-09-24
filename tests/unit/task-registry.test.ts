@@ -10,17 +10,18 @@
  * Dependencies are injected (docs/testing-constraints.md #1 clock/IO boundary): every test uses
  * an `InMemoryTaskStorage` and a fake clock (`createFakeClock`), never a real timer and never
  * `Date.now()`. Every command's failure path has its own test: illegal transitions, unknown
- * taskId, runtime-invalid target state, duplicate spawn, bad handle, unknown subscription,
- * negative query limit, terminal reconcile.
+ * taskId, runtime-invalid target state, duplicate spawn, bad handle, negative query limit,
+ * terminal reconcile.
  *
  * The counterfactual block at the bottom (docs/testing-constraints.md #5) pins that the spec
- * assertions above are falsifiable: an obviously-broken registry (permissive transition table /
- * no-op cursor) is shown to violate what the spec requires.
+ * assertions above are falsifiable: an obviously-broken registry (permissive transition table)
+ * is shown to violate what the spec requires.
  */
 
 import { describe, expect, test, vi } from "vitest";
 import {
   InMemoryTaskStorage,
+  type TaskEvent,
   type TaskRecord,
   type TaskStatus,
   type ULID,
@@ -106,6 +107,22 @@ function createHarness(start = 1000): Harness {
 
 function callContext(h: Harness, callerId: string): TransitionContext {
   return { clock: h.clock.clock, callerId };
+}
+
+/**
+ * Materialize the per-subscriber event buffer through the storage seam the registry writes into.
+ * Replaces the deleted `TaskRegistry.loadEventLog` inspection helper (R-m11).
+ */
+async function collectEvents(
+  storage: InMemoryTaskStorage,
+  subscriberId: string,
+  since?: ULID,
+): Promise<TaskEvent[]> {
+  const events: TaskEvent[] = [];
+  for await (const event of storage.loadEvents(subscriberId as ULID, since)) {
+    events.push(event);
+  }
+  return events;
 }
 
 /** The spawn command's record omits id/status/createdAt/transitionAt (bg-02 brief). */
@@ -235,7 +252,7 @@ describe("TaskRegistry.spawn", () => {
     expect(subscription?.status).toBe("active");
     expect(subscription?.cursor).toBe(result.cursor);
 
-    const log = await h.registry.loadEventLog(CALLER as ULID);
+    const log = await collectEvents(h.storage, CALLER);
     expect(log.map((event) => event.type)).toEqual(["task:01JBZ000000000000000000001:running"]);
   });
 
@@ -531,7 +548,7 @@ describe("TaskRegistry.stop", () => {
 
     expect(first.record.status).toBe("stopping");
     expect(second.record.status).toBe("stopping");
-    const log = await h.registry.loadEventLog(CALLER as ULID);
+    const log = await collectEvents(h.storage, CALLER);
     expect(log.filter((event) => event.type.endsWith(":stopping"))).toHaveLength(1);
   });
 });
@@ -849,48 +866,15 @@ describe("TaskRegistry.get", () => {
 });
 
 // ---------------------------------------------------------------------------
-//  advanceCursor + loadEventLog (ADR-0022 §5/§7)
+//  per-subscriber event buffer (ADR-0022 §5/§7)
+//
+//  `TaskRegistry.advanceCursor` / `loadEventLog` were deleted (R-m11): neither had a production
+//  caller and the former duplicated `DefaultNotificationPipeline.acknowledgeEvents`, the single
+//  production cursor writer. Event-buffer order is asserted through the storage seam the registry
+//  writes into; cursor advancement is covered by the notification-pipeline suite.
 // ---------------------------------------------------------------------------
 
-describe("TaskRegistry.advanceCursor", () => {
-  test("persists a strictly newer cursor (§5)", async () => {
-    const h = createHarness(1000);
-    const spawn = await spawnTask(h, TASK_1);
-    const succeeded = await h.registry.transition(
-      { kind: "transition", taskId: TASK_1, to: "succeeded" },
-      callContext(h, CALLER),
-    );
-    expect(succeeded.cursor > spawn.cursor).toBe(true);
-
-    await h.registry.advanceCursor(CALLER as ULID, TASK_1, succeeded.cursor, succeeded.events);
-    const subscription = await h.storage.loadSubscription(CALLER as ULID, TASK_1);
-    expect(subscription?.cursor).toBe(succeeded.cursor);
-  });
-
-  test("advancing to a lower or equal cursor is an idempotent no-op (§5/§8)", async () => {
-    const h = createHarness(1000);
-    const spawn = await spawnTask(h, TASK_1);
-    const succeeded = await h.registry.transition(
-      { kind: "transition", taskId: TASK_1, to: "succeeded" },
-      callContext(h, CALLER),
-    );
-    await h.registry.advanceCursor(CALLER as ULID, TASK_1, succeeded.cursor, succeeded.events);
-    await h.registry.advanceCursor(CALLER as ULID, TASK_1, spawn.cursor, spawn.events);
-    await h.registry.advanceCursor(CALLER as ULID, TASK_1, succeeded.cursor, succeeded.events);
-
-    const subscription = await h.storage.loadSubscription(CALLER as ULID, TASK_1);
-    expect(subscription?.cursor).toBe(succeeded.cursor);
-  });
-
-  test("an unknown subscription throws", async () => {
-    const h = createHarness(1000);
-    await expect(
-      h.registry.advanceCursor("ghost" as ULID, TASK_1, "01JBZ0000000000000000000ZZ" as ULID, []),
-    ).rejects.toThrow(/unknown subscription/);
-  });
-});
-
-describe("TaskRegistry.loadEventLog", () => {
+describe("per-subscriber event buffer (ADR-0022 §5/§7)", () => {
   test("returns the full per-subscriber log in emission order (§5/§7)", async () => {
     const h = createHarness(1000);
     await spawnTask(h, TASK_1);
@@ -903,7 +887,7 @@ describe("TaskRegistry.loadEventLog", () => {
       callContext(h, CALLER),
     );
 
-    const log = await h.registry.loadEventLog(CALLER as ULID);
+    const log = await collectEvents(h.storage, CALLER);
     expect(log.map((event) => event.type)).toEqual([
       "task:01JBZ000000000000000000001:running",
       "task:01JBZ000000000000000000001:stopping",
@@ -919,15 +903,8 @@ describe("TaskRegistry.loadEventLog", () => {
       callContext(h, CALLER),
     );
 
-    const log = await h.registry.loadEventLog(CALLER as ULID, spawn.cursor);
+    const log = await collectEvents(h.storage, CALLER, spawn.cursor);
     expect(log.map((event) => event.type)).toEqual(["task:01JBZ000000000000000000001:->succeeded"]);
-  });
-
-  test("an unknown subscription throws", async () => {
-    const h = createHarness(1000);
-    await expect(h.registry.loadEventLog("ghost" as ULID)).rejects.toThrow(
-      /unknown subscriptionId/,
-    );
   });
 });
 
@@ -993,7 +970,7 @@ describe("TaskRegistry.reconcileLostTasks", () => {
     await spawnTask(h, TASK_1);
     await h.registry.reconcileLostTasks();
 
-    const log = await h.registry.loadEventLog(CALLER as ULID);
+    const log = await collectEvents(h.storage, CALLER);
     expect(log.map((event) => event.type)).toEqual([
       "task:01JBZ000000000000000000001:running",
       "task:01JBZ000000000000000000001:->lost",
@@ -1087,8 +1064,6 @@ describe("TaskRegistry counterfactual", () => {
       query: async () => [],
       get: async () => record,
       onTransition: () => () => undefined,
-      advanceCursor: async () => undefined,
-      loadEventLog: async () => [],
       reconcileLostTasks: async () => [],
     };
   }
@@ -1102,20 +1077,5 @@ describe("TaskRegistry counterfactual", () => {
         callContext(h, CALLER),
       ),
     ).resolves.toBeDefined();
-  });
-
-  test("a no-op advanceCursor leaves the old cursor, which the spec asserts must move", async () => {
-    const h = createHarness(1000);
-    const spawn = await spawnTask(h, TASK_1);
-    const succeeded = await h.registry.transition(
-      { kind: "transition", taskId: TASK_1, to: "succeeded" },
-      callContext(h, CALLER),
-    );
-    const broken = brokenRegistry();
-    await broken.advanceCursor(CALLER as ULID, TASK_1, succeeded.cursor, succeeded.events);
-
-    const subscription = await h.storage.loadSubscription(CALLER as ULID, TASK_1);
-    expect(subscription?.cursor).toBe(spawn.cursor);
-    expect(subscription?.cursor).not.toBe(succeeded.cursor);
   });
 });
