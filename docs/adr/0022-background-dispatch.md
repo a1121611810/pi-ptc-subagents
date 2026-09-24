@@ -113,11 +113,14 @@ interface TaskRecord {
   exitCode?: number;
   spawnSource: { kind: "ptc-program" | "ptc-batch"; callerId: string };
   parentTaskId?: ULID;
-  sessionFile?: string; // <sessionDir>/tasks/<id>.pi-* per R1
+  sessionFile?: string; // v1 leaves this UNSET: the extension cannot learn pi's session-file
+  // path, and a fabricated value is worse than an absent one (reopen R-m12)
 }
 ```
 
 Args and prompt text do **not** live in TaskRecord (privacy + size); they live in pi's own session log. Result body / raw text are not in TaskRecord (size); the model gets them via `ptc_task_output` which dereferences `outputRef` and applies ADR-0015 truncateTail (50 KB / 2000 lines).
+
+**v1 leaves `sessionFile` unset.** The extension cannot know the filename pi chose for a child's session file, and the R1 session triple (`--session-dir` / `--session-id` / `--name`) does not expose it through any API this package consumes. The field stays on the schema for a future reader that can learn it; no code path writes a value in v1 (reopen R-m12).
 
 ### 4. DispatchHandle: thin snapshot, not the source of truth
 
@@ -193,14 +196,16 @@ A single batch carries N events. When a single-batch content exceeds the byte bu
 
 Map fog sub-item (the 3rd G1 sub-item), resolved:
 
-| signal source                            | trigger  | TaskRecord transition                                  | emit key               |
-| ---------------------------------------- | -------- | ------------------------------------------------------ | ---------------------- |
-| `ptc_task_stop(taskId, reason)` (model)  | explicit | `running -> stopping -> canceled`                      | `task:<id>:->canceled` |
-| AbortSignal / Esc (session)              | implicit | `running -> lost` (reason=session_ended_while_running) | `task:<id>:->lost`     |
-| user kills the session from the Esc path | implicit | `running -> lost` (reason=user_killed_via_esc)         | `task:<id>:->lost`     |
-| session restart (startup-reconcile)      | implicit | `running -> lost` (reason=lost_on_session_restart)     | `task:<id>:->lost`     |
+| signal source                            | trigger  | TaskRecord transition                                                         | emit key               |
+| ---------------------------------------- | -------- | ----------------------------------------------------------------------------- | ---------------------- |
+| `ptc_task_stop(taskId, reason)` (model)  | explicit | `running -> stopping -> canceled`                                             | `task:<id>:->canceled` |
+| AbortSignal / Esc (session)              | implicit | `running -> lost` (reason=session_ended_while_running)                        | `task:<id>:->lost`     |
+| user kills the session from the Esc path | implicit | `running -> lost` (reason=user_killed_via_esc; **v1 reserved — unreachable**) | `task:<id>:->lost`     |
+| session restart (startup-reconcile)      | implicit | `running -> lost` (reason=lost_on_session_restart)                            | `task:<id>:->lost`     |
 
-Three `lost` reasons (distinct strings in `errorMessage` field) preserve auditability. Model stop is explicit and synchronous (cursor advances past `canceled`); session-stop is implicit and async (cursor advances at next session replay).
+Three `lost` reasons are named (distinct strings in `errorMessage` field) to preserve auditability. Model stop is explicit and synchronous (cursor advances past `canceled`); session-stop is implicit and async (cursor advances at next session replay).
+
+**v1 emits two of the three reasons.** `session_ended_while_running` is written by the `session_shutdown` hook and `lost_on_session_restart` by startup reconcile. `user_killed_via_esc` is **reserved and unreachable**: pi's `SessionShutdownEvent` exposes only `reason: "quit" | "reload" | "new" | "resume" | "fork"` and carries no Esc/abort signal, so v1 cannot tell a user Esc/abort apart from a normal session end. The value remains in the `LostReason` union for a future Esc-identifiable signal; no code path emits it today.
 
 Late-arrival stop: if model sends `ptc_task_stop` while the child is already `stopping`, the call is idempotent (cursor advances past `canceled` once, not twice). codex's `start_or_steer_turn` semantic with `interrupt:true` first cancels, then delivers -- we don't need that here because the binding is fire-and-forget (cursor advances, not the child turn itself).
 
