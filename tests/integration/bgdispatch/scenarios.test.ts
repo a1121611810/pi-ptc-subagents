@@ -323,7 +323,13 @@ describe("bgdispatch scenarios", () => {
     expect(h.delivered).toHaveLength(60);
   });
 
-  test("slow_fast: fast tasks deliver before slow tasks, and every slot is released", async () => {
+  test("slow_fast: every task terminalises and releases its slot", async () => {
+    // Coverage note (review 2 finding S8): this suite drives delivery itself (`deliverTask`
+    // per task), so cross-task delivery ORDER is chosen by the caller, not by the
+    // implementation — asserting it would only restate the loop below and could never go red.
+    // What this scenario honestly pins is that completing four tasks before the other four
+    // still terminalises every task and releases every slot. Cursor-ordered delivery (the order
+    // the pipeline actually controls) is covered by the fork replay test above.
     const h = createHarness({ concurrency: 8 });
     const wave = await spawnWave(h, 8);
     const fast = wave.slice(0, 4);
@@ -338,13 +344,13 @@ describe("bgdispatch scenarios", () => {
       await deliverTask(h, spawned.handle.taskId);
     }
 
-    const terminalOrder = h.delivered
+    // The delivered terminal-event multiset is exactly the wave (no drop, no duplicate). This
+    // is order-independent on purpose: the assertion can fail if a task's event is lost.
+    const terminalTaskIds = h.delivered
       .filter((entry) => entry.event.type.endsWith(":->succeeded"))
-      .map((entry) => entry.event.taskId);
-    expect(terminalOrder).toEqual([
-      ...fast.map((spawned) => spawned.handle.taskId),
-      ...slow.map((spawned) => spawned.handle.taskId),
-    ]);
+      .map((entry) => entry.event.taskId)
+      .sort();
+    expect(terminalTaskIds).toEqual(wave.map((spawned) => spawned.handle.taskId).sort());
     expect(h.slots.active).toBe(0);
   });
 

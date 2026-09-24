@@ -21,7 +21,9 @@
  *   (subscriberId, taskId) pair returns the persisted subscription *unchanged* — resetting
  *   the cursor there would re-deliver the whole log (or worse, skip events if a
  *   `since` were applied naively). `acknowledgeEvents` never moves the cursor backwards,
- *   so a late ack (a duplicate wake, an out-of-order retry) is a no-op.
+ *   so a late ack (a duplicate wake, an out-of-order retry) is a no-op. Because the write is a
+ *   read-modify-write, concurrent acks are serialized per (subscriberId, taskId) and re-read the
+ *   persisted cursor before committing — a stale target that lost the race cannot rewind it.
  *
  * - **The event buffer is per-subscriber in BG-01's adapter.** `TaskStorage.loadEvents`
  *   is keyed by the subscriber id (see the BG-01 implementation note: "the brief's
@@ -36,10 +38,10 @@
  *   `loadEvents(since)` comparison `eventId <= since` yields the full log when the cursor
  *   is mapped back to `undefined`.
  *
- * - **`splitBatch`** is the ADR-0022 §7 boundary rule as a pure function: split along event
- *   boundaries, never drop. A single event larger than the budget still gets its own batch.
- *   The payload estimate is the UTF-8 byte length of the event's JSON encoding — a
- *   conservative, deterministic proxy the registry can also meter against.
+ * - **The batch split lives in the renderer, not here.** This module owns the cursor and the
+ *   idle-wake plumbing; the ADR-0022 §7 "split along event boundaries, never drop" rule is
+ *   single-sourced in `splitTaskNotificationBatches` (`task-notification.ts`). The only
+ *   batching fact this module exports is the shared byte budget {@link DEFAULT_MAX_BATCH_BYTES}.
  */
 
 import type { Subscription, TaskEvent, TaskStorage, ULID } from "./task-storage.ts";
@@ -51,10 +53,11 @@ import type { Subscription, TaskEvent, TaskStorage, ULID } from "./task-storage.
 export const ZERO_CURSOR: ULID = "00000000000000000000" as ULID;
 
 /**
- * Default per-batch payload budget for `splitBatch`, in bytes. Callers that have a
- * token-budget-derived ceiling override it (ADR-0022 §7); 100 KiB is the Ticket BG-05
- * default and is deliberately far below the 200 K-token split point so a batch rarely
- * needs to be re-split downstream.
+ * Default per-batch payload budget, in bytes, for the ADR-0022 §7 split along event
+ * boundaries (`docs/adr/0022-background-dispatch.md:190`):
+ * `DEFAULT_MAX_BATCH_BYTES = 100 * 1024` (100 KiB). This is the single declaration of the
+ * number; the renderer's `splitTaskNotificationBatches` consumes it, and a caller with a
+ * token-budget-derived ceiling may override it at that call site.
  */
 export const DEFAULT_MAX_BATCH_BYTES: number = 100 * 1024;
 
@@ -120,12 +123,20 @@ export class DefaultNotificationPipeline implements NotificationPipeline {
   readonly #now: () => number;
   readonly #logger: NotificationPipelineLogger;
   readonly #handlers: IdleWakeHandler[];
+  /**
+   * Per-(subscriberId, taskId) serialization tail for cursor writes. `acknowledgeEvents` is a
+   * read-modify-write, so two concurrent deliverers that read the same cursor must not both
+   * commit out of order. The chain serializes them; the in-section re-read then rejects a stale
+   * target (ADR-0022 §5: the cursor is monotonic). Keyed by `subscriberId-taskId`.
+   */
+  readonly #ackTail: Map<string, Promise<void>>;
 
   constructor(storage: TaskStorage, options: NotificationPipelineOptions = {}) {
     this.#storage = storage;
     this.#now = options.now ?? Date.now;
     this.#logger = options.logger ?? DEFAULT_PIPELINE_LOGGER;
     this.#handlers = [];
+    this.#ackTail = new Map();
   }
 
   /**
@@ -159,14 +170,43 @@ export class DefaultNotificationPipeline implements NotificationPipeline {
   }
 
   /**
-   * Advance the subscription cursor to `untilCursor` and persist it. An older-or-equal
-   * cursor is a no-op, so duplicate / out-of-order acks cannot rewind delivery state
-   * (ADR-0022 §5 cursor is monotonic).
+   * Advance the subscription cursor to `untilCursor` and persist it, never backwards:
+   * ADR-0022 §5 makes the cursor monotonic. The update is a read-modify-write, so it runs inside
+   * a per-(subscriberId, taskId) serialized section and re-reads the persisted cursor before
+   * writing; a stale target that lost the race is a no-op. Without the section, two deliverers
+   * could both read cursor C and commit C-1 after C, rewinding delivery state (double-delivery).
    */
   async acknowledgeEvents(subscriberId: ULID, taskId: ULID, untilCursor: ULID): Promise<void> {
-    const subscription = await this.#requireSubscription(subscriberId, taskId, "acknowledgeEvents");
-    if (untilCursor <= subscription.cursor) return;
-    await this.#storage.saveSubscription({ ...subscription, cursor: untilCursor });
+    await this.#serializeAck(subscriberId, taskId, async () => {
+      const subscription = await this.#requireSubscription(
+        subscriberId,
+        taskId,
+        "acknowledgeEvents",
+      );
+      if (untilCursor <= subscription.cursor) return;
+      await this.#storage.saveSubscription({ ...subscription, cursor: untilCursor });
+    });
+  }
+
+  /**
+   * Run one cursor write with exclusive access to a single (subscriberId, taskId). Waiters chain
+   * on the previous write's settled tail, so a rejected ack (an unknown subscription) rejects its
+   * own caller but does not poison the next waiter's write. The tail entry is dropped once no
+   * waiter remains, so the map tracks live subscriptions rather than growing for the session.
+   */
+  #serializeAck(subscriberId: ULID, taskId: ULID, write: () => Promise<void>): Promise<void> {
+    const key = `${subscriberId}-${taskId}`;
+    const previous = this.#ackTail.get(key) ?? Promise.resolve();
+    const run = previous.then(write);
+    const tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.#ackTail.set(key, tail);
+    void tail.then(() => {
+      if (this.#ackTail.get(key) === tail) this.#ackTail.delete(key);
+    });
+    return run;
   }
 
   /** Register an idle-wake handler; later registrations run after earlier ones. */
@@ -238,34 +278,4 @@ export class DefaultNotificationPipeline implements NotificationPipeline {
     }
     return events;
   }
-}
-
-/** Estimated UTF-8 payload size of one event, used by {@link splitBatch}. */
-export function estimateEventBytes(event: TaskEvent): number {
-  return Buffer.byteLength(JSON.stringify(event), "utf8");
-}
-
-/**
- * Split a batch along event boundaries so no batch exceeds `maxBytes` of estimated payload
- * (ADR-0022 §7). Pure and order-preserving: flattening the result yields the input. An event
- * that alone exceeds `maxBytes` is still emitted as its own batch — the rule is "split, never
- * drop". An empty input yields an empty array.
- */
-export function splitBatch(events: TaskEvent[], maxBytes: number): TaskEvent[][] {
-  const batches: TaskEvent[][] = [];
-  let current: TaskEvent[] = [];
-  let currentBytes = 0;
-
-  for (const event of events) {
-    const eventBytes = estimateEventBytes(event);
-    if (current.length > 0 && currentBytes + eventBytes > maxBytes) {
-      batches.push(current);
-      current = [];
-      currentBytes = 0;
-    }
-    current.push(event);
-    currentBytes += eventBytes;
-  }
-  if (current.length > 0) batches.push(current);
-  return batches;
 }

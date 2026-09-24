@@ -1,16 +1,15 @@
 /**
  * Tests for NotificationPipeline (BG-05 ticket): subscribe / drainPending /
- * acknowledgeEvents / onIdleWake / pendingCount, the dispatcher-facing notifyIdle wake
- * trigger, and the pure splitBatch helper.
+ * acknowledgeEvents / onIdleWake / pendingCount and the dispatcher-facing notifyIdle wake
+ * trigger.
  *
  * SPECIFICATION tests, not characterization (docs/testing-constraints.md #4 + #6).
  * Every expected value is pinned to an independent source:
  *   - ADR-0022 section 5: Subscription cursor is monotonic and per-subscriber; a
- *     re-subscribe must not reset delivery state; the fork cursor is max(parent, child).
+ *     re-subscribe must not reset delivery state; the fork cursor is max(parent, child);
+ *     concurrent acks must not regress it.
  *   - ADR-0022 section 6: cursor-based delivery; the buffer drains in one idle wake;
  *     cursor replay survives restart, so an unacknowledged drain re-delivers.
- *   - ADR-0022 section 7: a single batch carries N events; split along event boundaries
- *     into N batches; never drop an event.
  *   - the BG-05 ticket text: ZERO_CURSOR sentinel; idempotent subscribe /
  *     acknowledgeEvents; an unknown subscription is an explicit error.
  *
@@ -22,11 +21,8 @@
 
 import { describe, expect, test } from "vitest";
 import {
-  DEFAULT_MAX_BATCH_BYTES,
   DefaultNotificationPipeline,
   ZERO_CURSOR,
-  estimateEventBytes,
-  splitBatch,
 } from "../../src/runtime/notification-pipeline.ts";
 import {
   InMemoryTaskStorage,
@@ -265,6 +261,31 @@ describe("NotificationPipeline.acknowledgeEvents", () => {
     expect((await storage.loadSubscription(SUBSCRIBER, TASK_A))?.cursor).toBe(E2);
   });
 
+  test("a concurrent older ack cannot regress the cursor", async () => {
+    const storage = new InMemoryTaskStorage();
+    const pipeline = makePipeline(storage);
+    await pipeline.subscribe(SUBSCRIBER, TASK_A);
+    await seedEvents(storage, SUBSCRIBER, [
+      event(E1, TASK_A),
+      event(E2, TASK_A),
+      event(E3, TASK_A),
+    ]);
+
+    // Two deliverers race the same subscription: both read the cursor before either writes.
+    // The newer target (E3) is issued first and the stale target (E2) second, WITHOUT awaiting
+    // the first call. A read-then-write implementation lets the stale write land last and
+    // rewinds the cursor to E2.
+    await Promise.all([
+      pipeline.acknowledgeEvents(SUBSCRIBER, TASK_A, E3),
+      pipeline.acknowledgeEvents(SUBSCRIBER, TASK_A, E2),
+    ]);
+
+    // ADR-0022 section 5: the cursor is monotonic, so the newer ack must win. Counterfactual
+    // (#5): deleting the serialization/guard makes this red (the stored cursor becomes E2).
+    expect((await storage.loadSubscription(SUBSCRIBER, TASK_A))?.cursor).toBe(E3);
+    expect(await pipeline.pendingCount(SUBSCRIBER, TASK_A)).toBe(0);
+  });
+
   test("rejects for an unknown subscription", async () => {
     const storage = new InMemoryTaskStorage();
     const pipeline = makePipeline(storage);
@@ -443,75 +464,5 @@ describe("ZERO_CURSOR", () => {
       E2,
       E3,
     ]);
-  });
-});
-
-// --- splitBatch (ADR-0022 section 7) --------------------------------------------------------
-
-describe("splitBatch", () => {
-  test("returns an empty array for an empty event list", () => {
-    expect(splitBatch([], DEFAULT_MAX_BATCH_BYTES)).toEqual([]);
-  });
-
-  test("keeps events that fit inside one budget in a single order-preserving batch", () => {
-    const events = [event(E1, TASK_A), event(E2, TASK_A), event(E3, TASK_A)];
-
-    const batches = splitBatch(events, DEFAULT_MAX_BATCH_BYTES);
-
-    expect(batches).toHaveLength(1);
-    expect(batches[0]?.map((e) => e.eventId)).toEqual([E1, E2, E3]);
-  });
-
-  test("splits on an exact-fit boundary and on a budget below one event", () => {
-    // Identical shapes => identical JSON byte size, so the boundaries are deterministic.
-    const events = [event(E1, TASK_A), event(E2, TASK_A), event(E3, TASK_A)];
-    const oneBytes = estimateEventBytes(events[0] as TaskEvent);
-
-    // ADR-0022 section 7: split along event boundaries. Budget == two events => [2, 1].
-    const twoBatches = splitBatch(events, oneBytes * 2);
-    expect(twoBatches.map((b) => b.length)).toEqual([2, 1]);
-
-    // Budget == one event => each event exactly fits its own batch.
-    const singletonBatches = splitBatch(events, oneBytes);
-    expect(singletonBatches.map((b) => b.length)).toEqual([1, 1, 1]);
-
-    // Budget below one event => every event is oversized and still gets its own batch.
-    const oversizedBatches = splitBatch(events, oneBytes - 1);
-    expect(oversizedBatches.map((b) => b.length)).toEqual([1, 1, 1]);
-    expect(oversizedBatches.flat().map((e) => e.eventId)).toEqual([E1, E2, E3]);
-  });
-
-  test("gives a single oversized event its own batch and never drops it", () => {
-    const huge = event(E1, TASK_A, { outputPreview: "p".repeat(4096) });
-    const small = event(E2, TASK_A);
-
-    const batches = splitBatch([huge, small], estimateEventBytes(small));
-
-    // ADR-0022 section 7: an event that alone exceeds maxBytes still gets its own batch.
-    expect(batches.map((b) => b.map((e) => e.eventId))).toEqual([[E1], [E2]]);
-    expect(estimateEventBytes(huge)).toBeGreaterThan(estimateEventBytes(small));
-  });
-
-  test("never exceeds the budget for multi-event batches and preserves every event once", () => {
-    const events = [
-      event(E1, TASK_A, { outputPreview: "a".repeat(300) }),
-      event(E2, TASK_A, { outputPreview: "b".repeat(150) }),
-      event(E3, TASK_A),
-    ];
-
-    for (const maxBytes of [1, 50, 200, DEFAULT_MAX_BATCH_BYTES]) {
-      const batches = splitBatch(events, maxBytes);
-
-      // Invariant (#4 source: structural property): order + multiset are preserved.
-      expect(batches.flat().map((e) => e.eventId)).toEqual([E1, E2, E3]);
-
-      // A multi-event batch is only legal when its summed estimate fits the budget; the
-      // singleton exemption is the "never drop an oversized event" rule above.
-      const multi = batches.filter((batch) => batch.length > 1);
-      for (const batch of multi) {
-        const bytes = batch.reduce((sum, e) => sum + estimateEventBytes(e), 0);
-        expect(bytes).toBeLessThanOrEqual(maxBytes);
-      }
-    }
   });
 });

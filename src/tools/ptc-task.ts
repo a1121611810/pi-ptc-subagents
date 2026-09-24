@@ -13,16 +13,15 @@
  * `details`) and nothing else. State lives in {@link TaskRegistry} (BG-02); bytes live behind
  * {@link OutputStorage}; the actual SIGTERM/SIGKILL dance belongs to the dispatcher pump, which is
  * why `ptc_task_stop` deliberately never calls `lifecycle.kill` (ADR-0022 §8). The
- * `ChildProcessLifecycle` parameter is part of the factory contract so the eventual wiring site
- * hands the same seam the dispatcher uses; this tool only guards it is present.
+ * `ChildProcessLifecycle` parameter is part of the factory contract so the wiring site hands the
+ * same seam the dispatcher uses; this module only guards it is present.
  *
  * Always-on (ADR-0022 "What we deliberately don't add" 1 + map Notes clause 5): `/ptc off` gates
  * *new spawn*, not in-flight lifecycle, so these tools are not part of PTC mode's gated loadout.
- *
- * Integration state: the background branch of `pi.dispatch` shipped (BG-04), so the session
- * TaskRegistry / OutputStorage seams these factories take exist. Constructing them against the
- * session registry and registering them with `pi.registerTool(...)` outside the `/ptc` mode
- * loadout is the entrypoint wiring step owned by BG-14; this module is only the factory layer.
+ * `src/index.ts` constructs all three factories against the session-scoped stable holder
+ * (registry / outputStorage / lifecycle) and registers them with `pi.registerTool(...)` outside
+ * the `/ptc` mode loadout, so they stay callable while PTC mode is off. This module is the
+ * factory layer only.
  */
 
 import { defineTool } from "@earendil-works/pi-coding-agent";
@@ -40,7 +39,7 @@ import { sanitizeText } from "./text.ts";
  *
  * pi's `defineTool` returns an intersection whose params are statically `any` at the seam
  * anyway; naming the erased shape here keeps the factory signatures explicit for
- * `isolatedDeclarations` and lets a future orchestrator hold all three tools in one array.
+ * `isolatedDeclarations` and lets the entrypoint orchestrator hold all three tools together.
  */
 export type AnyTool = ToolDefinition<any, any, any>;
 
@@ -245,7 +244,9 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
         );
       }
       const slice = sinceBytes === 0 ? full : rawBytes.subarray(sinceBytes).toString("utf8");
-      const truncation = applyAdr0015Truncation(slice);
+      // ADR-0015 §2: the model reads the (possibly truncated) page, but the full-output pointer
+      // must name the COMPLETE stored text — `full`, never the page `slice`.
+      const truncation = applyAdr0015Truncation(slice, full);
       // ADR-0022 §7: inline the preview only at or below the 2048-byte ceiling.
       const outputPreview = outputBytes <= OUTPUT_PREVIEW_MAX_BYTES ? full : undefined;
       const details: PtcTaskOutputDetails = {

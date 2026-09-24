@@ -124,9 +124,17 @@ export type { Adr0015Truncation } from "./adr0015-truncation.ts";
  *
  * The implementation — tail bias, ceilings, footer wording and the write-before-cut temp file —
  * lives once in `./adr0015-truncation.ts`; this wrapper only pins the `pi-ptc-task-output-`
- * prefix ADR-0022 §3 / `docs/usage/bgdispatch.md` document. The signature is unchanged so
- * `src/tools/ptc-task.ts` keeps importing it from here (R-m13 / R2-3).
+ * prefix ADR-0022 §3 / `docs/usage/bgdispatch.md` document. The one-argument signature is kept
+ * for existing callers; `fullText` (below) lets a paged read write the complete body while the
+ * model reads the truncated page (R-m13 / R2-3).
+ *
+ * @param text the page shown to the model (truncated to the ADR-0015 ceiling).
+ * @param fullText what the temp file receives when `text` is truncated; defaults to `text`.
  */
-export function applyAdr0015Truncation(text: string): Adr0015Truncation {
-  return applySharedAdr0015Truncation(text, TASK_SCALE_TEMP_PREFIX);
+export function applyAdr0015Truncation(text: string, fullText?: string): Adr0015Truncation {
+  return applySharedAdr0015Truncation(
+    text,
+    TASK_SCALE_TEMP_PREFIX,
+    fullText === undefined ? {} : { fullText },
+  );
 }
