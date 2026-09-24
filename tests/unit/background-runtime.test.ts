@@ -13,13 +13,18 @@
  * storage whose `listTasks` throws on a corrupt record, and the happy in-memory/file paths. The
  * child lifecycle is a `MockChildProcessLifecycle` so no real `pi` process is spawned.
  */
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { createBackgroundTaskRuntime } from "../../src/runtime/background-runtime.ts";
-import { dispatch, type DispatchResult } from "../../src/runtime/dispatch.ts";
+import {
+  DISPATCH_KILL_GRACE_MS,
+  dispatch,
+  type DispatchResult,
+} from "../../src/runtime/dispatch.ts";
 import {
   MockChildProcessLifecycle,
+  type ChildHandle,
   type ChildSpawnOptions,
 } from "../../src/runtime/child-process-lifecycle.ts";
 import {
@@ -48,6 +53,25 @@ const AGENT = "bg-runtime-probe";
 const AGENT_MD = "---\nname: " + AGENT + "\n---\nYou probe.\n";
 
 const TERMINAL: ReadonlySet<string> = new Set(["succeeded", "failed", "canceled", "lost"]);
+
+/** Mock lifecycle that records every handle the real dispatch pump spawns. */
+class RecordingLifecycle extends MockChildProcessLifecycle {
+  readonly spawned: ChildHandle[] = [];
+
+  override spawn(argv: readonly string[], opts: ChildSpawnOptions): ChildHandle {
+    const handle = super.spawn(argv, opts);
+    this.spawned.push(handle);
+    return handle;
+  }
+
+  handleAt(index: number): ChildHandle {
+    const handle = this.spawned[index];
+    if (handle === undefined) {
+      throw new Error("RecordingLifecycle: no spawned handle at index " + String(index));
+    }
+    return handle;
+  }
+}
 
 /** 21-field spawn record copied from ADR-0022 §3 (the BG-02 suite's fixture, reused). */
 function spawnRecord(
@@ -163,7 +187,7 @@ describe("bindSession", () => {
     expect((await runtime.registry.get(TASK_RUNNING))?.status).toBe("lost");
   });
 
-  test("drainNotifications joins each event to its record and advances the cursor", async () => {
+  test("drainNotifications joins each event to its record; acknowledge advances the cursor", async () => {
     const storage = new InMemoryTaskStorage();
     await seedRunningTask(storage);
     const runtime = createBackgroundTaskRuntime({
@@ -172,14 +196,21 @@ describe("bindSession", () => {
     });
     await runtime.bindSession("/sessions/s1");
 
-    const items = await runtime.drainNotifications(OWNER as ULID);
+    const drain = await runtime.drainNotifications(OWNER as ULID);
 
-    expect(items).toHaveLength(1);
-    expect(items[0]?.event.status).toBe("lost");
-    expect(items[0]?.event.taskId).toBe(TASK_RUNNING);
-    expect(items[0]?.record.id).toBe(TASK_RUNNING);
-    // Cursor advanced on delivery: a second drain is empty (at-least-once, not repeat-forever).
-    expect(await runtime.drainNotifications(OWNER as ULID)).toEqual([]);
+    expect(drain.items).toHaveLength(1);
+    expect(drain.items[0]?.event.status).toBe("lost");
+    expect(drain.items[0]?.event.taskId).toBe(TASK_RUNNING);
+    expect(drain.items[0]?.record.id).toBe(TASK_RUNNING);
+    expect(drain.acks).toHaveLength(1);
+    expect(drain.acks[0]?.taskId).toBe(TASK_RUNNING);
+    // The drain alone does not advance: the cursor moves only on acknowledge (ADR-0022 §5/§6),
+    // so an undelivered batch re-drains.
+    expect((await runtime.drainNotifications(OWNER as ULID)).items).toHaveLength(1);
+
+    await runtime.acknowledgeNotifications(drain.acks);
+    // Acknowledged: a third drain is empty (at-least-once, not repeat-forever).
+    expect((await runtime.drainNotifications(OWNER as ULID)).items).toEqual([]);
   });
 
   test("a terminal transition fires the registered idle-wake handler", async () => {
@@ -307,8 +338,9 @@ describe("shutdown", () => {
     const runtime = createBackgroundTaskRuntime({ createLifecycle: () => lifecycle });
     // A live child the holder is tracking (the shared SIGTERM ladder must reach it).
     const handle = runtime.lifecycle.spawn(["pi", "--x"], {} as ChildSpawnOptions);
-    // One held dispatch slot that shutdown must release (ADR-0022 §9).
-    expect(runtime.slots.tryAcquire()).toBe(true);
+    // One held dispatch slot keyed by the task id that owns it, exactly as the background
+    // branch acquires it; shutdown releases the same token (ADR-0022 §9).
+    expect(runtime.slots.tryAcquire(TASK_RUNNING)).toBe(true);
     await runtime.registry.transition(
       {
         kind: "spawn",
@@ -330,6 +362,92 @@ describe("shutdown", () => {
     // Idempotent: a second shutdown has no non-terminal task left and does not re-kill.
     expect(await runtime.shutdown("session_ended_while_running")).toEqual([]);
     expect(lifecycle.getKillSignals(handle)).toEqual(["SIGTERM"]);
+  });
+
+  test("a real pump plus shutdown leaves slots.active equal to the number of genuinely live tasks", async () => {
+    await withAgent(async (dir) => {
+      const lifecycle = new RecordingLifecycle();
+      const warnings: string[] = [];
+      const runtime = createBackgroundTaskRuntime({
+        createLifecycle: () => lifecycle,
+        concurrency: 2,
+        logger: { info: () => undefined, warn: (message) => warnings.push(message) },
+      });
+
+      const spawn = async (callId: number, task: string): Promise<DispatchHandle> =>
+        asHandle(
+          await dispatch(
+            { agent: AGENT, task, background: true, agentScope: "project" },
+            { callId, cwd: dir, depth: 0, maxDispatchDepth: 3, callerId: "run-1" },
+            runtime.dispatchDeps,
+          ),
+        );
+
+      const first = await spawn(1, "one");
+      const second = await spawn(2, "two");
+      expect(runtime.slots.active).toBe(2);
+
+      const reclaimed = await runtime.shutdown("session_ended_while_running");
+      expect(reclaimed.map((record) => record.id).sort()).toEqual(
+        [first.taskId, second.taskId].sort(),
+      );
+      expect(runtime.slots.active).toBe(0);
+
+      const third = await spawn(3, "three");
+      const fourth = await spawn(4, "four");
+      expect(runtime.slots.active).toBe(2);
+
+      lifecycle.resolveExit(lifecycle.handleAt(0), 0, null);
+      lifecycle.resolveExit(lifecycle.handleAt(1), 0, null);
+      for (let attempt = 0; attempt < 100 && warnings.length < 2; attempt += 1) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+      expect(warnings.filter((message) => message.includes("is terminal")).length).toBe(2);
+      expect(runtime.slots.active).toBe(2);
+
+      const overCap = await dispatch(
+        { agent: AGENT, task: "five", background: true, agentScope: "project" },
+        { callId: 5, cwd: dir, depth: 0, maxDispatchDepth: 3, callerId: "run-1" },
+        runtime.dispatchDeps,
+      );
+      expect("taskId" in overCap).toBe(false);
+      expect(runtime.slots.active).toBe(2);
+
+      lifecycle.resolveExit(lifecycle.handleAt(2), 0, null);
+      lifecycle.resolveExit(lifecycle.handleAt(3), 0, null);
+      expect(third.taskId.length).toBeGreaterThan(0);
+      expect(fourth.taskId.length).toBeGreaterThan(0);
+    });
+  });
+
+  test("cancels shutdown's SIGKILL escalation once the child closes (no signal to a reaped handle)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const lifecycle = new MockChildProcessLifecycle();
+      const runtime = createBackgroundTaskRuntime({ createLifecycle: () => lifecycle });
+      const handle = runtime.lifecycle.spawn(["pi", "--x"], {} as ChildSpawnOptions);
+      await runtime.registry.transition(
+        {
+          kind: "spawn",
+          handle: { taskId: TASK_RUNNING, label: "l", status: "running" },
+          record: spawnRecord(OWNER),
+        },
+        { clock: () => 1_000, callerId: OWNER },
+      );
+
+      await runtime.shutdown("session_ended_while_running");
+      expect(lifecycle.getKillSignals(handle)).toEqual(["SIGTERM"]);
+
+      // The child closes: the pump's exit() is what clears the escalation timer. Drive it
+      // directly (the pump path is covered above) and advance well past the grace window.
+      lifecycle.resolveExit(handle, 0, null);
+      await runtime.lifecycle.exit(handle);
+      vi.advanceTimersByTime(DISPATCH_KILL_GRACE_MS * 2);
+      // The escalation must not fire against a reaped handle (A4).
+      expect(lifecycle.getKillSignals(handle)).toEqual(["SIGTERM"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -368,5 +486,49 @@ describe("dispatch path and tools share the holder registry", () => {
       expect(result.details.tasks[0]?.status).toBe("running");
       expect(TERMINAL.has(result.details.tasks[0]?.status ?? "")).toBe(false);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+//  default durable storage: the un-injected production branch
+// ---------------------------------------------------------------------------
+
+describe("default durable storage", () => {
+  test("bindSession with a real session dir persists records through FileTaskStorage", async () => {
+    const sessionDir = await makeTempDir();
+    try {
+      // No createStorage / createOutputStorage injected: production must build FileTaskStorage
+      // rooted at the session dir, not silently fall back to the in-memory adapter (A6).
+      const runtime = createBackgroundTaskRuntime({
+        createLifecycle: () => new MockChildProcessLifecycle(),
+      });
+      await runtime.bindSession(sessionDir);
+
+      await runtime.registry.transition(
+        {
+          kind: "spawn",
+          handle: { taskId: TASK_RUNNING, label: "durable", status: "running" },
+          record: spawnRecord(OWNER),
+        },
+        { clock: () => 1_000, callerId: OWNER },
+      );
+
+      // ADR-0022 §3: the TaskRecord lands on disk at <sessionDir>/tasks/<taskId>.json.
+      const taskRaw = await readFile(join(sessionDir, "tasks", TASK_RUNNING + ".json"), "utf8");
+      const task = JSON.parse(taskRaw) as TaskRecord;
+      expect(task.id).toBe(TASK_RUNNING);
+      expect(task.status).toBe("running");
+
+      // ADR-0022 §5: the owner subscription lands on disk too.
+      const subRaw = await readFile(
+        join(sessionDir, "subscriptions", OWNER + "-" + TASK_RUNNING + ".json"),
+        "utf8",
+      );
+      const subscription = JSON.parse(subRaw) as { taskId: string; subscriberId: string };
+      expect(subscription.taskId).toBe(TASK_RUNNING);
+      expect(subscription.subscriberId).toBe(OWNER);
+    } finally {
+      await removeTempDir(sessionDir);
+    }
   });
 });

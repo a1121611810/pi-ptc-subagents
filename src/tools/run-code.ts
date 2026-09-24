@@ -153,6 +153,9 @@ export function createPtcRunCodeTool(
           ...(sessionDir === undefined ? {} : { sessionDir }),
           ...(dispatchDeps === undefined ? {} : { dispatchDeps }),
           ...(options.depth === undefined ? {} : { depth: options.depth }),
+          // ADR-0022 §3/reopen R-m12: this process's own parent task id, read once by the
+          // entrypoint from PI_PTC_TASK_ID; stamps a nested spawn's TaskRecord.parentTaskId.
+          ...(options.parentTaskId === undefined ? {} : { parentTaskId: options.parentTaskId }),
           ...(params.timeoutMs === undefined ? {} : { timeoutMs: params.timeoutMs }),
           ...(signal === undefined ? {} : { signal }),
           ...(options.config === undefined ? {} : { config: options.config }),

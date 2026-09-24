@@ -254,6 +254,8 @@ export function createPtcWorkflowTool(
           ...(dispatchDeps === undefined ? {} : { dispatchDeps }),
           ...(params.args === undefined ? {} : { args: params.args }),
           ...(options.depth === undefined ? {} : { depth: options.depth }),
+          // ADR-0022 §3/reopen R-m12: same parent-task-id seam as ptc_run_code.
+          ...(options.parentTaskId === undefined ? {} : { parentTaskId: options.parentTaskId }),
           ...(signal === undefined ? {} : { signal }),
           ...(options.config === undefined ? {} : { config: options.config }),
           ...(pool === undefined ? {} : { pool }),

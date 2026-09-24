@@ -39,6 +39,7 @@ import {
 } from "./dispatch.ts";
 import { createWorkerEnv, effectiveTimeoutMs, resolveConfig } from "./limits.ts";
 import type { PtcConfig, PtcSurface } from "./limits.ts";
+import type { ULID } from "./task-storage.ts";
 import {
   HOST_FRAME_KIND,
   isPtcHostFrame,
@@ -91,6 +92,13 @@ export interface RunPtcProgramOptions {
    * to 0.
    */
   depth?: number;
+  /**
+   * ADR-0022 §3/reopen R-m12: this process's own background task id, when the run is inside a
+   * child spawned by `pi.dispatch({ background: true })`. The entrypoint reads it from
+   * `PI_PTC_TASK_ID` and threads it to the binding context so a nested spawn records
+   * `TaskRecord.parentTaskId`. Absent for a top-level session.
+   */
+  parentTaskId?: ULID;
   /** Identifier carried to the worker; generated when omitted. */
   runId?: string;
   /**
@@ -727,6 +735,7 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
           // ADR-0022 §5/R1: the run id is the subscriber, and the host session dir (when it
           // has one) travels to the background spawn as the R1 `--session-dir` flag.
           callerId: runId,
+          ...(options.parentTaskId === undefined ? {} : { parentTaskId: options.parentTaskId }),
           ...(options.sessionDir === undefined ? {} : { sessionDir: options.sessionDir }),
           // ADR-0022 §9: a session-supplied counter wins; otherwise keep this run's own
           // counter as the default (nothing regresses for callers that pass no deps).

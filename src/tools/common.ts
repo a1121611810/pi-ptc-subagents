@@ -62,6 +62,13 @@ export interface PtcToolOptions {
    */
   depth?: number;
   /**
+   * ADR-0022 §3 / reopen R-m12: the background task id of the pi process this PTC run is
+   * inside, or `undefined` for a top-level session. The extension entrypoint derives it from
+   * `PI_PTC_TASK_ID` (stamped on a background child's environment by `dispatch()`); direct
+   * library users omit it. A nested background dispatch stamps it onto `TaskRecord.parentTaskId`.
+   */
+  parentTaskId?: ULID;
+  /**
    * ADR-0022 §9: session-level dispatch deps (TaskRegistry / OutputStorage / lifecycle / one
    * `DispatchSlotCounter` / clock / logger) the run's `pi.dispatch` binding shares. Read once
    * per execute; omitted for direct library use, where the dispatcher's in-memory fallback
