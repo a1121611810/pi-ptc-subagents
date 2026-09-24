@@ -37,10 +37,12 @@
  *   failure (EACCES on read, ENOSPC on rename) that a temp-dir test cannot produce portably.
  *
  * - **Complexity.** loadTask / loadSubscription / saveTask / saveSubscription / deleteTask are
- *   O(1) filesystem calls on one file; listTasks is O(files); appendEvents is O(k) appends over
- *   the k incoming events (plus an O(s) subscription scan, s = subscription files) and never
- *   rewrites the log, so it does not have the in-memory adapter's O(N^2) reshape; loadEvents
- *   reads the subscriber's files and sorts the merged result in O(E log E), E = events returned.
+ *   O(1) filesystem calls on one file; listTasks is O(files). appendEvents is O(k) reads/appends
+ *   for a k-event batch: it checks ownership with one direct loadSubscription per distinct taskId
+ *   (never a scan of subscriptions/), then appends without rewriting the log. A run-level
+ *   subscriber's N appends are therefore O(N), not O(N^2). The only O(s) subscription scan
+ *   (s = files in subscriptions/) is the empty-batch / error-message path and loadEvents, which
+ *   reads the subscriber's files and sorts the merged result in O(s + E log E), E = events yielded.
  */
 
 import { ok as assertPresent } from "node:assert/strict";
