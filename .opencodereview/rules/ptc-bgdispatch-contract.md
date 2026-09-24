@@ -24,7 +24,11 @@ Subscription / DispatchHandle / `ptc_task_*` / `<bg-task-notification>`)。
 
 1. **迁移守卫**:每条边都必须显式列在迁移表里;表外的边必须报错(显式错误状态或抛出),不得静默忽略。
    `-> lost` 必须携带 LostReason(`session_ended_while_running` / `user_killed_via_esc` /
-   `lost_on_session_restart`);无 reason 的 lost 是阻塞项(审计要求:§8 的三个独立 reason 可审计)。
+   `lost_on_session_restart`);无 reason 的 lost 是阻塞项。
+   **注意 v1 的可达性**:pi 扩展 API 只暴露两个可写 reason——`session_shutdown` 的 reason 枚举是
+   `quit | reload | new | resume | fork`(无 Esc/abort 成员),`agent_end` 不带 stop reason,因此 **v1 生产只写
+   `session_ended_while_running` 与 `lost_on_session_restart`**,`user_killed_via_esc` 是保留值(ADR-0022 §8
+   已记录)。审查时不要因为"第三个 reason 没有 emitter"就报阻塞——除非 ADR/文档又把它写成已实现。
 2. **单一 terminal 写入器**:终态只能由一个写入点落库。禁止"先 get、再判断、后 transition"的
    read-then-write 组合——那会产生 TOCTOU 丢失更新(模型 stop 与子进程 close 竞争时,stop 会被
    静默覆盖为 succeeded)。终态判定必须在写入器内部原子完成(CAS / 期望状态守卫 / 在命令里表达条件)。
