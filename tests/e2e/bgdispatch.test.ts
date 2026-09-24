@@ -38,7 +38,9 @@ import {
 // tests/dispatch-e2e.test.ts uses: PT_DISPATCH_E2E=1 + PT_SMOKE_MODEL + `pi` on PATH. The
 // meta-discipline fixture (tests/test-meta-discipline.test.ts) verifies the gate is a
 // `test.skipIf(...)` and not an `if (...) { return; }` early return, so default CI runs show it as
-// SKIPPED rather than falsely green.
+// SKIPPED rather than falsely green. PT_SMOKE_MODEL must be a model `pi` can resolve — prefer the
+// provider-qualified form, e.g. PT_SMOKE_MODEL=deepseek/deepseek-flash, because a bare id can
+// fuzzy-match another provider that has no key.
 //
 // Assertions are SPECIFICATION (docs/testing-constraints.md #5): they fail unless a real child
 // process reached a terminal TaskRecord, and unless ptc_task_stop actually delivered a signal to
