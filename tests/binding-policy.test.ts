@@ -10,7 +10,11 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AgentToolResult, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { BUILTIN_BINDING_NAMES } from "../src/runtime/bindings.ts";
-import { resolveBindingNames, resolveDepthFromEnv } from "../src/tools/common.ts";
+import {
+  resolveBindingNames,
+  resolveDepthFromEnv,
+  resolveParentTaskIdFromEnv,
+} from "../src/tools/common.ts";
 import type { PtcToolDetails } from "../src/tools/common.ts";
 import { createPtcRunCodeTool } from "../src/tools/run-code.ts";
 import { RUN_TIMEOUT_MS, makeTempDir, removeTempDir, toolContext } from "./helpers/ptc.ts";
@@ -30,6 +34,27 @@ test("resolveDepthFromEnv parses PI_PTC_DEPTH (positive integer; invalid or abse
   expect(resolveDepthFromEnv({ PI_PTC_DEPTH: "2n" })).toBe(0);
   expect(resolveDepthFromEnv({ PI_PTC_DEPTH: "-2" })).toBe(0);
   expect(resolveDepthFromEnv({ PI_PTC_DEPTH: "0" })).toBe(0);
+});
+
+test("resolveParentTaskIdFromEnv parses PI_PTC_TASK_ID (26-char ULID; invalid or absent → undefined)", () => {
+  // The ULID spec's own canonical example is an independent literal (Crockford base32, no I/L/O/U).
+  const VALID = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+  expect(resolveParentTaskIdFromEnv({ PI_PTC_TASK_ID: VALID })).toBe(VALID);
+  expect(resolveParentTaskIdFromEnv({})).toBeUndefined();
+  expect(resolveParentTaskIdFromEnv({ PI_PTC_TASK_ID: "" })).toBeUndefined();
+  expect(resolveParentTaskIdFromEnv({ PI_PTC_TASK_ID: "not-a-ulid" })).toBeUndefined();
+  // 25 chars (truncated).
+  expect(
+    resolveParentTaskIdFromEnv({ PI_PTC_TASK_ID: "01ARZ3NDEKTSV4RRFFQ69G5FA" }),
+  ).toBeUndefined();
+  // Lowercase is not the canonical ULID encoding.
+  expect(
+    resolveParentTaskIdFromEnv({ PI_PTC_TASK_ID: "01arz3ndektsv4rrffq69g5fav" }),
+  ).toBeUndefined();
+  // 'I' is outside the Crockford alphabet.
+  expect(
+    resolveParentTaskIdFromEnv({ PI_PTC_TASK_ID: "01ARZ3NDEKTSV4RRFFQ69G5FAI" }),
+  ).toBeUndefined();
 });
 
 function executeTool(

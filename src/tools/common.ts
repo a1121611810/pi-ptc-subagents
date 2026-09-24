@@ -35,9 +35,11 @@ import type {
   AgentToolUpdateCallback,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import type { DispatchDeps } from "../runtime/dispatch.ts";
 import type { PtcRunOutcome } from "../runtime/dispatcher.ts";
 import type { PtcConfig, PtcSurface } from "../runtime/limits.ts";
 import type { PtcJsonValue, SubCallRecord } from "../runtime/protocol.ts";
+import type { ULID } from "../runtime/task-storage.ts";
 import { renderModelValue, sanitizeText } from "./text.ts";
 
 /** Options every PTC tool factory accepts. */
@@ -68,6 +70,13 @@ export interface PtcToolOptions {
    * child environment by `dispatch()`); direct library users omit it.
    */
   depth?: number;
+  /**
+   * ADR-0022 §9: session-level dispatch deps (TaskRegistry / OutputStorage / lifecycle / one
+   * `DispatchSlotCounter` / clock / logger) the run's `pi.dispatch` binding shares. Read once
+   * per execute; omitted for direct library use, where the dispatcher's in-memory fallback
+   * applies.
+   */
+  getDispatchDeps?: () => DispatchDeps | undefined;
 }
 
 /**
@@ -83,6 +92,24 @@ export function resolveDepthFromEnv(source: NodeJS.ProcessEnv = process.env): nu
   const raw = source.PI_PTC_DEPTH;
   if (raw === undefined || !/^\d+$/.test(raw)) return 0;
   return Number.parseInt(raw, 10);
+}
+
+/**
+ * Read the parent background-task id pi-ptc was started with inside a child pi process.
+ *
+ * `dispatch({ background: true })` stamps `PI_PTC_TASK_ID` (the child's own task id) onto the
+ * spawned subprocess's environment, so a nested background dispatch inside that child can record
+ * `TaskRecord.parentTaskId` and the session registry can reconstruct the task tree. Only a
+ * 26-char Crockford-base32 ULID is accepted; a missing or malformed value means "not a dispatched
+ * child" and yields `undefined` — the same validate-or-fall-back approach as
+ * {@link resolveDepthFromEnv}. The entrypoint owns threading this into `DispatchContext`.
+ */
+export function resolveParentTaskIdFromEnv(
+  source: NodeJS.ProcessEnv = process.env,
+): ULID | undefined {
+  const raw = source.PI_PTC_TASK_ID;
+  if (raw === undefined || !/^[0-9A-HJKMNP-TV-Z]{26}$/.test(raw)) return undefined;
+  return raw as ULID;
 }
 
 /**

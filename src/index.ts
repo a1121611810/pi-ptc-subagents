@@ -19,8 +19,24 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { createPtcRunCodeTool } from "./tools/run-code.ts";
 import { createPtcWorkflowTool } from "./tools/workflow.ts";
+import {
+  createPtcTaskListTool,
+  createPtcTaskOutputTool,
+  createPtcTaskStopTool,
+} from "./tools/ptc-task.ts";
 import { resolveBindingNames, resolveDepthFromEnv } from "./tools/common.ts";
 import { TurnPools } from "./runtime/turn-pools.ts";
+import {
+  createBackgroundTaskRuntime,
+  type BackgroundTaskRuntime,
+} from "./runtime/background-runtime.ts";
+import { createULID } from "./runtime/child-process-lifecycle.ts";
+import {
+  renderTaskNotifications,
+  shouldDeliverTaskNotification,
+  splitTaskNotificationBatches,
+} from "./runtime/task-notification.ts";
+import type { TaskRecord, ULID } from "./runtime/task-storage.ts";
 import {
   bindingSource,
   buildModeInstruction,
@@ -131,7 +147,16 @@ export {
 } from "./runtime/protocol.ts";
 export type { PtcErrorKind, PtcErrorShape, PtcJsonValue } from "./runtime/protocol.ts";
 
-export default function ptcSubagents(pi: ExtensionAPI): void {
+/**
+ * Optional seams for the extension factory. Production calls `ptcSubagents(pi)`; tests may inject
+ * a pre-built background runtime (with a mock child lifecycle) so no real `pi` process is spawned.
+ */
+export interface PtcSubagentsOptions {
+  /** Use this session-scoped background runtime instead of constructing one. */
+  backgroundRuntime?: BackgroundTaskRuntime;
+}
+
+export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOptions = {}): void {
   const mode = initialModeState();
   // Set on entry, cleared after the briefing has been injected, so the instruction lands once
   // per mode entry instead of on every turn.
@@ -160,11 +185,101 @@ export default function ptcSubagents(pi: ExtensionAPI): void {
    */
   const ptcDepth = resolveDepthFromEnv();
 
+  /* ------------------------ BG-14: session-scoped background runtime ------------------------ */
+
+  /**
+   * Created ONCE, before any session; the session delegate is swapped by `bindSession` on
+   * `session_start`. The three `ptc_task_*` tools and the two PTC surfaces capture its stable
+   * delegates, so they never have to be re-registered. This factory body creates objects only —
+   * `pi.*` is never called here (R2); the delivery below runs from event handlers.
+   */
+  const background: BackgroundTaskRuntime =
+    options.backgroundRuntime ?? createBackgroundTaskRuntime();
+
+  /** R2: whether an agent turn is in flight. `turn_start` sets it; `agent_settled` clears it. */
+  let turnActive = false;
+
+  const backgroundWarn = (message: string): void => {
+    console.warn("[pi-ptc.background] " + message);
+  };
+
+  /** Send one rendered batch through the R2 channel for the current activity. */
+  const sendBatch = (content: string): void => {
+    // `renderTaskNotifications` returns "" for an empty batch: never send an empty message.
+    if (content.length === 0) return;
+    if (turnActive) {
+      // Mid-turn injection steers the running agent (R2 verified channel).
+      pi.sendMessage(
+        { customType: "bg-task-notification", content, display: false },
+        { deliverAs: "steer" },
+      );
+      return;
+    }
+    // Idle wake: sendUserMessage always starts a turn (R2 verified channel).
+    pi.sendUserMessage(content);
+  };
+
+  /** Drain one subscriber's undelivered events, keep the completions, render + send. */
+  const deliverSubscriber = async (subscriberId: ULID): Promise<void> => {
+    const items = await background.drainNotifications(subscriberId);
+    // ADR-0022 §8 "谁停谁报告": canceled tasks are suppressed (BG-15 owns the policy).
+    const deliverable = items.filter((item) => shouldDeliverTaskNotification(item.record));
+    if (deliverable.length === 0) return;
+    for (const batch of splitTaskNotificationBatches(deliverable)) {
+      sendBatch(
+        renderTaskNotifications(batch, {
+          batchId: createULID(),
+          deliveredAtMs: background.clock(),
+        }),
+      );
+    }
+  };
+
+  /** Distinct owners (`spawnSource.callerId`) of every known task. */
+  const knownOwners = async (): Promise<ULID[]> => {
+    const records = await background.registry.query({ limit: Number.MAX_SAFE_INTEGER });
+    const owners = new Set<ULID>();
+    for (const record of records) {
+      const owner = record.spawnSource.callerId;
+      if (owner.length > 0) owners.add(owner as ULID);
+    }
+    return [...owners];
+  };
+
+  /** Drain every known owner; the `agent_settled` trigger. */
+  const deliverAllOwners = async (): Promise<void> => {
+    for (const owner of await knownOwners()) await deliverSubscriber(owner);
+  };
+
+  /** Deliver the records `bindSession` reconciled at startup through the same path. */
+  const deliverLost = async (lost: readonly TaskRecord[]): Promise<void> => {
+    const owners = new Set<ULID>();
+    for (const record of lost) {
+      const owner = record.spawnSource.callerId;
+      if (owner.length > 0) owners.add(owner as ULID);
+    }
+    for (const owner of owners) await deliverSubscriber(owner);
+  };
+
+  /**
+   * Terminal-transition trigger (ADR-0022 §6): the runtime calls `notifyIdle` when a task reaches
+   * a terminal state, and this handler is where `pi.*` runs. When a turn is active the handler
+   * steers; when idle it wakes with a user message.
+   */
+  background.pipeline.onIdleWake((subscriberId) => {
+    void deliverSubscriber(subscriberId as ULID).catch((error: unknown) => {
+      backgroundWarn(
+        "notification delivery failed: " + (error instanceof Error ? error.message : String(error)),
+      );
+    });
+  });
+
   pi.registerTool(
     createPtcRunCodeTool({
       getBindingSourceNames,
       getPool: () => turnPools.get("run_code"),
       depth: ptcDepth,
+      getDispatchDeps: () => background.dispatchDeps,
     }),
   );
   pi.registerTool(
@@ -172,8 +287,37 @@ export default function ptcSubagents(pi: ExtensionAPI): void {
       getBindingSourceNames,
       getPool: () => turnPools.get("workflow"),
       depth: ptcDepth,
+      getDispatchDeps: () => background.dispatchDeps,
     }),
   );
+
+  /*
+   * Always-on management tools (ADR-0022 "What we add" #6): registered at factory time, OUTSIDE
+   * the PTC mode loadout. `/ptc off` only gates new spawns; it must never hide the lifecycle face
+   * of in-flight tasks. The mode's `modeLoadout` keeps non-built-in names, so these survive both
+   * entry and exit (proved in tests/unit/extension-background.test.ts).
+   */
+  pi.registerTool(createPtcTaskListTool(background.registry));
+  pi.registerTool(createPtcTaskOutputTool(background.registry, background.outputStorage));
+  pi.registerTool(
+    createPtcTaskStopTool(background.registry, background.lifecycle, { clock: background.clock }),
+  );
+
+  pi.on("turn_start", async () => {
+    turnActive = true;
+  });
+
+  pi.on("agent_settled", async () => {
+    turnActive = false;
+    try {
+      await deliverAllOwners();
+    } catch (error) {
+      backgroundWarn(
+        "agent_settled delivery failed: " +
+          (error instanceof Error ? error.message : String(error)),
+      );
+    }
+  });
 
   /**
    * Retire the turn's pools. `drain()` terminates the warm workers, so nothing outlives the
@@ -299,6 +443,23 @@ export default function ptcSubagents(pi: ExtensionAPI): void {
   });
 
   pi.on("session_start", async (_event, ctx) => {
+    // BG-14: bind the session-scoped background runtime before anything else. The records this
+    // returns were reconciled to `lost`; delivering them through the one notification path is the
+    // ADR-0022 §8 startup guarantee, not a bespoke message. A bind failure is surfaced as a
+    // warning through `ctx.ui.notify` and leaves the previous (in-memory) delegate usable.
+    turnActive = false;
+    const lost = await background.bindSession(ctx.sessionManager?.getSessionDir?.(), (message) =>
+      ctx.ui.notify(message, "warning"),
+    );
+    try {
+      await deliverLost(lost);
+    } catch (error) {
+      backgroundWarn(
+        "startup reconcile delivery failed: " +
+          (error instanceof Error ? error.message : String(error)),
+      );
+    }
+
     const config = readDefaultModeConfig(getAgentDir());
     if (config.error !== undefined) {
       ctx.ui.notify(`pi-ptc-subagents: ${config.error}`, "warning");
@@ -334,6 +495,23 @@ export default function ptcSubagents(pi: ExtensionAPI): void {
           "info",
         );
       }
+    }
+  });
+
+  /**
+   * BG-14 teardown (ADR-0022 §8): a session end is an implicit stop for every in-flight task.
+   * They are session-anchored, not run-anchored, so the run AbortSignal never reaches them; this
+   * hook is where they are reclaimed `running/stopping -> lost (session_ended_while_running)` and
+   * their live children are reaped with the dispatcher's shared SIGTERM -> grace -> SIGKILL ladder.
+   */
+  pi.on("session_shutdown", async () => {
+    turnActive = false;
+    try {
+      await background.shutdown("session_ended_while_running");
+    } catch (error) {
+      backgroundWarn(
+        "session shutdown failed: " + (error instanceof Error ? error.message : String(error)),
+      );
     }
   });
 

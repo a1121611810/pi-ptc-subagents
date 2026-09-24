@@ -13,6 +13,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import ptcSubagents from "../../src/index.ts";
 import type { Binding, BindingTable } from "../../src/runtime/bindings.ts";
+import type { BackgroundTaskRuntime } from "../../src/runtime/background-runtime.ts";
 
 /** Timeout applied to tests that spawn real workers, so a deadlock fails instead of hanging. */
 export const RUN_TIMEOUT_MS = 20_000;
@@ -51,6 +52,15 @@ export interface ExtensionStub {
   entries: { customType: string; data?: unknown }[];
   notifications: { message: string; type?: string }[];
   statuses: { key: string; text: string | undefined }[];
+  /** Custom messages sent through `pi.sendMessage`, in order. */
+  sentMessages: {
+    customType: string;
+    content: string;
+    display?: boolean;
+    options?: { deliverAs?: "steer" | "followUp" | "nextTurn"; triggerTurn?: boolean };
+  }[];
+  /** User messages sent through `pi.sendUserMessage`, in order. */
+  sentUserMessages: { content: string; options?: unknown }[];
   api: ExtensionAPI;
   /** Fire every handler registered for `event`, in registration order, and collect results. */
   emit(event: string, ctx: ExtensionContext): Promise<unknown[]>;
@@ -65,7 +75,14 @@ export interface ExtensionStub {
 export const DEFAULT_SESSION_TOOLS: readonly string[] = ["read", "bash", "edit", "write"];
 
 /** Build the stub and run the extension factory against it. */
-export function makeExtensionStub(options: { active?: readonly string[] } = {}): ExtensionStub {
+export function makeExtensionStub(
+  options: {
+    active?: readonly string[];
+    sessionDir?: string;
+    /** BG-14 test seam: use a pre-built background runtime instead of constructing one. */
+    backgroundRuntime?: BackgroundTaskRuntime;
+  } = {},
+): ExtensionStub {
   const tools = new Map<string, ToolDefinition>();
   const commands = new Map<
     string,
@@ -76,6 +93,8 @@ export function makeExtensionStub(options: { active?: readonly string[] } = {}):
   const entries: { customType: string; data?: unknown }[] = [];
   const notifications: { message: string; type?: string }[] = [];
   const statuses: { key: string; text: string | undefined }[] = [];
+  const sentMessages: ExtensionStub["sentMessages"] = [];
+  const sentUserMessages: ExtensionStub["sentUserMessages"] = [];
   const active = [...(options.active ?? DEFAULT_SESSION_TOOLS), "ptc_run_code", "ptc_workflow"];
 
   const stub: ExtensionStub = {
@@ -87,6 +106,8 @@ export function makeExtensionStub(options: { active?: readonly string[] } = {}):
     entries,
     notifications,
     statuses,
+    sentMessages,
+    sentUserMessages,
     api: undefined as unknown as ExtensionAPI,
     async emit(event, ctx) {
       const results: unknown[] = [];
@@ -120,10 +141,27 @@ export function makeExtensionStub(options: { active?: readonly string[] } = {}):
     appendEntry: (customType: string, data?: unknown) => {
       entries.push({ customType, ...(data === undefined ? {} : { data }) });
     },
+    sendMessage: (
+      message: { customType: string; content: string; display?: boolean },
+      options?: ExtensionStub["sentMessages"][number]["options"],
+    ) => {
+      sentMessages.push({
+        customType: message.customType,
+        content: message.content,
+        ...(message.display === undefined ? {} : { display: message.display }),
+        ...(options === undefined ? {} : { options }),
+      });
+    },
+    sendUserMessage: (content: string, options?: unknown) => {
+      sentUserMessages.push({ content, ...(options === undefined ? {} : { options }) });
+    },
   } as unknown as ExtensionAPI;
 
   stub.api = api;
-  ptcSubagents(api);
+  ptcSubagents(
+    api,
+    options.backgroundRuntime === undefined ? {} : { backgroundRuntime: options.backgroundRuntime },
+  );
   return stub;
 }
 
@@ -148,6 +186,7 @@ export function modeContext(
   options: {
     mode?: string;
     entries?: { type: string; customType: string; data?: unknown }[];
+    sessionDir?: string;
     notify?: (message: string, type?: string) => void;
     setStatus?: (key: string, text: string | undefined) => void;
   } = {},
@@ -159,7 +198,10 @@ export function modeContext(
       setStatus: options.setStatus ?? (() => {}),
       theme: { fg: (_color: string, text: string) => text },
     },
-    sessionManager: { getEntries: () => options.entries ?? [] },
+    sessionManager: {
+      getEntries: () => options.entries ?? [],
+      getSessionDir: () => options.sessionDir,
+    },
   } as unknown as ExtensionContext;
 }
 
@@ -169,7 +211,11 @@ export function modeContext(
  */
 export function stubContext(
   stub: ExtensionStub,
-  options: { mode?: string; entries?: { type: string; customType: string; data?: unknown }[] } = {},
+  options: {
+    mode?: string;
+    entries?: { type: string; customType: string; data?: unknown }[];
+    sessionDir?: string;
+  } = {},
 ): ExtensionContext {
   return modeContext({
     ...options,

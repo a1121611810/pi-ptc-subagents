@@ -1,0 +1,372 @@
+/**
+ * BG-14 unit tests for the session-scoped background runtime holder
+ * (`src/runtime/background-runtime.ts`).
+ *
+ * SPECIFICATION tests (docs/testing-constraints.md #4/#6): every expected value traces to a
+ * literal or invariant — the ADR-0022 §2 six-state machine (a restart marks `running` records
+ * `lost` with `lost_on_session_restart`), §3/§7 (the record/event pair the renderer consumes),
+ * §8 (the three distinct `lost` reasons; shutdown uses `session_ended_while_running`), §9 (one
+ * session-level slot counter), and the holder contract itself. Nothing is copied from the
+ * implementation.
+ *
+ * IO boundaries are exercised on both paths (constraint #1): a storage factory that throws, a
+ * storage whose `listTasks` throws on a corrupt record, and the happy in-memory/file paths. The
+ * child lifecycle is a `MockChildProcessLifecycle` so no real `pi` process is spawned.
+ */
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { describe, expect, test } from "vitest";
+import { createBackgroundTaskRuntime } from "../../src/runtime/background-runtime.ts";
+import { dispatch, type DispatchResult } from "../../src/runtime/dispatch.ts";
+import {
+  MockChildProcessLifecycle,
+  type ChildSpawnOptions,
+} from "../../src/runtime/child-process-lifecycle.ts";
+import {
+  createTaskRegistry,
+  type DispatchHandle,
+  type TaskRecord,
+} from "../../src/runtime/task-registry.ts";
+import { InMemoryOutputStorage } from "../../src/runtime/output-storage.ts";
+import { InMemoryTaskStorage, type ULID } from "../../src/runtime/task-storage.ts";
+import {
+  createPtcTaskListTool,
+  type AnyTool,
+  type PtcTaskListDetails,
+} from "../../src/tools/ptc-task.ts";
+import { DEFAULT_CONFIG } from "../../src/runtime/limits.ts";
+import { makeTempDir, removeTempDir } from "../helpers/ptc.ts";
+
+// ---------------------------------------------------------------------------
+//  Fixtures — literal ULID-shaped ids and the ADR-0022 §3 record shape
+// ---------------------------------------------------------------------------
+
+const TASK_RUNNING = "01JBZ000000000000000000001" as ULID;
+const TASK_SECOND = "01JBZ000000000000000000002" as ULID;
+const OWNER = "run-prev";
+const AGENT = "bg-runtime-probe";
+const AGENT_MD = "---\nname: " + AGENT + "\n---\nYou probe.\n";
+
+const TERMINAL: ReadonlySet<string> = new Set(["succeeded", "failed", "canceled", "lost"]);
+
+/** 21-field spawn record copied from ADR-0022 §3 (the BG-02 suite's fixture, reused). */
+function spawnRecord(
+  callerId: string,
+): Omit<TaskRecord, "id" | "status" | "createdAt" | "transitionAt"> {
+  return {
+    label: "seeded task",
+    agentName: "researcher",
+    depth: 0,
+    startedAt: 1_000,
+    finishedAt: undefined,
+    durationMs: undefined,
+    outputRef: undefined,
+    outputBytes: undefined,
+    outputPreview: undefined,
+    stopReason: undefined,
+    errorMessage: undefined,
+    exitCode: undefined,
+    spawnSource: { kind: "ptc-program", callerId },
+    parentTaskId: undefined,
+    sessionFile: undefined,
+  };
+}
+
+/** Spawn one `running` record (with its owner subscription) through a real registry. */
+async function seedRunningTask(
+  storage: InMemoryTaskStorage,
+  taskId: ULID = TASK_RUNNING,
+  owner = OWNER,
+): Promise<TaskRecord> {
+  const registry = createTaskRegistry(storage, { clock: () => 1_000 });
+  const { record } = await registry.transition(
+    {
+      kind: "spawn",
+      handle: { taskId, label: "seeded task", status: "running" },
+      record: spawnRecord(owner),
+    },
+    { clock: () => 1_000, callerId: owner },
+  );
+  return record;
+}
+
+async function withAgent<T>(body: (dir: string) => Promise<T>): Promise<T> {
+  const dir = await makeTempDir();
+  try {
+    await mkdir(join(dir, ".pi", "agents"), { recursive: true });
+    await writeFile(join(dir, ".pi", "agents", AGENT + ".md"), AGENT_MD, { encoding: "utf-8" });
+    return await body(dir);
+  } finally {
+    await removeTempDir(dir);
+  }
+}
+
+function asHandle(value: DispatchHandle | DispatchResult): DispatchHandle {
+  if (!("taskId" in value))
+    throw new Error("expected a DispatchHandle, got " + JSON.stringify(value));
+  return value;
+}
+
+// ---------------------------------------------------------------------------
+//  Session-less usability (the tools / dispatch path must work before a session)
+// ---------------------------------------------------------------------------
+
+describe("session-less runtime", () => {
+  test("exposes a usable registry and output storage before bindSession", async () => {
+    const runtime = createBackgroundTaskRuntime({
+      createLifecycle: () => new MockChildProcessLifecycle(),
+    });
+
+    await runtime.registry.transition(
+      {
+        kind: "spawn",
+        handle: { taskId: TASK_RUNNING, label: "l", status: "running" },
+        record: spawnRecord(OWNER),
+      },
+      { clock: () => 1_000, callerId: OWNER },
+    );
+    const record = await runtime.registry.get(TASK_RUNNING);
+    expect(record?.status).toBe("running");
+
+    await runtime.outputStorage.writeOutput(TASK_RUNNING, "body");
+    expect(await runtime.outputStorage.readOutput(TASK_RUNNING)).toBe("body");
+
+    // One session-level slot counter, not a per-run rebuild (ADR-0022 §9).
+    expect(runtime.slots.limit).toBe(DEFAULT_CONFIG.dispatchConcurrency);
+  });
+});
+
+// ---------------------------------------------------------------------------
+//  bindSession: delegate swap + reconcile
+// ---------------------------------------------------------------------------
+
+describe("bindSession", () => {
+  test("swaps the delegate, marks running records lost, and returns them", async () => {
+    const storage = new InMemoryTaskStorage();
+    await seedRunningTask(storage);
+    let calls = 0;
+    const runtime = createBackgroundTaskRuntime({
+      createStorage: () => {
+        calls += 1;
+        return storage;
+      },
+      createLifecycle: () => new MockChildProcessLifecycle(),
+    });
+
+    const lost = await runtime.bindSession("/sessions/s1");
+
+    expect(calls).toBe(1);
+    expect(lost.map((record) => record.id)).toEqual([TASK_RUNNING]);
+    expect(lost[0]?.status).toBe("lost");
+    expect(lost[0]?.errorMessage).toBe("lost_on_session_restart");
+    // The stable delegate now resolves the same record from the new session storage.
+    expect((await runtime.registry.get(TASK_RUNNING))?.status).toBe("lost");
+  });
+
+  test("drainNotifications joins each event to its record and advances the cursor", async () => {
+    const storage = new InMemoryTaskStorage();
+    await seedRunningTask(storage);
+    const runtime = createBackgroundTaskRuntime({
+      createStorage: () => storage,
+      createLifecycle: () => new MockChildProcessLifecycle(),
+    });
+    await runtime.bindSession("/sessions/s1");
+
+    const items = await runtime.drainNotifications(OWNER as ULID);
+
+    expect(items).toHaveLength(1);
+    expect(items[0]?.event.status).toBe("lost");
+    expect(items[0]?.event.taskId).toBe(TASK_RUNNING);
+    expect(items[0]?.record.id).toBe(TASK_RUNNING);
+    // Cursor advanced on delivery: a second drain is empty (at-least-once, not repeat-forever).
+    expect(await runtime.drainNotifications(OWNER as ULID)).toEqual([]);
+  });
+
+  test("a terminal transition fires the registered idle-wake handler", async () => {
+    const runtime = createBackgroundTaskRuntime({
+      createLifecycle: () => new MockChildProcessLifecycle(),
+    });
+    const wakes: string[] = [];
+    runtime.pipeline.onIdleWake((_subscriberId, events) => {
+      for (const event of events) wakes.push(event.status);
+    });
+
+    await runtime.registry.transition(
+      {
+        kind: "spawn",
+        handle: { taskId: TASK_RUNNING, label: "l", status: "running" },
+        record: spawnRecord(OWNER),
+      },
+      { clock: () => 1_000, callerId: OWNER },
+    );
+    await runtime.registry.transition(
+      { kind: "transition", taskId: TASK_RUNNING, to: "succeeded" },
+      { clock: () => 1_500, callerId: OWNER },
+    );
+    // The observer detaches the (async) wake, so flush microtasks before asserting.
+    for (let attempt = 0; attempt < 100 && wakes.length === 0; attempt += 1) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+
+    expect(wakes).toEqual(["succeeded"]);
+  });
+
+  test("warns and reports a storage-construction failure, keeping the previous delegate usable", async () => {
+    const good = new InMemoryTaskStorage();
+    const goodOutput = new InMemoryOutputStorage();
+    const warnings: string[] = [];
+    const reported: string[] = [];
+    let fail = false;
+    const runtime = createBackgroundTaskRuntime({
+      logger: { info: () => undefined, warn: (message) => warnings.push(message) },
+      createStorage: () => {
+        if (fail) throw new Error("storage factory boom");
+        return good;
+      },
+      createOutputStorage: () => goodOutput,
+      createLifecycle: () => new MockChildProcessLifecycle(),
+    });
+
+    await runtime.bindSession("/sessions/good");
+    await runtime.registry.transition(
+      {
+        kind: "spawn",
+        handle: { taskId: TASK_RUNNING, label: "l", status: "running" },
+        record: spawnRecord(OWNER),
+      },
+      { clock: () => 1_000, callerId: OWNER },
+    );
+    fail = true;
+
+    const result = await runtime.bindSession("/sessions/bad", (message) => reported.push(message));
+
+    expect(result).toEqual([]);
+    expect(warnings.some((message) => message.includes("storage factory boom"))).toBe(true);
+    expect(reported.some((message) => message.includes("storage factory boom"))).toBe(true);
+    // The previous delegate survives: the earlier task is still readable and writable.
+    expect((await runtime.registry.get(TASK_RUNNING))?.status).toBe("running");
+    await runtime.outputStorage.writeOutput(TASK_RUNNING, "still here");
+    expect(await runtime.outputStorage.readOutput(TASK_RUNNING)).toBe("still here");
+  });
+
+  test("treats a reconcile failure as best-effort: warns, reports, resolves, registry stays usable", async () => {
+    class CorruptStorage extends InMemoryTaskStorage {
+      override async *listTasks(): AsyncIterable<TaskRecord> {
+        // The yield keeps this a generator; the first next() then rejects, which is what the
+        // storage's "corrupt record" contract surfaces.
+        yield* [] as TaskRecord[];
+        throw new Error("FileTaskStorage: corrupt JSON in tasks/xyz.json");
+      }
+    }
+    const warnings: string[] = [];
+    const reported: string[] = [];
+    const runtime = createBackgroundTaskRuntime({
+      logger: { info: () => undefined, warn: (message) => warnings.push(message) },
+      createStorage: () => new CorruptStorage(),
+      createLifecycle: () => new MockChildProcessLifecycle(),
+    });
+
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const result = await runtime.bindSession("/sessions/corrupt", (message) =>
+        reported.push(message),
+      );
+
+      expect(result).toEqual([]);
+      expect(warnings.some((message) => message.includes("corrupt JSON"))).toBe(true);
+      expect(reported.some((message) => message.includes("corrupt JSON"))).toBe(true);
+      // The session still comes up usable: spawn/get bypass listTasks, so they keep working.
+      await runtime.registry.transition(
+        {
+          kind: "spawn",
+          handle: { taskId: TASK_SECOND, label: "post-reconcile", status: "running" },
+          record: spawnRecord(OWNER),
+        },
+        { clock: () => 2_000, callerId: OWNER },
+      );
+      expect((await runtime.registry.get(TASK_SECOND))?.status).toBe("running");
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+    expect(unhandled).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+//  shutdown
+// ---------------------------------------------------------------------------
+
+describe("shutdown", () => {
+  test("marks every non-terminal task lost with the given reason, kills children, releases slots, and is idempotent", async () => {
+    const lifecycle = new MockChildProcessLifecycle();
+    const runtime = createBackgroundTaskRuntime({ createLifecycle: () => lifecycle });
+    // A live child the holder is tracking (the shared SIGTERM ladder must reach it).
+    const handle = runtime.lifecycle.spawn(["pi", "--x"], {} as ChildSpawnOptions);
+    // One held dispatch slot that shutdown must release (ADR-0022 §9).
+    expect(runtime.slots.tryAcquire()).toBe(true);
+    await runtime.registry.transition(
+      {
+        kind: "spawn",
+        handle: { taskId: TASK_RUNNING, label: "l", status: "running" },
+        record: spawnRecord(OWNER),
+      },
+      { clock: () => 1_000, callerId: OWNER },
+    );
+
+    const released = await runtime.shutdown("session_ended_while_running");
+
+    expect(released.map((record) => record.id)).toEqual([TASK_RUNNING]);
+    expect(released[0]?.status).toBe("lost");
+    expect(released[0]?.errorMessage).toBe("session_ended_while_running");
+    expect(lifecycle.getKillSignals(handle)).toEqual(["SIGTERM"]);
+    expect(runtime.slots.active).toBe(0);
+    expect((await runtime.registry.get(TASK_RUNNING))?.status).toBe("lost");
+
+    // Idempotent: a second shutdown has no non-terminal task left and does not re-kill.
+    expect(await runtime.shutdown("session_ended_while_running")).toEqual([]);
+    expect(lifecycle.getKillSignals(handle)).toEqual(["SIGTERM"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+//  dispatch path <-> tool registry (the "same registry" seam)
+// ---------------------------------------------------------------------------
+
+describe("dispatch path and tools share the holder registry", () => {
+  test("a task spawned through the dispatch path is visible to ptc_task_list", async () => {
+    await withAgent(async (dir) => {
+      const runtime = createBackgroundTaskRuntime({
+        createLifecycle: () => new MockChildProcessLifecycle(),
+      });
+      await runtime.bindSession(undefined);
+      const handle = asHandle(
+        await dispatch(
+          { agent: AGENT, task: "shared registry", background: true, agentScope: "project" },
+          { callId: 7, cwd: dir, depth: 0, maxDispatchDepth: 3, callerId: "run-1" },
+          runtime.dispatchDeps,
+        ),
+      );
+
+      const tool: AnyTool = createPtcTaskListTool(runtime.registry);
+      const result = (await tool.execute(
+        "call-1",
+        {},
+        undefined,
+        undefined,
+        undefined as never,
+      )) as {
+        details: PtcTaskListDetails;
+      };
+
+      expect(result.details.count).toBe(1);
+      expect(result.details.tasks.map((record) => record.id)).toEqual([handle.taskId]);
+      expect(result.details.tasks[0]?.status).toBe("running");
+      expect(TERMINAL.has(result.details.tasks[0]?.status ?? "")).toBe(false);
+    });
+  });
+});
