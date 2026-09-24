@@ -14,11 +14,32 @@
  * does not require the user to install pi's subagent extension. See ADR-0016 section 2.
  */
 
-import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
+
+import {
+  RealChildProcessLifecycle,
+  type ChildExitValue,
+  type ChildHandle,
+  type ChildProcessLifecycle,
+  type ParsedAgentEvent,
+} from "./child-process-lifecycle.ts";
+
+// Re-exports keep existing imports working after BG-03 moved these definitions.
+// `tests/dispatch-helpers.test.ts` imports `parseAgentEvent` / `safeKill` from this
+// module; rather than churn the test file, we re-export them.
+export { parseAgentEvent, safeKill } from "./child-process-lifecycle.ts";
+
+/**
+ * Shared lifecycle adapter for the foreground `pi.dispatch` path. BG-03 extracted the
+ * spawn / kill / JSONL-parse / exit-wait dance into a typed seam so the background
+ * dispatch (ADR-0022) can drive the same handles from a different caller. Tests that
+ * need to swap the adapter mock the `node:child_process` module (which is what
+ * `RealChildProcessLifecycle` calls into); the seam itself is module-private.
+ */
+const DISPATCH_LIFECYCLE: ChildProcessLifecycle = new RealChildProcessLifecycle();
 
 /**
  * The CLI command used to invoke a fresh pi subprocess for one dispatch.
@@ -207,39 +228,6 @@ export function decideCloseOutcome(input: CloseOutcomeInput): CloseOutcome {
 }
 
 /**
- * Minimal interface for the bits of `node:child_process`'s ChildProcess that
- * `safeKill` touches — narrow on purpose so tests can pass plain objects.
- *
- * `pid` is optional on `ChildProcess` (`pid?: number`); a fresh process whose
- * pid has not yet been assigned reports `undefined`, and the kill must be a
- * no-op rather than a TS error. `killed` is intentionally absent: callers read
- * it on the real ChildProcess directly, not through this helper's contract.
- */
-export interface Killable {
-  pid?: number | undefined;
-  kill(signal: NodeJS.Signals): boolean;
-}
-
-/**
- * Send `signal` to `proc` iff the process is still attached, swallowing
- * "process already gone" throws. Returns whether a kill was actually issued.
- *
- * `proc.pid === undefined` happens for processes spawned without a usable
- * pid (rare, but TS-strict demands the guard); `proc.kill` throwing happens
- * for processes that exited between the guard and the syscall (the OS hands
- * back ESRCH). Both are "no-op successfully" for our purposes.
- */
-export function safeKill(proc: Killable, signal: NodeJS.Signals): boolean {
-  if (proc.pid === undefined) return false;
-  try {
-    proc.kill(signal);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Minimal YAML frontmatter scalar parser. Returns the trimmed value, with surrounding
  * double or single quotes stripped when both are present.
  */
@@ -390,40 +378,6 @@ export function buildArgv(
 }
 
 /**
- * One line of the child's stdout, parsed as JSON. The child emits the events described
- * in examples/extensions/subagent/index.ts (message_end, tool_result_end, error).
- * Anything unparseable is dropped: the line is one event the host cannot interpret, and
- * the run continues.
- */
-interface ParsedAgentEvent {
-  type: string;
-  message?: {
-    role?: string;
-    content?: ReadonlyArray<{ type?: string; text?: string }>;
-    usage?: {
-      input?: number;
-      output?: number;
-      cacheRead?: number;
-      cacheWrite?: number;
-      cost?: { total?: number };
-    };
-    model?: string;
-    stopReason?: string;
-    errorMessage?: string;
-  };
-  message_text?: string;
-}
-
-export function parseAgentEvent(line: string): ParsedAgentEvent | null {
-  const trimmed = line.trim();
-  if (trimmed.length === 0) return null;
-  try {
-    return JSON.parse(trimmed) as ParsedAgentEvent;
-  } catch {
-    return null;
-  }
-}
-/**
  * Write the system prompt (with depth hint appended) to a tmpfile. The caller is
  * responsible for cleanup; we use mkdtemp + 0o600 to keep the prompt private, then
  * best-effort cleanup in the dispatch() Promise.
@@ -502,14 +456,13 @@ export async function dispatch(
   const argv = buildArgv(input, agent, tmp.filePath);
 
   return await new Promise<DispatchResult>((resolve) => {
-    let stdoutBuffer = "";
-    let stderrBuf = "";
     let finalText = "";
     let usage: DispatchUsage | undefined;
     let exitCode = -1;
+    let stderrText = "";
     let resolved = false;
     let killTimer: NodeJS.Timeout | undefined;
-    let proc: ReturnType<typeof spawn> | undefined;
+    let handle: ChildHandle | undefined;
     let aborted = false;
 
     const finalize = (
@@ -531,31 +484,42 @@ export async function dispatch(
         exitCode,
       };
       if (usage) out.usage = usage;
-      if (stderrBuf.length > 0) out.stderr = stderrBuf;
+      if (stderrText.length > 0) out.stderr = stderrText;
       if (errorMessage) out.errorMessage = errorMessage;
       resolve(out);
     };
 
     const onAbort = (): void => {
-      if (!proc || proc.killed || resolved) return;
+      if (!handle || resolved) return;
       aborted = true;
-      safeKill(proc, "SIGTERM");
+      DISPATCH_LIFECYCLE.kill(handle, "SIGTERM");
       killTimer = setTimeout(() => {
-        if (proc && !proc.killed) safeKill(proc, "SIGKILL");
+        // The lifecycle adapter's kill() absorbs "process already gone" throws via
+        // safeKill, so we don't need to gate on `proc.killed` here any more — the
+        // adapter does the right thing either way.
+        if (handle && !resolved) DISPATCH_LIFECYCLE.kill(handle, "SIGKILL");
       }, 5000);
     };
 
+    // Hand the spawn to the lifecycle adapter (BG-03). The adapter wires stdout /
+    // stderr pipes, JSONL parsing, and the close / error event handlers; this function
+    // is left to accumulate usage / finalText and decide the close outcome.
     try {
-      proc = spawn(PI_COMMAND, argv, {
-        cwd,
-        shell: false,
-        stdio: ["ignore", "pipe", "pipe"],
-        // ADR-0016 Recursive section: the child run's depth baseline travels in the
-        // environment so the pi-ptc extension loaded inside the child starts its PTC
-        // runs at childDepth instead of at 0; the rest of the environment is inherited
-        // from the host (the child needs the same PATH and provider config as pi itself).
-        env: { ...process.env, PI_PTC_DEPTH: String(childDepth) },
-      });
+      handle = DISPATCH_LIFECYCLE.spawn(
+        // argv[0] is the command per the ChildProcessLifecycle contract; the rest are
+        // forwarded verbatim. PI_COMMAND stays "pi" — see the constant's doc for why
+        // we don't reuse process.execPath.
+        [PI_COMMAND, ...argv],
+        {
+          cwd,
+          // ADR-0016 Recursive section: the child run's depth baseline travels in the
+          // environment so the pi-ptc extension loaded inside the child starts its PTC
+          // runs at childDepth instead of at 0; the rest of the environment is inherited
+          // from the host (the child needs the same PATH and provider config as pi itself).
+          env: { ...process.env, PI_PTC_DEPTH: String(childDepth) },
+          promptFile: tmp.filePath,
+        },
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       finalize("rejected", "failed to spawn pi: " + message, false);
@@ -567,68 +531,68 @@ export async function dispatch(
       else ctx.signal.addEventListener("abort", onAbort, { once: true });
     }
 
-    const stdout = proc.stdout;
-    if (!stdout) return;
-    stdout.on("data", (data: Buffer) => {
-      stdoutBuffer += data.toString("utf-8");
-      let nl = stdoutBuffer.indexOf("\n");
-      while (nl >= 0) {
-        const line = stdoutBuffer.slice(0, nl);
-        stdoutBuffer = stdoutBuffer.slice(nl + 1);
-        const ev = parseAgentEvent(line);
-        if (!ev) {
-          nl = stdoutBuffer.indexOf("\n");
-          continue;
-        }
-        if (ev.type === "message_end" && ev.message && ev.message.role === "assistant") {
-          const m = ev.message;
-          if (m.usage) {
-            const cur: DispatchUsage = usage ?? {
-              input: 0,
-              output: 0,
-              cacheRead: 0,
-              cacheWrite: 0,
-              cost: 0,
-              turns: 0,
-            };
-            cur.input += m.usage.input ?? 0;
-            cur.output += m.usage.output ?? 0;
-            cur.cacheRead += m.usage.cacheRead ?? 0;
-            cur.cacheWrite += m.usage.cacheWrite ?? 0;
-            cur.cost += m.usage.cost?.total ?? 0;
-            cur.turns += 1;
-            usage = cur;
-          }
-          if (Array.isArray(m.content)) {
-            for (const part of m.content) {
-              if (part && part.type === "text" && typeof part.text === "string") {
-                finalText = part.text;
+    // Drain the adapter's event stream and finalize the result. We run this async
+    // work inside the Promise body so `resolve` (and therefore `finalize`) can fire
+    // synchronously on the abort path while the iterator is still parked.
+    void (async () => {
+      if (!handle) return;
+      const h = handle;
+      try {
+        for await (const ev of DISPATCH_LIFECYCLE.events(h)) {
+          if (ev.type === "message_end" && ev.message && ev.message.role === "assistant") {
+            const m = ev.message;
+            if (m.usage) {
+              const cur: DispatchUsage = usage ?? {
+                input: 0,
+                output: 0,
+                cacheRead: 0,
+                cacheWrite: 0,
+                cost: 0,
+                turns: 0,
+              };
+              cur.input += m.usage.input ?? 0;
+              cur.output += m.usage.output ?? 0;
+              cur.cacheRead += m.usage.cacheRead ?? 0;
+              cur.cacheWrite += m.usage.cacheWrite ?? 0;
+              cur.cost += m.usage.cost?.total ?? 0;
+              cur.turns += 1;
+              usage = cur;
+            }
+            if (Array.isArray(m.content)) {
+              for (const part of m.content) {
+                if (part && part.type === "text" && typeof part.text === "string") {
+                  finalText = part.text;
+                }
               }
             }
           }
         }
-        nl = stdoutBuffer.indexOf("\n");
+
+        // Events iterator ended — child has closed.
+        const exitVal: ChildExitValue = await DISPATCH_LIFECYCLE.exit(h);
+        exitCode = exitVal.code ?? -1;
+        stderrText = await DISPATCH_LIFECYCLE.stderr(h);
+
+        // A failed spawn (ENOENT and friends) never brought a child up, so it is a
+        // refusal like the depth and concurrency gates — `started: false` is what
+        // keeps it out of the sub-call tree's `error` bucket. The adapter marks the
+        // stderr with `[spawn-error] <message>` (same convention as the pre-BG-03
+        // dispatch code).
+        const spawnErrMatch = stderrText.match(/^\[spawn-error\] (.+)$/m);
+        if (spawnErrMatch && exitVal.code === null && exitVal.signal === null) {
+          finalize("rejected", "failed to spawn pi: " + spawnErrMatch[1], false);
+          return;
+        }
+
+        const { status, errorMessage } = decideCloseOutcome({ exitCode, finalText, aborted });
+        finalize(status, errorMessage);
+      } catch (err) {
+        // The lifecycle adapter's events() / exit() / stderr() do not throw under
+        // normal operation; if something unexpected happens, surface it as a rejected
+        // result rather than hanging the dispatch Promise.
+        const message = err instanceof Error ? err.message : String(err);
+        finalize("rejected", "dispatch internal error: " + message);
       }
-    });
-
-    const stderrStream = proc.stderr;
-    if (!stderrStream) return;
-    stderrStream.on("data", (data: Buffer) => {
-      stderrBuf += data.toString("utf-8");
-    });
-
-    proc.on("close", (code) => {
-      exitCode = code ?? -1;
-      const { status, errorMessage } = decideCloseOutcome({ exitCode, finalText, aborted });
-      finalize(status, errorMessage);
-    });
-
-    proc.on("error", (err) => {
-      stderrBuf += "[spawn-error] " + err.message + "\n";
-      // A failed spawn (ENOENT and friends arrive here, not at the synchronous `spawn()` call)
-      // never brought a child up, so it is a refusal like the depth and concurrency gates —
-      // `started: false` is what keeps it out of the sub-call tree's `error` bucket.
-      finalize("rejected", "failed to spawn pi: " + err.message, false);
-    });
+    })();
   });
 }
