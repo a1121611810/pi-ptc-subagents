@@ -2,7 +2,7 @@
 
 ADR-0016 added `pi.dispatch(...)` as a parallel binding that returns a `DispatchResult` once the child pi subprocess exits. What ADR-0016 explicitly did NOT add is the lifecycle face of that child: the parent turn's model has no tool to ask "is task X still running", "give me task X's output", or "stop task X". The child lives only as long as the awaited Promise in the program; its state evaporates when the call resolves.
 
-Background dispatch is the long-lived variant. A child may outlive the spawn turn, may run across program boundaries, may finish while the parent is in a 30-minute tool loop, may fail because the host rebooted, and the parent turn's model must observe all of these. The binding remains the spawn surface (so the program keeps agency over who spawns what), but the *state* moves out of the binding's return value into a session-level **TaskRegistry** whose cursor advances on delivery, and a small set of model-visible `ptc_task_*` tools whose semantics are documented here.
+Background dispatch is the long-lived variant. A child may outlive the spawn turn, may run across program boundaries, may finish while the parent is in a 30-minute tool loop, may fail because the host rebooted, and the parent turn's model must observe all of these. The binding remains the spawn surface (so the program keeps agency over who spawns what), but the _state_ moves out of the binding's return value into a session-level **TaskRegistry** whose cursor advances on delivery, and a small set of model-visible `ptc_task_*` tools whose semantics are documented here.
 
 Status: accepted (2026-09-24). Behavior change on the program-visible side (new optional `{ background: true }` opt on the existing binding; new optional `subscribe` interface for cursor-based observation; new model-facing tools `ptc_task_list` / `ptc_task_output` / `ptc_task_stop`; new TaskRecord 21-field schema persisted under `<sessionDir>/`; new subscription event schema with `<bg-task-notifications>` parent + per-event `<bg-task-notification>` children). All changes are additive: existing foreground `pi.dispatch(...)` keeps its `DispatchResult` shape and semantics unchanged.
 
@@ -29,7 +29,7 @@ This ADR closes the bgdispatch map. The four research/decision tickets it crysta
 
 6. **`ptc_task_list`, `ptc_task_output`, `ptc_task_stop`** model-facing tools per G1. Constant model surface; **not** affected by `/ptc off` -- `/ptc off` only gates new spawn (ADR-0016 R6), it does not orphan in-flight tasks (per map Notes clause 5).
 
-7. **`ptc_task_resubscribe(taskId, since: ULID | "initial")`** per Q3 fork semantics. Default `max(parent, child) cursor` for forked branches; explicit reset to `"initial"` for full-replay observation.
+7. **`ptc_task_resubscribe(taskId, since: ULID | "initial")`** per Q3 fork semantics. Default `max(parent, child) cursor` for forked branches; explicit reset to `"initial"` for full-replay observation. **v1 status: deferred to v2.** The v1 `subscribe(since?)` seam takes the starting cursor from the caller, so a fork integration supplies `max(parent, child)` itself; neither the helper nor the reset tool ships in v1.
 
 8. **Reopen hooks** (this ADR closes the agenda): when any of these happens, the TaskRegistry fires its existing notification path (cursor advances, parent wakes). They do NOT require new model-facing tools.
    - **Steering** (forwarded): `ptc_task_append(taskId, message)` -- mcode 3-state ack (`activated` / `steered` / `duplicate`). v1 scope: out of scope (map.frozen: 复活/steering 一起评).
@@ -52,13 +52,13 @@ TaskStorage interface is unchanged and both adapters are kept.
 
 ## What we deliberately don't add
 
-1. **No `/ptc off` orphan** -- map Notes clause 5: in-flight tasks continue to deliver notifications and update TaskRecord even when `/ptc off` is on. The mode toggle affects *new spawn* (ADR-0016 R6); it does not affect in-flight lifecycle.
+1. **No `/ptc off` orphan** -- map Notes clause 5: in-flight tasks continue to deliver notifications and update TaskRecord even when `/ptc off` is on. The mode toggle affects _new spawn_ (ADR-0016 R6); it does not affect in-flight lifecycle.
 
 2. **No spawned-into-quota** -- the existing `dispatchConcurrency` (default 8, ADR-0016) is the only concurrency gate. There is no in-task queue (`queued` state absent, per G1). Spawn above the cap resolves with `rejected` immediately. codex's `agent_max_depth` analogue maps to the existing `maxDispatchDepth` (default 3, ADR-0016 recursive section).
 
 3. **No transparency into the spawned child's tool-calling** -- the model sees `dispatched <label> -> <taskId>` once; mid-flight it sees nothing. Live child state moves to the TUI backend panel (P1), not to the sub-call tree. (G1 verdict section 5.)
 
-4. **No model-visible `subscribe` API** -- cursor management is wholly the TaskRegistry's job. The model decides *whether* to query (`ptc_task_list`), but never has to manage a cursor. The cursor-based architecture is in service of the registry, not exposed.
+4. **No model-visible `subscribe` API** -- cursor management is wholly the TaskRegistry's job. The model decides _whether_ to query (`ptc_task_list`), but never has to manage a cursor. The cursor-based architecture is in service of the registry, not exposed.
 
 5. **No `resume` in v1** -- `ptc_task_resume` is listed in section 8 as a deferred hook, not a v1 surface. R1 already locked "resume has no identity check (ADR 记为已知取舍)" as a known limitation; the v1 task record's `lost` state is the terminal when restart hits a non-terminal record.
 
@@ -80,14 +80,14 @@ Why an opt, not a new binding `pi.dispatch_background(...)`: ADR-0016 already do
 
 ### 2. State machine (6 states, no `queued`)
 
-| state | enters from | triggers |
-|---|---|---|
-| `running` | `(spawn)` (atomic) | emit `task:<id>:running` |
-| `stopping` | `running` (model stop call) | emit `task:<id>:stopping` |
-| `succeeded` | `running` | child exits 0 |
-| `failed` | `running` | child exits non-zero |
-| `canceled` | `running` / `stopping` | model stop; or `ptc_task_handoff` (v2, defer) |
-| `lost` | `running` (session restart); or restart-reconcile | TASK_LOST_ON_STARTUP |
+| state       | enters from                                       | triggers                                      |
+| ----------- | ------------------------------------------------- | --------------------------------------------- |
+| `running`   | `(spawn)` (atomic)                                | emit `task:<id>:running`                      |
+| `stopping`  | `running` (model stop call)                       | emit `task:<id>:stopping`                     |
+| `succeeded` | `running`                                         | child exits 0                                 |
+| `failed`    | `running`                                         | child exits non-zero                          |
+| `canceled`  | `running` / `stopping`                            | model stop; or `ptc_task_handoff` (v2, defer) |
+| `lost`      | `running` (session restart); or restart-reconcile | TASK_LOST_ON_STARTUP                          |
 
 `queued` is **deliberately absent** in v1 (G1 verdict): the cap is `dispatchConcurrency=8` hard reject (ADR-0016); there is no in-task queue; spawning above the cap resolves immediately as `rejected`. G2 prototype v1 surfaced 0 successful spawns that overflowed the cap in 12 scenarios.
 
@@ -98,22 +98,22 @@ interface TaskRecord {
   id: ULID;
   label: string;
   agentName: string;
-  depth: number;          // 0 = parent's direct, 1 = grandchild, etc.
-  status: TaskStatus;     // 6-state enum
-  createdAt: number;      // ms epoch
+  depth: number; // 0 = parent's direct, 1 = grandchild, etc.
+  status: TaskStatus; // 6-state enum
+  createdAt: number; // ms epoch
   startedAt: number;
   finishedAt?: number;
   durationMs?: number;
-  transitionAt: number;   // last state transition; used for cursor
-  outputRef?: string;     // <sessionDir>/tasks/<id>/output.log
+  transitionAt: number; // last state transition; used for cursor
+  outputRef?: string; // <sessionDir>/tasks/<id>/output.log
   outputBytes?: number;
-  outputPreview?: string;  // <=2KB inline preview (Map+preview)
+  outputPreview?: string; // <=2KB inline preview (Map+preview)
   stopReason?: string;
   errorMessage?: string;
   exitCode?: number;
   spawnSource: { kind: "ptc-program" | "ptc-batch"; callerId: string };
   parentTaskId?: ULID;
-  sessionFile?: string;    // <sessionDir>/tasks/<id>.pi-* per R1
+  sessionFile?: string; // <sessionDir>/tasks/<id>.pi-* per R1
 }
 ```
 
@@ -125,7 +125,7 @@ Args and prompt text do **not** live in TaskRecord (privacy + size); they live i
 type DispatchHandle = {
   taskId: ULID;
   label: string;
-  status: "running";       // always "running" at handle creation
+  status: "running"; // always "running" at handle creation
 };
 ```
 
@@ -137,7 +137,7 @@ The handle is what the spawning program carries. The TaskRecord is what the regi
 interface Subscription {
   subscriberId: ULID;
   taskId: ULID;
-  cursor: ULID;            // monotonic per subscriber
+  cursor: ULID; // monotonic per subscriber
   status: "active" | "closed";
   createdAt: number;
 }
@@ -156,6 +156,7 @@ Multi-subscriber broadcast: each subscriber keeps its own cursor; event fan-out 
 G2 prototype v1 verified: 4-scheme head-to-head across 12 scenarios, 6 dimensions. The locked choice is **B. SUB + Map + preview** -- winner on performance (p99 30s vs PUSH 9.5 min, 19x faster), tokens-effective (925 B/delivered, smallest), boundary (100% delivered; PUSH 75%), and exceptions (cursor replay handles network / restart / fork).
 
 The rejected schemes:
+
 - **A. PUSH + Tiered** -- 75% delivered in burst / restart scenarios; 9.5 min p99.
 - **C. SUB + Tiered** -- same delivery as B but +60% bytes (Tiered payload inflated without rate-limit).
 - **D. PUSH + Map** -- 75% delivered; smallest raw bytes (1.69 MB) but effective 940 B/delivered (only marginally cheaper than B for 25% lost).
@@ -192,11 +193,12 @@ A single batch carries N events. When a single-batch content exceeds the byte bu
 
 Map fog sub-item (the 3rd G1 sub-item), resolved:
 
-| signal source | trigger | TaskRecord transition | emit key |
-|---|---|---|---|
-| `ptc_task_stop(taskId, reason)` (model) | explicit | `running -> stopping -> canceled` | `task:<id>:->canceled` |
-| AbortSignal / Esc (session) | implicit | `running -> lost` (reason=session_ended_while_running) | `task:<id>:->lost` |
-| session restart (startup-reconcile) | implicit | `running -> lost` (reason=lost_on_session_restart) | `task:<id>:->lost` |
+| signal source                            | trigger  | TaskRecord transition                                  | emit key               |
+| ---------------------------------------- | -------- | ------------------------------------------------------ | ---------------------- |
+| `ptc_task_stop(taskId, reason)` (model)  | explicit | `running -> stopping -> canceled`                      | `task:<id>:->canceled` |
+| AbortSignal / Esc (session)              | implicit | `running -> lost` (reason=session_ended_while_running) | `task:<id>:->lost`     |
+| user kills the session from the Esc path | implicit | `running -> lost` (reason=user_killed_via_esc)         | `task:<id>:->lost`     |
+| session restart (startup-reconcile)      | implicit | `running -> lost` (reason=lost_on_session_restart)     | `task:<id>:->lost`     |
 
 Three `lost` reasons (distinct strings in `errorMessage` field) preserve auditability. Model stop is explicit and synchronous (cursor advances past `canceled`); session-stop is implicit and async (cursor advances at next session replay).
 
@@ -221,18 +223,19 @@ ADR-0016 added `pi.dispatch` as a parallel binding that returns a `DispatchResul
 **This ADR flips that half-sentence.** The spawn surface remains the binding (no new binding `pi.dispatch_background`; one parameterization, not two surfaces). The **lifecycle face** is now model-visible via three tools (`ptc_task_list` / `ptc_task_output` / `ptc_task_stop`), and the cursor-based subscription delivers events to the model. The CONTEXT.md glossary entry for `pi.dispatch` is updated accordingly: the words "_Not_ a model-visible lifecycle tool" are replaced with "spawn is binding; the lifecycle face is model-visible via `ptc_task_*` tools (see `bg-task-notification` events)".
 
 The flip preserves ADR-0016's other invariants:
+
 - binding is untrusted program input (ADR-0005)
 - binding is called by the program, not by the model's tool-call surface
 - no per-call gate on bindings
 - Promise semantics (no throw) for foreground
 
-What changes: the **result tree** now contains a `DispatchHandle` (background) or `DispatchResult` (foreground), not just `DispatchResult`. The model can still not *call* `pi.dispatch`; it can only observe tasks that the program called.
+What changes: the **result tree** now contains a `DispatchHandle` (background) or `DispatchResult` (foreground), not just `DispatchResult`. The model can still not _call_ `pi.dispatch`; it can only observe tasks that the program called.
 
 ## Boundary with existing tools
 
 - **`ptc_run_code` / `ptc_workflow`**: unchanged. Programs that need a single program still call `ptc_run_code`; they don't need TaskRegistry.
 - **`ptc_task_*` tools**: new surface. They live alongside `ptc_run_code` etc. in the same `tools.<name>(args)` table; they are **constant on** -- not gated by `/ptc off`. Map Notes clause 5.
-- **`pi.dispatch` foreground**: unchanged. They return `DispatchResult`. Background is an *additive* opt.
+- **`pi.dispatch` foreground**: unchanged. They return `DispatchResult`. Background is an _additive_ opt.
 
 ## Implementation outline (deferred to follow-up commits)
 
