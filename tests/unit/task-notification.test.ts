@@ -367,65 +367,15 @@ describe("shouldDeliverTaskNotification (T4.4 suppression)", () => {
 
 // --- counterfactual (constraint #5) ----------------------------------------------------------
 
-describe("counterfactual (constraint #5)", () => {
-  // These build the obviously-wrong variants the ticket names and show the spec assertions
-  // above genuinely reject them. A regression that weakened an assertion would lose this
-  // property, so the counterfactual guards the spec.
-
-  test("removing the preview ceiling would break the 2049 test", () => {
-    const item = makeItem(
-      { status: "succeeded", outputBytes: 2049, outputPreview: "p" },
-      { status: "succeeded", outputBytes: 2049, outputPreview: "p" },
-    );
-    const real = renderTaskNotifications([item], OPTS);
-    const ceilingless = real.replace(
-      "  </bg-task-notification>",
-      "    <output-preview>p</output-preview>\n  </bg-task-notification>",
-    );
-
-    expect(real).not.toContain("<output-preview>");
-    expect(ceilingless).not.toBe(real);
-    expect(ceilingless).toContain("<output-preview>p</output-preview>");
-  });
-
-  test("swapping <= for < would break the 2048 test", () => {
-    const item = makeItem(
-      { status: "succeeded", outputBytes: 2048, outputPreview: "p" },
-      { status: "succeeded", outputBytes: 2048, outputPreview: "p" },
-    );
-    const real = renderTaskNotifications([item], OPTS);
-    const strictLess = real.replace("    <output-preview>p</output-preview>\n", "");
-
-    expect(real).toContain("<output-preview>p</output-preview>");
-    expect(strictLess).not.toContain("<output-preview>");
-    expect(strictLess).not.toBe(real);
-  });
-
-  test("dropping XML escaping would break the escaping test", () => {
-    const item = makeItem(
-      {
-        status: "succeeded",
-        outputBytes: 7,
-        outputPreview: ESCAPED_PREVIEW_RAW,
-        label: ESCAPED_LABEL_RAW,
-      },
-      { status: "succeeded", outputBytes: 7, outputPreview: ESCAPED_PREVIEW_RAW },
-    );
-    const real = renderTaskNotifications([item], OPTS);
-    const unescaped = real.replace("a&lt;b>c &amp; d&quot;e&#10;f", ESCAPED_LABEL_RAW);
-
-    expect(real).not.toContain(ESCAPED_LABEL_RAW);
-    expect(unescaped).not.toBe(real);
-    expect(unescaped).toContain(ESCAPED_LABEL_RAW);
-  });
-
-  test("dropping an oversized item would break the preservation assertion", () => {
-    const huge = itemAt(0, "H".repeat(500));
-    const small = itemAt(1);
-    const batches = splitTaskNotificationBatches([huge, small], 900);
-    const dropped = batches.filter((batch) => !(batch.length === 1 && batch[0] === huge));
-
-    expect(batches.flat()).toEqual([huge, small]);
-    expect(dropped).not.toEqual([huge, small]);
-  });
-});
+// Counterfactual note (constraint #5, review-2 finding B5): this file used to carry a
+// "counterfactual" block that mutated the RENDERED STRING and asserted the mutation differed.
+// That is self-referential - a broken renderer leaves it green - so it was deleted. Each real
+// assertion above already rejects the named wrong implementation:
+//   - the 2049-byte case asserts the output does NOT contain `<output-preview>`, so an
+//     implementation that always inlines the preview fails it;
+//   - the 2048-byte case asserts it DOES, so `<` instead of `<=` fails it;
+//   - the escaping case asserts the raw `<`/`&`/`"`/newline never appear, so a renderer that
+//     interpolates without escaping fails it;
+//   - the preservation case asserts the flattened batches equal the input, so a splitter that
+//     drops an oversized item fails it.
+// Weakening those assertions - not adding a string mutation - is what would weaken the suite.
