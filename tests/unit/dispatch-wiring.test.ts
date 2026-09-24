@@ -40,10 +40,14 @@ import {
   type ULID,
 } from "../../src/runtime/task-storage.ts";
 import { runPtcProgram } from "../../src/runtime/dispatcher.ts";
-import { makeBindings, makeTempDir, removeTempDir } from "../helpers/ptc.ts";
+import { createPtcRunCodeTool } from "../../src/tools/run-code.ts";
+import { createBackgroundTaskRuntime } from "../../src/runtime/background-runtime.ts";
+import { makeBindings, makeTempDir, removeTempDir, toolContext } from "../helpers/ptc.ts";
 
 const AGENT = "wiring-probe";
 const AGENT_MD = "---\nname: wiring-probe\n---\nYou are wired.\n";
+/** Canonical ULID literal (Crockford base32) used as the parent task id. */
+const PARENT_TASK = "01ARZ3NDEKTSV4RRFFQ69G5FAV" as ULID;
 
 const TERMINAL: ReadonlySet<TaskStatus> = new Set<TaskStatus>([
   "succeeded",
@@ -268,5 +272,105 @@ describe("dispatcher.ts threads the per-run counter + session identity (Gap 2 + 
     expect(contexts).toHaveLength(1);
     expect(contexts[0]?.sessionDir).toBeUndefined();
     expect(contexts[0]?.callerId).toBe("run-43");
+  });
+});
+
+// ---------------------------------------------------------------------------
+//  parentTaskId end-to-end wire (reopen R-m12)
+// ---------------------------------------------------------------------------
+
+describe("parentTaskId reaches the nested TaskRecord (reopen R-m12)", () => {
+  test("the real dispatch binding stamps BindingContext.parentTaskId onto the record", async () => {
+    await withAgent(async (dir) => {
+      const storage = new InMemoryTaskStorage();
+      const registry: TaskRegistry = createTaskRegistry(storage, { clock: () => 1000 });
+      const lifecycle = new RecordingLifecycle();
+      const slots = new DispatchSlotCounter(4);
+      const table = createBuiltinBindings({ cwd: dir, includeDispatch: true });
+      const binding = table.get(DISPATCH_BINDING_NAME);
+      if (binding === undefined) throw new Error("pi.dispatch binding is missing");
+
+      const result = await binding.execute(
+        { agent: AGENT, task: "nested", background: true, agentScope: "project" },
+        {
+          callId: 11,
+          depth: 0,
+          maxDispatchDepth: 3,
+          callerId: "run-parent",
+          parentTaskId: PARENT_TASK,
+          dispatchDeps: { taskRegistry: registry, lifecycle, slots, clock: () => 1000 },
+        },
+      );
+      if (result === null || typeof result !== "object" || !("taskId" in result)) {
+        throw new Error("expected a DispatchHandle from the background binding");
+      }
+      const handle = result as DispatchHandle;
+
+      const record = await storage.loadTask(handle.taskId);
+      expect(record?.parentTaskId).toBe(PARENT_TASK);
+      lifecycle.resolveExit(firstHandle(lifecycle), 0, null);
+      await waitForTerminal(storage, handle.taskId);
+    });
+  });
+
+  test("runPtcProgram threads parentTaskId through a nested background dispatch", async () => {
+    await withAgent(async (dir) => {
+      const storage = new InMemoryTaskStorage();
+      const registry: TaskRegistry = createTaskRegistry(storage, { clock: () => 1000 });
+      const lifecycle = new RecordingLifecycle();
+      const slots = new DispatchSlotCounter(4);
+      const outcome = await runPtcProgram({
+        code:
+          "const h = await tools['pi.dispatch']({agent:'" +
+          AGENT +
+          "',task:'nested',background:true,agentScope:'project'});\n" +
+          "return h.taskId;",
+        surface: "run_code",
+        cwd: dir,
+        bindings: createBuiltinBindings({ cwd: dir, includeDispatch: true }),
+        runId: "run-nested",
+        parentTaskId: PARENT_TASK,
+        dispatchDeps: { taskRegistry: registry, lifecycle, slots, clock: () => 1000 },
+      });
+
+      expect(outcome.error).toBeUndefined();
+      const taskId = outcome.value as ULID;
+      const record = await storage.loadTask(taskId);
+      expect(record?.parentTaskId).toBe(PARENT_TASK);
+      lifecycle.resolveExit(firstHandle(lifecycle), 0, null);
+      await waitForTerminal(storage, taskId);
+    });
+  });
+
+  test("the ptc_run_code tool forwards PtcToolOptions.parentTaskId to runPtcProgram", async () => {
+    await withAgent(async (dir) => {
+      const lifecycle = new RecordingLifecycle();
+      const runtime = createBackgroundTaskRuntime({ createLifecycle: () => lifecycle });
+      const tool = createPtcRunCodeTool({
+        getBindingSourceNames: () => [],
+        getDispatchDeps: () => runtime.dispatchDeps,
+        parentTaskId: PARENT_TASK,
+      });
+
+      const result = (await tool.execute(
+        "call-parent",
+        {
+          code:
+            "const h = await tools['pi.dispatch']({agent:'" +
+            AGENT +
+            "',task:'nested',background:true,agentScope:'project'});\n" +
+            "return h.taskId;",
+          description: "nested dispatch parent wire",
+        },
+        undefined,
+        undefined,
+        toolContext(dir),
+      )) as { details: { result?: unknown } };
+
+      const taskId = result.details.result as ULID;
+      const record = await runtime.registry.get(taskId);
+      expect(record?.parentTaskId).toBe(PARENT_TASK);
+      lifecycle.resolveExit(firstHandle(lifecycle), 0, null);
+    });
   });
 });

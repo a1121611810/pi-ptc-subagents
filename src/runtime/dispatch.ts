@@ -65,6 +65,13 @@ const DISPATCH_LIFECYCLE: ChildProcessLifecycle = new RealChildProcessLifecycle(
 export class DispatchSlotCounter {
   readonly limit: number;
   #active: number;
+  /**
+   * Tokens currently holding a slot. Only keyed acquires are tracked here; the dispatcher's
+   * foreground per-call gate keeps using the anonymous form. A token makes acquire/release
+   * idempotent PER TASK, which is what stops a late pump release from freeing a different
+   * live task's slot after `shutdown` already released the reclaimed task.
+   */
+  readonly #holders = new Set<string>();
 
   constructor(limit: number) {
     if (!Number.isInteger(limit) || limit < 0) {
@@ -81,16 +88,26 @@ export class DispatchSlotCounter {
     return this.#active;
   }
 
-  /** Reserve one in-flight slot; `false` means the cap is reached (hard reject, no queue). */
-  tryAcquire(): boolean {
+  /** Reserve one in-flight slot (optionally keyed by a per-task holder token); `false` means the cap is reached (hard reject, no queue). */
+  tryAcquire(holder?: string): boolean {
+    if (holder !== undefined && this.#holders.has(holder)) return false;
     if (this.#active >= this.limit) return false;
+    if (holder !== undefined) this.#holders.add(holder);
     this.#active += 1;
     return true;
   }
 
-  /** Release one slot; idempotent and never goes negative (a late release is safe). */
-  release(): void {
-    if (this.#active > 0) this.#active -= 1;
+  /**
+   * Release one slot; per-token idempotent (a late release for the same task is a no-op) and
+   * never negative. An anonymous release only frees an anonymous reservation.
+   */
+  release(holder?: string): void {
+    if (holder !== undefined) {
+      if (!this.#holders.delete(holder)) return;
+      this.#active -= 1;
+      return;
+    }
+    if (this.#active > this.#holders.size) this.#active -= 1;
   }
 }
 
@@ -638,8 +655,12 @@ async function dispatchBackground(
     // Background refusal (issue #68 part 4): teach the model to inspect in-flight tasks.
     return backgroundDispatchDepthLimitReached();
   }
+  // ADR-0022 §4/§9: mint the task id BEFORE acquiring its slot so the reservation is keyed by
+  // the task that owns it. The pump and `shutdown` both release by this id; the release is
+  // idempotent per task, so whichever runs second cannot free another live task's slot.
+  const taskId = createULID();
   const slots = deps.slots ?? FALLBACK_DISPATCH_SLOTS;
-  if (!slots.tryAcquire()) {
+  if (!slots.tryAcquire(taskId)) {
     return backgroundDispatchConcurrencyLimitReached();
   }
 
@@ -657,7 +678,7 @@ async function dispatchBackground(
   try {
     const agent = discoverAgent(input.agent, cwd, agentScope);
     if (!agent) {
-      slots.release();
+      slots.release(taskId);
       return {
         text: "",
         status: "rejected",
@@ -670,9 +691,8 @@ async function dispatchBackground(
       };
     }
 
-    // ADR-0022 §4: mint the fresh task id; the registry adopts it as the TaskRecord id, so
-    // the handle the program carries and the persisted record agree at creation.
-    const taskId = createULID();
+    // The registry adopts the already-minted id as the TaskRecord id, so the handle the
+    // program carries, the persisted record and the slot token all agree at creation.
     const label = input.label ?? input.task.slice(0, 64);
     const fullPrompt = appendDepthHint(agent.systemPrompt, childDepth, ctx.maxDispatchDepth);
     const written = await writePromptToTempFile(agent.name, fullPrompt);
@@ -720,7 +740,9 @@ async function dispatchBackground(
           exitCode: undefined,
           spawnSource,
           parentTaskId: ctx.parentTaskId,
-          sessionFile: undefined,
+          // ADR-0022 §3 (v1, R-m12): `sessionFile` is left UNSET. The extension cannot know
+          // pi's session-file path, and a fabricated value would be worse than an absent one;
+          // a future reader that can learn it may fill the field in.
         },
       },
       { clock, callerId, logger },
@@ -808,7 +830,8 @@ async function dispatchBackground(
         unsubscribeStopObserver();
         cancelStopEscalation?.();
         cleanupTmp(written);
-        slots.release();
+        // Release the task's own token; `shutdown` may already have released it (no-op then).
+        slots.release(taskId);
       }
     })();
 
@@ -824,7 +847,7 @@ async function dispatchBackground(
       killWithEscalation(lifecycle, childHandle, { unref: true });
     }
     if (tmp !== undefined) cleanupTmp(tmp);
-    slots.release();
+    slots.release(taskId);
     logger.warn("background dispatch failed for agent " + input.agent + ": " + message);
     return {
       text: "",

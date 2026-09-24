@@ -300,6 +300,32 @@ describe("startup reconcile is delivered through the notification path", () => {
     expect(stub.sentUserMessages).toEqual([]);
     expect(stub.sentMessages).toEqual([]);
   });
+
+  test("a send failure leaves the cursor unadvanced so the next drain re-delivers", async () => {
+    const { stub, storage } = wiredStub();
+    await seedRunningTask(storage, TASK_RUNNING, OWNER);
+    const ctx = stubContext(stub);
+
+    let failSend = true;
+    const api = stub.api as unknown as {
+      sendUserMessage: (content: string, options?: unknown) => void;
+    };
+    const originalSendUserMessage = api.sendUserMessage.bind(stub.api);
+    api.sendUserMessage = (content: string, options?: unknown) => {
+      if (failSend) throw new Error("simulated send failure");
+      originalSendUserMessage(content, options);
+    };
+
+    await stub.emit("session_start", ctx);
+    // The send threw, so nothing was delivered and the cursor must not have advanced (ADR §5/§6).
+    expect(stub.sentUserMessages).toEqual([]);
+
+    failSend = false;
+    await stub.emit("agent_settled", ctx);
+    // The unacknowledged lost event was re-drained and delivered on the retry.
+    expect(stub.sentUserMessages).toHaveLength(1);
+    expect(stub.sentUserMessages[0]?.content).toContain('task-id="' + TASK_RUNNING + '"');
+  });
 });
 
 // ---------------------------------------------------------------------------

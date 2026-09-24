@@ -21,9 +21,16 @@
  * ## One slot counter for the whole session
  *
  * `slots` is ONE `DispatchSlotCounter(concurrency)` for the holder, not a per-run counter. The
- * dispatcher's background branch acquires from `dispatchDeps.slots` and the pump releases at the
- * terminal transition, so a long-lived child keeps counting against `dispatchConcurrency`
- * (ADR-0022 §9) across program boundaries.
+ * dispatcher's background branch acquires from `dispatchDeps.slots`, keyed by the minted task id,
+ * and releases at the terminal transition, so a long-lived child keeps counting against
+ * `dispatchConcurrency` (ADR-0022 §9) across program boundaries.
+ *
+ * ## Slot release ownership
+ *
+ * The task id is the slot token. The detached pump owns the normal release (in its `finally`),
+ * and `shutdown` also releases the same token when it reclaims a still-running task; the release
+ * is idempotent per task, so exactly one slot is freed no matter which party runs first. A stale
+ * pump release therefore cannot free a slot that a different live task now holds.
  *
  * ## Delivery is metadata-only
  *
@@ -99,6 +106,22 @@ const ALL_TASKS_LIMIT = Number.MAX_SAFE_INTEGER;
 /** Best-effort reporter for a bind failure; the index notifies the user from it. */
 export type BackgroundBindReporter = (message: string) => void;
 
+/** One cursor to advance after a drained batch has actually been delivered. */
+export interface NotificationAck {
+  subscriberId: ULID;
+  taskId: ULID;
+  cursor: ULID;
+}
+
+/**
+ * One drain: the events to render plus the cursors the caller acknowledges after a successful
+ * send. The split is what lets a failed send leave the cursor unadvanced (ADR-0022 §5/§6).
+ */
+export interface NotificationDrain {
+  items: TaskNotificationItem[];
+  acks: readonly NotificationAck[];
+}
+
 /**
  * Construction seams. Production passes nothing; tests inject the clock, the storage factories
  * (to force IO failures) and the child lifecycle (to avoid spawning a real `pi`).
@@ -139,7 +162,13 @@ export interface BackgroundTaskRuntime {
     reporter?: BackgroundBindReporter,
   ): Promise<TaskRecord[]>;
   /** Drain undelivered events for a subscriber as `{event, record}` pairs ready for the renderer. */
-  drainNotifications(subscriberId: ULID): Promise<TaskNotificationItem[]>;
+  drainNotifications(subscriberId: ULID): Promise<NotificationDrain>;
+  /**
+   * Advance the subscription cursor for a drained batch. The caller invokes this ONLY after the
+   * batch's message was actually delivered (ADR-0022 §5/§6); a failed send leaves the cursor
+   * where it was so the next drain re-delivers the event.
+   */
+  acknowledgeNotifications(acks: readonly NotificationAck[]): Promise<void>;
   /** Mark every non-terminal task lost (given reason) and release resources. */
   shutdown(reason: LostReason): Promise<TaskRecord[]>;
 }
@@ -282,9 +311,25 @@ class StableNotificationPipeline implements NotificationPipeline {
 class TrackingLifecycle implements ChildProcessLifecycle {
   readonly #delegate: ChildProcessLifecycle;
   readonly #live = new Set<ChildHandle>();
+  /**
+   * Shutdown-owned SIGKILL escalations, keyed by the handle they would signal. exit() invokes
+   * the matching cancel as soon as the child is known to have closed, so the timer cannot fire
+   * against a reaped handle (A4).
+   */
+  readonly #reapCancels = new Map<ChildHandle, () => void>();
 
   constructor(delegate: ChildProcessLifecycle) {
     this.#delegate = delegate;
+  }
+
+  /** Whether the child is still live from this adapter's point of view. */
+  isLive(handle: ChildHandle): boolean {
+    return this.#live.has(handle);
+  }
+
+  /** Register shutdown's escalation cancel for one handle; exit() runs it once the child closes. */
+  trackReapCancel(handle: ChildHandle, cancel: () => void): void {
+    this.#reapCancels.set(handle, cancel);
   }
 
   spawn(argv: readonly string[], opts: ChildSpawnOptions): ChildHandle {
@@ -306,6 +351,12 @@ class TrackingLifecycle implements ChildProcessLifecycle {
       return await this.#delegate.exit(handle);
     } finally {
       this.#live.delete(handle);
+      // The child has closed: clear any shutdown escalation before its timer can fire.
+      const cancel = this.#reapCancels.get(handle);
+      if (cancel !== undefined) {
+        this.#reapCancels.delete(handle);
+        cancel();
+      }
     }
   }
 
@@ -458,7 +509,7 @@ class DefaultBackgroundTaskRuntime implements BackgroundTaskRuntime {
     }
   }
 
-  async drainNotifications(subscriberId: ULID): Promise<TaskNotificationItem[]> {
+  async drainNotifications(subscriberId: ULID): Promise<NotificationDrain> {
     let records: TaskRecord[];
     try {
       records = await this.registry.query({ limit: ALL_TASKS_LIMIT });
@@ -469,10 +520,11 @@ class DefaultBackgroundTaskRuntime implements BackgroundTaskRuntime {
           ": " +
           messageOf(error),
       );
-      return [];
+      return { items: [], acks: [] };
     }
 
     const items: TaskNotificationItem[] = [];
+    const acks: NotificationAck[] = [];
     for (const record of records) {
       if (record.spawnSource.callerId !== subscriberId) continue;
       let events: TaskEvent[];
@@ -494,15 +546,29 @@ class DefaultBackgroundTaskRuntime implements BackgroundTaskRuntime {
       for (const event of events) items.push({ event, record });
       const last = events[events.length - 1];
       if (last === undefined) continue;
+      // Do NOT acknowledge here: the cursor advances only after the caller's send succeeds.
+      acks.push({ subscriberId, taskId: record.id, cursor: last.eventId });
+    }
+    return { items, acks };
+  }
+
+  /**
+   * Advance the cursor for a delivered drain. Called by the delivery layer AFTER the batch was
+   * sent; a send failure therefore leaves the cursor untouched and the next drain re-delivers.
+   */
+  async acknowledgeNotifications(acks: readonly NotificationAck[]): Promise<void> {
+    for (const ack of acks) {
       try {
-        await this.pipeline.acknowledgeEvents(subscriberId, record.id, last.eventId);
+        await this.pipeline.acknowledgeEvents(ack.subscriberId, ack.taskId, ack.cursor);
       } catch (error) {
         this.#logger.warn(
-          "drainNotifications: could not acknowledge task " + record.id + ": " + messageOf(error),
+          "acknowledgeNotifications: could not acknowledge task " +
+            ack.taskId +
+            ": " +
+            messageOf(error),
         );
       }
     }
-    return items;
   }
 
   async shutdown(reason: LostReason): Promise<TaskRecord[]> {
@@ -534,13 +600,21 @@ class DefaultBackgroundTaskRuntime implements BackgroundTaskRuntime {
     }
 
     // Reap every live child with the one shared ladder (ADR-0022 §8; dispatch.ts owns the grace
-    // number). Detached escalation is unref'd so teardown cannot hang the host.
+    // number). Detached escalation is unref'd so teardown cannot hang the host. isDone is bound
+    // to the handle's liveness and the cancel is registered so a child that closes clears the
+    // SIGKILL timer instead of letting it fire against a reaped handle (A4, mirroring the pump).
     for (const handle of this.lifecycle.liveHandles()) {
-      killWithEscalation(this.lifecycle, handle, { unref: true });
+      const cancel = killWithEscalation(this.lifecycle, handle, {
+        isDone: () => !this.lifecycle.isLive(handle),
+        unref: true,
+      });
+      this.lifecycle.trackReapCancel(handle, cancel);
     }
-    // One held slot per reclaimed task (ADR-0022 §9); release is idempotent, so a later pump
-    // release cannot underflow the counter.
-    for (const _record of lost) this.slots.release();
+    // ADR-0022 §9 slot ownership: the background branch acquires the slot keyed by the task
+    // id, and BOTH this shutdown sweep and the task's detached pump release that same token.
+    // The release is idempotent PER TASK, so whichever runs second is a no-op; without the key
+    // a stale pump release could free a slot now held by a different live task.
+    for (const record of lost) this.slots.release(record.id);
 
     return lost;
   }

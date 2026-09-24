@@ -81,6 +81,8 @@ vi.mock("node:child_process", async (importOriginal) => {
 
 const AGENT = "bg-probe";
 const AGENT_MD = "---\nname: bg-probe\n---\nYou probe.\n";
+/** Canonical ULID literal (Crockford base32) used as a nested dispatch's parent task id. */
+const PARENT_TASK = "01ARZ3NDEKTSV4RRFFQ69G5FAV" as ULID;
 
 /**
  * Background refusal copy (issue #68 part 4 / wayfinder T4.4): a refused *background* spawn
@@ -242,6 +244,8 @@ describe("dispatch background spawn", () => {
           maxDispatchDepth: 3,
           sessionDir: join(dir, "sessions"),
           callerId: "owner-1",
+          // A nested background dispatch carries its own parent task id (ADR-0022 §3/reopen R-m12).
+          parentTaskId: PARENT_TASK,
         },
         h.deps,
       );
@@ -264,7 +268,8 @@ describe("dispatch background spawn", () => {
       expect(record?.transitionAt).toBe(1000);
       expect(record?.finishedAt).toBeUndefined();
       expect(record?.spawnSource).toEqual({ kind: "ptc-program", callerId: "owner-1" });
-      expect(record?.parentTaskId).toBeUndefined();
+      // The wired value, not undefined: the R-m12 wire is what stamps this field.
+      expect(record?.parentTaskId).toBe(PARENT_TASK);
       expect(h.slots.active).toBe(1);
     });
   });

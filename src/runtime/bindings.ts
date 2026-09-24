@@ -16,6 +16,7 @@
  * get from the native pipeline.
  */
 import { validateToolArguments } from "@earendil-works/pi-ai";
+import type { ULID } from "./task-storage.ts";
 import {
   createBashTool,
   createEditTool,
@@ -27,11 +28,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { TSchema } from "typebox";
 
-import {
-  dispatch as dispatchBinding,
-  type DispatchDeps,
-  type DispatchInput,
-} from "./dispatch.ts";
+import { dispatch as dispatchBinding, type DispatchDeps, type DispatchInput } from "./dispatch.ts";
 
 /** pi's built-in tools that can be exposed as bindings, in native order. */
 export const BUILTIN_BINDING_NAMES = [
@@ -79,6 +76,12 @@ export interface BindingContext {
    * keeps the foreground no-session shape.
    */
   sessionDir?: string;
+  /**
+   * ADR-0022 §3/reopen R-m12: this process's own background task id, when this run is inside a
+   * background child. Threaded from the dispatcher (see `RunPtcProgramOptions.parentTaskId`)
+   * and forwarded to `pi.dispatch` so a nested spawn records `TaskRecord.parentTaskId`.
+   */
+  parentTaskId?: ULID;
   /**
    * ADR-0022 §9: per-run dispatch dependencies. The dispatcher supplies the run's shared
    * `DispatchSlotCounter` here; a host may also pass session-level deps (registry / lifecycle /
@@ -207,6 +210,7 @@ export function createBuiltinBindings(options: CreateBuiltinBindingsOptions): Bi
             maxDispatchDepth: context.maxDispatchDepth,
             ...(context.callerId === undefined ? {} : { callerId: context.callerId }),
             ...(context.sessionDir === undefined ? {} : { sessionDir: context.sessionDir }),
+            ...(context.parentTaskId === undefined ? {} : { parentTaskId: context.parentTaskId }),
           },
           context.dispatchDeps,
         );

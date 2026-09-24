@@ -24,7 +24,11 @@ import {
   createPtcTaskOutputTool,
   createPtcTaskStopTool,
 } from "./tools/ptc-task.ts";
-import { resolveBindingNames, resolveDepthFromEnv } from "./tools/common.ts";
+import {
+  resolveBindingNames,
+  resolveDepthFromEnv,
+  resolveParentTaskIdFromEnv,
+} from "./tools/common.ts";
 import { TurnPools } from "./runtime/turn-pools.ts";
 import {
   createBackgroundTaskRuntime,
@@ -185,6 +189,13 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
    */
   const ptcDepth = resolveDepthFromEnv();
 
+  /**
+   * ADR-0022 §3/reopen R-m12: this process's own background task id, read once from the child
+   * environment `dispatch()` stamped (`PI_PTC_TASK_ID`). A top-level pi session has none. It
+   * travels with each PTC run so a nested `pi.dispatch({ background: true })` records its parent.
+   */
+  const parentTaskId = resolveParentTaskIdFromEnv();
+
   /* ------------------------ BG-14: session-scoped background runtime ------------------------ */
 
   /**
@@ -219,12 +230,14 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     pi.sendUserMessage(content);
   };
 
-  /** Drain one subscriber's undelivered events, keep the completions, render + send. */
+  /** Drain one subscriber's undelivered events, keep the completions, render + send, then ack. */
   const deliverSubscriber = async (subscriberId: ULID): Promise<void> => {
-    const items = await background.drainNotifications(subscriberId);
+    const { items, acks } = await background.drainNotifications(subscriberId);
     // ADR-0022 §8 "谁停谁报告": canceled tasks are suppressed (BG-15 owns the policy).
     const deliverable = items.filter((item) => shouldDeliverTaskNotification(item.record));
-    if (deliverable.length === 0) return;
+    // Send FIRST, acknowledge after (ADR-0022 §5/§6). A throwing send propagates before the ack,
+    // so the cursor stays put and the next drain re-delivers the event. An all-suppressed batch
+    // sends nothing and advances immediately.
     for (const batch of splitTaskNotificationBatches(deliverable)) {
       sendBatch(
         renderTaskNotifications(batch, {
@@ -233,6 +246,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
         }),
       );
     }
+    await background.acknowledgeNotifications(acks);
   };
 
   /** Distinct owners (`spawnSource.callerId`) of every known task. */
@@ -279,6 +293,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
       getBindingSourceNames,
       getPool: () => turnPools.get("run_code"),
       depth: ptcDepth,
+      ...(parentTaskId === undefined ? {} : { parentTaskId }),
       getDispatchDeps: () => background.dispatchDeps,
     }),
   );
@@ -287,6 +302,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
       getBindingSourceNames,
       getPool: () => turnPools.get("workflow"),
       depth: ptcDepth,
+      ...(parentTaskId === undefined ? {} : { parentTaskId }),
       getDispatchDeps: () => background.dispatchDeps,
     }),
   );
