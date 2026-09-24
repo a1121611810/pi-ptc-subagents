@@ -173,15 +173,19 @@ there is no in-task queue.
 - `stopping -> canceled` — the stop resolves; the child's close is the writer of the terminal state.
 - `running -> lost` — the session ended while the child was running, or restart reconciliation swept it.
 
-### The three `lost` reasons
+### The `lost` reasons (two emitted in v1)
 
 `lost` carries a distinct reason in the record's `errorMessage` field so the reasons stay
-auditable:
+auditable. v1 emits **two**:
 
-- `session_ended_while_running` — the session stopped (abort / Esc) while the task ran.
-- `user_killed_via_esc` — the user killed the session from the Esc path.
+- `session_ended_while_running` — the session stopped while the task ran (`session_shutdown`).
 - `lost_on_session_restart` — startup reconciliation found a `running` or `stopping` record after a
   restart; `reconcileLostTasks()` sweeps both and is idempotent.
+
+`user_killed_via_esc` is **reserved and unreachable in v1**: pi's `SessionShutdownEvent` exposes no
+Esc/abort signal (`reason` is only `quit | reload | new | resume | fork`), so an Esc kill cannot be
+separated from a normal session end. The value stays in the `LostReason` union for a future
+Esc-identifiable signal (ADR-0022 §8).
 
 ## Notification delivery
 
@@ -253,7 +257,7 @@ Signal handling is layered by who asked:
 | source                  | transition                        | notes                                                                                                                                        |
 | ----------------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ptc_task_stop` (model) | `running -> stopping -> canceled` | explicit and synchronous; the dispatcher pump owns the actual signal and writes `canceled` when the child closes. A late stop is idempotent. |
-| session stop / Esc      | `running -> lost`                 | implicit; the reason string records which path ended the session.                                                                            |
+| session stop / Esc      | `running -> lost`                 | implicit; v1 records `session_ended_while_running` (pi exposes no Esc-specific signal, so `user_killed_via_esc` is not emitted).             |
 | session restart         | `running -> lost`                 | startup reconciliation, reason `lost_on_session_restart`; also sweeps a task caught mid-`stopping`.                                          |
 
 ## On disk
@@ -267,8 +271,10 @@ under the session directory so a restart can reconcile:
 <sessionDir>/subscriptions/<subscriberId>-<taskId>.json          # the per-subscriber cursor (atomic temp+rename)
 <sessionDir>/events/<subscriberId>-<taskId>.jsonl                # append-only newline-delimited events
 <sessionDir>/tasks/<taskId>/output.log                           # the captured output
-<sessionDir>/tasks/<taskId>.pi-*                                 # the child's pi session file
 ```
+
+The record's optional `sessionFile` field is deliberately left unset in v1: the extension cannot
+learn pi's session-file path for the child (reopen R-m12), so no `.pi-*` file is named.
 
 A missing file is "absent" (`null` / no events); a file that exists but does not parse throws a
 path-naming error rather than being reported as absent. The event log deviates from ADR-0022
