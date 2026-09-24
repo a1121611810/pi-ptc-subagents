@@ -173,7 +173,7 @@ G2 verdict, locked:
 
 `<bg-` prefix (map Notes clause 1) avoids pi's general notification prefix. `subscription-id` is debug metadata (<=10 B), does not affect payload-size budget. Parent label carries no summary, model expands `<bg-task>` children directly. TUI panel rendering is handled in P1 (#43).
 
-A single batch carries N events. When a single-batch content exceeds 200 K tokens, the TaskRegistry splits along event boundaries into N batches. Each batch has its own `<bg-task-notifications>` parent. The model sees N consecutive parent tags; the cursor advances by N events, not N batches.
+A single batch carries N events. When a single-batch content exceeds the byte budget `DEFAULT_MAX_BATCH_BYTES = 100 * 1024` (100 KiB), the TaskRegistry splits along event boundaries into N batches. Each batch has its own `<bg-task-notifications>` parent. The model sees N consecutive parent tags; the cursor advances by N events, not N batches.
 
 ### 8. Signal layering: model stop -> stopped; session stop / Esc -> lost
 
@@ -223,8 +223,8 @@ What changes: the **result tree** now contains a `DispatchHandle` (background) o
 
 ## Implementation outline (deferred to follow-up commits)
 
-- New files: `src/runtime/task-registry.ts`, `src/runtime/subscription.ts`, `src/tools/ptc-task.ts` (the three tools), `src/types/task.ts` (TaskRecord / DispatchHandle / TaskStatus / Subscription).
-- Modified files: `src/runtime/dispatch.ts` (background opt path; `DispatchHandle` return type); `src/runtime/bindings.ts` (register `ptc_task_*` tools); `src/runtime/dispatcher.ts` (subscription observation + idle wake + 30s poll); `src/types/ptc-config.ts` (`notificationCadenceMs`, `notificationRateLimit` removed; `subscriptionPollIntervalMs` added).
+- New files as shipped: `src/runtime/task-storage.ts` (TaskStorage + InMemoryTaskStorage; TaskRecord / DispatchHandle / TaskStatus / Subscription / TaskEvent), `src/runtime/task-registry.ts`, `src/runtime/child-process-lifecycle.ts`, `src/runtime/notification-pipeline.ts`, `src/runtime/output-storage.ts`, `src/runtime/task-notification.ts` (notification renderer), `src/tools/ptc-task.ts` (the three tools), `src/tools/task-panel-render.ts`.
+- Modified files as shipped: `src/runtime/dispatch.ts` (background opt path; `DispatchHandle` return type), `src/runtime/dispatcher.ts` (per-run `DispatchSlotCounter` + `dispatchDeps` threading), `src/runtime/bindings.ts` (`callerId` / `sessionDir` / `dispatchDeps` on the binding context), `src/index.ts` (session runtime + always-on `ptc_task_*` registration + notification delivery), `src/tools/run-code.ts` / `src/tools/workflow.ts` (session dir threading). No `subscriptionPollIntervalMs` / `notificationCadenceMs` / `notificationRateLimit` config field ships in v1.
 - Tests: unit-test TaskRecord state machine transitions (G1: explicit transition table); integration-test the binding through `runPtcProgram` with a small agent script; e2e-test the 12-scenario G2 prototype as a regression suite.
 - Schema validator: T5 implementation ticket.
 
