@@ -25,26 +25,81 @@
  */
 
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 
 // ---------------------------------------------------------------------------
-//  ULID-ish id
+//  ULID
 // ---------------------------------------------------------------------------
 
 /**
  * String id for a child handle. Background-dispatch (ADR-0022) carries these as
- * `taskId`; for the foreground path we only need uniqueness within one process.
+ * `taskId`; for the foreground path we need uniqueness within one process, and across
+ * a restart, since these persist under `<sessionDir>`.
  *
- * The format is a 20-char base36 stamp: 10 chars of ms-epoch plus 10 chars of
- * randomness, uppercased. Sortable by creation time, unique within a run
- * (10 random base36 chars ~= 51 bits of entropy). No external ULID library needed.
+ * A real ULID: 26 chars of Crockford base32, `TTTTTTTTTTRRRRRRRRRRRRRRRR` — 10 chars
+ * (48 bits) of ms-epoch followed by 16 chars (80 bits) of crypto randomness. The
+ * alphabet omits I, L, O and U; its ordering means lexical sort equals creation order.
+ * 80 bits from `randomBytes` (not `Math.random()`) makes two ids minted in the same
+ * millisecond distinct, and a per-ms counter makes them strictly increasing.
  */
 export type ULID = string;
 
-/** Generate a fresh `ULID` for one child handle. */
+/** Crockford base32 alphabet (ULID spec) - deliberately omits I, L, O, U. */
+const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+/** Monotonic state: ms of the last id plus its random tail, for same-ms increments. */
+let lastMs = -1;
+let lastRandom: Uint8Array<ArrayBufferLike> = new Uint8Array(10);
+
+/** Encode a 48-bit ms timestamp as 10 Crockford chars (most-significant first). */
+function encodeTime(ms: number): string {
+  let out = "";
+  let v = ms;
+  for (let i = 0; i < 10; i++) {
+    out = CROCKFORD[v % 32] + out;
+    v = Math.floor(v / 32);
+  }
+  return out;
+}
+
+/** Encode 80 bits of entropy as 16 Crockford chars (5 bits per char). */
+function encodeRandom(bytes: Uint8Array): string {
+  let out = "";
+  let acc = 0;
+  let bits = 0;
+  for (let i = 0; i < bytes.length && out.length < 16; i++) {
+    acc = (acc << 8) | (bytes[i] ?? 0);
+    bits += 8;
+    while (bits >= 5 && out.length < 16) {
+      bits -= 5;
+      out += CROCKFORD[(acc >>> bits) & 31];
+    }
+  }
+  return out.padEnd(16, "0");
+}
+
+/** Increment an 80-bit big-endian byte tail by one (wraps at 2^80, never in practice). */
+function incrementRandom(bytes: Uint8Array): Uint8Array {
+  const out = new Uint8Array(bytes);
+  for (let i = out.length - 1; i >= 0; i--) {
+    if ((out[i] ?? 0) < 0xff) {
+      out[i] = (out[i] ?? 0) + 1;
+      return out;
+    }
+    out[i] = 0;
+  }
+  return out;
+}
+
+/** Generate a fresh `ULID` for one child handle. Monotonic within a millisecond. */
 export function createULID(): ULID {
-  const ts = Date.now().toString(36).padStart(10, "0").toUpperCase();
-  const rand = Math.random().toString(36).slice(2, 12).padStart(10, "0").toUpperCase();
-  return ts + rand;
+  const now = Date.now();
+  // Never let a backwards clock step (NTP) break the lexical-ordering invariant.
+  const ms = now > lastMs ? now : lastMs;
+  const bytes = ms === lastMs ? incrementRandom(lastRandom) : new Uint8Array(randomBytes(10));
+  lastMs = ms;
+  lastRandom = bytes;
+  return encodeTime(ms) + encodeRandom(bytes);
 }
 
 // ---------------------------------------------------------------------------

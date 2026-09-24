@@ -65,16 +65,33 @@ function spawnNode(js: string, opts: { extraArgs?: readonly string[] } = {}): {
 }
 
 describe("createULID", () => {
-  test("produces a 20-character uppercased string", () => {
+  // A ULID is 26 chars of Crockford base32 (spec: 48-bit ms timestamp, 80 bits random).
+  // The alphabet deliberately omits I, L, O and U to avoid transcription confusion.
+  const CROCKFORD_26 = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+
+  test("emits a 26-character Crockford-base32 ULID", () => {
     const id = createULID();
-    expect(id).toHaveLength(20);
-    expect(id).toMatch(/^[0-9A-Z]+$/);
+    expect(id).toHaveLength(26);
+    expect(id).toMatch(CROCKFORD_26);
   });
 
-  test("two consecutive calls produce distinct ids", () => {
-    const a = createULID();
-    const b = createULID();
-    expect(a).not.toBe(b);
+  test("ids minted in the same millisecond are distinct AND lexically increasing", () => {
+    // ULID's whole point is that lexical order equals creation order. A 52-bit
+    // Math.random() tail (the pre-fix implementation) is neither monotonic nor
+    // collision-free, so this assertion genuinely fails on that version.
+    const ids = Array.from({ length: 200 }, () => createULID());
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toEqual([...ids].sort());
+  });
+
+  test("the first 10 chars are the ms timestamp and sort across milliseconds", () => {
+    const before = createULID();
+    const start = Date.now();
+    while (Date.now() === start) {
+      // spin one real millisecond so the timestamp prefix must advance
+    }
+    const after = createULID();
+    expect(after.slice(0, 10) > before.slice(0, 10)).toBe(true);
   });
 });
 
