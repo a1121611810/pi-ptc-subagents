@@ -27,7 +27,11 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { TSchema } from "typebox";
 
-import { dispatch as dispatchBinding, type DispatchInput } from "./dispatch.ts";
+import {
+  dispatch as dispatchBinding,
+  type DispatchDeps,
+  type DispatchInput,
+} from "./dispatch.ts";
 
 /** pi's built-in tools that can be exposed as bindings, in native order. */
 export const BUILTIN_BINDING_NAMES = [
@@ -64,6 +68,23 @@ export interface BindingContext {
   depth: number;
   /** Maximum allowed depth; passed through to `pi.dispatch` for the depth check. */
   maxDispatchDepth: number;
+  /**
+   * ADR-0022 §5: the TaskRecord owner / subscription subscriber. The dispatcher threads the
+   * run id here so a background task's events are addressed to the spawning run.
+   */
+  callerId?: string;
+  /**
+   * ADR-0022 R1: the session dir a background child persists into. Threaded from the
+   * dispatcher (see `RunPtcProgramOptions.sessionDir`); when no dir is available the spawn
+   * keeps the foreground no-session shape.
+   */
+  sessionDir?: string;
+  /**
+   * ADR-0022 §9: per-run dispatch dependencies. The dispatcher supplies the run's shared
+   * `DispatchSlotCounter` here; a host may also pass session-level deps (registry / lifecycle /
+   * output storage) so the binding's `dispatch()` call shares them.
+   */
+  dispatchDeps?: DispatchDeps;
 }
 
 export interface Binding {
@@ -176,13 +197,19 @@ export function createBuiltinBindings(options: CreateBuiltinBindingsOptions): Bi
     table.set(DISPATCH_BINDING_NAME, {
       name: DISPATCH_BINDING_NAME,
       execute: async (args, context) => {
-        return dispatchBinding(args as DispatchInput, {
-          signal: context.signal,
-          callId: context.callId,
-          cwd: options.cwd,
-          depth: context.depth,
-          maxDispatchDepth: context.maxDispatchDepth,
-        });
+        return dispatchBinding(
+          args as DispatchInput,
+          {
+            signal: context.signal,
+            callId: context.callId,
+            cwd: options.cwd,
+            depth: context.depth,
+            maxDispatchDepth: context.maxDispatchDepth,
+            ...(context.callerId === undefined ? {} : { callerId: context.callerId }),
+            ...(context.sessionDir === undefined ? {} : { sessionDir: context.sessionDir }),
+          },
+          context.dispatchDeps,
+        );
       },
     });
   }

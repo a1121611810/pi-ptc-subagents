@@ -133,6 +133,9 @@ export function createPtcRunCodeTool(
       const names = resolveBindingNames(options.getBindingSourceNames?.());
       const startedAt = Date.now();
       const pool = options.getPool?.();
+      // ADR-0022 R1: hand the host session dir to background children. Read defensively
+      // because direct library callers may pass a context without a session manager.
+      const sessionDir = ctx.sessionManager?.getSessionDir?.();
       // Live sub-call pushes: while the program runs, the tree is visible (ADR-0021 §4).
       const updater = createSubCallUpdater({ surface: "run_code", startedAt, onUpdate });
       let outcome: PtcRunOutcome;
@@ -144,6 +147,7 @@ export function createPtcRunCodeTool(
           // The shipped surface always exposes the parallel binding (ADR-0016); the
           // binding-source names only curate the built-in subset.
           bindings: createBuiltinBindings({ cwd, names, includeDispatch: true }),
+          ...(sessionDir === undefined ? {} : { sessionDir }),
           ...(options.depth === undefined ? {} : { depth: options.depth }),
           ...(params.timeoutMs === undefined ? {} : { timeoutMs: params.timeoutMs }),
           ...(signal === undefined ? {} : { signal }),

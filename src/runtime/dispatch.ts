@@ -31,10 +31,12 @@ import {
 import { DEFAULT_CONFIG } from "./limits.ts";
 import {
   DefaultTaskRegistry,
+  OUTPUT_PREVIEW_MAX_BYTES,
   type DispatchHandle,
   type RegistryLogger,
   type TaskRegistry,
 } from "./task-registry.ts";
+import type { OutputStorage } from "./output-storage.ts";
 import {
   InMemoryTaskStorage,
   type TaskSpawnSource,
@@ -124,6 +126,12 @@ export interface DispatchDeps {
   clock?: () => number;
   /** Logger for the background pump's failure path. Defaults to a `console.warn` logger. */
   logger?: RegistryLogger;
+  /**
+   * ADR-0022 §3: where the pump persists a task's drained stdout. When present, the terminal
+   * transition records `outputRef` / `outputBytes` / `outputPreview` so `ptc_task_output`
+   * can dereference the bytes (BG-07).
+   */
+  outputStorage?: OutputStorage;
 }
 
 /**
@@ -594,6 +602,7 @@ async function dispatchBackground(
   const lifecycle = deps.lifecycle ?? DISPATCH_LIFECYCLE;
   const callerId = ctx.callerId ?? "dispatch:" + String(ctx.callId);
   const registry = resolveTaskRegistry(deps, clock);
+  const outputStorage = deps.outputStorage;
 
   let childHandle: ChildHandle | undefined;
   let tmp: { dir: string; filePath: string } | undefined;
@@ -667,9 +676,11 @@ async function dispatchBackground(
       { clock, callerId, logger },
     );
 
-    // Detached pump (ADR-0022 §2/§8): drain the child's stdout so it cannot back-pressure,
-    // then drive running -> succeeded (exit 0) / failed (anything else) from the close
-    // event. It is deliberately not awaited, so the spawn turn returns the handle at once.
+    // Detached pump (ADR-0022 §2/§3/§8): drain the child's stdout so it cannot back-pressure,
+    // persist it through the OutputStorage seam, then drive the terminal transition from the
+    // close event (exit 0 -> succeeded / anything else -> failed, or -> canceled when a stop
+    // was requested while the child ran). It is deliberately not awaited, so the spawn turn
+    // returns the handle at once.
     void (async (): Promise<void> => {
       let output = "";
       try {
@@ -679,9 +690,37 @@ async function dispatchBackground(
         }
         const exitValue: ChildExitValue = await lifecycle.exit(handle);
         const exitCode = exitValue.code ?? -1;
-        const to: TaskStatus = exitCode === 0 ? "succeeded" : "failed";
+
+        // ADR-0022 §3/§7: project the drained bytes onto the record and persist the raw text
+        // so ptc_task_output can dereference outputRef. The preview is inlined only at or
+        // below the 2048-byte Map+preview ceiling (OUTPUT_PREVIEW_MAX_BYTES).
+        const outputBytes = Buffer.byteLength(output, "utf8");
+        const outputPreview = outputBytes <= OUTPUT_PREVIEW_MAX_BYTES ? output : undefined;
+        let outputRef: string | undefined;
+        if (outputStorage !== undefined) {
+          try {
+            await outputStorage.writeOutput(taskId, output);
+            outputRef = outputStorage.outputRef(taskId);
+          } catch (persistError) {
+            // Never let a persistence failure swallow the terminal state (testing-constraints
+            // #3): surface it and still write the record.
+            const persistMessage =
+              persistError instanceof Error ? persistError.message : String(persistError);
+            logger.warn(
+              "background dispatch output persistence for task " + taskId + " failed: " + persistMessage,
+            );
+          }
+        }
+
+        // ADR-0022 §8 signal layering: a model stop wrote running -> stopping; the child's
+        // close is the writer of the terminal canceled state, so re-read the record (O(1) via
+        // registry.get) rather than mapping the exit code alone.
+        const currentRecord = await registry.get(taskId);
+        const currentStatus = currentRecord?.status;
+        const to: TaskStatus =
+          currentStatus === "stopping" ? "canceled" : exitCode === 0 ? "succeeded" : "failed";
         await registry.transition(
-          { kind: "transition", taskId, to, exitCode },
+          { kind: "transition", taskId, to, exitCode, outputRef, outputBytes, outputPreview },
           { clock, callerId, logger },
         );
       } catch (err) {

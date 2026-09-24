@@ -31,7 +31,12 @@ import { randomUUID } from "node:crypto";
 import { MessageChannel, Worker } from "node:worker_threads";
 import type { MessagePort } from "node:worker_threads";
 import { BUILTIN_BINDING_NAMES, DISPATCH_BINDING_NAME, type BindingTable } from "./bindings.ts";
-import { dispatchConcurrencyLimitReached } from "./dispatch.ts";
+import {
+  DISPATCH_CONCURRENCY_LIMIT_MESSAGE,
+  DispatchSlotCounter,
+  dispatchConcurrencyLimitReached,
+  type DispatchDeps,
+} from "./dispatch.ts";
 import { createWorkerEnv, effectiveTimeoutMs, resolveConfig } from "./limits.ts";
 import type { PtcConfig, PtcSurface } from "./limits.ts";
 import {
@@ -88,6 +93,19 @@ export interface RunPtcProgramOptions {
   depth?: number;
   /** Identifier carried to the worker; generated when omitted. */
   runId?: string;
+  /**
+   * ADR-0022 R1: the session dir background children persist into, when the host has one.
+   * Threaded to the binding context so `pi.dispatch({ background: true })` can stamp the R1
+   * session flags; absent means the background spawn keeps the foreground no-session shape.
+   */
+  sessionDir?: string;
+  /**
+   * ADR-0022 §3/§9: session-level dispatch dependencies (TaskRegistry / OutputStorage /
+   * lifecycle / clock / logger). The dispatcher merges its per-run `DispatchSlotCounter`
+   * into this bag before handing it to the `pi.dispatch` binding, so background tasks count
+   * against this run's `dispatchConcurrency` for their whole lifetime.
+   */
+  dispatchDeps?: DispatchDeps;
   /**
    * Optional worker pool (ADR-0017). Absent = spawn a fresh worker and terminate it
    * at run end (the original cold-start path). Present = the dispatcher acquires a
@@ -187,6 +205,21 @@ function dispatchOutcome(
         ? "dispatch refused"
         : "dispatch failed";
   return { kind: candidate.started === false ? "refused" : "failed", message };
+}
+
+/**
+ * True when a `pi.dispatch` call's raw args carry the ADR-0022 §1 background opt.
+ *
+ * The dispatcher only needs this to decide who owns the task slot: a background call owns
+ * it inside `dispatchBackground` (spawn -> terminal), a foreground call in `dispatchCall`.
+ * Shape-checked because the frame's args are untrusted worker input.
+ */
+function isBackgroundDispatchArgs(args: unknown): boolean {
+  return (
+    typeof args === "object" &&
+    args !== null &&
+    (args as { background?: unknown }).background === true
+  );
 }
 
 function messageOf(error: unknown): string {
@@ -405,8 +438,13 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
      * (ADR-0016 §2) can reject the overflow immediately. There is deliberately no
      * waiter queue behind this counter: the N+1th concurrent call resolves as
      * rejected instead of waiting for a slot. Independent of `activeBuiltinCalls`.
+     *
+     * ADR-0022 §9: this is the ONE per-run counter the `pi.dispatch` binding receives. A
+     * foreground call holds it for the call (released when the result resolves); a background
+     * call acquires it inside `dispatchBackground` and holds it until the task's terminal
+     * transition, so a long-lived child keeps counting after `dispatch()` already returned.
      */
-    let activeDispatches = 0;
+    const dispatchSlots = new DispatchSlotCounter(config.dispatchConcurrency);
     /**
      * Concurrently in-flight builtin binding calls, counted against
      * `maxParallelSubCalls` (ADR-0004 consequence). Unlike the dispatch cap,
@@ -638,15 +676,20 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
         return;
       }
       const isDispatch = frame.tool === DISPATCH_BINDING_NAME;
+      // ADR-0022 §9: a background dispatch owns its own slot inside `dispatchBackground`
+      // (acquired at spawn, released at the terminal transition), so the dispatcher must not
+      // acquire or release it here. A foreground dispatch keeps the pre-BG-04 accounting:
+      // acquire before the call, release when its result resolves.
+      const isBackgroundDispatch = isDispatch && isBackgroundDispatchArgs(frame.args);
       if (isDispatch) {
         /* dispatch cap (ADR-0016 §2) */
         // Hard cap: at `dispatchConcurrency` in-flight calls the next one is rejected
         // immediately — never queued, never executed. The rejection is a settled
         // DispatchResult (the binding never throws, §3), so a Promise.all /
         // Promise.allSettled over pi.dispatch calls sees a settled record, not a throw.
-        if (activeDispatches >= config.dispatchConcurrency) {
+        if (!isBackgroundDispatch && !dispatchSlots.tryAcquire()) {
           subCallTracker.recordEnd(frame.callId, "rejected", {
-            errorMessage: "dispatch concurrency limit reached",
+            errorMessage: DISPATCH_CONCURRENCY_LIMIT_MESSAGE,
           });
           postCallResult({
             kind: HOST_FRAME_KIND.callResult,
@@ -657,7 +700,6 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
           });
           return;
         }
-        activeDispatches += 1;
       } else {
         // Builtin fan-out cap (ADR-0004 consequence): the overflow waits for a slot
         // instead of failing.
@@ -682,6 +724,12 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
           callId: frame.callId,
           depth: runDepth,
           maxDispatchDepth: config.maxDispatchDepth,
+          // ADR-0022 §5/R1: the run id is the subscriber, and the host session dir (when it
+          // has one) travels to the background spawn as the R1 `--session-dir` flag.
+          callerId: runId,
+          ...(options.sessionDir === undefined ? {} : { sessionDir: options.sessionDir }),
+          // ADR-0022 §9: the one per-run slot counter, merged over any session-level deps.
+          dispatchDeps: { ...options.dispatchDeps, slots: dispatchSlots },
         });
         // Capture image blocks before the callResult post so the hoist can never race the
         // worker's view of the result; the captures are committed only once the post
@@ -779,7 +827,8 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
         });
       } finally {
         if (isDispatch) {
-          activeDispatches -= 1;
+          // Background slots are released by the pump's terminal transition, never here.
+          if (!isBackgroundDispatch) dispatchSlots.release();
         } else {
           releaseBuiltinSlot();
         }

@@ -41,6 +41,7 @@ import {
   type TaskStatus,
   type ULID,
 } from "../../src/runtime/task-storage.ts";
+import { InMemoryOutputStorage, type OutputStorage } from "../../src/runtime/output-storage.ts";
 import { makeTempDir, removeTempDir } from "../helpers/ptc.ts";
 
 // ---------------------------------------------------------------------------
@@ -527,5 +528,117 @@ describe("dispatch foreground", () => {
     expect(result).toEqual(dispatchDepthLimitReached());
     expect(h.lifecycle.spawnCount).toBe(0);
     expect(await allTasks(h.storage)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+//  output persistence: the pump writes through OutputStorage (ADR-0022 §3/§7)
+// ---------------------------------------------------------------------------
+
+describe("background output persistence", () => {
+  test("persists the drained text and projects outputRef/outputBytes/outputPreview at <= 2048 bytes", async () => {
+    await withAgent(async (dir) => {
+      const h = createHarness({ start: 1000 });
+      const outputStorage = new InMemoryOutputStorage();
+      const deps: DispatchDeps = { ...h.deps, outputStorage };
+      const handle = asHandle(
+        await dispatch(
+          { agent: AGENT, task: "small", background: true, agentScope: "project" },
+          { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          deps,
+        ),
+      );
+      h.lifecycle.pushEvent(h.lifecycle.handleAt(0), {
+        type: "message_end",
+        message: { role: "assistant", content: [{ type: "text", text: "PONG" }] },
+      });
+      h.clock.set(1500);
+      h.lifecycle.resolveExit(h.lifecycle.handleAt(0), 0, null);
+      const record = await waitForTerminal(h.storage, handle.taskId);
+
+      expect(record.status).toBe("succeeded");
+      // ADR-0022 §7: preview is inlined only when outputBytes <= 2048; "PONG" is 4 bytes.
+      expect(record.outputBytes).toBe(4);
+      expect(record.outputPreview).toBe("PONG");
+      expect(record.outputRef).toBe(outputStorage.outputRef(handle.taskId));
+      expect(await outputStorage.readOutput(handle.taskId)).toBe("PONG");
+    });
+  });
+
+  test("omits outputPreview above the 2048-byte ceiling but still persists the bytes", async () => {
+    await withAgent(async (dir) => {
+      const h = createHarness({ start: 1000 });
+      const outputStorage = new InMemoryOutputStorage();
+      const deps: DispatchDeps = { ...h.deps, outputStorage };
+      const handle = asHandle(
+        await dispatch(
+          { agent: AGENT, task: "big", background: true, agentScope: "project" },
+          { callId: 2, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          deps,
+        ),
+      );
+      const big = "x".repeat(2049);
+      h.lifecycle.pushEvent(h.lifecycle.handleAt(0), {
+        type: "message_end",
+        message: { role: "assistant", content: [{ type: "text", text: big }] },
+      });
+      h.clock.set(1500);
+      h.lifecycle.resolveExit(h.lifecycle.handleAt(0), 0, null);
+      const record = await waitForTerminal(h.storage, handle.taskId);
+
+      expect(record.status).toBe("succeeded");
+      // 2049 > the 2048-byte Map+preview ceiling (ADR-0022 §3/§7): no inline preview.
+      expect(record.outputBytes).toBe(2049);
+      expect(record.outputPreview).toBeUndefined();
+      expect(record.outputRef).toBe(outputStorage.outputRef(handle.taskId));
+      expect(await outputStorage.readOutput(handle.taskId)).toBe(big);
+    });
+  });
+
+  test("logs a warning and still writes the terminal record when output persistence fails", async () => {
+    await withAgent(async (dir) => {
+      const h = createHarness({ start: 1000 });
+      const failing: OutputStorage = {
+        readOutput: async () => null,
+        writeOutput: async () => {
+          throw new Error("disk full");
+        },
+        outputRef: () => "memory:tasks/failing/output.log",
+      };
+      const warnings: string[] = [];
+      const deps: DispatchDeps = {
+        ...h.deps,
+        outputStorage: failing,
+        logger: {
+          info: (): void => undefined,
+          warn: (message: string): void => {
+            warnings.push(message);
+          },
+        },
+      };
+      const handle = asHandle(
+        await dispatch(
+          { agent: AGENT, task: "persist-fail", background: true, agentScope: "project" },
+          { callId: 3, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          deps,
+        ),
+      );
+      h.lifecycle.pushEvent(h.lifecycle.handleAt(0), {
+        type: "message_end",
+        message: { role: "assistant", content: [{ type: "text", text: "PONG" }] },
+      });
+      h.clock.set(1500);
+      h.lifecycle.resolveExit(h.lifecycle.handleAt(0), 0, null);
+      const record = await waitForTerminal(h.storage, handle.taskId);
+
+      // The terminal state is never swallowed (testing-constraints #3); the record keeps
+      // the bytes/preview but has no outputRef because the write failed.
+      expect(record.status).toBe("succeeded");
+      expect(record.outputBytes).toBe(4);
+      expect(record.outputPreview).toBe("PONG");
+      expect(record.outputRef).toBeUndefined();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("output persistence for task " + handle.taskId);
+    });
   });
 });

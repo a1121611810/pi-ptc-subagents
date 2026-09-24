@@ -315,6 +315,41 @@ function markExited(state: BaseHandleState, value: ChildExitValue): void {
 }
 
 // ---------------------------------------------------------------------------
+//  R1 session-flag translation (ADR-0022 §1 / R1)
+// ---------------------------------------------------------------------------
+
+/**
+ * pi's "do not persist a session" flag (ADR-0016). The foreground dispatch has no session
+ * identity to persist, so it always passes this; background dispatch replaces it with the
+ * R1 session triple below (ADR-0022 §1).
+ */
+export const NO_SESSION_FLAG = "--no-session";
+
+/**
+ * Translate the R1 session options into the argv handed to pi (ADR-0022 §1 / R1).
+ *
+ * Foreground dispatch (ADR-0016) passes no `sessionDir`, so the argv is returned with its
+ * `--no-session` flag intact: every child is an ephemeral session. Background dispatch has a
+ * session dir and must instead carry the R1 triple — `--session-dir <dir>`,
+ * `--session-id <taskId>` (retry idempotence) and `--name bgdispatch:<taskId>` (audit) — so
+ * the no-session flag is removed. `argv_extra` is appended verbatim after the session flags.
+ *
+ * Pure on purpose: the Real adapter calls it and tests pin the exact argv for both branches
+ * without spawning a process.
+ */
+export function buildSpawnArgv(argv: readonly string[], opts: ChildSpawnOptions): string[] {
+  const effective =
+    opts.sessionDir === undefined ? [...argv] : argv.filter((arg) => arg !== NO_SESSION_FLAG);
+  if (opts.sessionDir !== undefined) {
+    effective.push("--session-dir", opts.sessionDir);
+    if (opts.sessionId !== undefined) effective.push("--session-id", opts.sessionId);
+    if (opts.sessionName !== undefined) effective.push("--name", opts.sessionName);
+  }
+  if (opts.argv_extra !== undefined) effective.push(...opts.argv_extra);
+  return effective;
+}
+
+// ---------------------------------------------------------------------------
 //  RealChildProcessLifecycle
 // ---------------------------------------------------------------------------
 
@@ -334,8 +369,11 @@ export class RealChildProcessLifecycle implements ChildProcessLifecycle {
     if (argv.length === 0) {
       throw new TypeError("RealChildProcessLifecycle.spawn: argv must include the command");
     }
-    const command = argv[0] as string;
-    const args = argv.slice(1);
+    // ADR-0022 §1/R1: turn the session options into argv here; the foreground path (no
+    // sessionDir) keeps `--no-session`, the background path drops it for the R1 triple.
+    const effectiveArgv = buildSpawnArgv(argv, opts);
+    const command = effectiveArgv[0] as string;
+    const args = effectiveArgv.slice(1);
 
     const proc = spawn(command, args, {
       cwd: opts.cwd,
