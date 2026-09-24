@@ -111,6 +111,13 @@ export interface NotificationAck {
   subscriberId: ULID;
   taskId: ULID;
   cursor: ULID;
+  /**
+   * The concrete session pipeline this drain READ from, carried so the ack lands on the same
+   * session even if a rebind happens between the drain and the send (P1). Without it the ack goes
+   * through the stable proxy's *current* delegate and targets a session that never knew the
+   * subscription, leaving the original cursor unadvanced and re-delivering the batch.
+   */
+  sink: NotificationPipeline;
 }
 
 /**
@@ -287,6 +294,15 @@ class StableNotificationPipeline implements NotificationPipeline {
   setCurrent(next: DefaultNotificationPipeline): void {
     this.#current = next;
     for (const handler of this.#handlers) next.onIdleWake(handler);
+  }
+
+  /**
+   * The concrete session pipeline. `drainNotifications` captures it so a drain and its later ack
+   * are pinned to one session even across a rebind (P1); the proxy's other methods keep routing to
+   * whatever session is current.
+   */
+  current(): NotificationPipeline {
+    return this.#current;
   }
 
   subscribe(subscriberId: ULID, taskId: ULID, since?: ULID) {
@@ -538,11 +554,14 @@ class DefaultBackgroundTaskRuntime implements BackgroundTaskRuntime {
 
     const items: TaskNotificationItem[] = [];
     const acks: NotificationAck[] = [];
+    // Pin the whole drain to the session that is current NOW, so the caller's later ack cannot be
+    // re-routed by a rebind between the read and the send (P1).
+    const sink = this.pipeline.current();
     for (const record of records) {
       if (record.spawnSource.callerId !== subscriberId) continue;
       let events: TaskEvent[];
       try {
-        events = await this.pipeline.drainPending(subscriberId, record.id);
+        events = await sink.drainPending(subscriberId, record.id);
       } catch (error) {
         // A record without a subscription (or a storage read failure) must not swallow the rest
         // of the subscriber's events; report it and continue (testing-constraints #3).
@@ -560,7 +579,7 @@ class DefaultBackgroundTaskRuntime implements BackgroundTaskRuntime {
       const last = events[events.length - 1];
       if (last === undefined) continue;
       // Do NOT acknowledge here: the cursor advances only after the caller's send succeeds.
-      acks.push({ subscriberId, taskId: record.id, cursor: last.eventId });
+      acks.push({ subscriberId, taskId: record.id, cursor: last.eventId, sink });
     }
     return { items, acks };
   }
@@ -572,7 +591,8 @@ class DefaultBackgroundTaskRuntime implements BackgroundTaskRuntime {
   async acknowledgeNotifications(acks: readonly NotificationAck[]): Promise<void> {
     for (const ack of acks) {
       try {
-        await this.pipeline.acknowledgeEvents(ack.subscriberId, ack.taskId, ack.cursor);
+        // Use the sink the drain read from, not the proxy's current session (P1).
+        await ack.sink.acknowledgeEvents(ack.subscriberId, ack.taskId, ack.cursor);
       } catch (error) {
         this.#logger.warn(
           "acknowledgeNotifications: could not acknowledge task " +

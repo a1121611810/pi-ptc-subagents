@@ -226,6 +226,33 @@ describe("bindSession", () => {
     expect((await runtime.drainNotifications(OWNER as ULID)).items).toEqual([]);
   });
 
+  test("an ack after a rebind lands on the session that drained the events (P1)", async () => {
+    const storageA = new InMemoryTaskStorage();
+    const storageB = new InMemoryTaskStorage();
+    await seedRunningTask(storageA);
+    const warnings: string[] = [];
+    const runtime = createBackgroundTaskRuntime({
+      createStorage: (sessionDir) => (sessionDir === "/sessions/a" ? storageA : storageB),
+      createLifecycle: () => new MockChildProcessLifecycle(),
+      logger: { info: () => undefined, warn: (message) => warnings.push(message) },
+    });
+    await runtime.bindSession("/sessions/a");
+    const drain = await runtime.drainNotifications(OWNER as ULID);
+    expect(drain.acks).toHaveLength(1);
+
+    // Rebind BEFORE the ack: the stable pipeline proxy now points at session B, but the ack must
+    // stay pinned to the session the drain read from (P1). Without the sink, the ack is misrouted
+    // to B (where the subscription is unknown), warns, and leaves A's cursor unadvanced.
+    await runtime.bindSession("/sessions/b");
+    await runtime.acknowledgeNotifications(drain.acks);
+
+    expect(warnings.filter((message) => message.includes("could not acknowledge"))).toEqual([]);
+    expect((await storageA.loadSubscription(OWNER as ULID, TASK_RUNNING))?.cursor).toBe(
+      drain.acks[0]?.cursor,
+    );
+    expect(await storageB.loadSubscription(OWNER as ULID, TASK_RUNNING)).toBeNull();
+  });
+
   test("a terminal transition fires the registered idle-wake handler", async () => {
     const runtime = createBackgroundTaskRuntime({
       createLifecycle: () => new MockChildProcessLifecycle(),
