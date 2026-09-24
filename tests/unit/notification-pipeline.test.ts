@@ -381,6 +381,39 @@ describe("NotificationPipeline.onIdleWake / notifyIdle", () => {
     );
     expect(calls).toBe(0);
   });
+
+  test("isolates a throwing handler and surfaces its failure (R-m14)", async () => {
+    const storage = new InMemoryTaskStorage();
+    const warnings: string[] = [];
+    const pipeline = new DefaultNotificationPipeline(storage, {
+      now: () => FIXED_NOW,
+      logger: {
+        warn: (msg: string): void => {
+          warnings.push(msg);
+        },
+      },
+    });
+    await pipeline.subscribe(SUBSCRIBER, TASK_A);
+    await seedEvents(storage, SUBSCRIBER, [event(E1, TASK_A)]);
+
+    const calls: string[] = [];
+    pipeline.onIdleWake(() => {
+      calls.push("first");
+      throw new Error("handler boom");
+    });
+    pipeline.onIdleWake(() => {
+      calls.push("second");
+    });
+
+    const woken = await pipeline.notifyIdle(SUBSCRIBER, TASK_A);
+
+    // A throwing consumer must not abort delivery to the handlers registered after it.
+    expect(calls).toEqual(["first", "second"]);
+    expect(woken.map((e) => e.eventId)).toEqual([E1]);
+    // testing-constraints #3: the failure is surfaced through the warn path, never swallowed.
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("handler boom");
+  });
 });
 
 // --- ZERO_CURSOR sentinel -------------------------------------------------------------------

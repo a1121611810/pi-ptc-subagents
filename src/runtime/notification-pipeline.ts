@@ -62,6 +62,24 @@ export const DEFAULT_MAX_BATCH_BYTES: number = 100 * 1024;
 export type IdleWakeHandler = (subscriberId: ULID, events: TaskEvent[]) => void;
 
 /**
+ * Minimal warn seam for delivery failures. Kept structural (no dependency on the task
+ * registry's logger type) so this module stays Layer-1 and testable with a capturing stub.
+ */
+export interface NotificationPipelineLogger {
+  warn(msg: string): void;
+}
+
+/**
+ * Default failure surface: an idle-wake handler that throws must not vanish silently
+ * (docs/testing-constraints.md #3), so the first line of defence is a console warning.
+ */
+const DEFAULT_PIPELINE_LOGGER: NotificationPipelineLogger = {
+  warn: (msg: string): void => {
+    console.warn("[pi-ptc.notifications] " + msg);
+  },
+};
+
+/**
  * The five-method pipeline surface (Ticket BG-05). The concrete class adds the
  * dispatcher-facing `notifyIdle` wake trigger on top of this interface.
  */
@@ -85,6 +103,11 @@ export interface NotificationPipelineOptions {
    * clock so the persisted subscription is byte-for-byte reproducible.
    */
   now?: () => number;
+  /**
+   * Failure seam for idle-wake handlers. Defaults to a `console.warn` logger; tests inject
+   * a capturing stub. See {@link NotificationPipelineLogger}.
+   */
+  logger?: NotificationPipelineLogger;
 }
 
 /**
@@ -95,11 +118,13 @@ export interface NotificationPipelineOptions {
 export class DefaultNotificationPipeline implements NotificationPipeline {
   readonly #storage: TaskStorage;
   readonly #now: () => number;
+  readonly #logger: NotificationPipelineLogger;
   readonly #handlers: IdleWakeHandler[];
 
   constructor(storage: TaskStorage, options: NotificationPipelineOptions = {}) {
     this.#storage = storage;
     this.#now = options.now ?? Date.now;
+    this.#logger = options.logger ?? DEFAULT_PIPELINE_LOGGER;
     this.#handlers = [];
   }
 
@@ -167,7 +192,17 @@ export class DefaultNotificationPipeline implements NotificationPipeline {
     // Snapshot so a handler that registers another handler cannot extend this wake.
     const handlers = this.#handlers.slice();
     for (const handler of handlers) {
-      handler(subscriberId, events);
+      try {
+        handler(subscriberId, events);
+      } catch (err) {
+        // Per-handler isolation: one bad consumer must not starve the others. Report the
+        // failure through the warn path instead of swallowing it (testing-constraints #3).
+        const message = err instanceof Error ? err.message : String(err);
+        this.#logger.warn(
+          `notifyIdle: idle-wake handler for subscriber ${subscriberId} / task ${taskId} ` +
+            `threw: ${message}`,
+        );
+      }
     }
     return events;
   }
