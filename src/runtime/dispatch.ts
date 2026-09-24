@@ -21,11 +21,26 @@ import type { ThinkingLevel } from "@earendil-works/pi-ai";
 
 import {
   RealChildProcessLifecycle,
+  createULID,
   type ChildExitValue,
   type ChildHandle,
   type ChildProcessLifecycle,
+  type ChildSpawnOptions,
   type ParsedAgentEvent,
 } from "./child-process-lifecycle.ts";
+import { DEFAULT_CONFIG } from "./limits.ts";
+import {
+  DefaultTaskRegistry,
+  type DispatchHandle,
+  type RegistryLogger,
+  type TaskRegistry,
+} from "./task-registry.ts";
+import {
+  InMemoryTaskStorage,
+  type TaskSpawnSource,
+  type TaskStatus,
+  type ULID,
+} from "./task-storage.ts";
 
 // Re-exports keep existing imports working after BG-03 moved these definitions.
 // `tests/dispatch-helpers.test.ts` imports `parseAgentEvent` / `safeKill` from this
@@ -35,11 +50,103 @@ export { parseAgentEvent, safeKill } from "./child-process-lifecycle.ts";
 /**
  * Shared lifecycle adapter for the foreground `pi.dispatch` path. BG-03 extracted the
  * spawn / kill / JSONL-parse / exit-wait dance into a typed seam so the background
- * dispatch (ADR-0022) can drive the same handles from a different caller. Tests that
- * need to swap the adapter mock the `node:child_process` module (which is what
- * `RealChildProcessLifecycle` calls into); the seam itself is module-private.
+ * dispatch (ADR-0022) can drive the same handles from a different caller. The foreground
+ * path is mocked through `node:child_process` (which `RealChildProcessLifecycle` calls
+ * into); the background path can swap the adapter per call through
+ * {@link DispatchDeps.lifecycle}.
  */
 const DISPATCH_LIFECYCLE: ChildProcessLifecycle = new RealChildProcessLifecycle();
+
+/**
+ * Per-run in-flight `pi.dispatch` counter (ADR-0016 §2 + ADR-0022 §9). The dispatcher's
+ * foreground gate owns the canonical counter today; this class is the small exported seam
+ * ADR-0022 §9 asks for so the background branch can hold a slot for a child's whole
+ * lifetime and release it only on the terminal transition — a background task keeps
+ * counting against `dispatchConcurrency` after `dispatch()` has already returned. The
+ * dispatcher can adopt this type without a behaviour change.
+ */
+export class DispatchSlotCounter {
+  readonly limit: number;
+  #active: number;
+
+  constructor(limit: number) {
+    if (!Number.isInteger(limit) || limit < 0) {
+      throw new TypeError(
+        `DispatchSlotCounter: limit must be a non-negative integer, got ${String(limit)}`,
+      );
+    }
+    this.limit = limit;
+    this.#active = 0;
+  }
+
+  /** Number of slots currently held. */
+  get active(): number {
+    return this.#active;
+  }
+
+  /** Reserve one in-flight slot; `false` means the cap is reached (hard reject, no queue). */
+  tryAcquire(): boolean {
+    if (this.#active >= this.limit) return false;
+    this.#active += 1;
+    return true;
+  }
+
+  /** Release one slot; idempotent and never goes negative (a late release is safe). */
+  release(): void {
+    if (this.#active > 0) this.#active -= 1;
+  }
+}
+
+/**
+ * Fallback counter for a background dispatch that was not handed the dispatcher's per-run
+ * counter. It keeps ADR-0022 §9's cap in force (default `dispatchConcurrency` = 8) instead
+ * of silently skipping it; production wires the per-run counter through
+ * {@link DispatchDeps.slots}.
+ */
+const FALLBACK_DISPATCH_SLOTS: DispatchSlotCounter = new DispatchSlotCounter(
+  DEFAULT_CONFIG.dispatchConcurrency,
+);
+
+/**
+ * Injected dependencies for the background branch. The foreground path ignores this object
+ * entirely (it uses the module-level {@link DISPATCH_LIFECYCLE}); every field is optional so
+ * existing zero-argument call sites keep working. Tests pass an in-memory registry and a
+ * mock lifecycle so no real `pi` process is ever spawned.
+ */
+export interface DispatchDeps {
+  /** Session-level TaskRegistry (ADR-0022 §3). Defaults to a lazy in-memory registry. */
+  taskRegistry?: TaskRegistry;
+  /** Child lifecycle for the background spawn. Defaults to the shared real adapter. */
+  lifecycle?: ChildProcessLifecycle;
+  /** Per-run in-flight counter shared with the dispatcher's foreground gate (ADR-0022 §9). */
+  slots?: DispatchSlotCounter;
+  /** Time source for TaskRecord stamps. Defaults to `Date.now`. */
+  clock?: () => number;
+  /** Logger for the background pump's failure path. Defaults to a `console.warn` logger. */
+  logger?: RegistryLogger;
+}
+
+/**
+ * Lazy session-level fallback registry for background dispatches that were not handed one.
+ * Production passes the session registry through {@link DispatchDeps.taskRegistry}; the
+ * fallback exists so a direct `dispatch(..., { background: true })` call without DI still
+ * registers and advances a task instead of dropping it (ADR-0022 §3, "no silent failure").
+ */
+let fallbackTaskRegistry: DefaultTaskRegistry | undefined;
+
+function resolveTaskRegistry(deps: DispatchDeps, clock: () => number): TaskRegistry {
+  if (deps.taskRegistry !== undefined) return deps.taskRegistry;
+  fallbackTaskRegistry ??= new DefaultTaskRegistry(new InMemoryTaskStorage(), { clock });
+  return fallbackTaskRegistry;
+}
+
+/** Default pump logger: surface a background lifecycle failure instead of swallowing it. */
+const DEFAULT_DISPATCH_LOGGER: RegistryLogger = {
+  info: (): void => undefined,
+  warn: (msg: string): void => {
+    console.warn("[pi.dispatch] " + msg);
+  },
+};
 
 /**
  * The CLI command used to invoke a fresh pi subprocess for one dispatch.
@@ -65,6 +172,17 @@ export interface DispatchInput {
   agentScope?: "user" | "project" | "both";
   model?: string;
   thinkingLevel?: ThinkingLevel;
+  /**
+   * ADR-0022 §1: long-lived background spawn. When `true`, {@link dispatch} returns a
+   * {@link DispatchHandle} immediately and a detached pump drives the child's TaskRecord
+   * lifecycle; every other call keeps the ADR-0016 `DispatchResult` semantics.
+   */
+  background?: boolean;
+  /**
+   * ADR-0022 §1: human label carried by the handle and the TaskRecord. Defaults to the
+   * task text truncated to 64 characters.
+   */
+  label?: string;
 }
 
 /** Token usage accumulated from the child's message_end events. Optional. */
@@ -118,6 +236,22 @@ export interface DispatchContext {
   depth: number;
   /** Maximum allowed depth for any run reachable from this dispatch (ADR-0016 Recursive section). */
   maxDispatchDepth: number;
+  /**
+   * ADR-0022 R1: dedicated session directory for background children. When set, the three
+   * R1 session flags travel through {@link ChildSpawnOptions}; when absent, the spawn keeps
+   * the foreground shape (no session flags).
+   */
+  sessionDir?: string;
+  /**
+   * ADR-0022 §5: the TaskRecord owner, which is also the subscription subscriber
+   * ("Subscriber == owner"). Defaults to `dispatch:<callId>`.
+   */
+  callerId?: string;
+  /**
+   * ADR-0022 §3: parent background task id when this spawn is itself a background child,
+   * so the session registry can reconstruct the task tree.
+   */
+  parentTaskId?: ULID;
 }
 
 /**
@@ -411,21 +545,227 @@ function cleanupTmp(tmp: { dir: string; filePath: string }): void {
 }
 
 /**
- * Spawn one pi subprocess for one dispatch and resolve with a DispatchResult.
- *
- * Behavioural contract (ADR-0016 sections 1, 3, 4):
- *   - Resolves with status: fulfilled when the child exits 0 and emits at least one
- *     assistant message whose text is non-empty.
- *   - Resolves with status: rejected on non-zero exit, signal kill, spawn failure,
- *     unknown agent, or no usable final text.
- *   - Never rejects. The caller can pattern-match on outcome.status the same way
- *     it would pattern-match a Promise.allSettled record.
- *   - Honours signal with SIGTERM, then SIGKILL after a 5s grace window.
+ * Extract the assistant text from one child event, mirroring the foreground final-text rule
+ * (`message_end` assistant text parts; the last part wins). The detached background pump
+ * drains the child's stdout through this so a chatty child cannot back-pressure the spawn
+ * turn, even though the current TaskRecord command surface has nowhere to persist it yet.
  */
+function assistantText(event: ParsedAgentEvent): string | undefined {
+  if (event.type !== "message_end" || event.message?.role !== "assistant") return undefined;
+  const content = event.message.content;
+  if (!Array.isArray(content)) return undefined;
+  let text: string | undefined;
+  for (const part of content) {
+    if (part && part.type === "text" && typeof part.text === "string") {
+      text = part.text;
+    }
+  }
+  return text;
+}
+
+/**
+ * Background branch of {@link dispatch} (ADR-0022 §1/§3/§4/§9). It applies the same depth
+ * and concurrency gates as the foreground path, spawns the child, registers a `running`
+ * TaskRecord, starts a detached pump driving the terminal transition from the child's close
+ * event, and returns the spawn-time {@link DispatchHandle} immediately.
+ *
+ * Pre-spawn refusals reuse the exact foreground shapes (`dispatchDepthLimitReached` /
+ * `dispatchConcurrencyLimitReached` / the unknown-agent result) so the model and the
+ * sub-call tree keep one vocabulary (ADR-0021 §6).
+ */
+async function dispatchBackground(
+  input: DispatchInput,
+  ctx: DispatchContext,
+  deps: DispatchDeps,
+): Promise<DispatchHandle | DispatchResult> {
+  const childDepth = ctx.depth + 1;
+  if (childDepth > ctx.maxDispatchDepth) {
+    return dispatchDepthLimitReached();
+  }
+  const slots = deps.slots ?? FALLBACK_DISPATCH_SLOTS;
+  if (!slots.tryAcquire()) {
+    return dispatchConcurrencyLimitReached();
+  }
+
+  const clock = deps.clock ?? ((): number => Date.now());
+  const logger = deps.logger ?? DEFAULT_DISPATCH_LOGGER;
+  const cwd = input.cwd ?? ctx.cwd;
+  const agentScope = input.agentScope ?? "user";
+  const lifecycle = deps.lifecycle ?? DISPATCH_LIFECYCLE;
+  const callerId = ctx.callerId ?? "dispatch:" + String(ctx.callId);
+  const registry = resolveTaskRegistry(deps, clock);
+
+  let childHandle: ChildHandle | undefined;
+  let tmp: { dir: string; filePath: string } | undefined;
+  try {
+    const agent = discoverAgent(input.agent, cwd, agentScope);
+    if (!agent) {
+      slots.release();
+      return {
+        text: "",
+        status: "rejected",
+        started: false,
+        agentName: input.agent,
+        durationMs: 0,
+        exitCode: 1,
+        errorMessage:
+          "unknown agent: " + input.agent + " (agentScope=" + agentScope + ", cwd=" + cwd + ")",
+      };
+    }
+
+    // ADR-0022 §4: mint the fresh task id; the registry adopts it as the TaskRecord id, so
+    // the handle the program carries and the persisted record agree at creation.
+    const taskId = createULID() as ULID;
+    const label = input.label ?? input.task.slice(0, 64);
+    const fullPrompt = appendDepthHint(agent.systemPrompt, childDepth, ctx.maxDispatchDepth);
+    const written = await writePromptToTempFile(agent.name, fullPrompt);
+    tmp = written;
+    const argv = buildArgv(input, agent, written.filePath);
+
+    const spawnOptions: ChildSpawnOptions = {
+      cwd,
+      // ADR-0016 Recursive section: the child run's depth baseline travels in the
+      // environment so the pi-ptc extension loaded inside the child starts its PTC runs at
+      // childDepth instead of at 0.
+      env: { ...process.env, PI_PTC_DEPTH: String(childDepth) },
+      promptFile: written.filePath,
+    };
+    // R1 session-file flags travel through the lifecycle options. When no sessionDir is
+    // available the options keep the foreground shape (none of the three fields set).
+    if (ctx.sessionDir !== undefined) {
+      spawnOptions.sessionDir = ctx.sessionDir;
+      spawnOptions.sessionId = taskId;
+      spawnOptions.sessionName = "bgdispatch:" + taskId;
+    }
+
+    childHandle = lifecycle.spawn([PI_COMMAND, ...argv], spawnOptions);
+    const handle: ChildHandle = childHandle;
+
+    const spawnSource: TaskSpawnSource = { kind: "ptc-program", callerId };
+    await registry.transition(
+      {
+        kind: "spawn",
+        handle: { taskId, label, status: "running" },
+        record: {
+          label,
+          agentName: agent.name,
+          depth: childDepth,
+          startedAt: Math.max(0, Math.floor(clock())),
+          finishedAt: undefined,
+          durationMs: undefined,
+          outputRef: undefined,
+          outputBytes: undefined,
+          outputPreview: undefined,
+          stopReason: undefined,
+          errorMessage: undefined,
+          exitCode: undefined,
+          spawnSource,
+          parentTaskId: ctx.parentTaskId,
+          sessionFile: undefined,
+        },
+      },
+      { clock, callerId, logger },
+    );
+
+    // Detached pump (ADR-0022 §2/§8): drain the child's stdout so it cannot back-pressure,
+    // then drive running -> succeeded (exit 0) / failed (anything else) from the close
+    // event. It is deliberately not awaited, so the spawn turn returns the handle at once.
+    void (async (): Promise<void> => {
+      let output = "";
+      try {
+        for await (const event of lifecycle.events(handle)) {
+          const text = assistantText(event);
+          if (text !== undefined) output = text;
+        }
+        const exitValue: ChildExitValue = await lifecycle.exit(handle);
+        const exitCode = exitValue.code ?? -1;
+        const to: TaskStatus = exitCode === 0 ? "succeeded" : "failed";
+        await registry.transition(
+          { kind: "transition", taskId, to, exitCode },
+          { clock, callerId, logger },
+        );
+      } catch (err) {
+        // A pump failure must not vanish. A task already driven terminal by a model stop
+        // lands here on the illegal running -> terminal edge; log it so it is observable.
+        const message = err instanceof Error ? err.message : String(err);
+        logger.warn(
+          "background dispatch pump for task " +
+            taskId +
+            " failed after " +
+            String(output.length) +
+            " chars of buffered output: " +
+            message,
+        );
+      } finally {
+        cleanupTmp(written);
+        slots.release();
+      }
+    })();
+
+    return { taskId, label, status: "running" };
+  } catch (err) {
+    // Spawn / registration / IO failure: release the slot, reap a child that did come up,
+    // and keep the ADR-0016 "never throws" contract with a rejected DispatchResult.
+    const message = err instanceof Error ? err.message : String(err);
+    if (childHandle !== undefined) {
+      lifecycle.kill(childHandle, "SIGTERM");
+    }
+    if (tmp !== undefined) cleanupTmp(tmp);
+    slots.release();
+    logger.warn("background dispatch failed for agent " + input.agent + ": " + message);
+    return {
+      text: "",
+      status: "rejected",
+      started: childHandle !== undefined,
+      agentName: input.agent,
+      durationMs: 0,
+      exitCode: -1,
+      errorMessage: "background dispatch failed: " + message,
+    };
+  }
+}
+
+/**
+ * Spawn one pi subprocess for one dispatch.
+ *
+ * Behavioural contract (ADR-0016 sections 1, 3, 4) for the foreground path, and ADR-0022
+ * for the `{ background: true }` path:
+ *   - Foreground (`input.background !== true`) resolves with a {@link DispatchResult}:
+ *     `fulfilled` when the child exits 0 with assistant text; `rejected` on non-zero
+ *     exit, signal kill, spawn failure, unknown agent, or no usable final text.
+ *   - Background (`input.background === true`) resolves with a {@link DispatchHandle}
+ *     immediately after the child and its `running` TaskRecord are registered; a detached
+ *     pump drives the terminal transition. The pre-spawn refusals (depth gate, concurrency
+ *     gate, unknown agent) still resolve with the foreground {@link DispatchResult}
+ *     rejection shapes, which is why the overload below returns a union.
+ *   - Never rejects. The caller can pattern-match on `status` the same way it would
+ *     pattern-match a Promise.allSettled record.
+ *   - Honours signal with SIGTERM, then SIGKILL after a 5s grace window (foreground).
+ *
+ * The overloads narrow by `input.background`: a literal `{ background: true }` yields the
+ * handle-or-refusal union; every other call keeps the plain `DispatchResult` of ADR-0016.
+ */
+export function dispatch(
+  input: Omit<DispatchInput, "background"> & { background: true },
+  ctx: DispatchContext,
+  deps?: DispatchDeps,
+): Promise<DispatchHandle | DispatchResult>;
+export function dispatch(
+  input: DispatchInput,
+  ctx: DispatchContext,
+  deps?: DispatchDeps,
+): Promise<DispatchResult>;
 export async function dispatch(
   input: DispatchInput,
   ctx: DispatchContext,
-): Promise<DispatchResult> {
+  deps: DispatchDeps = {},
+): Promise<DispatchResult | DispatchHandle> {
+  // ADR-0022 §1: the background opt switches the binding's tail. Pre-spawn refusals reuse
+  // the foreground shapes, so the union stays even for a statically-background call.
+  if (input.background === true) {
+    return await dispatchBackground(input, ctx, deps);
+  }
+
   // ADR-0016 Recursive dispatch: bound recursion explicitly.
   const childDepth = ctx.depth + 1;
   if (childDepth > ctx.maxDispatchDepth) {
