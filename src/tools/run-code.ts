@@ -136,6 +136,9 @@ export function createPtcRunCodeTool(
       // ADR-0022 R1: hand the host session dir to background children. Read defensively
       // because direct library callers may pass a context without a session manager.
       const sessionDir = ctx.sessionManager?.getSessionDir?.();
+      // ADR-0022 §9/BG-14: the session-scoped dispatch deps, so a background spawn writes into
+      // the session registry and shares its slot counter. Absent for direct library callers.
+      const dispatchDeps = options.getDispatchDeps?.();
       // Live sub-call pushes: while the program runs, the tree is visible (ADR-0021 §4).
       const updater = createSubCallUpdater({ surface: "run_code", startedAt, onUpdate });
       let outcome: PtcRunOutcome;
@@ -148,6 +151,7 @@ export function createPtcRunCodeTool(
           // binding-source names only curate the built-in subset.
           bindings: createBuiltinBindings({ cwd, names, includeDispatch: true }),
           ...(sessionDir === undefined ? {} : { sessionDir }),
+          ...(dispatchDeps === undefined ? {} : { dispatchDeps }),
           ...(options.depth === undefined ? {} : { depth: options.depth }),
           ...(params.timeoutMs === undefined ? {} : { timeoutMs: params.timeoutMs }),
           ...(signal === undefined ? {} : { signal }),

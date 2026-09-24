@@ -238,6 +238,8 @@ export function createPtcWorkflowTool(
       // ADR-0022 R1: hand the host session dir to background children (same seam as
       // ptc_run_code; read defensively for direct library callers).
       const sessionDir = ctx.sessionManager?.getSessionDir?.();
+      // ADR-0022 §9/BG-14: the session-scoped dispatch deps (same seam as ptc_run_code).
+      const dispatchDeps = options.getDispatchDeps?.();
       // Live sub-call pushes: while the program runs, the tree is visible (ADR-0021 §4).
       const updater = createSubCallUpdater({ surface: "workflow", startedAt, onUpdate });
       let outcome: PtcRunOutcome;
@@ -249,6 +251,7 @@ export function createPtcWorkflowTool(
           // Same surface contract as ptc_run_code: pi.dispatch is always bound (ADR-0016).
           bindings: createBuiltinBindings({ cwd, names, includeDispatch: true }),
           ...(sessionDir === undefined ? {} : { sessionDir }),
+          ...(dispatchDeps === undefined ? {} : { dispatchDeps }),
           ...(params.args === undefined ? {} : { args: params.args }),
           ...(options.depth === undefined ? {} : { depth: options.depth }),
           ...(signal === undefined ? {} : { signal }),

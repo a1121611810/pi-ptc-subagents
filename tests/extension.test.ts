@@ -22,9 +22,16 @@ test("the default export is the extension factory and runs without touching pi",
   expect(ptcSubagents(makeExtensionStub().api)).toBe(undefined);
 });
 
-test("the factory registers both PTC tools against the ExtensionAPI", () => {
+test("the factory registers the two PTC tools and the three background-task tools", () => {
   const tools = captureRegisteredTools();
-  expect([...tools.keys()]).toEqual(["ptc_run_code", "ptc_workflow"]);
+  // BG-14: the three ptc_task_* tools are always-on, registered at factory time outside /ptc mode.
+  expect([...tools.keys()]).toEqual([
+    "ptc_run_code",
+    "ptc_workflow",
+    "ptc_task_list",
+    "ptc_task_output",
+    "ptc_task_stop",
+  ]);
   for (const tool of tools.values()) {
     expect(typeof tool.execute).toBe("function");
     expect(typeof tool.description).toBe("string");

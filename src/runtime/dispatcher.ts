@@ -728,8 +728,12 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
           // has one) travels to the background spawn as the R1 `--session-dir` flag.
           callerId: runId,
           ...(options.sessionDir === undefined ? {} : { sessionDir: options.sessionDir }),
-          // ADR-0022 §9: the one per-run slot counter, merged over any session-level deps.
-          dispatchDeps: { ...options.dispatchDeps, slots: dispatchSlots },
+          // ADR-0022 §9: a session-supplied counter wins; otherwise keep this run's own
+          // counter as the default (nothing regresses for callers that pass no deps).
+          dispatchDeps: {
+            ...options.dispatchDeps,
+            slots: options.dispatchDeps?.slots ?? dispatchSlots,
+          },
         });
         // Capture image blocks before the callResult post so the hoist can never race the
         // worker's view of the result; the captures are committed only once the post

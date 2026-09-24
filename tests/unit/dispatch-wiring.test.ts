@@ -21,10 +21,7 @@ import {
   createBuiltinBindings,
   type BindingContext,
 } from "../../src/runtime/bindings.ts";
-import {
-  DispatchSlotCounter,
-  type DispatchDeps,
-} from "../../src/runtime/dispatch.ts";
+import { DispatchSlotCounter, type DispatchDeps } from "../../src/runtime/dispatch.ts";
 import {
   MockChildProcessLifecycle,
   type ChildHandle,
@@ -207,6 +204,48 @@ describe("dispatcher.ts threads the per-run counter + session identity (Gap 2 + 
     // The dispatcher skipped tryAcquire for the background call, so the shared counter was
     // at 0 while the binding ran; dispatchBackground acquires it for the child's lifetime.
     expect(activeDuringBackgroundCall).toBe(0);
+  });
+
+  test("an injected session counter wins over the per-run default for a background branch", async () => {
+    await withAgent(async (dir) => {
+      const storage = new InMemoryTaskStorage();
+      const registry: TaskRegistry = createTaskRegistry(storage, { clock: () => 1000 });
+      const lifecycle = new RecordingLifecycle();
+      const outputStorage = new InMemoryOutputStorage();
+      const injected = new DispatchSlotCounter(4);
+      const bindings = createBuiltinBindings({ cwd: dir, includeDispatch: true });
+
+      const outcome = await runPtcProgram({
+        code:
+          "const h = await tools['pi.dispatch']({agent:'" +
+          AGENT +
+          "',task:'injected',background:true,agentScope:'project'});\n" +
+          "return h.taskId;",
+        surface: "run_code",
+        cwd: dir,
+        bindings,
+        runId: "run-injected",
+        // ADR-0022 §9 / BG-14: a session-supplied counter must not be clobbered by the per-run
+        // default. Removing the `?? dispatchSlots` fix leaves this counter at 0.
+        dispatchDeps: {
+          taskRegistry: registry,
+          lifecycle,
+          slots: injected,
+          clock: () => 1000,
+          outputStorage,
+        },
+      });
+
+      expect(outcome.error).toBeUndefined();
+      expect(injected.active).toBe(1);
+      // The injected slot is the one the background branch acquired, and the terminal
+      // transition releases it (ADR-0022 §9).
+      lifecycle.resolveExit(firstHandle(lifecycle), 0, null);
+      const taskId = outcome.value as ULID;
+      const terminal = await waitForTerminal(storage, taskId);
+      expect(terminal.status).toBe("succeeded");
+      expect(injected.active).toBe(0);
+    });
   });
 
   test("omits sessionDir when the run has none, still carrying the run id", async () => {
