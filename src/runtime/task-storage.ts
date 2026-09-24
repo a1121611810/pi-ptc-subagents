@@ -16,10 +16,11 @@
  *   `docs/testing-constraints.md`): the test fixtures are copy-pasted from the ADR, not
  *   derived from this file.
  *
- * - **ULID brand** — `type ULID = string & { __brand: "ULID" }` is a compile-time-only
- *   distinction. Runtime strings flow freely into the brand (no `new ULID(...)` constructor);
- *   the brand just keeps us honest at the type level when a plain `string` would otherwise
- *   hide a wrong-shape param (e.g. a taskId slipped into a cursor slot).
+ * - **ULID brand** — `type ULID = string & { __brand: "ULID" }` is owned by `ulid.ts`
+ *   (WS-ULID / R-M2) and re-exported here. It is a compile-time-only distinction: runtime
+ *   strings flow freely into the brand (no `new ULID(...)` constructor); the brand just keeps
+ *   us honest at the type level when a plain `string` would otherwise hide a wrong-shape param
+ *   (e.g. a taskId slipped into a cursor slot).
  *
  * - **`AsyncIterable` over arrays** for `listTasks(filter)` and `loadEvents(subscriptionId, since?)`
  *   is a deliberate seam. The interface lets future adapters stream results from disk without
@@ -40,20 +41,21 @@
 
 import { ok as assertPresent } from "node:assert/strict";
 
-/** Lexically-sortable identifier (26-char Crockford base32). Brand-only; runtime is `string`. */
-export type ULID = string & { readonly __brand: "ULID" };
+import type { ULID } from "./ulid.ts";
+
+/**
+ * Lexically-sortable identifier (26-char Crockford base32). Re-exported from `ulid.ts`
+ * (WS-ULID / R-M2), the single source of truth, so every existing
+ * `import type { ULID } from "./task-storage.ts"` keeps compiling. The dependency is one-way:
+ * `ulid.ts` must never import this file.
+ */
+export type { ULID };
 
 /**
  * The 6-state TaskRecord status (ADR-0022 §2). `queued` is deliberately absent in v1
  * (spawn-or-reject, no in-task queue; cap=8 rejects above the limit immediately).
  */
-export type TaskStatus =
-  | "running"
-  | "stopping"
-  | "succeeded"
-  | "failed"
-  | "canceled"
-  | "lost";
+export type TaskStatus = "running" | "stopping" | "succeeded" | "failed" | "canceled" | "lost";
 
 /** Origin of the spawn — `ptc-program` from a PTC run, `ptc-batch` from a future batch entry. */
 export interface TaskSpawnSource {

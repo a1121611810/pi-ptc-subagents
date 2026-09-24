@@ -25,82 +25,13 @@
  */
 
 import { spawn } from "node:child_process";
-import { randomBytes } from "node:crypto";
 
-// ---------------------------------------------------------------------------
-//  ULID
-// ---------------------------------------------------------------------------
+import { createULID, type ULID } from "./ulid.ts";
 
-/**
- * String id for a child handle. Background-dispatch (ADR-0022) carries these as
- * `taskId`; for the foreground path we need uniqueness within one process, and across
- * a restart, since these persist under `<sessionDir>`.
- *
- * A real ULID: 26 chars of Crockford base32, `TTTTTTTTTTRRRRRRRRRRRRRRRR` — 10 chars
- * (48 bits) of ms-epoch followed by 16 chars (80 bits) of crypto randomness. The
- * alphabet omits I, L, O and U; its ordering means lexical sort equals creation order.
- * 80 bits from `randomBytes` (not `Math.random()`) makes two ids minted in the same
- * millisecond distinct, and a per-ms counter makes them strictly increasing.
- */
-export type ULID = string;
-
-/** Crockford base32 alphabet (ULID spec) - deliberately omits I, L, O, U. */
-const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-
-/** Monotonic state: ms of the last id plus its random tail, for same-ms increments. */
-let lastMs = -1;
-let lastRandom: Uint8Array<ArrayBufferLike> = new Uint8Array(10);
-
-/** Encode a 48-bit ms timestamp as 10 Crockford chars (most-significant first). */
-function encodeTime(ms: number): string {
-  let out = "";
-  let v = ms;
-  for (let i = 0; i < 10; i++) {
-    out = CROCKFORD[v % 32] + out;
-    v = Math.floor(v / 32);
-  }
-  return out;
-}
-
-/** Encode 80 bits of entropy as 16 Crockford chars (5 bits per char). */
-function encodeRandom(bytes: Uint8Array): string {
-  let out = "";
-  let acc = 0;
-  let bits = 0;
-  for (let i = 0; i < bytes.length && out.length < 16; i++) {
-    acc = (acc << 8) | (bytes[i] ?? 0);
-    bits += 8;
-    while (bits >= 5 && out.length < 16) {
-      bits -= 5;
-      out += CROCKFORD[(acc >>> bits) & 31];
-    }
-  }
-  return out.padEnd(16, "0");
-}
-
-/** Increment an 80-bit big-endian byte tail by one (wraps at 2^80, never in practice). */
-function incrementRandom(bytes: Uint8Array): Uint8Array {
-  const out = new Uint8Array(bytes);
-  for (let i = out.length - 1; i >= 0; i--) {
-    if ((out[i] ?? 0) < 0xff) {
-      out[i] = (out[i] ?? 0) + 1;
-      return out;
-    }
-    out[i] = 0;
-  }
-  return out;
-}
-
-/** Generate a fresh `ULID` for one child handle. Monotonic within a millisecond. */
-export function createULID(): ULID {
-  const now = Date.now();
-  // Never let a backwards clock step (NTP) break the lexical-ordering invariant.
-  const ms = now > lastMs ? now : lastMs;
-  const bytes = ms === lastMs ? incrementRandom(lastRandom) : new Uint8Array(randomBytes(10));
-  lastMs = ms;
-  lastRandom = bytes;
-  return encodeTime(ms) + encodeRandom(bytes);
-}
+// The ULID machinery moved to `ulid.ts` (WS-ULID / R-M2). Re-export the names this module's
+// importers relied on: `dispatch.ts` imports `createULID`, and `ChildHandle.id` is a `ULID`.
+export { createULID };
+export type { ULID };
 
 // ---------------------------------------------------------------------------
 //  ParsedAgentEvent - moved from dispatch.ts (BG-03)
