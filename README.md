@@ -32,6 +32,9 @@ required — install it and the extension is on for the next pi startup.
 - `ptc_workflow` — structured variant with `meta` + plain-JSON `args`, plus the
   workflow helpers (`log`, `phase`, `parallel`, `pipeline`). There is no
   `agent()` helper on either surface.
+- `ptc_task_list` / `ptc_task_output` / `ptc_task_stop` — manage background
+  dispatches (see [Background dispatch](#background-dispatch)). They stay
+  available when PTC mode is off.
 
 Long output follows pi's own truncation contract ([ADR-0015](./docs/adr/0015-pi-truncation-contract.md)):
 
@@ -82,6 +85,31 @@ createBuiltinBindings({ cwd: "/abs/path", names: ["read", "grep"] });
 ```
 
 **Not a subagent.** The term _subagent_ is overloaded in this field (DSH's `subagent` is a different thing; pi's `examples/extensions/subagent/` extension is also a different thing). pi-ptc uses _parallel binding_ and _concurrent tool call_ throughout; see `CONTEXT.md` for the canonical terms.
+
+### Background dispatch
+
+Foreground `pi.dispatch` blocks the program until the child exits. Pass `background: true` to spawn the child and return immediately with a `DispatchHandle` ([ADR-0022](./docs/adr/0022-background-dispatch.md)); the child outlives both the program and the turn:
+
+```ts
+// inside a ptc_run_code program — bindings are reached as tools["<name>"]
+const handle = await tools["pi.dispatch"]({
+  agent: "scout",
+  task: "audit the auth code",
+  background: true,
+  label: "auth audit", // defaults to task.slice(0, 64)
+});
+// handle: { taskId: "01J…", label: "auth audit", status: "running" }
+```
+
+(The binding's name is `pi.dispatch`; a program reaches it as `tools["pi.dispatch"]`.)
+
+A detached pump drives the task's lifecycle (`running` -> `succeeded` / `failed` / `canceled` / `lost`), and the model observes it with three always-on tools — they are not part of the PTC-mode loadout, so `/ptc off` (which only blocks new spawns) does not remove them:
+
+- `ptc_task_list({ status?, limit? })` — list this session's tasks, newest first (default limit 100).
+- `ptc_task_output({ taskId, sinceBytes? })` — read a task's captured output, tail-truncated to pi's 50 KB / 2000-line contract (ADR-0015).
+- `ptc_task_stop({ taskId, reason? })` — ask a running task to stop.
+
+Background tasks count against the same `dispatchConcurrency` (default 8) for their whole lifetime and share the `maxDispatchDepth` (default 3) recursion bound. A pre-spawn refusal (depth or concurrency cap, unknown agent) still comes back as the familiar `DispatchResult` with `status: "rejected"`. Full guide: [`docs/usage/bgdispatch.md`](./docs/usage/bgdispatch.md).
 
 ## TUI rendering
 
