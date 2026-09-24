@@ -66,6 +66,21 @@
       "merge_system_rule": false
     },
     {
+      "path": "src/tools/common.ts",
+      "rule": ".opencodereview/rules/ptc-bgdispatch-contract.md",
+      "merge_system_rule": true
+    },
+    {
+      "path": "src/tools/run-code.ts",
+      "rule": ".opencodereview/rules/ptc-bgdispatch-contract.md",
+      "merge_system_rule": true
+    },
+    {
+      "path": "src/tools/workflow.ts",
+      "rule": ".opencodereview/rules/ptc-bgdispatch-contract.md",
+      "merge_system_rule": true
+    },
+    {
       "path": "src/tools/task-panel-render.ts",
       "rule": ".opencodereview/rules/ptc-render-bounds.md",
       "merge_system_rule": false
