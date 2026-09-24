@@ -3,9 +3,10 @@
  *
  * This module owns the *types* the TaskRegistry and the model-facing `ptc_task_*` tools read
  * (TaskRecord, TaskStatus, Subscription, TaskEvent, TaskFilter) and the *interface* TaskStorage
- * they read them through. The `InMemoryTaskStorage` adapter is the v1 backend; a future file-based
- * adapter under `<sessionDir>/tasks/<id>.json` + `<sessionDir>/event-log/<eventId>.json` will
- * satisfy the same interface (see ADR-0022 "Implementation outline").
+ * they read them through. Two adapters satisfy the interface: `InMemoryTaskStorage` (this file,
+ * process-local) and `FileTaskStorage` (`./task-storage-file.ts`, the durable session backend
+ * under `<sessionDir>/tasks/<id>.json` + `<sessionDir>/subscriptions/<subscriberId>-<taskId>.json`
+ * + `<sessionDir>/events/<subscriberId>-<taskId>.jsonl`; see ADR-0022 and its BG-13 note).
  *
  * Design notes:
  *
@@ -147,10 +148,11 @@ export interface TaskFilter {
  * Adapters:
  * - `InMemoryTaskStorage` (this file): `Map<ULID, TaskRecord>` for tasks +
  *   `Map<string, Subscription>` keyed by `${subscriberId}-${taskId}` for unique load +
- *   `Map<string, TaskEvent[]>` keyed by subscriberId for the event buffer. v1 default backend.
- * - File-backed adapter (future, ADR-0022 "Implementation outline"): `<sessionDir>/tasks/<id>.json`
- *   + `<sessionDir>/subscriptions/<subscriberId>-<taskId>.json` + `<sessionDir>/event-log/<eventId>.json`,
- *   same interface.
+ *   `Map<string, TaskEvent[]>` keyed by subscriberId for the event buffer. Used when no session
+ *   directory is available (session-less/library callers and tests).
+ * - `FileTaskStorage` (durable default, `./task-storage-file.ts`): `<sessionDir>/tasks/<id>.json`
+ *   + `<sessionDir>/subscriptions/<subscriberId>-<taskId>.json` + `<sessionDir>/events/<subscriberId>-<taskId>.jsonl`,
+ *   same interface; bonds the session's on-disk state across a restart.
  */
 export interface TaskStorage {
   /** Load one TaskRecord by id; returns `null` if the id is unknown. */

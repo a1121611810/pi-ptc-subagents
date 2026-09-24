@@ -106,7 +106,7 @@ Re-run the same two axes over the fix commits, and additionally verify: (a) the 
 | R-m13 / R-m11 / R-m9 cleanup         | WS-CLEANUP (in flight) | shared ADR-0015 helpers, registry-vs-pipeline cursor seam, `argv_extra`.                                                                                                                                                                                                               |
 | new — silent malformed-line drop     | WS-CLEANUP (in flight) | `child-process-lifecycle.ts` will warn on a dropped non-empty line (testing-constraints #3).                                                                                                                                                                                           |
 
-Verified at `69c5261`: `tsc --noEmit` clean, `oxlint` clean, **695 passed / 3 skipped (43 files)**, meta-discipline green (42 files scanned).
+Verified at `69c5261`: `tsc --noEmit` clean, `oxlint` clean, **695 passed / 3 skipped (43 files)**, meta-discipline green (43 test files scanned; review 2 corrected an earlier 42).
 
 ## What is already correct
 

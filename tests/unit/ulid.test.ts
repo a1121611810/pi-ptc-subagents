@@ -3,9 +3,9 @@
  *
  * SPECIFICATION tests, not characterization (docs/testing-constraints.md #4/#6): every
  * expectation traces to an independent source — the ULID spec's 26-char Crockford base32
- * alphabet (10 time chars + 16 entropy chars), the ADR-0022 §5 cursor invariant ("monotonic
- * ULID that advances on every event delivered"), or a differential property between the two
- * public seams of the single module.
+ * alphabet (10 time chars + 16 entropy chars) INCLUDING its canonical example literal for
+ * 1469918176385, the ADR-0022 §5 cursor invariant ("monotonic ULID that advances on every
+ * event delivered"), or a test-side decoder that uses its own copy of the alphabet.
  *
  * The clock and the entropy source are both injected (constraint #1, IO boundary): tests pass
  * a fake clock and a deterministic `randomBytes`, never a real timer and never the crypto RNG.
@@ -14,7 +14,7 @@
  * Counterfactual block (constraint #5): every assertion below goes red for an obviously-wrong
  * implementation — no same-ms increment duplicates ids, no clamp inverts order on a backwards
  * clock, a wrong alphabet breaks the literal membership check, and a drifted time encoder
- * breaks the createULID()/createUlidMinter() differential.
+ * breaks the spec-literal prefix ("01ARYZ6S41") or the test-side decode.
  */
 
 import { describe, expect, test } from "vitest";
@@ -117,19 +117,29 @@ describe("createUlidMinter (injected clock + entropy)", () => {
     expect(second > first).toBe(true);
   });
 
-  test("differential: createULID() and createUlidMinter() encode the same instant identically", () => {
-    // The counterfactual: if the two public seams drifted onto different time encoders,
-    // alphabets or widths, decoding createULID()'s prefix and re-encoding it through a minter
-    // would not reproduce it.
-    const fromDefault = createULID();
-    const decodedMs = decodeTimePrefix(fromDefault);
-    const fromMinter = createUlidMinter({
-      now: () => decodedMs,
+  test("the time prefix is the spec's Crockford encoding of the injected instant", () => {
+    // Two INDEPENDENT oracles, neither read out of the implementation (constraint #4):
+    //   1. the test-side decoder below recovers the injected millisecond, and
+    //   2. the ULID spec's canonical example: 1469918176385 encodes to the literal
+    //      "01ARYZ6S41" (10 chars x 5 bits of base32). The full id below is that prefix
+    //      followed by the zero entropy this test injects.
+    const minter = createUlidMinter({
+      now: () => 1_469_918_176_385,
       randomBytes: fixedRandom(0),
-    }).next();
-    expect(fromDefault).toMatch(CROCKFORD_26);
-    expect(fromMinter).toMatch(CROCKFORD_26);
-    expect(fromMinter.slice(0, 10)).toBe(fromDefault.slice(0, 10));
+    });
+    const id = minter.next();
+    expect(decodeTimePrefix(id)).toBe(1_469_918_176_385);
+    expect(id).toBe("01ARYZ6S410000000000000000");
+    // Counterfactual: a drifted time encoder, a shifted alphabet or a wrong width breaks the
+    // literal above (or the decode), not merely a round-trip through the same encoder.
+  });
+
+  test("the default seam mints a decodable 26-char id from the shared encoder", () => {
+    // createULID() reads the real clock, so its instant cannot be pinned; what IS pinned is
+    // that its prefix decodes through the test-side oracle and its shape matches the spec.
+    const id = createULID();
+    expect(id).toMatch(CROCKFORD_26);
+    expect(decodeTimePrefix(id)).toBeGreaterThan(1_400_000_000_000);
   });
 
   test("the same now + entropy sequence yields identical ids (deterministic seam)", () => {
