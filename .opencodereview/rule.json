@@ -61,6 +61,11 @@
       "merge_system_rule": false
     },
     {
+      "path": "src/runtime/adr0015-truncation.ts",
+      "rule": ".opencodereview/rules/ptc-render-bounds.md",
+      "merge_system_rule": true
+    },
+    {
       "path": "src/tools/ptc-task.ts",
       "rule": ".opencodereview/rules/ptc-bgdispatch-contract.md",
       "merge_system_rule": false
