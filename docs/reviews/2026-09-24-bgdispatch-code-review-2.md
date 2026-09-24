@@ -48,7 +48,9 @@ Spec-B first verified the R-B1..R-B6 closure wires are genuine **with a wire-rem
 | B7      | minor | **The ULID differential test cannot catch the drift it claims** — both "seams" are one function (`createULID` delegates to `DEFAULT_ULID_MINTER`), so the assertion is a decode/encode round-trip, i.e. characterization.                       | `src/runtime/ulid.ts:115,118-119,36-44`; `tests/unit/ulid.test.ts:120-123`.                                                                           |
 | B8      | minor | **The terminal `#apply` still writes the record before its event**, so an `appendEvents` failure leaves a terminal record with no event and no observer fire; the R-m7 fix covered only `#spawn`.                                               | `task-registry.ts:663-665`; `dispatch.ts:795-806`; tests inject failure only into `#spawn` (`tests/unit/task-registry.test.ts:755-775`).              |
 
-Doc-only: the closure log says the meta-discipline fixture scans 42 test files; the actual output is 43.
+Doc-only: the closure log said the meta-discipline fixture scans 42 test files; the actual output is 43 (corrected in `666952b`).
+
+Anchor coverage re-verified after the fix pass: over the whole `6737ec3..HEAD` reviewable set (23 files), the only SYSTEM-ONLY entries are `package.json` and `.opencodereview/rule.json` (config); every TS source/test file resolves a **project** rule. Review-1's S7 gap is closed.
 
 ## Review-2 disposition
 
