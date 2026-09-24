@@ -13,9 +13,10 @@
  * taskId, runtime-invalid target state, duplicate spawn, bad handle, negative query limit,
  * terminal reconcile.
  *
- * The counterfactual block at the bottom (docs/testing-constraints.md #5) pins that the spec
- * assertions above are falsifiable: an obviously-broken registry (permissive transition table)
- * is shown to violate what the spec requires.
+ * The counterfactual requirement (docs/testing-constraints.md #5) is met by the REAL registry
+ * assertions, not a local stub: the ILLEGAL_CASES rejection table rejects a permissive state
+ * machine, and the write-order failure-injection tests reject a no-op event/record writer. See
+ * the note at the bottom of the file.
  */
 
 import { describe, expect, test, vi } from "vitest";
@@ -772,6 +773,25 @@ describe("TaskRegistry.spawn write order", () => {
 
     expect(await h.storage.loadTask(TASK_1)).toBeNull();
   });
+
+  test("a terminal event-log write failure leaves the record non-terminal (B8 IO failure path)", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    vi.spyOn(h.storage, "appendEvents").mockRejectedValueOnce(new Error("event append failed"));
+
+    await expect(
+      h.registry.transition(
+        { kind: "transition", taskId: TASK_1, to: "succeeded" },
+        callContext(h, CALLER),
+      ),
+    ).rejects.toThrow(/event append failed/);
+
+    // B8: the event must be written BEFORE the terminal record, so a failed append cannot leave
+    // a succeeded record whose event never exists. The task is still running and retryable.
+    expect((await h.storage.loadTask(TASK_1))?.status).toBe("running");
+    const events = await collectEvents(h.storage, CALLER);
+    expect(events.map((event) => event.status)).toEqual(["running"]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1035,47 +1055,13 @@ describe("TaskRegistry injection seams", () => {
 });
 
 // ---------------------------------------------------------------------------
-//  counterfactual (docs/testing-constraints.md #5)
+//  counterfactual coverage (docs/testing-constraints.md #5)
 // ---------------------------------------------------------------------------
-
-describe("TaskRegistry counterfactual", () => {
-  /** An obviously-broken registry: no transition validation, no-op cursor writes. */
-  function brokenRegistry(): TaskRegistry {
-    const record: TaskRecord = {
-      id: TASK_1,
-      label: "broken",
-      agentName: "none",
-      depth: 0,
-      status: "running",
-      createdAt: 0,
-      startedAt: 0,
-      transitionAt: 0,
-      spawnSource: { kind: "ptc-program", callerId: CALLER },
-    };
-    return {
-      transition: async (command) => ({
-        record: {
-          ...record,
-          status: command.kind === "transition" ? command.to : "running",
-        },
-        events: [],
-        cursor: "01JBZ0000000000000000000ZZ" as ULID,
-      }),
-      query: async () => [],
-      get: async () => record,
-      onTransition: () => () => undefined,
-      reconcileLostTasks: async () => [],
-    };
-  }
-
-  test("a permissive state machine resolves the running -> running edge the spec rejects", async () => {
-    const h = createHarness(1000);
-    const broken = brokenRegistry();
-    await expect(
-      broken.transition(
-        { kind: "transition", taskId: TASK_1, to: "running" },
-        callContext(h, CALLER),
-      ),
-    ).resolves.toBeDefined();
-  });
-});
+//
+// There is deliberately no locally-defined "broken registry" here: asserting a stub's own
+// behaviour is self-referential and stays green under any production regression. The wrong
+// implementations are rejected by the REAL DefaultTaskRegistry assertions above:
+//   - a permissive state machine (allowing running -> running) is rejected by the
+//     ILLEGAL_CASES table in "TaskRegistry.transition — rejection paths" (line 447);
+//   - a no-op cursor/event writer is rejected by the per-subscriber event-buffer
+//     assertions and by the spawn/terminal write-order failure-injection tests.
