@@ -11,12 +11,67 @@
       "merge_system_rule": false
     },
     {
+      "path": "src/runtime/task-*.ts",
+      "rule": ".opencodereview/rules/ptc-bgdispatch-contract.md",
+      "merge_system_rule": false
+    },
+    {
+      "path": "src/runtime/child-process-lifecycle.ts",
+      "rule": ".opencodereview/rules/ptc-bgdispatch-contract.md",
+      "merge_system_rule": false
+    },
+    {
+      "path": "src/runtime/notification-pipeline.ts",
+      "rule": ".opencodereview/rules/ptc-bgdispatch-contract.md",
+      "merge_system_rule": false
+    },
+    {
+      "path": "src/runtime/dispatch.ts",
+      "rule": ".opencodereview/rules/ptc-bgdispatch-contract.md",
+      "merge_system_rule": false
+    },
+    {
+      "path": "src/runtime/dispatcher.ts",
+      "rule": ".opencodereview/rules/ptc-bgdispatch-contract.md",
+      "merge_system_rule": false
+    },
+    {
+      "path": "src/runtime/output-storage.ts",
+      "rule": ".opencodereview/rules/ptc-render-bounds.md",
+      "merge_system_rule": false
+    },
+    {
+      "path": "src/tools/ptc-task.ts",
+      "rule": ".opencodereview/rules/ptc-bgdispatch-contract.md",
+      "merge_system_rule": false
+    },
+    {
+      "path": "src/tools/task-panel-render.ts",
+      "rule": ".opencodereview/rules/ptc-render-bounds.md",
+      "merge_system_rule": false
+    },
+    {
       "path": "src/tools/render.ts",
       "rule": ".opencodereview/rules/ptc-render-bounds.md",
       "merge_system_rule": false
     },
     {
       "path": "tests/dispatch-*.test.ts",
+      "rule": ".opencodereview/rules/test-discipline-oracle.md",
+      "merge_system_rule": false
+    },
+    {
+      "path": "tests/unit/dispatch-*.test.ts",
+      "rule": ".opencodereview/rules/test-discipline-oracle.md",
+      "merge_system_rule": false
+    },
+    {
+      "path": "tests/e2e/**/*.test.ts",
+      "rule": ".opencodereview/rules/test-discipline-oracle.md",
+      "merge_system_rule": false
+    },
+    {
+      "path": "tests/integration/**/*.test.ts",
       "rule": ".opencodereview/rules/test-discipline-oracle.md",
       "merge_system_rule": false
     },
