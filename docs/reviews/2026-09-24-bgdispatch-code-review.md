@@ -1,0 +1,75 @@
+# Code review 1 — background dispatch (`6737ec3..HEAD`)
+
+Date: 2026-09-24. Fixed point: `6737ec3` (T1/ADR-0022 lock). Reviewed commit: `42f12ec` (BG-12/BG-10).
+Skill: `code-review` (Standards + Spec axes). OCR deterministic layer: `ocr delegate preview` excluded all 11
+new test files (`exclude_reason: default_path`) and `ocr delegate rule` resolved **no project rule** for any of
+the 13 reviewable files, so audit 2 (oracle) and audit 3 (platform contracts) were executed by hand.
+Three parallel sub-agents: Standards, Spec-A (blast radius + platform contracts), Spec-B (oracle + reachability).
+
+Total: **52 findings** across the three reports (many are the same defect seen from two axes).
+Disposition column: the workstream that closes it.
+
+## Blockers — the ADR-0022 destination is not reached in production
+
+| # | Finding | Evidence | Disposition |
+|---|---|---|---|
+| R-B1 | `ptc_task_list/output/stop` are never registered; the model-visible always-on surface does not exist. | `src/index.ts` registers only `ptc_run_code`/`ptc_workflow`; `grep -rn "createPtcTask" src/ \| grep -v tools/ptc-task.ts` = 0; `TODO(BG-04 integration)` admits it. | BG-14 #66 |
+| R-B2 | `NotificationPipeline` / `IdleWakeHandler` / `splitBatch` have no production caller; no `<bg-task-notification>` is ever emitted and no idle pi is woken. | `new DefaultNotificationPipeline` in src = 0; `bg-task-notification` in src = 1 comment. | BG-15 #67 + BG-14 #66 |
+| R-B3 | No durable `TaskStorage` and no startup reconcile: truthful `lost` after a restart is impossible. | only `InMemoryTaskStorage` constructed (dispatch.ts fallback); `reconcileLostTasks` production callers = 0; `FileOutputStorage` production callers = 0. | BG-13 #65 + BG-14 #66 |
+| R-B4 | Production never passes `dispatchDeps`, so every task lands in a process-global in-memory fallback. | `options.dispatchDeps` never supplied by run-code/workflow/index. | BG-14 #66 |
+| R-B5 | `ptc_task_stop` only relabels state; no SIGTERM/SIGKILL is ever delivered to the child. | tool never calls `lifecycle.kill`; the pump has no `stopping` observer; `grep "\.kill(" src` = spawn-failure + foreground only. | BG-16 #68 |
+| R-B6 | Background dispatch ignores the run/session `AbortSignal`; `session_ended_while_running` is never written. | `dispatchBackground` has no `signal`; the reason string exists only in the type union. | BG-14 #66 |
+
+## Major
+
+| # | Finding | Evidence | Disposition |
+|---|---|---|---|
+| R-M1 | TOCTOU / lost update: the pump reads the record, then writes the terminal state, so a concurrent `ptc_task_stop` is silently overwritten. Two concurrent stops can emit two `stopping` events. | `dispatch.ts` `get(taskId)` … `transition({to: "succeeded"})`; the registry never compare-and-swaps. | BG-16 #68 |
+| R-M2 | Two independent ULID implementations with two incompatible `ULID` types and two monotonicity strategies. | `child-process-lifecycle.ts` vs `task-registry.ts` each define `CROCKFORD`/`encodeTime`; joined by `as ULID`. | WS-ULID (new) |
+| R-M3 | Background concurrency cap is per-run, so a background task cannot constrain the next program; an injected host counter is clobbered. | `dispatcher.ts` `new DispatchSlotCounter(...)` inside `runPtcProgram`, then `{...options.dispatchDeps, slots: dispatchSlots}`. | BG-14 #66 |
+| R-M4 | `running -> lost` is allowed generically with no `LostReason` guard, defeating the three-distinct-reason rule. | transition table + no reason requirement except on the reconcile path. | BG-16 #68 |
+| R-M5 | Background teardown has no SIGKILL escalation (the failure-path kill is a bare SIGTERM). | `dispatch.ts` failure catch vs foreground's SIGTERM→5s→SIGKILL. | BG-16 #68 |
+| R-M6 | The "e2e" suite never spawns a real `pi`; test-discipline-oracle T1 forbids the e2e name for a mock-driven suite. | `tests/e2e/bgdispatch/harness.ts` uses `MockChildProcessLifecycle` + `vi.mock("node:fs")`. | WS-TESTS (new) |
+| R-M7 | The `restart` scenario reconciles the same in-memory registry; deleting the (absent) production reconcile call would keep it green. | `scenarios.test.ts` → `h.registry.reconcileLostTasks()`. | WS-TESTS (new) |
+| R-M8 | `stop_spike` never asserts a signal; a no-op stop that lets the child exit naturally passes. | `completeTask(h, spawned, 0)` then asserts `canceled`. | BG-16 #68 + WS-TESTS |
+| R-M9 | A unit test pins the missing kill with a false justification (`expect(killSpy).not.toHaveBeenCalled()`). | `tests/unit/ptc-task-tools.test.ts`. | BG-16 #68 |
+| R-M10 | The `ptc_off` scenario is a local tautology (`let ptcOff = false; ptcOff = true`). | `scenarios.test.ts`. | WS-TESTS (new) |
+
+## Minor
+
+| # | Finding | Evidence | Disposition |
+|---|---|---|---|
+| R-m1 | `loadTaskOrThrow` scans `limit: MAX_SAFE_INTEGER` although `TaskRegistry.get` exists; three comments claim it does not. | `src/tools/ptc-task.ts`. | BG-16 #68 |
+| R-m2 | `TODO(BG-04 integration)` is stale (the background branch shipped). | `src/tools/ptc-task.ts`. | BG-16 #68 |
+| R-m3 | `renderTaskStop` ignores `PtcTaskStopDetails.fromStatus` and invents `running → stopping`, so an idempotent late stop renders a transition that never happened. | `src/tools/task-panel-render.ts`. | BG-16 #68 |
+| R-m4 | `assistantText` docstring says there is nowhere to persist output; the pump persists it. | `src/runtime/dispatch.ts`. | BG-16 #68 |
+| R-m5 | Class doc quotes "single terminal writer" as ADR-0022 §3; the phrase is not in the ADR. | `task-registry.ts`; `grep -ci "single terminal" docs/adr/0022` = 0. | BG-16 #68 |
+| R-m6 | `tests/unit/dispatch-background.test.ts` asserts `--no-session` present while sessionDir is set, contradicting the real adapter and the dedicated spec test. | same file vs `child-process-lifecycle-session-argv.test.ts`. | BG-16 #68 |
+| R-m7 | `#spawn` writes the TaskRecord before the subscription/event; a later write failure leaves a permanent orphan `running` record. | `task-registry.ts`. | BG-16 #68 |
+| R-m8 | `ptc_task_list` can render 100 rows with no container cap (`MAX_CHILDREN` analogue). | `DEFAULT_TASK_LIST_LIMIT = 100`; README documents 6 children/container. | BG-16 #68 |
+| R-m9 | `argv_extra` has no production caller (speculative generality / dead branch). | `child-process-lifecycle.ts`; dispatch never sets it. | BG-17 #69 |
+| R-m10 | `createTaskRegistry` is a dead factory. | only tests call it. | BG-14 #66 (will adopt) |
+| R-m11 | `advanceCursor`/`loadEventLog` on `TaskRegistry` have no production caller and duplicate `DefaultNotificationPipeline.acknowledgeEvents`. | registry vs pipeline. | WS-CLEANUP (new) |
+| R-m12 | `sessionFile` is hardcoded `undefined`; `parentTaskId` is never populated. | `dispatch.ts`. | BG-16 #68 + BG-14 #66 |
+| R-m13 | `output-storage.ts` duplicates `src/tools/common.ts`'s truncation footer and temp-file writer. | two private copies of the same three-branch footer. | WS-CLEANUP (new) |
+| R-m14 | `notifyIdle` runs wake handlers without per-handler isolation; one throwing handler aborts the rest. | `notification-pipeline.ts`. | BG-15 #67 |
+| R-m15 | `FALLBACK_DISPATCH_SLOTS` is process-global, so unrelated sessions share one 8-slot budget. | `dispatch.ts`. | BG-14 #66 |
+| R-m16 | `sinceBytes` slices raw UTF-8 bytes and can split a multibyte codepoint into U+FFFD. | `src/tools/ptc-task.ts`. | BG-16 #68 |
+| R-m17 | `InMemoryTaskStorage.appendEvents` copies + re-sorts the whole log per append, and `loadEvents` linearly filters — O(N²) for a run-level subscriber. | `task-storage.ts`. | BG-13 #65 |
+| R-m18 | The e2e harness deliberately avoids the production run-level subscriber, so the production subscription shape is not covered. | `harness.ts`. | WS-TESTS (new) |
+
+## ADR / documentation truthfulness (BG-17 #69)
+
+- ADR §7 said "200 K tokens" while the shipped constant is 100 KiB → **fixed in-place** (this session).
+- ADR "Implementation outline" named `src/runtime/subscription.ts` / `src/types/task.ts` / `src/types/ptc-config.ts`; the shipped file set is different → **fixed in-place** (this session).
+- ADR §8's two-row signal table omits the third code `LostReason` (`user_killed_via_esc`).
+- ADR §5 / "What we add" 7 promise `ptc_task_resubscribe` and a `max(parent, child)` fork cursor; neither exists in the code. Either implement in v1 or record the deferral.
+- ADR + CONTEXT + the pre-existing README foreground examples write the binding as the positional `pi.dispatch(agentName, prompt, opts)`; the real program surface is `tools["pi.dispatch"]({ agent, task, … })` (one object, no `pi` global — `worker-main.ts` installs `tools`).
+- `docs/adr/README.md` index stops at ADR-0021 and does not list ADR-0022.
+- `.opencodereview/rule.json` anchors no project rule to the new platform-contract files, and `ocr delegate preview` drops `tests/**` before rule matching; the oracle/platform audits had to be run by hand. Fix the anchors and add a background-dispatch contract rule.
+
+## What is already correct
+
+- No F1/F2/F3 pattern in the diff; `tests/test-meta-discipline.test.ts` green (35 files scanned).
+- `DispatchSlotCounter` threading, the state-machine transition table, the 2048-byte preview ceiling, the ADR-0015 truncation contract, and the `buildSpawnArgv` R1 translation are all implemented and have real spec tests.
+- Most oracle findings are minor tension between "regression lock" and "specification lock" on counterfactual-only tests; they are recorded above, not treated as blockers.
