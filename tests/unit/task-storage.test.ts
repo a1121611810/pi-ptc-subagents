@@ -429,6 +429,125 @@ describe("InMemoryTaskStorage: appendEvents / loadEvents", () => {
   });
 });
 
+describe("InMemoryTaskStorage: append fast path vs slow path (differential oracle, constraint #5)", () => {
+  /**
+   * The production append is monotonic: each call carries an already-ordered batch whose first
+   * eventId continues the log's tail. The old shape re-copied and re-sorted the whole log on
+   * every append (O(N^2)); the new one appends in place and binary-searches on load. This
+   * differential oracle pins that the fast path and the still-supported out-of-order slow path
+   * agree on the exact eventId order the TaskStorage doc promises.
+   */
+  test("monotonic per-event appends equal one shuffled batch (fast path == slow path)", async () => {
+    const monotonic = new InMemoryTaskStorage();
+    const shuffled = new InMemoryTaskStorage();
+    const sub = fixtureSub();
+    await monotonic.saveSubscription(sub);
+    await shuffled.saveSubscription(sub);
+    const e1 = fixtureEvent({ eventId: "01JBZ00000000000000000001E" as ULID });
+    const e2 = fixtureEvent({ eventId: "01JBZ00000000000000000002E" as ULID });
+    const e3 = fixtureEvent({ eventId: "01JBZ00000000000000000003E" as ULID });
+    const e4 = fixtureEvent({ eventId: "01JBZ00000000000000000004E" as ULID });
+
+    // Fast path: four continuing single-event appends (ordered, tail continues).
+    await monotonic.appendEvents(sub.subscriberId, [e1]);
+    await monotonic.appendEvents(sub.subscriberId, [e2]);
+    await monotonic.appendEvents(sub.subscriberId, [e3]);
+    await monotonic.appendEvents(sub.subscriberId, [e4]);
+    // Slow path: one batch with the same events shuffled; the adapter must sort it.
+    await shuffled.appendEvents(sub.subscriberId, [e3, e1, e4, e2]);
+
+    const fast = (await collect(monotonic.loadEvents(sub.subscriberId))).map((e) => e.eventId);
+    const slow = (await collect(shuffled.loadEvents(sub.subscriberId))).map((e) => e.eventId);
+    // Independent oracle: eventIds sort lexically (TaskStorage.appendEvents doc). Counterfactual:
+    // a fast path that skipped a needed sort, or a merge that dropped/duplicated an event, diverges.
+    expect(fast).toEqual([e1.eventId, e2.eventId, e3.eventId, e4.eventId]);
+    expect(slow).toEqual(fast);
+  });
+
+  test("first append of an unordered batch sorts before storing", async () => {
+    const storage = new InMemoryTaskStorage();
+    const sub = fixtureSub();
+    await storage.saveSubscription(sub);
+    const e1 = fixtureEvent({ eventId: "01JBZ00000000000000000001E" as ULID });
+    const e2 = fixtureEvent({ eventId: "01JBZ00000000000000000002E" as ULID });
+    const e3 = fixtureEvent({ eventId: "01JBZ00000000000000000003E" as ULID });
+
+    await storage.appendEvents(sub.subscriberId, [e2, e3, e1]);
+
+    // SPECIFICATION: the interface stores events in eventId order. Counterfactual: skipping the
+    // sort whenever the log is empty would yield [e2, e3, e1].
+    expect((await collect(storage.loadEvents(sub.subscriberId))).map((e) => e.eventId)).toEqual([
+      e1.eventId,
+      e2.eventId,
+      e3.eventId,
+    ]);
+  });
+
+  test("subscriber-level ownership: a second task's subscription still accepts the append", async () => {
+    const storage = new InMemoryTaskStorage();
+    const subscriberId = "01JBZ00000000000000000010S" as ULID;
+    const taskA = "01JBZ00000000000000000000A" as ULID;
+    const taskB = "01JBZ00000000000000000000B" as ULID;
+    // Only taskA is subscribed. The in-memory check is subscriber-level (ADR-0022 §5 "Subscriber
+    // == owner"), so an event for taskB must still be accepted. This pins the O(1) subscriber
+    // index that replaced the old full-scan check: a regression that keyed on one task fails.
+    await storage.saveSubscription({
+      subscriberId,
+      taskId: taskA,
+      cursor: "01JBZ00000000000000000020C" as ULID,
+      status: "active",
+      createdAt: 1_700_000_000_500,
+    });
+    const eB = fixtureEvent({
+      eventId: "01JBZ00000000000000000002E" as ULID,
+      subscriptionId: subscriberId,
+      taskId: taskB,
+    });
+
+    await expect(storage.appendEvents(subscriberId, [eB])).resolves.toBeUndefined();
+    expect((await collect(storage.loadEvents(subscriberId))).map((e) => e.eventId)).toEqual([
+      eB.eventId,
+    ]);
+  });
+
+  test("a later out-of-order batch is merged to keep the log in eventId order", async () => {
+    const storage = new InMemoryTaskStorage();
+    const sub = fixtureSub();
+    await storage.saveSubscription(sub);
+    const e1 = fixtureEvent({ eventId: "01JBZ00000000000000000001E" as ULID });
+    const e2 = fixtureEvent({ eventId: "01JBZ00000000000000000002E" as ULID });
+    const e3 = fixtureEvent({ eventId: "01JBZ00000000000000000003E" as ULID });
+
+    await storage.appendEvents(sub.subscriberId, [e3]);
+    await storage.appendEvents(sub.subscriberId, [e1, e2]);
+
+    // Interface contract: events are stored in eventId order. The binary-search loadEvents
+    // depends on that invariant, so the merge branch must restore it. Counterfactual: the old
+    // append-batch-only shape would leave [e3, e1, e2] and fail this.
+    expect((await collect(storage.loadEvents(sub.subscriberId))).map((e) => e.eventId)).toEqual([
+      e1.eventId,
+      e2.eventId,
+      e3.eventId,
+    ]);
+  });
+
+  test("loadEvents(since) binary-search boundaries: before-first, gap, between, after-last", async () => {
+    const storage = new InMemoryTaskStorage();
+    const sub = fixtureSub();
+    await storage.saveSubscription(sub);
+    const e1 = fixtureEvent({ eventId: "01JBZ00000000000000000001E" as ULID });
+    const e2 = fixtureEvent({ eventId: "01JBZ00000000000000000002E" as ULID });
+    const e3 = fixtureEvent({ eventId: "01JBZ00000000000000000003E" as ULID });
+    await storage.appendEvents(sub.subscriberId, [e1, e2, e3]);
+
+    // gap cursor: strictly greater than e1, strictly less than e2.
+    expect((await collect(storage.loadEvents(sub.subscriberId, "00000000000000000000" as ULID))).map((e) => e.eventId)).toEqual([e1.eventId, e2.eventId, e3.eventId]);
+    expect((await collect(storage.loadEvents(sub.subscriberId, "01JBZ00000000000000000001F" as ULID))).map((e) => e.eventId)).toEqual([e2.eventId, e3.eventId]);
+    expect((await collect(storage.loadEvents(sub.subscriberId, e2.eventId))).map((e) => e.eventId)).toEqual([e3.eventId]);
+    expect((await collect(storage.loadEvents(sub.subscriberId, e3.eventId))).map((e) => e.eventId)).toEqual([]);
+  });
+});
+
 describe("InMemoryTaskStorage: structural type-shape checks", () => {
   test("ULID is a string-typed brand at runtime (no ULID constructor — constraint #2 fixture)", () => {
     // The brand is compile-time-only; at runtime a ULID is just a string. Pin this so a future

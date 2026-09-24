@@ -37,6 +37,19 @@ This ADR closes the bgdispatch map. The four research/decision tickets it crysta
    - **Query** (boundary clarification): `ptc_parent_query(taskId, question)` -- child->parent via subscription buffer; parent answers via `ptc_query_response`. v1 scope: out of scope (deferred).
    - **Resume** (cold start): deferred to v2 -- `ptc_task_resume(taskId)` opens `pi -c --session-id <taskId>` continuation (Reasonix "interrupted 拒续、完成态才可续" rule).
 
+## Implementation note (BG-13, file-backed TaskStorage)
+
+Issue #65 ships FileTaskStorage (src/runtime/task-storage-file.ts). It uses the paths in "What
+we add" items 3 and 4 unchanged: <sessionDir>/tasks/<taskId>.json and
+<sessionDir>/subscriptions/<subscriberId>-<taskId>.json. It deviates from item 5's
+<sessionDir>/event-log/<eventId>.json: the append-only log is
+<sessionDir>/events/<subscriberId>-<taskId>.jsonl, one newline-delimited file per
+(subscriberId, taskId). The log is still keyed by subscriber (the TaskStorage contract and
+BG-01's fixed bug): loadEvents(subscriberId, since) merges the subscriber's per-task files into
+one ULID-ordered stream. Rationale: one small file per event makes the cursor scan open one file
+per event, while a per-pair JSONL log gives O(1) appends and a per-file scan. The 8-method
+TaskStorage interface is unchanged and both adapters are kept.
+
 ## What we deliberately don't add
 
 1. **No `/ptc off` orphan** -- map Notes clause 5: in-flight tasks continue to deliver notifications and update TaskRecord even when `/ptc off` is on. The mode toggle affects *new spawn* (ADR-0016 R6); it does not affect in-flight lifecycle.

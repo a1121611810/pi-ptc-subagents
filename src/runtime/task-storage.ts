@@ -180,6 +180,21 @@ export interface TaskStorage {
   loadEvents(subscriptionId: ULID, since?: ULID): AsyncIterable<TaskEvent>;
 }
 
+/** ULID lexical comparator (lexical = chronological for correctly-generated ULIDs). */
+function compareEventId(a: TaskEvent, b: TaskEvent): number {
+  return a.eventId < b.eventId ? -1 : a.eventId > b.eventId ? 1 : 0;
+}
+
+/** True when the batch's eventIds are already non-decreasing, so sorting would be a no-op. */
+function isOrdered(events: readonly TaskEvent[]): boolean {
+  for (let index = 1; index < events.length; index++) {
+    if (compareEventId(events[index - 1] as TaskEvent, events[index] as TaskEvent) > 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /**
  * In-memory TaskStorage adapter. Pure data structures; no IO, no clock, no random. Stable
  * iteration order matches Map insertion order — that is part of the public contract tests pin
@@ -188,11 +203,14 @@ export interface TaskStorage {
 export class InMemoryTaskStorage implements TaskStorage {
   readonly #tasks: Map<ULID, TaskRecord>;
   readonly #subscriptions: Map<string, Subscription>;
+  /** O(1) subscriber-existence index; the Map above is keyed by pair, not by subscriber. */
+  readonly #subscriberIds: Set<ULID>;
   readonly #events: Map<string, TaskEvent[]>;
 
   constructor() {
     this.#tasks = new Map();
     this.#subscriptions = new Map();
+    this.#subscriberIds = new Set();
     this.#events = new Map();
   }
 
@@ -207,10 +225,9 @@ export class InMemoryTaskStorage implements TaskStorage {
    * `subscriptionId` parameter is the subscriber's id, since the event buffer is per-subscriber.
    */
   #hasSubscriber(subscriberId: ULID): boolean {
-    for (const sub of this.#subscriptions.values()) {
-      if (sub.subscriberId === subscriberId) return true;
-    }
-    return false;
+    // O(1) via the subscriber index. Scanning #subscriptions.values() here would be O(s) per
+    // append; for a run-level subscriber with one subscription per task that is O(N^2) over a run.
+    return this.#subscriberIds.has(subscriberId);
   }
 
   async loadTask(taskId: ULID): Promise<TaskRecord | null> {
@@ -249,6 +266,7 @@ export class InMemoryTaskStorage implements TaskStorage {
     assertPresent(sub, "saveSubscription: sub is required");
     const key = InMemoryTaskStorage.#subKey(sub.subscriberId, sub.taskId);
     this.#subscriptions.set(key, structuredClone(sub));
+    this.#subscriberIds.add(sub.subscriberId);
   }
 
   async appendEvents(subscriptionId: ULID, events: TaskEvent[]): Promise<void> {
@@ -260,15 +278,29 @@ export class InMemoryTaskStorage implements TaskStorage {
     }
     if (events.length === 0) return;
     const log = this.#events.get(subscriptionId) ?? [];
-    // Defensive copy + sort by ULID (lexical = chronological). The caller is expected to
-    // produce monotonically-increasing eventIds; we sort defensively for out-of-order appends.
-    const sorted = [...events].sort((a, b) =>
-      a.eventId < b.eventId ? -1 : a.eventId > b.eventId ? 1 : 0,
-    );
-    for (const ev of sorted) {
-      log.push(structuredClone(ev));
+    // Event ids are monotonic ULIDs, so the common append is an already-ordered batch that
+    // continues the log's tail. Sort only when the batch itself is unordered, and rebuild the
+    // log only when the batch does not continue the tail. The old shape copied and re-sorted the
+    // whole log (plus every prior event) on every append — O(N^2) for a run-level subscriber.
+    const ordered = isOrdered(events) ? [...events] : [...events].sort(compareEventId);
+    const lastExisting = log.length === 0 ? undefined : log[log.length - 1]?.eventId;
+    const firstIncoming = ordered[0]?.eventId;
+    if (
+      lastExisting === undefined ||
+      (firstIncoming !== undefined && lastExisting <= firstIncoming)
+    ) {
+      for (const ev of ordered) {
+        log.push(structuredClone(ev));
+      }
+      this.#events.set(subscriptionId, log);
+      return;
     }
-    this.#events.set(subscriptionId, log);
+    // Out-of-order relative to the existing log: rebuild once, preserving the interface's
+    // "stored in events[i].eventId order" invariant. Array#sort is stable, so equal ids keep
+    // existing-before-incoming order.
+    const merged = [...log, ...ordered.map((ev) => structuredClone(ev))];
+    merged.sort(compareEventId);
+    this.#events.set(subscriptionId, merged);
   }
 
   async *loadEvents(subscriptionId: ULID, since?: ULID): AsyncIterable<TaskEvent> {
@@ -276,11 +308,22 @@ export class InMemoryTaskStorage implements TaskStorage {
       throw new Error(`loadEvents: unknown subscriptionId ${subscriptionId}`);
     }
     const log = this.#events.get(subscriptionId) ?? [];
-    for (const ev of log) {
-      // `since` is the last-delivered cursor; we yield strictly-newer events (ADR-0022 §5: cursor
-      // advances past the event, so an event whose eventId === since has already been delivered).
-      if (since !== undefined && ev.eventId <= since) continue;
-      yield structuredClone(ev);
+    // Binary-search the first index whose eventId is strictly greater than `since` (ADR-0022 §5:
+    // the cursor advances past the delivered event, so eventId === since is excluded). The log is
+    // kept in eventId order by appendEvents, so this is O(log N) instead of a full filter scan.
+    let start = 0;
+    if (since !== undefined) {
+      let low = 0;
+      let high = log.length;
+      while (low < high) {
+        const mid = (low + high) >>> 1;
+        if ((log[mid]?.eventId ?? "") <= since) low = mid + 1;
+        else high = mid;
+      }
+      start = low;
+    }
+    for (let index = start; index < log.length; index++) {
+      yield structuredClone(log[index] as TaskEvent);
     }
   }
 }
