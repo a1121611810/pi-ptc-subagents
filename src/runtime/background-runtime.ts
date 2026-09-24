@@ -215,6 +215,12 @@ class StableTaskRegistry implements TaskRegistry {
    * pump's resolve-exit) route to the registry that persisted it, so a session rebind cannot
    * re-route an in-flight terminal write to a registry that never knew the task (S9). Reads
    * (query/get) intentionally stay on the current session.
+   *
+   * Boundedness (review 3, P2): the map holds one small entry per spawned task for the process
+   * lifetime. It is only consulted for non-spawn transitions, which end at the task's terminal
+   * write, so a terminal transition could prune it -- but nothing observes that pruning, so it is
+   * left as an accepted v1 bound rather than an untested change. A session that spawns N tasks
+   * retains N tiny entries; that is deliberate, not an oversight.
    */
   readonly #owners = new Map<ULID, TaskRegistry>();
 
