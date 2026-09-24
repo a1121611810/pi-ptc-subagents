@@ -19,7 +19,20 @@ This repo has both **CodeGraph** and **open-code-review (ocr)** initialized and 
 - **CodeGraph** (`.codegraph/codegraph.db`, 4.32 MB SQLite, 851 nodes / 4 398 edges) — `codegraph status` to confirm health, `codegraph explore <symbol>` for one-shot symbol source + caller paths + blast radius, `codegraph callers <symbol>` for raw caller list. Use in code review and large refactors; the spec axis of the `code-review` skill relies on this for blast-radius evidence.
 - **open-code-review** (`ocr` CLI v1.12.9, configured at `~/.opencodereview/config.json` with `deepseek` provider + `deepseek-flash` model) — `ocr delegate preview --format json` for reviewable files, `ocr delegate rule --format json <paths>` for per-file checklists, `ocr review --format json --rule .opencodereview/rule.json` for a full default-mode review (uses the configured LLM). Project rule overrides at `.opencodereview/rule.json` (NOT `.ocr/rule.json`); rule docs at `.opencodereview/rules/*.md`. Schema is `ProjectRule` (`rules: [{path, rule, merge_system_rule}]`), not the system-rule `default_rule + path_rule_map` shape.
 - **Code review skill** at `.agents/skills/code-review/SKILL.md` — thin orchestrator that runs OCR delegate + CodeGraph + two parallel sub-agents (Standards / Spec). Project rules cover ptc-protocol-pair-correctness / ptc-worker-lifecycle / ptc-render-bounds / ptc-bgdispatch-contract / test-discipline (-oracle). Meta-discipline fixture `tests/test-meta-discipline.test.ts` automatically flags F1 (accept-both regex), F2 (conditional assertion), F3 (opt-in gate + early return) — see `docs/testing-constraints.md` for the 6 testing hard constraints. The fixture MUST stay green; if it goes red, fix the offending test before merging.
-- **`ocr delegate preview` excludes `tests/**` from `reviewable_files` (`exclude_reason: "default_path"`).** The test-discipline project rules still resolve — but only when a test path is passed explicitly, so the oracle audit must enumerate the diff's test files itself and call `ocr delegate rule --format json <those paths>` rather than relying on the preview list. Likewise check every anchored path actually resolves a **project** rule (`Source: project`), not the system built-in: an anchor that no longer matches a moved/renamed file silently degrades the whole audit to the generic checklist. As of 2026-09-24 the anchors are `src/runtime/protocol.ts`, `src/runtime/worker-*.ts`, `src/runtime/task-*.ts`, `src/runtime/child-process-lifecycle.ts`, `src/runtime/notification-pipeline.ts`, `src/runtime/dispatch.ts`, `src/runtime/dispatcher.ts`, `src/runtime/output-storage.ts`, `src/tools/render.ts`, `src/tools/ptc-task.ts`, `src/tools/task-panel-render.ts`, plus `tests/dispatch-*.test.ts`, `tests/unit/dispatch-*.test.ts`, `tests/e2e/**`, `tests/integration/**`, `tests/**`.
+- **`ocr delegate preview` excludes `tests/**` from `reviewable_files` (`exclude_reason: "default_path"`).** The test-discipline project rules still resolve — but only when a test path is passed explicitly, so the oracle audit must enumerate the diff's test files itself and call `ocr delegate rule --format json <those paths>` rather than relying on the preview list. Likewise check every anchored path actually resolves a **project** rule (`Source: project`), not the system built-in: an anchor that no longer matches a moved/renamed file silently degrades the whole audit to the generic checklist. Do not trust a hand-maintained anchor list — read `.opencodereview/rule.json` and run the coverage check on the diff under review:
+
+```bash
+ocr delegate preview --format json --from <fixed> --to HEAD > /tmp/pv.json
+python3 - <<'PY'
+import json, subprocess
+files = [f["path"] for f in json.load(open("/tmp/pv.json"))["reviewable_files"]]
+d = json.loads(subprocess.run(["ocr","delegate","rule","--format","json",*files],
+                              capture_output=True, text=True).stdout)
+print("SYSTEM-ONLY:", [f for g in d["groups"] if g["source"] != "project" for f in g["files"]])
+PY
+```
+
+Anything important left in `SYSTEM-ONLY` (other than config/JSON) is a missing anchor — add it, with `merge_system_rule: true` when the file is not contract-specific so the generic checks survive alongside the project rule.
 
 ## Testing constraints
 
