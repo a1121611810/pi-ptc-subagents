@@ -6,7 +6,10 @@ subprocess for a named agent, and the program gets a structured result. The fore
 has no life beyond that `await`. Background dispatch
 ([ADR-0022](../adr/0022-background-dispatch.md)) is the long-lived variant: the binding returns a
 handle immediately, a detached pump drives the child's lifecycle, and the child keeps running after
-the spawning program and the spawning turn have ended.
+the spawning program and the spawning turn have ended. Precisely (ADR-0023): the child survives the
+spawning program, the spawning turn, and `/ptc off`; it is **owned by the dispatching pi process**
+and ends only when that session ends or is replaced (`session_ended_while_running`) or when the
+owner process dies before completion (`lost_on_session_restart`).
 
 Reach for it when the work is longer than the program's useful lifetime, or when the model should be
 able to check on it later: a scout over a large tree, a review that runs while the model does
@@ -14,13 +17,13 @@ something else, a batch of children fanned out from one program.
 
 ## Foreground vs. background
 
-|                    | foreground `pi.dispatch`                | `pi.dispatch({ background: true })`                                                       |
-| ------------------ | --------------------------------------- | ----------------------------------------------------------------------------------------- |
-| return             | `DispatchResult`, after the child exits | `DispatchHandle`, immediately after spawn                                                 |
-| blocks the program | yes, until the child exits              | no                                                                                        |
-| child lifetime     | the awaited `Promise`                   | independent of the program and of the turn                                                |
-| observation        | the return value                        | `ptc_task_list` / `ptc_task_output` / `ptc_task_stop` and `<bg-task-notification>` events |
-| failure            | `status: "rejected"` on the result      | a terminal `TaskStatus` on the `TaskRecord`                                               |
+|                    | foreground `pi.dispatch`                | `pi.dispatch({ background: true })`                                                                                                            |
+| ------------------ | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| return             | `DispatchResult`, after the child exits | `DispatchHandle`, immediately after spawn                                                                                                      |
+| blocks the program | yes, until the child exits              | no                                                                                                                                             |
+| child lifetime     | the awaited `Promise`                   | the dispatching pi process's lifetime — survives the program, the turn, and `/ptc off`; ends on session end/replacement or owner process death |
+| observation        | the return value                        | `ptc_task_list` / `ptc_task_output` / `ptc_task_stop` and `<bg-task-notification>` events                                                      |
+| failure            | `status: "rejected"` on the result      | a terminal `TaskStatus` on the `TaskRecord`                                                                                                    |
 
 Both forms share the same depth and concurrency gates (see [Limits](#limits)). A pre-spawn refusal
 uses the foreground `DispatchResult` shape, so a background call returns either a
@@ -29,6 +32,25 @@ uses the foreground `DispatchResult` shape, so a background call returns either 
 ## Spawning
 
 A binding is reached as `tools["<name>"]` inside a program; this binding's name is `pi.dispatch`.
+
+### Prerequisites
+
+`agent` must name a **registered agent** — there is no default agent. Registration is an
+agent markdown file at `~/.pi/agent/agents/<name>.md` (user scope) or `<cwd>/.pi/agents/<name>.md`
+(project scope, searched when `agentScope` is `"project"` or `"both"`):
+
+```text
+---
+name: researcher
+---
+
+You are a research agent. ...
+```
+
+The file's frontmatter `name:` is the name the dispatch uses (the file name is the fallback).
+A missing or unknown `agent` resolves with a refused `DispatchResult` whose `errorMessage`
+lists the agents currently registered under the effective scope, both lookup paths, and the
+minimal file shape — read it instead of re-probing the file system.
 
 ```ts
 // ptc_run_code
@@ -171,16 +193,26 @@ there is no in-task queue.
 - `running -> failed` — the child exited non-zero.
 - `running -> stopping` — `ptc_task_stop` (explicit model stop).
 - `stopping -> canceled` — the stop resolves; the child's close is the writer of the terminal state.
-- `running -> lost` — the session ended while the child was running, or restart reconciliation swept it.
+- `running -> lost` — the owning session ended while the child was running, or startup
+  reconciliation found the record's owner process dead.
 
 ### The `lost` reasons (two emitted in v1)
 
 `lost` carries a distinct reason in the record's `errorMessage` field so the reasons stay
 auditable. v1 emits **two**:
 
-- `session_ended_while_running` — the session stopped while the task ran (`session_shutdown`).
-- `lost_on_session_restart` — startup reconciliation found a `running` or `stopping` record after a
-  restart; `reconcileLostTasks()` sweeps both and is idempotent.
+- `session_ended_while_running` — the **owner** session ended while the task ran (`session_shutdown`
+  of the dispatching pi process).
+- `lost_on_session_restart` — the record's **owner process died** before the task completed, and a
+  later bind of a process sharing the session dir discovered it; `reconcileLostTasks()` sweeps
+  both `running` and `stopping` records whose owner is gone (plus pre-upgrade ownerless records)
+  and is idempotent.
+
+Reaping is owner-scoped (ADR-0023): every record carries the owning runtime instance's identity
+(`ownerPid` + `ownerBootMs`), a process only ever reaps records it owns, and **other pi processes
+started in the same cwd neither reap nor terminate your background tasks** — a background child
+itself loads this extension and shares your session dir, and pre-fix both its startup reconcile and
+its exit sweep used to flip your still-running records to `lost`.
 
 `user_killed_via_esc` is **reserved and unreachable in v1**: pi's `SessionShutdownEvent` exposes no
 Esc/abort signal (`reason` is only `quit | reload | new | resume | fork`), so an Esc kill cannot be
@@ -249,16 +281,37 @@ Two per-run caps apply to background dispatch exactly as they do to foreground; 
   rejected when `childDepth > maxDispatchDepth` with
   `{ status: "rejected", errorMessage: "dispatch depth limit reached" }`. The child subprocess also
   loads pi-ptc, so the child can dispatch further children within the same budget.
+- **The program's own run deadline bounds foreground dispatches.** A foreground dispatch runs
+  inside the program: when the `ptc_run_code` / `ptc_workflow` run times out (default **120 s**,
+  ceiling **600 s** — raise it with `timeoutMs`), its in-flight foreground dispatches are
+  terminated with it. A long fan-out therefore needs either a higher `timeoutMs` (the deadline
+  bounds the whole run, including every awaited child) or smaller per-child tasks; independent
+  foreground dispatches compose under `Promise.all`, so one program can hold them all inside the
+  same deadline.
+
+## Output shape convention
+
+A child's long final reply is the first thing a caller loses: any post-processing that trims
+`result.text` (a `.slice` budget, a summary pass) cuts the tail, and the tail is where the
+findings usually are. Two conventions keep that from costing a re-dispatch:
+
+- **Ask for a compact final reply in the task itself.** Put the budget in the child's
+  instructions — e.g. "final reply ≤ 40 lines, findings only (or LGTM)" — so the text that
+  crosses the wire is already the size the caller can keep whole.
+- **Page, don't truncate.** A foreground `DispatchResult.text` comes back whole; forward it
+  unchanged. For long background output, read it in slices with
+  `ptc_task_output({ taskId, sinceBytes })` — the stored bytes are the canonical copy, and
+  `outputBytes` tells you where the next slice starts — instead of truncating a preview.
 
 ## Signals
 
 Signal handling is layered by who asked:
 
-| source                  | transition                        | notes                                                                                                                                        |
-| ----------------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ptc_task_stop` (model) | `running -> stopping -> canceled` | explicit and synchronous; the dispatcher pump owns the actual signal and writes `canceled` when the child closes. A late stop is idempotent. |
-| session stop / Esc      | `running -> lost`                 | implicit; v1 records `session_ended_while_running` (pi exposes no Esc-specific signal, so `user_killed_via_esc` is not emitted).             |
-| session restart         | `running -> lost`                 | startup reconciliation, reason `lost_on_session_restart`; also sweeps a task caught mid-`stopping`.                                          |
+| source                  | transition                        | notes                                                                                                                                                                                   |
+| ----------------------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ptc_task_stop` (model) | `running -> stopping -> canceled` | explicit and synchronous; the dispatcher pump owns the actual signal and writes `canceled` when the child closes. A late stop is idempotent.                                            |
+| session stop / Esc      | `running -> lost`                 | implicit; v1 records `session_ended_while_running` (pi exposes no Esc-specific signal, so `user_killed_via_esc` is not emitted).                                                        |
+| session restart         | `running -> lost`                 | startup reconciliation, reason `lost_on_session_restart`; reaps only records whose owner process is dead (or pre-upgrade ownerless ones), and also sweeps a task caught mid-`stopping`. |
 
 ## On disk
 
@@ -267,7 +320,7 @@ The task state goes through the `TaskStorage` seam. There are two adapters: an i
 under the session directory so a restart can reconcile:
 
 ```text
-<sessionDir>/tasks/<taskId>.json                                 # the 21-field TaskRecord (atomic temp+rename)
+<sessionDir>/tasks/<taskId>.json                                 # the TaskRecord: 19 ADR-0022 §3 fields + 2 optional ADR-0023 owner fields = 21 today (atomic temp+rename)
 <sessionDir>/subscriptions/<subscriberId>-<taskId>.json          # the per-subscriber cursor (atomic temp+rename)
 <sessionDir>/events/<subscriberId>-<taskId>.jsonl                # append-only newline-delimited events
 <sessionDir>/tasks/<taskId>/output.log                           # the captured output
@@ -336,6 +389,8 @@ Deferred deliberately; the map items and reasons are in ADR-0022 §8/§10.
 ## See also
 
 - [ADR-0022 — background dispatch](../adr/0022-background-dispatch.md) — the full design and decisions.
+- [ADR-0023 — background task ownership](../adr/0023-background-task-ownership.md) — owner-tagged
+  records and owner-scoped reaping (why sibling processes no longer reap your tasks).
 - [ADR-0016 — the `pi.dispatch` binding](../adr/0016-ptc-dispatch-binding.md) — the foreground binding this extends.
 - [ADR-0015 — the pi truncation contract](../adr/0015-pi-truncation-contract.md) — the 50 KB / 2000-line rule.
 - [`CONTEXT.md`](../../CONTEXT.md) — canonical terms (background dispatch, TaskRecord, TaskStatus, TaskRegistry, Subscription, DispatchHandle, `ptc_task_*`, `<bg-task-notification>`).

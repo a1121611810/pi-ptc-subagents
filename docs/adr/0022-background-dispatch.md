@@ -6,6 +6,8 @@ Background dispatch is the long-lived variant. A child may outlive the spawn tur
 
 Status: accepted (2026-09-24). Behavior change on the program-visible side (new optional `{ background: true }` opt on the existing binding; new optional `subscribe` interface for cursor-based observation; new model-facing tools `ptc_task_list` / `ptc_task_output` / `ptc_task_stop`; new TaskRecord 21-field schema persisted under `<sessionDir>/`; new subscription event schema with `<bg-task-notifications>` parent + per-event `<bg-task-notification>` children). All changes are additive: existing foreground `pi.dispatch(...)` keeps its `DispatchResult` shape and semantics unchanged.
 
+> Amended by ADR-0023 (2026-09-29): task ownership. Records carry optional `ownerPid` / `ownerBootMs`, and the sweeps specified below (startup reconcile → `lost`, session shutdown → `session_ended_while_running`) are **owner-scoped** — a record is only reaped by a runtime instance that owns it; at startup reconcile it is also reaped when its owner process is dead, or when it predates ownership (`ownerPid` absent). ADR-0023's text governs the sweep semantics; the tables below remain as the pre-amendment specification — as do this document's four "21 fields" mentions (Status line, G1, §3 intro, §3 heading): §3's code block lists 19 fields, and ADR-0023's two owner fields bring the record to 21.
+
 ## Context
 
 This ADR closes the bgdispatch map. The four research/decision tickets it crystallizes are:

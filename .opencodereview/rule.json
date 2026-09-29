@@ -86,6 +86,11 @@
       "merge_system_rule": true
     },
     {
+      "path": "src/mode/ptc-mode.ts",
+      "rule": ".opencodereview/rules/ptc-bgdispatch-contract.md",
+      "merge_system_rule": true
+    },
+    {
       "path": "src/tools/task-panel-render.ts",
       "rule": ".opencodereview/rules/ptc-render-bounds.md",
       "merge_system_rule": false

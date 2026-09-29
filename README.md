@@ -105,7 +105,7 @@ const handle = await tools["pi.dispatch"]({
 
 (The binding's name is `pi.dispatch`; a program reaches it as `tools["pi.dispatch"]`.)
 
-A detached pump drives the task's lifecycle (`running` -> `succeeded` / `failed` / `canceled` / `lost`), and the model observes it with three always-on tools — they are not part of the PTC-mode loadout, so `/ptc off` (which only blocks new spawns) does not remove them:
+A detached pump drives the task's lifecycle (`running` -> `succeeded` / `failed` / `canceled` / `lost`), and the model observes it with three always-on tools — they are not part of the PTC-mode loadout, so `/ptc off` (which only blocks new spawns) does not remove them. A background task is owned by the dispatching pi process (ADR-0023): it survives programs, turns, and `/ptc off`, ends when that session ends or the process dies, and no other pi process in the same directory can reap it (background dispatch children share the session's task storage, so pre-ADR-0023 any same-directory pi process — including a dispatch child itself — could reap every task on startup). Known edges: pre-upgrade ownerless records are still reaped by whichever process binds the directory first; a recycled pid can leave a record `running` after its owner died; and `ptc_task_stop` from another process can write a `stopping` state into your record even though the stop signal itself never crosses the process boundary:
 
 - `ptc_task_list({ status?, limit? })` — list this session's tasks, newest first (default limit 100).
 - `ptc_task_output({ taskId, sinceBytes? })` — read a task's captured output, tail-truncated to pi's 50 KB / 2000-line contract (ADR-0015).

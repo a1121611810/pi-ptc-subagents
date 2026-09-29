@@ -311,15 +311,18 @@ state call `ptc_task_list` instead. See ADR-0022.
 spawning program's model observes the spawned child via `<bg-task-notification>`
 events delivered through the TaskRegistry subscription buffer, and via
 model-facing tools `ptc_task_list` / `ptc_task_output` / `ptc_task_stop`.
-The child may outlive the spawn turn, run across program boundaries,
-finish while the parent is in a tool loop, fail because the host
-rebooted, or be stopped explicitly (`ptc_task_stop`) or implicitly by
-session abort (`Esc`). See ADR-0022.
+The child survives the spawning program, the spawning turn, and
+`/ptc off`; it is owned by the dispatching pi process (the _task owner_)
+and ends when that session ends or is replaced
+(`session_ended_while_running`) or when the owner process dies before
+completion (`lost_on_session_restart`). See ADR-0022 + ADR-0023.
 
 **TaskRecord** — session-level _TaskRegistry_ row tracking the full
-lifecycle of one background child. 21-field schema persisted to
-`<sessionDir>/tasks/<taskId>.json` per R1. Independent of `DispatchResult`
-and `SubCallRecord`. See ADR-0022.
+lifecycle of one background child. 19-field schema (ADR-0022 §3's code block;
+its "21 fields" heading is an authoring miscount) plus two
+optional owner-identity fields (`ownerPid`, `ownerBootMs`, ADR-0023)
+stamped at spawn, persisted to `<sessionDir>/tasks/<taskId>.json` per R1.
+Independent of `DispatchResult` and `SubCallRecord`. See ADR-0022 + ADR-0023.
 
 **TaskStatus** — the 6-state enum for `TaskRecord.status`:
 `running / stopping / succeeded / failed / canceled / lost`. The `queued`
@@ -328,9 +331,20 @@ See ADR-0022.
 
 **TaskRegistry** — session-level singleton holding `TaskRecord` rows and
 their per-subscriber `Subscription` cursors. On session restart,
-replays events whose cursor is ahead of the highest-scanned position;
-tasks left `running` at shutdown are marked `lost` (reason
-`lost_on_session_restart`). See ADR-0022.
+replays events whose cursor is ahead of the highest-scanned position.
+Its startup reconcile marks a `running`/`stopping` record `lost` (reason
+`lost_on_session_restart`) only when the record's owner process is dead
+(or the record predates ownership); its shutdown sweep marks only its own
+still-running records `lost` (reason `session_ended_while_running`).
+Reaping is owner-scoped — see _task owner_. See ADR-0022 + ADR-0023.
+
+**task owner** — the identity of the extension-runtime instance that
+created a `TaskRecord`: `{ ownerPid, ownerBootMs }` (process pid + the
+runtime instance's start ms, minted once per _BackgroundTaskRuntime_).
+A record belongs to exactly one owner; only the owning runtime reaps or
+terminates it, so a sibling pi process sharing the session dir (every
+background `pi.dispatch` child does) neither reaps nor kills another
+owner's tasks. Listing stays cross-owner. See ADR-0023.
 
 **Subscription** — per-subscriber cursor for one `TaskRecord`.
 Persisted to `<sessionDir>/subscriptions/<subscriberId>-<taskId>.json`.
