@@ -32,7 +32,11 @@ const BATCH_ID = "01JBZ00000000000000000000B";
 const DELIVERED_AT_MS = 1_700_000_002_000;
 const OPTS = { batchId: BATCH_ID, deliveredAtMs: DELIVERED_AT_MS };
 
-/** All 21 TaskRecord fields from ADR-0022 §3; overrides vary only what a test reads. */
+/**
+ * 19 keys — the full ADR-0022 §3 field set, with no ADR-0023 owner fields (`ownerPid` /
+ * `ownerBootMs` are left unset here; the notification renderer never reads them). Overrides vary
+ * only what a test reads.
+ */
 function fixtureRecord(overrides: Partial<TaskRecord> = {}): TaskRecord {
   return {
     id: TASK_ID,

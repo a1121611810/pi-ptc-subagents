@@ -509,14 +509,19 @@ export function parseAgentMarkdown(content: string): {
  * Discover an agent by name. Mirrors pi's subagent extension agentScope behaviour:
  * user-level (`~/.pi/agent/agents/`) is loaded by default; project-level
  * (`<cwd>/.pi/agents/`) is loaded only when agentScope includes it.
+ *
+ * Both lookup paths come from {@link resolveAgentDirs} — the same resolver `listRegisteredAgents`
+ * and `describeRegisteredAgents` use — so the agent a refusal message lists and the agent a
+ * dispatch loads cannot drift. `homeDir` (the optional `options`) is the same test seam
+ * `listRegisteredAgents` exposes; omitting it keeps every existing call site on `os.homedir()`.
  */
 export function discoverAgent(
   name: string,
   cwd: string,
   agentScope: "user" | "project" | "both",
+  options?: { homeDir?: string },
 ): AgentConfigLike | null {
-  const userDir = path.join(os.homedir(), ".pi", "agent", "agents");
-  const projectDir = path.join(cwd, ".pi", "agents");
+  const { userDir, projectDir } = resolveAgentDirs({ cwd, agentScope, homeDir: options?.homeDir });
   type Candidate = { path: string; source: "user" | "project" };
   const candidates: Candidate[] = [];
   if (agentScope === "user" || agentScope === "both") {
@@ -545,6 +550,324 @@ export function discoverAgent(
     }
   }
   return null;
+}
+
+/**
+ * Inputs to {@link listRegisteredAgents}: the same two lookup axes `discoverAgent` uses.
+ * `homeDir` is a test seam so the listing is unit-testable without touching the real HOME.
+ */
+export interface RegisteredAgentsListInput {
+  cwd: string;
+  agentScope: "user" | "project" | "both";
+  /** Overrides `os.homedir()` (the user-level agent root). Tests only. */
+  homeDir?: string;
+}
+
+/** The two lookup axes both agent listers use, resolved once so they cannot drift. */
+function resolveAgentDirs(input: RegisteredAgentsListInput): {
+  userDir: string;
+  projectDir: string;
+  userRoot: string;
+  projectRoot: string;
+} {
+  const home = input.homeDir ?? os.homedir();
+  return {
+    userDir: path.join(home, ".pi", "agent", "agents"),
+    projectDir: path.join(input.cwd, ".pi", "agents"),
+    userRoot: home,
+    projectRoot: input.cwd,
+  };
+}
+
+/** The OS error code of a thrown fs error (`"ENOENT"`, `"ENOTDIR"`, …), or its string form. */
+function errnoCode(error: unknown): string {
+  const code = (error as { code?: unknown } | null | undefined)?.code;
+  return typeof code === "string" ? code : String(error);
+}
+
+/**
+ * True when `dir` itself exists but is not a usable directory — a file sitting in the agents
+ * path, a symlink whose target is a file, or a dangling symlink.
+ *
+ * `statSync` follows symlinks, so a DANGLING link fails it exactly like a truly absent path;
+ * `lstatSync` does not, and is the only thing that separates "the entry is there but unusable"
+ * from "nothing is there". Without that second look a `.pi/agents -> <deleted>` link is
+ * indistinguishable from a never-configured project.
+ *
+ * Scope: the FINAL component only. A broken link ABOVE it is invisible here (every `lstat` of
+ * `dir` fails through the link) — {@link hasUnresolvableSymlinkAncestor} covers that case.
+ */
+function existsButIsNotADirectory(dir: string): boolean {
+  try {
+    return !fs.statSync(dir).isDirectory();
+  } catch {
+    try {
+      // Reachable as a directory entry (typically a dangling symlink): present but unusable.
+      fs.lstatSync(dir);
+      return true;
+    } catch {
+      // Absent, or a parent component is not a directory — nothing is there to report.
+      return false;
+    }
+  }
+}
+
+/**
+ * Hard cap on the ancestor walk, so a pathological or relative `boundary` can never turn the
+ * silence check into an unbounded climb. The real paths are `<cwd>/.pi/agents` and
+ * `<home>/.pi/agent/agents` — 2 and 3 components below their boundary — so 8 is generous.
+ */
+const MAX_ANCESTOR_WALK = 8;
+
+/**
+ * True when a component STRICTLY BELOW `boundary` is a symlink that cannot be resolved, so
+ * `dir` is unreachable even though the path was configured.
+ *
+ * `<cwd>/.pi -> <deleted>` is the shape this exists for: `readdirSync(<cwd>/.pi/agents)` and
+ * `lstatSync(<cwd>/.pi/agents)` both report ENOENT because the whole prefix is broken, so
+ * {@link existsButIsNotADirectory} — which only looks at the final component — reports "absent".
+ * The walk finds the DEEPEST ancestor that `statSync` still resolves to a DIRECTORY, then
+ * `lstat`s every component below it: an entry that exists (`lstat` ok) while the full path does
+ * not resolve is a configured path broken by a symlink, so it is observable.
+ *
+ * Only SYMLINKS count. A component that resolves to a plain FILE makes `dir` impossible rather
+ * than broken — that is the absent-dir case and it must stay silent (both reviewers measured it),
+ * so a resolved file is skipped rather than used as the base, and a file parent reads as silent
+ * while a symlink parent (dangling, or pointing at a file) warns.
+ *
+ * Bounded on both ends: it never climbs above `boundary`, and it gives up silently when nothing
+ * at or below `boundary` resolves (a prefix that simply does not exist — the normal case, and
+ * the one a `cwd` that was never created produces).
+ */
+function hasUnresolvableSymlinkAncestor(dir: string, boundary: string): boolean {
+  const target = path.resolve(dir);
+  const stop = path.resolve(boundary);
+  const parentOf = (p: string): string => path.dirname(p);
+  // Phase 1: climb from `target` to `stop`, looking for the deepest resolvable ancestor.
+  let resolvable = target;
+  let found = false;
+  for (let step = 0; step <= MAX_ANCESTOR_WALK; step += 1) {
+    try {
+      // A resolved FILE is not a usable base either: it makes everything below it impossible
+      // rather than broken. Skipping it (instead of stopping there) is what keeps the plain-file
+      // parent silent while a symlink that resolves to a file still warns below.
+      if (fs.statSync(resolvable).isDirectory()) {
+        found = true;
+        break;
+      }
+    } catch {
+      // keep climbing
+    }
+    if (resolvable === stop) break;
+    const next = parentOf(resolvable);
+    if (next === resolvable) break;
+    resolvable = next;
+  }
+  if (found) {
+    // Phase 2: everything strictly below the deepest resolvable ancestor is the suspect span.
+    for (
+      let probe = target;
+      probe !== resolvable && probe !== parentOf(probe);
+      probe = parentOf(probe)
+    ) {
+      if (isSymlinkEntry(probe)) return true;
+    }
+    return false;
+  }
+  // Nothing at or below `boundary` resolves. That is a genuinely absent prefix UNLESS the
+  // boundary itself is a broken symlink, which is a configured path that cannot be listed.
+  return resolvable === stop && isSymlinkEntry(stop);
+}
+
+/** True when `p` is an existing filesystem entry that is itself a symlink (dangling included). */
+function isSymlinkEntry(p: string): boolean {
+  try {
+    return fs.lstatSync(p).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True when a failed `readdirSync(dir)` means "there is no agents dir here" rather than "the
+ * agents dir is there and something is wrong with it".
+ *
+ * ENOENT and ENOTDIR cannot be separated by the code alone, so the enumeration below is
+ * EXHAUSTIVE over the shapes the fs boundary produces. `boundary` is the lookup axis root
+ * (`cwd` for the project dir, the home dir for the user dir) and bounds the ancestor walk.
+ *
+ * **Silent** (absent — the normal case; a refusal must not be cluttered by it):
+ *   - the agents dir, and every component above it, simply does not exist (ENOENT, incl. a
+ *     `cwd` that was never created);
+ *   - a component ABOVE the agents dir is a plain FILE (ENOTDIR) — the agents dir cannot exist
+ *     at all, which is the same absence wearing a different code;
+ *   - a component above is a symlink that RESOLVES to a directory and the agents dir is
+ *     missing beneath it — a real configuration with nothing registered in it.
+ *
+ * **Observable** (`console.warn` with the path and the OS code, then continue — constraint #3):
+ *   - a file at the agents path (ENOTDIR) — it exists, it is just not a directory;
+ *   - a symlink at the agents path pointing at a file (ENOTDIR) or at nothing at all (ENOENT
+ *     on readdir, `lstat` ok) — both are present-but-unusable;
+ *   - a broken symlink in a PARENT component (ENOENT or ENOTDIR all the way down) — the path
+ *     was configured and cannot resolve;
+ *   - any other code (EACCES, ELOOP, EIO, …) — a real failure, never an absence.
+ */
+function isSilentReaddirMiss(dir: string, boundary: string, error: unknown): boolean {
+  const code = errnoCode(error);
+  if (code !== "ENOENT" && code !== "ENOTDIR") return false;
+  if (existsButIsNotADirectory(dir)) return false;
+  return !hasUnresolvableSymlinkAncestor(dir, boundary);
+}
+
+/**
+ * The agent names registered under the effective scope — the same two directories
+ * `discoverAgent` searches. A file's name is its frontmatter `name:` field, falling back
+ * to the file name (minus `.md`), mirroring how pi's own agent listers present agents
+ * whose frontmatter is missing or malformed. Per lookup directory:
+ *
+ * - **Silent** (no entries, no warn — the path genuinely holds nothing to list): the agents
+ *   dir is absent, together with every component above it (the normal case for a project with
+ *   no `.pi/agents/`); the case where a component ABOVE it is a plain FILE, which makes it
+ *   impossible rather than broken and reports ENOTDIR instead of ENOENT; and a parent symlink
+ *   that resolves to a real directory that simply has no agents dir under it. All stay silent
+ *   because a refusal must not be cluttered for a project that simply has no agents.
+ * - **Observable** (`console.warn` with the path and the OS code, then continue with the other
+ *   side): the path EXISTS but cannot be listed — a file where the agents dir belongs (ENOTDIR),
+ *   a symlink at the agents path pointing at a file (ENOTDIR) or at a deleted target (ENOENT on
+ *   both readdir and a following stat), a broken symlink in a PARENT component (ENOENT/ENOTDIR
+ *   all the way down, invisible to a final-component lstat), or any other code (permissions, a
+ *   symlink loop / ELOOP, EIO).
+ *
+ * {@link isSilentReaddirMiss} carries the full, exhaustive enumeration of which errno shapes
+ * land in each bucket; this summary and it must not drift.
+ *
+ * A `.md` file that exists but cannot be read (permissions, wrong file type) still contributes
+ * its filename fallback, with its own `console.warn` so the failure is observable
+ * (testing-constraints #3). The result is sorted and de-duplicated so the message built
+ * from it is deterministic.
+ */
+export function listRegisteredAgents(input: RegisteredAgentsListInput): string[] {
+  const { userDir, projectDir, userRoot, projectRoot } = resolveAgentDirs(input);
+  const dirs: Array<{ dir: string; boundary: string }> = [];
+  if (input.agentScope === "user" || input.agentScope === "both") {
+    dirs.push({ dir: userDir, boundary: userRoot });
+  }
+  if (input.agentScope === "project" || input.agentScope === "both") {
+    dirs.push({ dir: projectDir, boundary: projectRoot });
+  }
+  const names = new Set<string>();
+  for (const { dir, boundary } of dirs) {
+    let entries: string[];
+    try {
+      entries = fs.readdirSync(dir);
+    } catch (error) {
+      if (!isSilentReaddirMiss(dir, boundary, error)) {
+        const code = errnoCode(error);
+        console.warn(
+          `pi.dispatch: cannot read agent directory ${dir} (${code}); ` +
+            "the agents registered there are not listed",
+        );
+      }
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.endsWith(".md")) continue;
+      const fallback = entry.slice(0, -".md".length);
+      const filePath = path.join(dir, entry);
+      let raw: string;
+      try {
+        raw = fs.readFileSync(filePath, "utf-8");
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        console.warn(
+          `pi.dispatch: cannot read agent file ${filePath}: ${detail}; falling back to the filename`,
+        );
+        names.add(fallback);
+        continue;
+      }
+      const parsed = parseAgentMarkdown(raw);
+      const name = parsed?.name ?? fallback;
+      if (name.length > 0) names.add(name);
+    }
+  }
+  return [...names].sort();
+}
+
+/**
+ * The actionable suffix every agent-related dispatch refusal appends (field report
+ * pitfall #2, 2026-09-29): the bare `unknown agent: undefined` message named nothing the
+ * model could act on. Lists what IS registered under the effective scope, both lookup
+ * paths, and the minimal agent-file shape (frontmatter `name:` + system prompt body).
+ */
+export function describeRegisteredAgents(input: RegisteredAgentsListInput): string {
+  const { userDir, projectDir } = resolveAgentDirs(input);
+  const registered = listRegisteredAgents(input);
+  const names = registered.length > 0 ? "[" + registered.join(", ") + "]" : "(none)";
+  return (
+    `registered agents: ${names} — ` +
+    `agents load from ${userDir}/<name>.md (user scope) or ${projectDir}/<name>.md ` +
+    `(project scope); register one as an agent markdown file: frontmatter header ` +
+    "(`---\\nname: <agent-name>\\n---`) followed by the system prompt body"
+  );
+}
+
+/**
+ * The refusal for a dispatch whose `agent` argument is missing, empty, or not a string.
+ * There is no default agent (ADR-0016), so the message says so up front and then gives
+ * the same actionable listing the unknown-agent branch appends.
+ */
+export function missingAgentResult(input: RegisteredAgentsListInput): DispatchResult {
+  return {
+    text: "",
+    status: "rejected",
+    started: false,
+    agentName: "",
+    durationMs: 0,
+    exitCode: 1,
+    errorMessage:
+      "agent is required (there is no default agent) — " + describeRegisteredAgents(input),
+  };
+}
+
+/**
+ * True when the `agent` argument is missing, empty, or not a string — the wire can
+ * deliver anything (field-report pitfall #2). One predicate so every dispatch entry
+ * point shares the same guard instead of re-inlining the check.
+ */
+export function isMissingAgentName(agent: unknown): boolean {
+  return typeof agent !== "string" || agent.trim().length === 0;
+}
+
+/**
+ * The refusal for a dispatch whose `agent` names nothing registered under the effective
+ * scope. Shared verbatim by the foreground and background paths so the model and the
+ * sub-call tree keep one vocabulary (ADR-0021 §6); each call site keeps its own slot /
+ * timing semantics — this builds only the refusal message. `durationMs` lets the
+ * foreground path report elapsed time while the pre-spawn background refusal stays 0.
+ */
+export function unknownAgentResult(
+  agent: string,
+  agentScope: "user" | "project" | "both",
+  cwd: string,
+  durationMs = 0,
+): DispatchResult {
+  return {
+    text: "",
+    status: "rejected",
+    started: false,
+    agentName: agent,
+    durationMs,
+    exitCode: 1,
+    errorMessage:
+      "unknown agent: " +
+      agent +
+      " (agentScope=" +
+      agentScope +
+      ", cwd=" +
+      cwd +
+      "). " +
+      describeRegisteredAgents({ cwd, agentScope }),
+  };
 }
 
 /**
@@ -655,6 +978,13 @@ async function dispatchBackground(
     // Background refusal (issue #68 part 4): teach the model to inspect in-flight tasks.
     return backgroundDispatchDepthLimitReached();
   }
+  // Pitfall #2: a missing agent is a caller bug, reported before any slot is minted or held.
+  if (isMissingAgentName(input.agent)) {
+    return missingAgentResult({
+      cwd: input.cwd ?? ctx.cwd,
+      agentScope: input.agentScope ?? "user",
+    });
+  }
   // ADR-0022 §4/§9: mint the task id BEFORE acquiring its slot so the reservation is keyed by
   // the task that owns it. The pump and `shutdown` both release by this id; the release is
   // idempotent per task, so whichever runs second cannot free another live task's slot.
@@ -679,16 +1009,7 @@ async function dispatchBackground(
     const agent = discoverAgent(input.agent, cwd, agentScope);
     if (!agent) {
       slots.release(taskId);
-      return {
-        text: "",
-        status: "rejected",
-        started: false,
-        agentName: input.agent,
-        durationMs: 0,
-        exitCode: 1,
-        errorMessage:
-          "unknown agent: " + input.agent + " (agentScope=" + agentScope + ", cwd=" + cwd + ")",
-      };
+      return unknownAgentResult(input.agent, agentScope, cwd);
     }
 
     // The registry adopts the already-minted id as the TaskRecord id, so the handle the
@@ -912,18 +1233,16 @@ export async function dispatch(
   const agentScope = input.agentScope ?? "user";
   const start = Date.now();
 
+  // Pitfall #2 (field report 2026-09-29): without this the missing-agent case surfaced as the
+  // unactionable "unknown agent: undefined"; there is no default agent, so say so and list
+  // what IS registered.
+  if (isMissingAgentName(input.agent)) {
+    return missingAgentResult({ cwd, agentScope });
+  }
+
   const agent = discoverAgent(input.agent, cwd, agentScope);
   if (!agent) {
-    return {
-      text: "",
-      status: "rejected",
-      started: false,
-      agentName: input.agent,
-      durationMs: Date.now() - start,
-      exitCode: 1,
-      errorMessage:
-        "unknown agent: " + input.agent + " (agentScope=" + agentScope + ", cwd=" + cwd + ")",
-    };
+    return unknownAgentResult(input.agent, agentScope, cwd, Date.now() - start);
   }
 
   const fullPrompt = appendDepthHint(agent.systemPrompt, childDepth, ctx.maxDispatchDepth);

@@ -200,6 +200,35 @@ test("the description tells the model how to reach tools and what comes back", (
   expect(description).not.toMatch(/sandbox/i);
 });
 
+test("the description documents the always-bound pi.dispatch binding (pitfalls #1/#4/#5)", () => {
+  const description = captureRegisteredTools().get("ptc_run_code")?.description ?? "";
+  // Pitfall #1: the binding is registered under the literal dot name, so the description must
+  // show string indexing — `tools.pi.dispatch` is a TypeError in the program.
+  expect(description, "shows the string-indexed call form").toContain('tools["pi.dispatch"]');
+  expect(description, "states the namespaced form does not exist").toContain(
+    "`tools.pi.dispatch` does not exist",
+  );
+  // Pitfall #4: the run deadline bounds in-flight foreground dispatches too.
+  expect(description, "foreground dispatches compose under Promise.all").toContain(
+    "foreground dispatches compose under `Promise.all`",
+  );
+  // Pitfall #5: the program reads this run's actual binding names instead of assuming a set.
+  expect(description, "names the introspection global").toContain("`ptcBindings`");
+});
+
+test("the timeoutMs parameter description warns that the deadline kills in-flight dispatches", () => {
+  const tool = captureRegisteredTools().get("ptc_run_code");
+  if (!tool) throw new Error("ptc_run_code must be registered");
+  const parameters = tool.parameters as unknown as {
+    properties?: { timeoutMs?: { description?: string } };
+  };
+  const description = parameters.properties?.timeoutMs?.description ?? "";
+  // Same fact the model needs in prose form (pitfall #4): a timed-out run takes the
+  // program's in-flight foreground dispatches with it.
+  expect(description).toContain("in-flight foreground dispatches");
+  expect(description).toContain("terminated with it");
+});
+
 test(
   "a program calling tools.read resolves relative paths against the tool context's cwd",
   async () => {

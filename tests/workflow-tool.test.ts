@@ -72,6 +72,10 @@ test("the description lists the four helpers and says there is no agent()", () =
   expect(description, "states the binding form shared with ptc_run_code").toMatch(
     /tools\.<name>\(args\)/,
   );
+  // Pitfalls #1/#5: same guidance as ptc_run_code — string-indexed dispatch name, per-run
+  // binding manifest.
+  expect(description, "shows the string-indexed dispatch form").toContain('tools["pi.dispatch"]');
+  expect(description, "names the introspection global").toContain("ptcBindings");
   expect(description).toMatch(/`meta\.phases`/);
   expect(description).toMatch(/`args`/);
 });

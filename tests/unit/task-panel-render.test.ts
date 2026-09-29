@@ -3,8 +3,9 @@
  *
  * SPECIFICATION tests (docs/testing-constraints.md #6): every expected value traces to a literal
  * in ADR-0022 — the 6-state machine and its colour intent (§2: running active / stopping transient
- * / succeeded success / failed error / lost dim / canceled muted), the TaskRecord 21-field schema
- * (§3), and the ADR-0015 truncation pointer (§7). Nothing is copied from the implementation.
+ * / succeeded success / failed error / lost dim / canceled muted), the TaskRecord schema of
+ * ADR-0022 §3 (its 19 fields; 19 §3 + 2 ADR-0023 owner fields = 21 in the interface), and the
+ * ADR-0015 truncation pointer (§7). Nothing is copied from the implementation.
  *
  * The theme stub returns `[<slot>]text[/]` so a test asserts the *slot* the renderer chose, not an
  * opaque ANSI snapshot. The six status rows are pinned individually, which is the counterfactual
@@ -78,7 +79,12 @@ function renderCall(surface: TaskPanelSurface, args: unknown): string {
 const TASK_ID = "01JBZ000000000000000000001" as TaskRecord["id"];
 const BASE = 1_700_000_000_000;
 
-/** TaskRecord fixture copied field-for-field from ADR-0022 §3. */
+/**
+ * TaskRecord fixture: 9 keys — `id`, `label`, `agentName`, `depth`, `status`, `createdAt`,
+ * `startedAt`, `transitionAt`, `spawnSource`. The panel reads nothing else; the remaining
+ * ADR-0022 §3 fields and the ADR-0023 owner fields are deliberately absent, so a renderer that
+ * reached for one would see `undefined` rather than a plausible value.
+ */
 function makeRecord(overrides: Partial<TaskRecord> = {}): TaskRecord {
   return {
     id: TASK_ID,

@@ -2,8 +2,10 @@
  * `ptc_run_code` — the unstructured PTC surface.
  *
  * The model writes the body of an async function; inside it, pi's built-in tools are reachable as
- * `tools.<name>(args)` (all seven: read, bash, edit, write, grep, find, ls — ADR-0005's set), and
- * the program's return value plus `console.log` output are what come back. There are no helpers
+ * `tools.<name>(args)` (all seven: read, bash, edit, write, grep, find, ls — ADR-0005's set), plus
+ * the parallel binding `pi.dispatch` under its literal dot name (`tools["pi.dispatch"](args)`,
+ * ADR-0016 — the shipped surface always binds it), and the program's return value plus
+ * `console.log` output are what come back. There are no helpers
  * on this surface: `log` / `phase` / `parallel` / `pipeline` belong to `ptc_workflow` (G1 #13 →
  * decision B; a call to a helper that does not exist is a plain `ReferenceError` through the
  * normal code-run error path).
@@ -47,6 +49,13 @@ const DESCRIPTION = [
   "`write`); calling a name that is not bound rejects with an error the program can catch, and",
   "independent calls may overlap under `Promise.all`.",
   "",
+  "The parallel binding `pi.dispatch` is always available, registered under its literal dot name —",
+  'call it with string indexing, e.g. `await tools["pi.dispatch"]({ agent: "reviewer", task: "..." })`;',
+  "`tools.pi.dispatch` does not exist. It fans work out to child pi agents, and independent",
+  "foreground dispatches compose under `Promise.all` exactly like the built-in calls. The run's",
+  "actual bound names (this run, not a static list) are on the `ptcBindings` global, so the program",
+  "never has to guess what is bound.",
+  "",
   "Only the program's return value and its `console.log` output come back. This surface has no",
   "helpers: `log` / `phase` / `parallel` / `pipeline` exist only in `ptc_workflow`.",
   "",
@@ -75,7 +84,9 @@ const PARAMETERS: RunCodeParameters = Type.Object({
       description:
         `Elapsed deadline in milliseconds for the whole run, including tool calls. ` +
         `Omit it (or pass 0) for the default of ${DEFAULT_CONFIG.timeoutMs / 1000} s; ` +
-        `anything above ${DEFAULT_CONFIG.maxTimeoutMs / 1000} s is capped.`,
+        `anything above ${DEFAULT_CONFIG.maxTimeoutMs / 1000} s is capped. ` +
+        `The deadline bounds the whole run: if it expires, in-flight foreground dispatches ` +
+        `spawned by the program are terminated with it.`,
     }),
   ),
 });

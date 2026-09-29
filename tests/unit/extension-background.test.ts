@@ -107,6 +107,27 @@ async function seedRunningTask(
   );
 }
 
+/**
+ * ADR-0023: seed a record owned by a DIFFERENT runtime instance (foreign-owned), as a sibling
+ * pi process sharing this session dir would have written it.
+ */
+async function seedForeignRunningTask(
+  storage: InMemoryTaskStorage,
+  taskId: ULID,
+  owner: string,
+  foreignOwner: { pid: number; bootMs: number },
+): Promise<void> {
+  const registry = createTaskRegistry(storage, { clock: () => 1_000, owner: foreignOwner });
+  await registry.transition(
+    {
+      kind: "spawn",
+      handle: { taskId, label: "seeded task", status: "running" },
+      record: spawnRecord(owner),
+    },
+    { clock: () => 1_000, callerId: owner },
+  );
+}
+
 async function withAgent<T>(body: (dir: string) => Promise<T>): Promise<T> {
   const dir = await makeTempDir();
   try {
@@ -297,6 +318,24 @@ describe("startup reconcile is delivered through the notification path", () => {
     await stub.emit("session_start", stubContext(stub));
     await new Promise<void>((resolve) => setImmediate(resolve));
 
+    expect(stub.sentUserMessages).toEqual([]);
+    expect(stub.sentMessages).toEqual([]);
+  });
+
+  test("session_start leaves a foreign-owned record whose owner pid is alive running (ADR-0023)", async () => {
+    const { stub, runtime, storage } = wiredStub();
+    // A sibling pi process (here: an older runtime instance in this same pid, bootMs 1) wrote
+    // this record into the shared dir. Its owner is alive, so the startup reconcile must skip
+    // it — pre-ADR-0023 the dir-wide sweep flipped it to lost and sent a spurious notification
+    // (field-report pitfall #3, the child's boot killing the parent's records).
+    await seedForeignRunningTask(storage, TASK_RUNNING, OWNER, { pid: process.pid, bootMs: 1 });
+    const ctx = stubContext(stub);
+
+    await stub.emit("session_start", ctx);
+    // Flush the (async) delivery path so a stray lost notification would have landed.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect((await runtime.registry.get(TASK_RUNNING))?.status).toBe("running");
     expect(stub.sentUserMessages).toEqual([]);
     expect(stub.sentMessages).toEqual([]);
   });

@@ -51,10 +51,12 @@
  *   A record caught mid-`stopping` at shutdown must still be reclaimed, so the
  *   `reconcile-lost` command (and only it) accepts the recovery source set
  *   {running, stopping}. The ordinary `transition` command remains strict and rejects
- *   `stopping -> lost`.
+ *   `stopping -> lost`. ADR-0023 scopes the sweep by record ownership: only owner-dead
+ *   (or legacy ownerless) records are reaped, so a sibling pi process sharing the session
+ *   dir is never swept.
  *
  * References: ADR-0022 §2 (state machine), §3 (TaskRecord), §4 (DispatchHandle),
- * §5 (Subscription cursor), §7 (event payload), §8 (signal layering).
+ * §5 (Subscription cursor), §7 (event payload), §8 (signal layering); ADR-0023 (task ownership).
  */
 
 import type { TaskEvent, TaskFilter, TaskRecord, TaskStorage, TaskStatus } from "./task-storage.ts";
@@ -211,6 +213,14 @@ export interface TaskRegistry {
 export interface TaskRegistryOptions {
   clock: () => number;
   logger?: RegistryLogger;
+  /**
+   * ADR-0023: this registry instance's owner identity. When set, every record the registry
+   * spawns is stamped with it; when absent, spawned records stay ownerless (the legacy shape),
+   * which the startup reconcile sweeps as pre-upgrade staleness.
+   */
+  owner?: TaskOwner;
+  /** ADR-0023: pid liveness probe for the startup reconcile; defaults to {@link isPidAlive}. */
+  isPidAlive?: (pid: number) => boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -283,6 +293,46 @@ function isLostReason(value: unknown): value is LostReason {
 }
 
 /**
+ * ADR-0023 (task ownership): the identity of the extension-runtime instance that created a
+ * TaskRecord. Minted once per `BackgroundTaskRuntime` instance and stamped on every record the
+ * instance's registries spawn; `isOwnRecord` below is the only ownership test, and the startup
+ * reconcile's owner-dead check is the only cross-process reaper.
+ */
+export interface TaskOwner {
+  /** The owning OS process (`process.pid` of the dispatching pi process). */
+  pid: number;
+  /** Wall-clock ms when the owning runtime instance started. */
+  bootMs: number;
+}
+
+/**
+ * ADR-0023: a record belongs to `owner` only when BOTH identity fields match. A record with the
+ * same pid but an older `bootMs` (a `/reload` in the same process, or a same-millisecond
+ * collision) reads as foreign, which is the accepted limitation — see the ADR.
+ */
+export function isOwnRecord(record: TaskRecord, owner: TaskOwner): boolean {
+  return record.ownerPid === owner.pid && record.ownerBootMs === owner.bootMs;
+}
+
+/**
+ * Default owner-liveness probe (ADR-0023): POSIX signal 0 (`process.kill(pid, 0)`). `ESRCH`
+ * means no such process → dead; `EPERM` means the process exists but belongs to another user →
+ * alive. Any other error propagates: the reconcile then aborts and the bind failure path warns
+ * (testing-constraints #3), rather than a probe glitch silently reaping or preserving records.
+ */
+export function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException | null | undefined)?.code;
+    if (code === "ESRCH") return false;
+    if (code === "EPERM") return true;
+    throw error;
+  }
+}
+
+/**
  * Emit key per ADR-0022 §2 + §8. Entry states use `task:<id>:<status>`; state changes use
  * `task:<id>:-><status>` (the arrow form appears verbatim in the §8 signal-layering table).
  */
@@ -303,6 +353,10 @@ export class DefaultTaskRegistry implements TaskRegistry {
   readonly #storage: TaskStorage;
   readonly #clock: () => number;
   readonly #logger: RegistryLogger | undefined;
+  /** ADR-0023: owner identity stamped on spawned records; absent → legacy ownerless records. */
+  readonly #owner: TaskOwner | undefined;
+  /** ADR-0023: pid liveness probe backing the owner-scoped startup reconcile. */
+  readonly #isPidAlive: (pid: number) => boolean;
   /** Per-instance monotonic id minter (ulid.ts); its state is not shared module-globally. */
   readonly #ulid: UlidMinter;
   /** Registered in-process transition observers (issue #68 §1). */
@@ -318,6 +372,8 @@ export class DefaultTaskRegistry implements TaskRegistry {
     this.#storage = storage;
     this.#clock = options.clock;
     this.#logger = options.logger;
+    this.#owner = options.owner;
+    this.#isPidAlive = options.isPidAlive ?? isPidAlive;
     this.#ulid = createUlidMinter({ now: () => this.#clock() });
   }
 
@@ -398,16 +454,22 @@ export class DefaultTaskRegistry implements TaskRegistry {
   }
 
   /**
-   * Restart-time reconcile (ADR-0022 §2/§8): every `running` or `stopping` record becomes
-   * `lost` with reason `lost_on_session_restart`. Idempotent: a second call finds no
-   * non-terminal records and returns an empty array.
+   * Restart-time reconcile (ADR-0022 §2/§8, owner-scoped per ADR-0023): a `running` or
+   * `stopping` record becomes `lost` with reason `lost_on_session_restart` only when its owner
+   * process is dead — or when the record predates task ownership (no `ownerPid`) and can only
+   * be pre-upgrade staleness. Records owned by a LIVE pid are skipped: our own in-flight tasks,
+   * and — the field-report pitfall #3 fix — records written by a sibling pi process that shares
+   * this session dir (every background `pi.dispatch` child does, via `--session-dir`). Without
+   * the scoping, a child's boot flipped every sibling record to `lost`, and its exit sweep
+   * (`session_ended_while_running`) killed the rest. Idempotent: a second call finds no
+   * non-terminal dead-owned records and returns an empty array.
    */
   async reconcileLostTasks(): Promise<TaskRecord[]> {
     const targets: TaskRecord[] = [];
     for await (const record of this.#storage.listTasks()) {
-      if (RECOVERY_SOURCES.has(record.status)) {
-        targets.push(record);
-      }
+      if (!RECOVERY_SOURCES.has(record.status)) continue;
+      if (!this.#isOwnerDead(record)) continue;
+      targets.push(record);
     }
     const reconciled: TaskRecord[] = [];
     for (const target of targets) {
@@ -458,6 +520,13 @@ export class DefaultTaskRegistry implements TaskRegistry {
       transitionAt: now,
       parentTaskId: command.parentTaskId ?? command.record.parentTaskId,
     };
+    if (this.#owner !== undefined) {
+      // ADR-0023: stamp the creator runtime's identity so cross-process reaping can be scoped
+      // to the owner (the registry is the single writer of a record's lifecycle, so the stamp
+      // lives here rather than at each call site — dispatch registration included).
+      record.ownerPid = this.#owner.pid;
+      record.ownerBootMs = this.#owner.bootMs;
+    }
     if (!adopted) {
       // Keep the caller's handle pointing at the canonical record id (ADR-0022 §4).
       handle.taskId = taskId;
@@ -663,6 +732,17 @@ export class DefaultTaskRegistry implements TaskRegistry {
         else console.warn("[task-registry] " + warning);
       }
     }
+  }
+
+  /**
+   * ADR-0023 startup-reconcile ownership rule: a non-terminal record is reapable when it has no
+   * `ownerPid` (legacy, pre-upgrade — its writer predates this code and cannot still be running
+   * it) or when its owner's pid is dead. A live owner pid keeps the record — whether the owner
+   * is this very process (our own in-flight tasks) or a sibling pi process sharing the dir.
+   */
+  #isOwnerDead(record: TaskRecord): boolean {
+    if (record.ownerPid === undefined) return true;
+    return !this.#isPidAlive(record.ownerPid);
   }
 
   #assertAllowed(record: TaskRecord, to: TaskStatus): void {

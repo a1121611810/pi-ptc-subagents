@@ -126,7 +126,11 @@ async function eventLog(h: Harness, subscriberId: string): Promise<TaskEvent[]> 
 
 type RecordInput = Omit<TaskRecord, "id" | "status" | "createdAt" | "transitionAt">;
 
-/** 21-field shape copied from ADR-0022 §3 (the BG-02 suite's fixture, reused verbatim). */
+/**
+ * Spawn record: 15 keys — the ADR-0022 §3 fields minus the four the registry owns (`id`,
+ * `status`, `createdAt`, `transitionAt`). The ADR-0023 owner fields are left unset; no
+ * `ptc_task_*` tool reads them.
+ */
 function fixtureRecord(overrides: Partial<RecordInput> = {}): RecordInput {
   return {
     label: "research X",

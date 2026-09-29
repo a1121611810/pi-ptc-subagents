@@ -20,6 +20,7 @@
  */
 
 import { describe, expect, test, vi } from "vitest";
+import { spawnSync } from "node:child_process";
 import {
   InMemoryTaskStorage,
   type TaskEvent,
@@ -29,8 +30,10 @@ import {
 } from "../../src/runtime/task-storage.ts";
 import {
   createTaskRegistry,
+  isPidAlive,
   type DispatchHandle,
   type RegistryLogger,
+  type TaskOwner,
   type TaskRegistry,
   type TaskRegistryOptions,
   type TransitionContext,
@@ -129,7 +132,12 @@ async function collectEvents(
 /** The spawn command's record omits id/status/createdAt/transitionAt (bg-02 brief). */
 type RecordInput = Omit<TaskRecord, "id" | "status" | "createdAt" | "transitionAt">;
 
-/** 21-field shape copied from ADR-0022 §3; every field present so drops are caught. */
+/**
+ * Spawn record: 15 keys — the ADR-0022 §3 fields minus the four the registry owns (`id`,
+ * `status`, `createdAt`, `transitionAt`), each present (as `undefined` where optional) so a
+ * dropped field is caught. The ADR-0023 owner fields are left unset: the registry stamps them
+ * on the spawn command, so setting them here would let a bug in that stamping go unseen.
+ */
 function fixtureRecord(overrides: Partial<RecordInput> = {}): RecordInput {
   return {
     label: "research X",
@@ -1017,6 +1025,202 @@ describe("TaskRegistry.reconcileLostTasks", () => {
         callContext(h, CALLER),
       ),
     ).rejects.toThrow(/only running\/stopping tasks can be reconciled/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+//  task ownership (ADR-0023)
+// ---------------------------------------------------------------------------
+
+describe("TaskRegistry task ownership (ADR-0023)", () => {
+  /**
+   * Owner identities are literals from the ADR-0023 model (pid + runtime-start bootMs). The
+   * ownership oracle is the ADR rule "reap a non-terminal record only when its owner pid is
+   * dead", driven through the injected `isPidAlive` seam — never the real process table — so
+   * each row of the matrix is decided by the alive-set, not by test-process timing.
+   */
+  const OWNER_A: TaskOwner = { pid: 7_001, bootMs: 100_000 };
+  const OWNER_B: TaskOwner = { pid: 8_002, bootMs: 200_000 };
+
+  interface OwnerHarness {
+    storage: InMemoryTaskStorage;
+    clock: FakeClock;
+    /** Registry owned by A — the "parent process" stand-in. */
+    registryA: TaskRegistry;
+    /** Registry owned by B — a "sibling pi process" binding the SAME storage. */
+    registryB: TaskRegistry;
+    /** Registry with no configured owner — stamps legacy ownerless records. */
+    legacy: TaskRegistry;
+  }
+
+  function createOwnerHarness(alivePids: readonly number[]): OwnerHarness {
+    const storage = new InMemoryTaskStorage();
+    const clock = createFakeClock(1000);
+    const alive = new Set<number>(alivePids);
+    const isAlive = (pid: number): boolean => alive.has(pid);
+    const base = { clock: clock.clock, isPidAlive: isAlive };
+    return {
+      storage,
+      clock,
+      registryA: createTaskRegistry(storage, { ...base, owner: OWNER_A }),
+      registryB: createTaskRegistry(storage, { ...base, owner: OWNER_B }),
+      legacy: createTaskRegistry(storage, base),
+    };
+  }
+
+  async function spawnWith(
+    registry: TaskRegistry,
+    clock: FakeClock,
+    taskId: ULID,
+    callerId = CALLER,
+  ): Promise<void> {
+    await registry.transition(
+      {
+        kind: "spawn",
+        handle: fixtureHandle(taskId),
+        record: fixtureRecord({ spawnSource: { kind: "ptc-program", callerId } }),
+      },
+      { clock: clock.clock, callerId },
+    );
+  }
+
+  /** Drive a seeded task into `stopping` so the reconcile's recovery source set is exercised. */
+  async function stopWith(
+    registry: TaskRegistry,
+    clock: FakeClock,
+    taskId: ULID,
+    callerId = CALLER,
+  ): Promise<void> {
+    await registry.transition(
+      { kind: "stop", taskId, reason: "matrix stop" },
+      { clock: clock.clock, callerId },
+    );
+  }
+
+  test("a spawned record carries its creator's owner identity (record creation)", async () => {
+    const h = createOwnerHarness([OWNER_A.pid, OWNER_B.pid]);
+    await spawnWith(h.registryA, h.clock, TASK_1);
+
+    const record = await h.storage.loadTask(TASK_1);
+    // SPECIFICATION (ADR-0023): the registered record is stamped with the creator runtime's
+    // identity — the literal OWNER_A the registry was constructed with. Counterfactual (#5):
+    // a registry that stopped stamping would leave both fields undefined and this fails.
+    expect(record?.ownerPid).toBe(OWNER_A.pid);
+    expect(record?.ownerBootMs).toBe(OWNER_A.bootMs);
+  });
+
+  test("a registry without an owner keeps stamping ownerless (legacy) records", async () => {
+    const h = createOwnerHarness([]);
+    await spawnWith(h.legacy, h.clock, TASK_1);
+
+    const record = await h.storage.loadTask(TASK_1);
+    // The pre-ADR-0023 persisted shape: no owner fields. This is what an upgrade finds on disk.
+    expect(record?.ownerPid).toBeUndefined();
+    expect(record?.ownerBootMs).toBeUndefined();
+  });
+
+  test("startup reconcile matrix (running): own and foreign-alive stay, foreign-dead and legacy are swept", async () => {
+    const h = createOwnerHarness([OWNER_A.pid, OWNER_B.pid]);
+    await spawnWith(h.registryB, h.clock, TASK_1); // own record (B's in-flight task)
+    await spawnWith(h.registryA, h.clock, TASK_2); // foreign record, owner A's pid alive
+    await spawnWith(h.legacy, h.clock, TASK_3); // legacy record, no owner
+    h.clock.set(4000);
+
+    const reconciled = await h.registryB.reconcileLostTasks();
+
+    // THE counterfactual for field-report pitfall #3: pre-ADR-0023 the sweep was dir-wide, so
+    // TASK_2 (a live sibling's record) and even TASK_1 (the reconciler's own in-flight task)
+    // were flipped to lost; only the legacy TASK_3 row may be swept now.
+    expect(reconciled.map((record) => record.id)).toEqual([TASK_3]);
+    expect(reconciled[0]?.status).toBe("lost");
+    expect(reconciled[0]?.errorMessage).toBe("lost_on_session_restart");
+    expect((await h.storage.loadTask(TASK_1))?.status).toBe("running");
+    expect((await h.storage.loadTask(TASK_2))?.status).toBe("running");
+    expect((await h.storage.loadTask(TASK_3))?.status).toBe("lost");
+  });
+
+  test("startup reconcile matrix (stopping): the same ownership rule on the recovery edge", async () => {
+    const h = createOwnerHarness([OWNER_A.pid, OWNER_B.pid]);
+    await spawnWith(h.registryB, h.clock, TASK_1);
+    await spawnWith(h.registryA, h.clock, TASK_2);
+    await spawnWith(h.legacy, h.clock, TASK_3);
+    await stopWith(h.registryB, h.clock, TASK_1);
+    await stopWith(h.registryA, h.clock, TASK_2);
+    await stopWith(h.legacy, h.clock, TASK_3);
+    h.clock.set(4000);
+
+    const reconciled = await h.registryB.reconcileLostTasks();
+
+    expect(reconciled.map((record) => record.id)).toEqual([TASK_3]);
+    expect((await h.storage.loadTask(TASK_1))?.status).toBe("stopping");
+    expect((await h.storage.loadTask(TASK_2))?.status).toBe("stopping");
+    expect((await h.storage.loadTask(TASK_3))?.status).toBe("lost");
+  });
+
+  test("a record whose foreign owner pid is dead is swept (owner process died pre-completion)", async () => {
+    const h = createOwnerHarness([OWNER_B.pid]); // owner A's process is gone
+    await spawnWith(h.registryA, h.clock, TASK_2);
+    await stopWith(h.registryA, h.clock, TASK_2); // caught mid-stopping at owner death
+    h.clock.set(4000);
+
+    const reconciled = await h.registryB.reconcileLostTasks();
+
+    expect(reconciled.map((record) => record.id)).toEqual([TASK_2]);
+    expect(reconciled[0]?.status).toBe("lost");
+    expect(reconciled[0]?.errorMessage).toBe("lost_on_session_restart");
+  });
+
+  test("a foreign record with our pid but an older bootMs reads as foreign-alive (accepted limitation)", async () => {
+    const h = createOwnerHarness([OWNER_B.pid]);
+    const reloaded = createTaskRegistry(h.storage, {
+      clock: h.clock.clock,
+      isPidAlive: (pid) => pid === OWNER_B.pid,
+      owner: { pid: OWNER_B.pid, bootMs: 1 }, // same process, an older runtime instance
+    });
+    await spawnWith(reloaded, h.clock, TASK_1);
+    h.clock.set(4000);
+
+    const reconciled = await h.registryB.reconcileLostTasks();
+
+    expect(reconciled).toEqual([]);
+    expect((await h.storage.loadTask(TASK_1))?.status).toBe("running");
+  });
+
+  test("the default isPidAlive probe reads a live pid as alive and a reaped child pid as dead", () => {
+    // Both sides of the IO boundary (constraint #1) against the REAL probe: our own pid is
+    // alive (happy path); a fully-reaped child is ESRCH (failure path). EPERM (exists but
+    // foreign-owned) has no portable test here; its branch is documented on the probe.
+    expect(isPidAlive(process.pid)).toBe(true);
+    const exited = spawnSync(process.execPath, ["-e", "process.exit(0)"]);
+    expect(exited.status).toBe(0);
+    expect(exited.pid).toBeGreaterThan(0);
+    expect(isPidAlive(exited.pid)).toBe(false);
+  });
+
+  test("a probe error other than ESRCH/EPERM rejects reconcileLostTasks and leaves the record running (ADR-0023)", async () => {
+    // ADR-0023 contract on the default probe: ESRCH → dead, EPERM → alive, ANY OTHER error
+    // rethrows so a probe glitch can neither silently reap nor silently preserve records.
+    // The seam is TaskRegistryOptions.isPidAlive; a throwing probe stands in for e.g. EINVAL.
+    // The record is owner-stamped so the probe is actually consulted (ownerless records are
+    // reapable without probing). Counterfactual: a reconcile that swallowed probe errors
+    // would resolve and flip the record to lost — both assertions below would fail.
+    const storage = new InMemoryTaskStorage();
+    const clock = createFakeClock(1000);
+    const registry = createTaskRegistry(storage, {
+      clock: clock.clock,
+      owner: OWNER_A,
+      isPidAlive: (): boolean => {
+        throw new Error("probe exploded");
+      },
+    });
+    await registry.transition(
+      { kind: "spawn", handle: fixtureHandle(TASK_1), record: fixtureRecord() },
+      { clock: clock.clock, callerId: CALLER },
+    );
+
+    await expect(registry.reconcileLostTasks()).rejects.toThrow("probe exploded");
+
+    expect((await storage.loadTask(TASK_1))?.status).toBe("running");
   });
 });
 

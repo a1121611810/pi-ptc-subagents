@@ -1,4 +1,9 @@
 import { expect, test } from "vitest";
+import {
+  BUILTIN_BINDING_NAMES,
+  createBuiltinBindings,
+  DISPATCH_BINDING_NAME,
+} from "../src/runtime/bindings.ts";
 import { runPtcProgram } from "../src/runtime/dispatcher.ts";
 import { DEFAULT_CONFIG } from "../src/runtime/limits.ts";
 import { makeBindings, RUN_TIMEOUT_MS } from "./helpers/ptc.ts";
@@ -311,6 +316,64 @@ test(
     expect(first.value).toBe("number");
     const second = await runCode("return typeof leaked;");
     expect(second.value).toBe("undefined");
+  },
+  RUN_TIMEOUT_MS,
+);
+
+// ---------------------------------------------------------------------------
+// ptcBindings — the per-run binding manifest (field report pitfall #5)
+// ---------------------------------------------------------------------------
+//
+// Specification (docs/testing-constraints.md #4/#5): the global must carry THIS run's
+// actual binding table — the same names as the `tools` keys, in table order, with
+// `pi.dispatch` present iff the table bound it. A static list, or one that ignores the
+// caller's explicit subset, fails one of these arms.
+
+test(
+  "ptcBindings mirrors the default binding table, pi.dispatch included and frozen",
+  async () => {
+    const table = createBuiltinBindings({ cwd: process.cwd() });
+    const outcome = await runPtcProgram({
+      code: "return { names: [...ptcBindings], frozen: Object.isFrozen(ptcBindings) };",
+      surface: "run_code",
+      cwd: process.cwd(),
+      bindings: table,
+    });
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.value).toEqual({
+      names: [...BUILTIN_BINDING_NAMES, DISPATCH_BINDING_NAME],
+      frozen: true,
+    });
+  },
+  RUN_TIMEOUT_MS,
+);
+
+test(
+  "ptcBindings reflects an explicit binding subset, pi.dispatch only when bound",
+  async () => {
+    const withDispatch = createBuiltinBindings({
+      cwd: process.cwd(),
+      names: ["read", "bash"],
+      includeDispatch: true,
+    });
+    const first = await runPtcProgram({
+      code: "return [...ptcBindings];",
+      surface: "run_code",
+      cwd: process.cwd(),
+      bindings: withDispatch,
+    });
+    expect(first.error).toBeUndefined();
+    expect(first.value).toEqual(["read", "bash", DISPATCH_BINDING_NAME]);
+
+    const withoutDispatch = createBuiltinBindings({ cwd: process.cwd(), names: ["read", "bash"] });
+    const second = await runPtcProgram({
+      code: "return [...ptcBindings];",
+      surface: "run_code",
+      cwd: process.cwd(),
+      bindings: withoutDispatch,
+    });
+    expect(second.error).toBeUndefined();
+    expect(second.value).toEqual(["read", "bash"]);
   },
   RUN_TIMEOUT_MS,
 );

@@ -10,8 +10,12 @@
  *
  * Design notes:
  *
- * - **Spec source of truth** for TaskRecord's 21 fields is ADR-0022 §3 (Decision §3); for
- *   Subscription it is §5. The field set is locked at the interface — adapters may add private
+ * - **Spec source of truth** for TaskRecord's 19 pre-ownership fields is ADR-0022 §3 (Decision
+ *   §3, whose code block lists 19 — its "21 fields" heading is an authoring miscount); ADR-0023
+ *   adds two optional owner-identity fields (`ownerPid` / `ownerBootMs`) on top, absent on
+ *   pre-upgrade legacy records, making 21 in the interface today. For Subscription it is §5.
+ *   The field set is locked at the
+ *   interface — adapters may add private
  *   indexing, but the persisted shape is exactly the schema in the ADR. This is what makes
  *   `tests/unit/task-storage.test.ts` a SPECIFICATION test (constraint #4 + #6 in
  *   `docs/testing-constraints.md`): the test fixtures are copy-pasted from the ADR, not
@@ -66,9 +70,12 @@ export interface TaskSpawnSource {
 }
 
 /**
- * Session-level row tracking the lifecycle of one background child. 21 fields, exact shape from
- * ADR-0022 §3. Optional fields are absent on records still `running` (e.g. `finishedAt` /
- * `exitCode` / `outputRef` are written at transition time, not at spawn).
+ * Session-level row tracking the lifecycle of one background child. 19 ADR-0022 §3 fields (its
+ * "21 fields" heading is an authoring miscount) plus two optional ADR-0023 owner-identity
+ * fields — 21 today, persisted as-is. Optional fields are absent on
+ * records still `running` (e.g. `finishedAt` / `exitCode` / `outputRef` are written at
+ * transition time, not at spawn) and `ownerPid` / `ownerBootMs` are absent on pre-upgrade
+ * legacy records.
  */
 export interface TaskRecord {
   id: ULID;
@@ -96,6 +103,16 @@ export interface TaskRecord {
   parentTaskId?: ULID;
   /** `<sessionDir>/tasks/<id>.pi-*` session file (R1). */
   sessionFile?: string;
+  /**
+   * ADR-0023 (task ownership): pid of the extension-runtime instance that created this record.
+   * Absent on pre-upgrade legacy records. The only writer is the registry's spawn command,
+   * stamping its configured owner; reaping is owner-scoped (startup reconcile sweeps a record
+   * only when this pid is dead; the shutdown sweep reaps only records that also match
+   * `ownerBootMs`).
+   */
+  ownerPid?: number;
+  /** ADR-0023: wall-clock ms when the owning runtime instance started; pairs with `ownerPid`. */
+  ownerBootMs?: number;
 }
 
 /**
@@ -242,7 +259,9 @@ export class InMemoryTaskStorage implements TaskStorage {
   async saveTask(record: TaskRecord): Promise<void> {
     assertPresent(record, "saveTask: record is required");
     // Deep-clone on insert so a later mutation of the caller's reference does not poison
-    // storage state. Cheap for the 21-field schema.
+    // storage state. Cheap for a 21-field record (19 ADR-0022 §3 fields + the two optional
+    // ADR-0023 owner fields) — the count is what bounds the walk, since every field is a
+    // scalar or a two-key spawnSource, never a nested structure.
     this.#tasks.set(record.id, structuredClone(record));
   }
 

@@ -226,7 +226,7 @@ function asResult(value: DispatchHandle | DispatchResult): DispatchResult {
 // ---------------------------------------------------------------------------
 
 describe("dispatch background spawn", () => {
-  test("returns a running DispatchHandle and registers the 21-field record (§3/§4)", async () => {
+  test("returns a running DispatchHandle and registers the ADR-0022 §3 record (§3/§4)", async () => {
     await withAgent(async (dir) => {
       const h = createHarness({ start: 1000 });
       const result = await dispatch(
@@ -424,6 +424,49 @@ describe("dispatch background gates", () => {
     expect(failure.errorMessage).toContain("unknown agent: __bg_missing_agent__");
     expect(h.lifecycle.spawnCount).toBe(0);
     expect(h.slots.active).toBe(0);
+  });
+
+  test("a missing agent refuses before any slot is minted, with the actionable message", async () => {
+    const h = createHarness();
+    // The wire can deliver an absent `agent`; the field-report case from pitfall #2.
+    const result = asResult(
+      await dispatch(
+        { task: "x", background: true } as unknown as Parameters<typeof dispatch>[0],
+        { callId: 10, cwd: process.cwd(), depth: 0, maxDispatchDepth: 3 },
+        h.deps,
+      ),
+    );
+
+    expect(result.status).toBe("rejected");
+    expect(result.started).toBe(false);
+    // Counterfactual: the old "unknown agent: undefined" shape fails both of these.
+    expect(result.errorMessage ?? "").toContain("agent is required (there is no default agent)");
+    expect(result.errorMessage ?? "").toContain("registered agents:");
+    expect(result.errorMessage ?? "").toContain("name: <agent-name>");
+    expect(h.lifecycle.spawnCount).toBe(0);
+    expect(h.slots.active).toBe(0);
+  });
+
+  test("an unknown background agent lists what is registered under the effective scope", async () => {
+    await withAgent(async (dir) => {
+      const h = createHarness();
+      const result = asResult(
+        await dispatch(
+          { agent: "__bg_missing_agent__", task: "x", background: true, agentScope: "project" },
+          { callId: 11, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          h.deps,
+        ),
+      );
+
+      expect(result.status).toBe("rejected");
+      expect(result.started).toBe(false);
+      expect(result.errorMessage ?? "").toContain("unknown agent: __bg_missing_agent__");
+      // The fixture agent from the temp project dir must appear, with both lookup paths.
+      expect(result.errorMessage ?? "").toContain("registered agents: [" + AGENT + "]");
+      expect(result.errorMessage ?? "").toContain(join(dir, ".pi", "agents"));
+      expect(h.lifecycle.spawnCount).toBe(0);
+      expect(h.slots.active).toBe(0);
+    });
   });
 });
 

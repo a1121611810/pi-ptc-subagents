@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   BUILTIN_BINDING_NAMES,
@@ -129,6 +129,68 @@ test(
         () =>
           bindings.get("read")?.execute({ path: "does-not-exist.txt" }, call) as Promise<unknown>,
       ).rejects.toThrow();
+    } finally {
+      await removeTempDir(dir);
+    }
+  },
+  options,
+);
+
+test(
+  "the pi.dispatch binding validates arguments and refuses bad calls without throwing",
+  async () => {
+    const dir = await makeTempDir();
+    try {
+      await mkdir(join(dir, ".pi", "agents"), { recursive: true });
+      await writeFile(
+        join(dir, ".pi", "agents", "probe.md"),
+        "---\nname: probe\n---\nYou probe.\n",
+      );
+      const bindings = createBuiltinBindings({
+        cwd: dir,
+        names: ["read"],
+        includeDispatch: true,
+      });
+      const binding = bindings.get(DISPATCH_BINDING_NAME);
+      if (binding === undefined) throw new Error("pi.dispatch binding is missing");
+
+      // Missing agent (the field-report case): actionable refusal, same shape dispatch()
+      // itself returns — and no throw, because the binding never throws (ADR-0016 §3).
+      // agentScope "project" puts the temp agent dir in the listing.
+      const missing = (await binding.execute({ task: "t", agentScope: "project" }, call)) as {
+        status: string;
+        started: boolean;
+        errorMessage?: string;
+      };
+      expect(missing.status).toBe("rejected");
+      expect(missing.started).toBe(false);
+      expect(missing.errorMessage ?? "").toContain("agent is required (there is no default agent)");
+      expect(missing.errorMessage ?? "").toContain("registered agents: [probe]");
+      // Whitespace-only counts as missing.
+      const blank = (await binding.execute({ agent: "  ", task: "t" }, call)) as {
+        status: string;
+        errorMessage?: string;
+      };
+      expect(blank.status).toBe("rejected");
+      expect(blank.errorMessage ?? "").toContain("agent is required");
+
+      // A typed-but-invalid field is refused with pi's own validator message.
+      const badScope = (await binding.execute(
+        { agent: "probe", task: "t", agentScope: "everywhere" },
+        call,
+      )) as { status: string; errorMessage?: string };
+      expect(badScope.status).toBe("rejected");
+      expect(badScope.errorMessage ?? "").toContain('Validation failed for tool "pi.dispatch"');
+      expect(badScope.errorMessage ?? "").toContain("agentScope");
+
+      // The happy path through validation still reaches dispatch(): unknown agent here, so
+      // the refusal is the unknown-agent shape — and no child is ever spawned for it.
+      const unknown = (await binding.execute(
+        { agent: "ghost", task: "t", agentScope: "project" },
+        call,
+      )) as { status: string; errorMessage?: string };
+      expect(unknown.status).toBe("rejected");
+      expect(unknown.errorMessage ?? "").toContain("unknown agent: ghost");
     } finally {
       await removeTempDir(dir);
     }

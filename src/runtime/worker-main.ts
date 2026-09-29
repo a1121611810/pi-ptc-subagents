@@ -828,6 +828,12 @@ export function workerMain(deps: WorkerMainDeps): void {
       };
     }
     globals().tools = tools;
+    // Field report pitfall #5 (2026-09-29): the bound set can grow between runs (late-registered
+    // extension tools), so the program sees THIS run's actual manifest — the same names as the
+    // `tools` keys, `pi.dispatch` included only when it is bound — instead of a static list.
+    // It is reinstalled per run: `restoreWarmBaseline` deletes the previous run's copy before
+    // `startRun` replaces it.
+    globals().ptcBindings = Object.freeze([...bindingNames]);
 
     if (frame.surface === "workflow") {
       const maxItemsPerCall = typeof frame.maxItemsPerCall === "number" ? frame.maxItemsPerCall : 0;

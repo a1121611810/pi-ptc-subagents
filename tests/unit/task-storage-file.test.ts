@@ -45,8 +45,9 @@ import type {
 // --- Test fixtures (copy-pasted from ADR-0022 §3 + §5 + §2/§8 emit keys) -------------------
 
 /**
- * 21-field TaskRecord matching ADR-0022 §3 verbatim. Every optional field is present as
- * undefined so the round-trip toEqual(record) catches a field drop.
+ * TaskRecord fixture: the 19 fields of ADR-0022 §3. Every optional field is present as
+ * undefined so the round-trip toEqual(record) catches a field drop. (19 §3 fields + the 2
+ * ADR-0023 owner fields = 21 in the interface; this fixture does not set the owner ones.)
  */
 function fixtureTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
   return {
@@ -200,7 +201,7 @@ describe("FileTaskStorage: paths (ADR-0022 §3 + §5 layout)", () => {
 });
 
 describe("FileTaskStorage: task CRUD (loadTask / saveTask / deleteTask)", () => {
-  test("saveTask + loadTask round-trip preserves every field of the 21-field schema", async () => {
+  test("saveTask + loadTask round-trip preserves every field of the 19-field ADR-0022 §3 schema", async () => {
     const base = await makeBase();
     try {
       const storage: TaskStorage = new FileTaskStorage(base);
@@ -210,6 +211,23 @@ describe("FileTaskStorage: task CRUD (loadTask / saveTask / deleteTask)", () => 
       const loaded = await storage.loadTask(record.id);
       // SPECIFICATION (constraint #4): field-for-field ADR-0022 §3 schema equality.
       // Counterfactual: dropping spawnSource.callerId or an optional field fails toEqual.
+      expect(loaded).toEqual(record);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  test("saveTask + loadTask round-trip preserves the ADR-0023 owner fields when present", async () => {
+    const base = await makeBase();
+    try {
+      const storage: TaskStorage = new FileTaskStorage(base);
+      const record = fixtureTask({ ownerPid: 7_001, ownerBootMs: 100_000 });
+      await storage.saveTask(record);
+
+      const loaded = await storage.loadTask(record.id);
+      // ADR-0023 ownership fields survive the JSON round-trip — the child/parent sharing this
+      // file is what scopes reaping. Counterfactual: an adapter that stripped unknown fields
+      // (a field whitelist) would fail toEqual here.
       expect(loaded).toEqual(record);
     } finally {
       await rm(base, { recursive: true, force: true });

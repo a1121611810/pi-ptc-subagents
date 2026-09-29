@@ -30,6 +30,7 @@ import {
 import {
   createTaskRegistry,
   type DispatchHandle,
+  type TaskOwner,
   type TaskRecord,
 } from "../../src/runtime/task-registry.ts";
 import { InMemoryOutputStorage } from "../../src/runtime/output-storage.ts";
@@ -48,6 +49,9 @@ import { makeTempDir, removeTempDir } from "../helpers/ptc.ts";
 
 const TASK_RUNNING = "01JBZ000000000000000000001" as ULID;
 const TASK_SECOND = "01JBZ000000000000000000002" as ULID;
+const TASK_FOREIGN_ALIVE = "01JBZ00000000000000000000A" as ULID;
+const TASK_FOREIGN_DEAD = "01JBZ00000000000000000000B" as ULID;
+const TASK_LEGACY = "01JBZ00000000000000000000C" as ULID;
 const OWNER = "run-prev";
 const AGENT = "bg-runtime-probe";
 const AGENT_MD = "---\nname: " + AGENT + "\n---\nYou probe.\n";
@@ -73,7 +77,11 @@ class RecordingLifecycle extends MockChildProcessLifecycle {
   }
 }
 
-/** 21-field spawn record copied from ADR-0022 §3 (the BG-02 suite's fixture, reused). */
+/**
+ * Spawn record: 15 keys — the ADR-0022 §3 fields minus the four the registry owns (`id`,
+ * `status`, `createdAt`, `transitionAt`). The ADR-0023 owner fields are NOT set here; the
+ * registry stamps them itself, which is what the ownership tests below assert.
+ */
 function spawnRecord(
   callerId: string,
 ): Omit<TaskRecord, "id" | "status" | "createdAt" | "transitionAt"> {
@@ -488,6 +496,134 @@ describe("shutdown", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+//  task ownership (ADR-0023)
+// ---------------------------------------------------------------------------
+
+describe("task ownership (ADR-0023)", () => {
+  /** Literal owner identity for the runtime under test; foreign owners get distinct literals. */
+  const RUNTIME_OWNER: TaskOwner = { pid: 61_000, bootMs: 1_000 };
+
+  /** Spawn one running record through `registry` (the fixture record, seeded caller). */
+  async function seedInto(
+    registry: ReturnType<typeof createTaskRegistry>,
+    taskId: ULID,
+  ): Promise<void> {
+    await registry.transition(
+      {
+        kind: "spawn",
+        handle: { taskId, label: "seeded task", status: "running" },
+        record: spawnRecord(OWNER),
+      },
+      { clock: () => 1_000, callerId: OWNER },
+    );
+  }
+
+  test("records registered through the runtime carry the runtime's owner identity", async () => {
+    const storage = new InMemoryTaskStorage();
+    const runtime = createBackgroundTaskRuntime({
+      createStorage: () => storage,
+      createLifecycle: () => new MockChildProcessLifecycle(),
+      owner: RUNTIME_OWNER,
+    });
+    await runtime.bindSession("/sessions/owned");
+
+    await runtime.registry.transition(
+      {
+        kind: "spawn",
+        handle: { taskId: TASK_RUNNING, label: "l", status: "running" },
+        record: spawnRecord(OWNER),
+      },
+      { clock: () => 1_000, callerId: OWNER },
+    );
+
+    const record = await storage.loadTask(TASK_RUNNING);
+    expect(record?.ownerPid).toBe(RUNTIME_OWNER.pid);
+    expect(record?.ownerBootMs).toBe(RUNTIME_OWNER.bootMs);
+  });
+
+  test("bindSession reconcile is owner-scoped: a foreign-alive record survives, a foreign-dead one is swept", async () => {
+    const storage = new InMemoryTaskStorage();
+    const alivePids = new Set<number>([RUNTIME_OWNER.pid, 62_000]);
+    const runtime = createBackgroundTaskRuntime({
+      createStorage: () => storage,
+      createLifecycle: () => new MockChildProcessLifecycle(),
+      owner: RUNTIME_OWNER,
+      isPidAlive: (pid) => alivePids.has(pid),
+    });
+    // A sibling pi process wrote these into the same shared dir before this runtime bound it.
+    const foreignAlive = createTaskRegistry(storage, {
+      clock: () => 1_000,
+      owner: { pid: 62_000, bootMs: 5 },
+    });
+    const foreignDead = createTaskRegistry(storage, {
+      clock: () => 1_000,
+      owner: { pid: 63_000, bootMs: 5 },
+    });
+    await seedInto(foreignAlive, TASK_FOREIGN_ALIVE);
+    await seedInto(foreignDead, TASK_FOREIGN_DEAD);
+
+    const lost = await runtime.bindSession("/sessions/shared");
+
+    expect(lost.map((record) => record.id)).toEqual([TASK_FOREIGN_DEAD]);
+    expect(lost[0]?.errorMessage).toBe("lost_on_session_restart");
+    expect((await runtime.registry.get(TASK_FOREIGN_ALIVE))?.status).toBe("running");
+    expect((await runtime.registry.get(TASK_FOREIGN_DEAD))?.status).toBe("lost");
+  });
+
+  test("shutdown reaps only own records — foreign (alive or dead) and legacy records survive and are never signaled", async () => {
+    const lifecycle = new MockChildProcessLifecycle();
+    const storage = new InMemoryTaskStorage();
+    const runtime = createBackgroundTaskRuntime({
+      createStorage: () => storage,
+      createLifecycle: () => lifecycle,
+      owner: RUNTIME_OWNER,
+      isPidAlive: () => true,
+    });
+    await runtime.bindSession("/sessions/shared");
+    // Own live child + record: the shared SIGTERM ladder MUST reach it.
+    const ownHandle = runtime.lifecycle.spawn(["pi", "--x"], {} as ChildSpawnOptions);
+    await runtime.registry.transition(
+      {
+        kind: "spawn",
+        handle: { taskId: TASK_RUNNING, label: "l", status: "running" },
+        record: spawnRecord(OWNER),
+      },
+      { clock: () => 1_000, callerId: OWNER },
+    );
+    // Three records another pi process (or a pre-upgrade one) wrote into the SAME shared dir.
+    // They are seeded after the bind so the startup reconcile — not shutdown — is what a
+    // foreign record must also survive here.
+    const foreignAlive = createTaskRegistry(storage, {
+      clock: () => 1_000,
+      owner: { pid: 62_000, bootMs: 5 },
+      isPidAlive: () => true,
+    });
+    const foreignDead = createTaskRegistry(storage, {
+      clock: () => 1_000,
+      owner: { pid: 63_000, bootMs: 5 },
+      isPidAlive: () => true,
+    });
+    const legacy = createTaskRegistry(storage, { clock: () => 1_000 });
+    await seedInto(foreignAlive, TASK_FOREIGN_ALIVE);
+    await seedInto(foreignDead, TASK_FOREIGN_DEAD);
+    await seedInto(legacy, TASK_LEGACY);
+
+    const released = await runtime.shutdown("session_ended_while_running");
+
+    // Only the own record is reaped: pre-ADR-0023 the sweep was dir-wide, so all five rows
+    // ended `lost` (counterfactual for field-report pitfall #3's second cut).
+    expect(released.map((record) => record.id)).toEqual([TASK_RUNNING]);
+    expect(released[0]?.errorMessage).toBe("session_ended_while_running");
+    expect((await runtime.registry.get(TASK_FOREIGN_ALIVE))?.status).toBe("running");
+    expect((await runtime.registry.get(TASK_FOREIGN_DEAD))?.status).toBe("running");
+    expect((await runtime.registry.get(TASK_LEGACY))?.status).toBe("running");
+    // The ladder ran exactly once — against the own child. No foreign record was signaled.
+    expect(lifecycle.getKillSignals(ownHandle)).toEqual(["SIGTERM"]);
+    expect(lifecycle.spawnCount).toBe(1);
   });
 });
 

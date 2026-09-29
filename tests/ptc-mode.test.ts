@@ -244,6 +244,10 @@ test("the injected briefing lists the bindings of this session, not a hardcoded 
   for (const name of BUILTIN_BINDING_NAMES) expect(full).toContain(`tools.${name}(args)`);
   expect(full).toContain("[PTC MODE ACTIVE]");
   expect(full).toContain("/ptc off");
+  // Pitfall #1: the briefing must surface the always-bound parallel binding in its
+  // string-indexed form, plus the per-run manifest global (pitfall #5).
+  expect(full).toContain('tools["pi.dispatch"](args)');
+  expect(full).toContain("ptcBindings");
 
   const restricted = buildModeInstruction(["read"], "builtins-only");
   expect(restricted).toContain("tools.read(args)");

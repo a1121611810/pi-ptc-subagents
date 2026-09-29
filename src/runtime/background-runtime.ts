@@ -49,6 +49,19 @@
  * startup. `bindSession` treats that as best-effort-but-visible: it warns, reports through the
  * caller's notifier, and still returns a usable session. The real fix — skip + warn per record
  * inside the storage adapter — is deferred to a deliberate BG-13 follow-up.
+ *
+ * ## Task ownership (ADR-0023)
+ *
+ * Every background child is spawned with `--session-dir <parentSessionDir>` (ADR-0022 §1/R1), so
+ * the child's pi process SHARES the parent's `<sessionDir>/tasks/` storage, and any pi process
+ * started in the same cwd reaps the same dir. Pre-ADR-0023 that was lethal: the child's startup
+ * reconcile and its `session_shutdown` sweep were dir-wide, so a child flipped its parent's
+ * records (and its own) to `lost` — field-report pitfall #3. This holder therefore mints ONE
+ * {@link TaskOwner} identity (`pid` + runtime-start `bootMs`) and hands it to every registry it
+ * binds: registered records are stamped with it, the startup reconcile reaps only records whose
+ * owner pid is dead (legacy ownerless records count as pre-upgrade stale), and `shutdown` reaps
+ * only records matching the full identity. Visibility is unchanged — `ptc_task_list` still lists
+ * every record in the shared dir; only reaping is owner-scoped.
  */
 
 import {
@@ -69,9 +82,12 @@ import {
 import { FileOutputStorage, InMemoryOutputStorage, type OutputStorage } from "./output-storage.ts";
 import {
   createTaskRegistry,
+  isOwnRecord,
+  isPidAlive,
   type LostReason,
   type RegistryLogger,
   type TaskCommand,
+  type TaskOwner,
   type TaskQuery,
   type TaskRegistry,
   type TaskTransitionObserver,
@@ -142,6 +158,18 @@ export interface BackgroundRuntimeOptions {
   concurrency?: number;
   /** Child lifecycle factory; defaults to the real `node:child_process` adapter. */
   createLifecycle?: () => ChildProcessLifecycle;
+  /**
+   * ADR-0023: this runtime instance's owner identity, stamped on every record it registers.
+   * Defaults to `{ pid: process.pid, bootMs: clock() }` — minted ONCE here, so every session
+   * registry the runtime binds (initial, session, rebind) shares one identity and a rebind
+   * cannot make the startup reconcile reap the runtime's own in-flight tasks.
+   */
+  owner?: TaskOwner;
+  /**
+   * ADR-0023: pid liveness probe for the startup reconcile; defaults to the real signal-0
+   * {@link isPidAlive}. Tests inject a table-driven probe for the ownership matrix.
+   */
+  isPidAlive?: (pid: number) => boolean;
 }
 
 /**
@@ -176,7 +204,11 @@ export interface BackgroundTaskRuntime {
    * where it was so the next drain re-delivers the event.
    */
   acknowledgeNotifications(acks: readonly NotificationAck[]): Promise<void>;
-  /** Mark every non-terminal task lost (given reason) and release resources. */
+  /**
+   * Mark every non-terminal task this runtime OWNS lost (given reason) and release resources.
+   * ADR-0023: records owned by another runtime instance — e.g. a sibling pi process sharing
+   * the session dir — are never reaped here, and their children are never signaled.
+   */
   shutdown(reason: LostReason): Promise<TaskRecord[]>;
 }
 
@@ -420,12 +452,18 @@ class DefaultBackgroundTaskRuntime implements BackgroundTaskRuntime {
   readonly #logger: RegistryLogger;
   readonly #createStorage: (sessionDir: string | undefined) => TaskStorage;
   readonly #createOutputStorage: (sessionDir: string | undefined) => OutputStorage;
+  /** ADR-0023: this instance's owner identity, minted once and shared by every session registry. */
+  readonly #owner: TaskOwner;
+  /** ADR-0023: pid liveness probe backing the startup reconcile's owner-dead check. */
+  readonly #isPidAlive: (pid: number) => boolean;
   /** True once `shutdown` has run; a second call is a no-op and the observer stops notifying. */
   #shutdown = false;
 
   constructor(options: BackgroundRuntimeOptions) {
     this.clock = options.clock ?? ((): number => Date.now());
     this.#logger = options.logger ?? DEFAULT_RUNTIME_LOGGER;
+    this.#owner = options.owner ?? { pid: process.pid, bootMs: this.clock() };
+    this.#isPidAlive = options.isPidAlive ?? isPidAlive;
     this.#createStorage =
       options.createStorage ??
       ((sessionDir) =>
@@ -445,6 +483,8 @@ class DefaultBackgroundTaskRuntime implements BackgroundTaskRuntime {
     const initialRegistry = createTaskRegistry(initialStorage, {
       clock: this.clock,
       logger: this.#logger,
+      owner: this.#owner,
+      isPidAlive: this.#isPidAlive,
     });
     const initialPipeline = new DefaultNotificationPipeline(initialStorage, {
       now: this.clock,
@@ -512,6 +552,8 @@ class DefaultBackgroundTaskRuntime implements BackgroundTaskRuntime {
     const sessionRegistry = createTaskRegistry(storage, {
       clock: this.clock,
       logger: this.#logger,
+      owner: this.#owner,
+      isPidAlive: this.#isPidAlive,
     });
     const sessionPipeline = new DefaultNotificationPipeline(storage, {
       now: this.clock,
@@ -625,6 +667,12 @@ class DefaultBackgroundTaskRuntime implements BackgroundTaskRuntime {
     const lost: TaskRecord[] = [];
     for (const record of records) {
       if (!NON_TERMINAL_STATUSES.has(record.status)) continue;
+      // ADR-0023 (task ownership): reap ONLY records this runtime instance owns. A record
+      // owned by a sibling pi process sharing the session dir (every background dispatch child
+      // shares it via --session-dir) survives this sweep — pre-fix, a child's exit sweep flipped
+      // the parent's still-running siblings to `session_ended_while_running` (field-report
+      // pitfall #3).
+      if (!isOwnRecord(record, this.#owner)) continue;
       try {
         const result = await this.registry.transition(
           { kind: "reconcile-lost", taskId: record.id, reason },

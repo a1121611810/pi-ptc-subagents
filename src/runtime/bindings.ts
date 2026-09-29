@@ -26,9 +26,16 @@ import {
   createReadTool,
   createWriteTool,
 } from "@earendil-works/pi-coding-agent";
-import type { TSchema } from "typebox";
+import { Type } from "typebox";
+import type { TBoolean, TLiteral, TObject, TOptional, TSchema, TString, TUnion } from "typebox";
 
-import { dispatch as dispatchBinding, type DispatchDeps, type DispatchInput } from "./dispatch.ts";
+import {
+  dispatch as dispatchBinding,
+  isMissingAgentName,
+  missingAgentResult,
+  type DispatchDeps,
+  type DispatchInput,
+} from "./dispatch.ts";
 
 /** pi's built-in tools that can be exposed as bindings, in native order. */
 export const BUILTIN_BINDING_NAMES = [
@@ -129,6 +136,45 @@ const BUILTIN_TOOL_FACTORIES: Record<BuiltinBindingName, (cwd: string) => AnyBui
 /** Argument type of pi's `validateToolArguments`, i.e. pi-ai's `ToolCall`. */
 type ToolCallLike = Parameters<typeof validateToolArguments>[1];
 
+/**
+ * The `pi.dispatch` argument schema, validated with pi's own `validateToolArguments`
+ * exactly like the seven built-in bindings (field report pitfall #2: the binding used to
+ * cast the wire args straight to `DispatchInput`, so a malformed call reached the
+ * subprocess layer). `agent` / `task` must be non-empty strings; everything else is
+ * optional and typed when present. Written out explicitly for `isolatedDeclarations`.
+ */
+type DispatchParameters = TObject<{
+  agent: TString;
+  task: TString;
+  cwd: TOptional<TString>;
+  agentScope: TOptional<TUnion<[TLiteral<"user">, TLiteral<"project">, TLiteral<"both">]>>;
+  model: TOptional<TString>;
+  thinkingLevel: TOptional<TString>;
+  background: TOptional<TBoolean>;
+  label: TOptional<TString>;
+}>;
+
+const DISPATCH_PARAMETERS: DispatchParameters = Type.Object({
+  agent: Type.String({ minLength: 1 }),
+  task: Type.String({ minLength: 1 }),
+  cwd: Type.Optional(Type.String()),
+  agentScope: Type.Optional(
+    Type.Union([Type.Literal("user"), Type.Literal("project"), Type.Literal("both")]),
+  ),
+  model: Type.Optional(Type.String()),
+  thinkingLevel: Type.Optional(Type.String()),
+  background: Type.Optional(Type.Boolean()),
+  label: Type.Optional(Type.String()),
+});
+
+/** Minimal `Tool` shape for pi's validator. */
+const DISPATCH_TOOL_LIKE = {
+  name: DISPATCH_BINDING_NAME,
+  description:
+    "Dispatch a task to a registered pi agent as a child subprocess (foreground await or background task).",
+  parameters: DISPATCH_PARAMETERS,
+};
+
 export interface CreateBuiltinBindingsOptions {
   /** Per-run working directory: the F4 `RunConfig.cwd`, used to build every tool. */
   cwd: string;
@@ -200,8 +246,48 @@ export function createBuiltinBindings(options: CreateBuiltinBindingsOptions): Bi
     table.set(DISPATCH_BINDING_NAME, {
       name: DISPATCH_BINDING_NAME,
       execute: async (args, context) => {
+        const toolCallId = `ptc:${context.callId}`;
+        const toolCall = {
+          type: "toolCall",
+          id: toolCallId,
+          name: DISPATCH_BINDING_NAME,
+          arguments: args,
+        } as unknown as ToolCallLike;
+        let validated: unknown;
+        try {
+          validated = validateToolArguments(DISPATCH_TOOL_LIKE, toolCall);
+        } catch (error) {
+          // Validation failure is a refused call, not a thrown exception: the binding never
+          // throws (ADR-0016 §3), so the program sees the same rejected DispatchResult shape
+          // dispatch() itself returns. A missing agent gets the actionable refusal that lists
+          // what is registered (pitfall #2) instead of pi's raw schema error.
+          const raw: Record<string, unknown> | undefined =
+            typeof args === "object" && args !== null && !Array.isArray(args)
+              ? (args as Record<string, unknown>)
+              : undefined;
+          const rawAgent = raw?.agent;
+          const rawScope = raw?.agentScope;
+          if (isMissingAgentName(rawAgent)) {
+            return missingAgentResult({
+              cwd: options.cwd,
+              agentScope:
+                rawScope === "user" || rawScope === "project" || rawScope === "both"
+                  ? rawScope
+                  : "user",
+            });
+          }
+          return {
+            text: "",
+            status: "rejected",
+            started: false,
+            agentName: rawAgent,
+            durationMs: 0,
+            exitCode: 1,
+            errorMessage: error instanceof Error ? error.message : String(error),
+          };
+        }
         return dispatchBinding(
-          args as DispatchInput,
+          validated as DispatchInput,
           {
             signal: context.signal,
             callId: context.callId,

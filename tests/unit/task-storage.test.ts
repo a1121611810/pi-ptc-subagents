@@ -38,10 +38,11 @@ import {
 // --- Test fixtures (copy-pasted from ADR-0022 §3 + §5 + §7) -------------------------------
 
 /**
- * Minimal 21-field TaskRecord matching ADR-0022 §3 verbatim — every field present even when
+ * Minimal TaskRecord: the 19 fields of ADR-0022 §3, every one present even when
  * the value is empty / zero, so the round-trip assertion (`expect(loaded).toEqual(record)`)
- * catches accidental field drops. The labels / ULIDs are recognisable monospaced strings; tests
- * never compute them from the implementation.
+ * catches accidental field drops. (19 §3 fields + the 2 ADR-0023 owner fields = 21 in the
+ * interface; this fixture does not set the owner ones.) The labels / ULIDs are recognisable
+ * monospaced strings; tests never compute them from the implementation.
  */
 function fixtureTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
   return {
@@ -111,7 +112,7 @@ async function collect<T>(iter: AsyncIterable<T>): Promise<T[]> {
 // --- Tests -----------------------------------------------------------------------------------
 
 describe("InMemoryTaskStorage: task CRUD (loadTask / saveTask / deleteTask)", () => {
-  test("saveTask + loadTask round-trip preserves every field of the 21-field schema", async () => {
+  test("saveTask + loadTask round-trip preserves every field of the 19-field ADR-0022 §3 schema", async () => {
     const storage: TaskStorage = new InMemoryTaskStorage();
     const record = fixtureTask();
     await storage.saveTask(record);
@@ -121,6 +122,26 @@ describe("InMemoryTaskStorage: task CRUD (loadTask / saveTask / deleteTask)", ()
     // schema, not an implementation-derived shape. A bug that drops `outputRef` or
     // `spawnSource.callerId` from the persisted shape is caught here.
     expect(loaded).toEqual(record);
+  });
+
+  test("saveTask + loadTask round-trip preserves the ADR-0023 owner fields when present", async () => {
+    const storage: TaskStorage = new InMemoryTaskStorage();
+    // The ADR-0023 ownership fields on top of the ADR-0022 schema; values are literals from the
+    // ownership model (pid + runtime-start bootMs).
+    const record = fixtureTask({ ownerPid: 7_001, ownerBootMs: 100_000 });
+    await storage.saveTask(record);
+
+    expect(await storage.loadTask(record.id)).toEqual(record);
+  });
+
+  test("a legacy record without owner fields round-trips with the fields absent", async () => {
+    const storage: TaskStorage = new InMemoryTaskStorage();
+    const record = fixtureTask();
+    await storage.saveTask(record);
+
+    const loaded = await storage.loadTask(record.id);
+    expect(loaded?.ownerPid).toBeUndefined();
+    expect(loaded?.ownerBootMs).toBeUndefined();
   });
 
   test("loadTask returns null for an unknown id (not a throw)", async () => {
@@ -570,10 +591,11 @@ describe("InMemoryTaskStorage: structural type-shape checks", () => {
     expect(id.length).toBe(26);
   });
 
-  test("TaskRecord carries all 21 ADR-0022 §3 fields at the type level", () => {
-    // Compile-time check: this fixture would not typecheck if any of the 21 fields was missing
+  test("TaskRecord carries all 19 ADR-0022 §3 fields at the type level", () => {
+    // Compile-time check: this fixture would not typecheck if any of the 19 §3 fields was missing
     // from the TaskRecord interface. Each field is named in the assertion message so a future
-    // reader can map the test to the ADR line.
+    // reader can map the test to the ADR line. (The two ADR-0023 owner fields are optional and
+    // deliberately NOT pinned here; they are covered by the owner-identity tests.)
     const requiredFields = {
       id: "ulid" as const,
       label: "string" as const,
@@ -605,10 +627,13 @@ describe("InMemoryTaskStorage: structural type-shape checks", () => {
       startedAt: 0,
       transitionAt: 0,
     };
-    // 21 distinct fields: id, label, agentName, depth, status, createdAt, startedAt,
+    // 19 interface fields: id, label, agentName, depth, status, createdAt, startedAt,
     // finishedAt, durationMs, transitionAt, outputRef, outputBytes, outputPreview,
-    // stopReason, errorMessage, exitCode, spawnSource, parentTaskId, sessionFile
-    // = 19 top-level + 2 inside spawnSource = 21 total.
+    // stopReason, errorMessage, exitCode, spawnSource, parentTaskId, sessionFile.
+    // Counting KEYS in the object graph instead gives 21, because `spawnSource` contributes 2 of
+    // its own. That is the same total as the 21 TaskRecord fields (19 §3 + 2 ADR-0023 owner), but
+    // reached a different way: the two extra keys come from the nested spawnSource object, not
+    // from the owner fields, which are absent here. Hence the two counts are asserted separately.
     expect(Object.keys(r).length).toBe(19);
     expect(Object.keys(r.spawnSource).length).toBe(2);
   });
