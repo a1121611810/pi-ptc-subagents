@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-09-29
+
+### Fixed
+
+- **Background dispatch children no longer reap their parent's tasks (field
+  report, 2026-09-29).** Background children share the session's task storage
+  via `--session-dir`; a child's startup reconcile and exit sweep used to be
+  directory-wide, so a dispatch child — or any `pi` process started in the same
+  directory — flipped every running task to `lost`. Task records now carry an
+  owner identity (`ownerPid` / `ownerBootMs`) and reaping is owner-scoped
+  (ADR-0023); `lost_on_session_restart` now means the owner process died
+  before the task finished, or the record predates ownership (pre-upgrade
+  ownerless rows, which any process binding the directory reaps).
+- **`pi.dispatch` refusals are actionable.** A missing `agent` argument is
+  reported distinctly (`agent is required (there is no default agent)`) and
+  both the missing- and unknown-agent results list the agents registered under
+  the effective scope plus the two lookup paths and the agent-file shape. The
+  binding now runs its arguments through pi's own `validateToolArguments`
+  (the same validation the built-in bindings use) and a validation failure
+  comes back as a `rejected` DispatchResult instead of reaching the
+  subprocess layer.
+
+### Changed
+
+- **PTC program prompts name the dispatch binding precisely.** The
+  `ptc_run_code` / `ptc_workflow` descriptions and the `/ptc` briefing state
+  that `pi.dispatch` is always bound under its literal dot name (call it as
+  `tools["pi.dispatch"](...)`; `tools.pi.dispatch` does not exist), and each
+  run exposes its actual bound names on the new `ptcBindings` global so
+  programs never guess the binding surface.
+- **Docs**: `ptc_run_code`'s `timeoutMs` description and `docs/usage/bgdispatch.md`
+  now state that a run timeout terminates in-flight foreground dispatches, and
+  the guide gains prerequisites (no default agent) and an output-compactness
+  convention (page via `ptc_task_output` instead of truncating).
+
 ## [1.0.0] - 2026-09-24
 
 ### Added
