@@ -154,6 +154,21 @@ export interface BackgroundRuntimeOptions {
   logger?: RegistryLogger;
   /** Factory for the per-session storage root; defaults to the BG-13 file adapter. */
   createStorage?: (sessionDir: string | undefined) => TaskStorage;
+  /**
+   * Factory for the PRE-SESSION storage root; defaults to `new InMemoryTaskStorage()`.
+   *
+   * The pre-session registry, notification pipeline and output storage are all built from ONE
+   * storage, and it used to be constructed in place, so a caller could not substitute it. That is
+   * the seam behind round 7's finding: five `logger.warn` calls in cleanup paths (526 / 594 / 616 /
+   * 663 / 683) could not be driven by any test -- not because the tests were missing, but because
+   * the failure they report cannot be produced at all.
+   *
+   * An optional field on THIS options object, defaulting to today's behaviour, is the whole change;
+   * a deps-less caller is unaffected. Deliberately a field and not a module-level global with an
+   * exported setter: the setter shape (`setPromptFileWriter`) had to be defended as being tree-shaken
+   * out of the bundle, an argument that has to be re-made on every release. A field needs no defence.
+   */
+  createInitialStorage?: () => TaskStorage;
   createOutputStorage?: (sessionDir: string | undefined) => OutputStorage;
   concurrency?: number;
   /** Child lifecycle factory; defaults to the real `node:child_process` adapter. */
@@ -479,7 +494,9 @@ class DefaultBackgroundTaskRuntime implements BackgroundTaskRuntime {
 
     // The pre-session delegate is always in-memory, so the tools/dispatch path are usable before
     // any session exists and a session-less test never touches the filesystem.
-    const initialStorage = new InMemoryTaskStorage();
+    const initialStorage = (
+      options.createInitialStorage ?? ((): TaskStorage => new InMemoryTaskStorage())
+    )();
     const initialRegistry = createTaskRegistry(initialStorage, {
       clock: this.clock,
       logger: this.#logger,

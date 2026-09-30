@@ -34,14 +34,19 @@ import {
   type TaskRecord,
 } from "../../src/runtime/task-registry.ts";
 import { InMemoryOutputStorage } from "../../src/runtime/output-storage.ts";
-import { InMemoryTaskStorage, type ULID } from "../../src/runtime/task-storage.ts";
+import {
+  InMemoryTaskStorage,
+  type TaskEvent,
+  type TaskStorage,
+  type ULID,
+} from "../../src/runtime/task-storage.ts";
 import {
   createPtcTaskListTool,
   type AnyTool,
   type PtcTaskListDetails,
 } from "../../src/tools/ptc-task.ts";
 import { DEFAULT_CONFIG } from "../../src/runtime/limits.ts";
-import { makeTempDir, removeTempDir } from "../helpers/ptc.ts";
+import { makeTempDir, removeTempDir, waitFor } from "../helpers/ptc.ts";
 
 // ---------------------------------------------------------------------------
 //  Fixtures — literal ULID-shaped ids and the ADR-0022 §3 record shape
@@ -853,4 +858,262 @@ describe("cleanup-path failure logs (round 7)", () => {
    * again" -- and a test written today for any of them would be one that cannot fail, which is
    * the failure mode this whole exercise exists to find.
    */
+});
+
+// ---------------------------------------------------------------------------
+// Round 8: the five cleanup-path logs that round 7 could not drive (526 / 594 / 616 / 663 / 683).
+//
+// All five run against the PRE-SESSION registry / pipeline, which used to be constructed in place
+// at `new InMemoryTaskStorage()`. Round 7 recorded that as "blocked on a missing seam in
+// production, not a missing test". `createInitialStorage` is that seam.
+//
+// Each of these builds a storage whose READS throw, injects it, and drives the one path that
+// reports. They are separate tests on purpose: round 7's lesson is that a table going red is not
+// per-site proof.
+// ---------------------------------------------------------------------------
+
+describe("pre-session cleanup-path failure logs (round 8)", () => {
+  /**
+   * A real `InMemoryTaskStorage` with exactly ONE method replaced by a throw.
+   *
+   * A Proxy over every read was the first attempt and it was the wrong instrument twice over:
+   * `listTasks` is an AsyncIterable, not a promise, so the rejection surfaced as a different
+   * error entirely and every assertion blamed the wrong call. Failing one NAMED method keeps each
+   * test pointed at one path, and the delegate is a real store so nothing else is disturbed.
+   */
+  /**
+   * A real `InMemoryTaskStorage` with one method that can be ARMED to throw, after seeding.
+   *
+   * Two things had to be learned the hard way to write this, and both cost a wrong-reason red:
+   *
+   *   1. `listTasks` is an AsyncIterable, not a promise. A rejected promise there hands the call
+   *      site a non-iterable and the error never carries the cause -- every assertion then blamed
+   *      the wrong call. It has to be a generator that throws on its first pull.
+   *   2. The registry captures the storage ONCE, in the constructor, so swapping the reference
+   *      afterwards changes nothing. The failure must be armed on the object the registry is
+   *      already holding -- which is also why it cannot simply be injected up front: the seeding
+   *      transition reads the same method and takes the setup down with it.
+   */
+  function armableStorage(): {
+    storage: TaskStorage;
+    arm: (method: string, cause: string) => void;
+  } {
+    const inner = new InMemoryTaskStorage();
+    const bag = inner as unknown as Record<string, ((...a: unknown[]) => unknown) | undefined>;
+    let armed: { method: string; cause: string } | undefined;
+    const double: Record<string, unknown> = {};
+    for (const name of [
+      "loadTask",
+      "saveTask",
+      "deleteTask",
+      "loadSubscription",
+      "saveSubscription",
+      "appendEvents",
+    ]) {
+      double[name] = (...args: unknown[]) => {
+        if (armed !== undefined && armed.method === name) {
+          return Promise.reject(new Error(armed.cause));
+        }
+        const impl = bag[name];
+        if (impl === undefined) throw new Error("armableStorage: no such method " + name);
+        return impl.apply(inner, args);
+      };
+    }
+    // `loadEvents` is the second AsyncIterable method, and the idle wake reads through it. A
+    // promise here yields "is not a function or its return value is not async iterable", which is
+    // the double's artefact rather than the injected failure -- and a test that passes because of
+    // its own harness is not a test.
+    double.loadEvents = async function* (): AsyncIterable<TaskEvent> {
+      if (armed !== undefined && armed.method === "loadEvents") throw new Error(armed.cause);
+      for await (const ev of (inner.loadEvents as (...a: unknown[]) => AsyncIterable<TaskEvent>)(
+        ...([] as unknown[]),
+      )) {
+        yield ev;
+      }
+    };
+    double.listTasks = async function* (): AsyncIterable<TaskRecord> {
+      if (armed !== undefined && armed.method === "listTasks") throw new Error(armed.cause);
+      for await (const record of (inner.listTasks as () => AsyncIterable<TaskRecord>)()) {
+        yield record;
+      }
+    };
+    return {
+      storage: double as unknown as TaskStorage,
+      arm: (method, cause) => {
+        armed = { method, cause };
+      },
+    };
+  }
+
+  test("a terminal wake whose read throws is reported (526)", async () => {
+    // `#handleTransition` fires on a terminal transition and awaits the idle wake, which reads
+    // storage. The promise is floating with an explicit catch, so the warn is the ONLY evidence
+    // the failure did not become an unhandled rejection.
+    //
+    // The task is spawned through the runtime's OWN registry -- the pre-session one the injected
+    // storage backs. Seeding a separate storage and then transitioning through `runtime.registry`
+    // fails with `unknown taskId`, which is a red for entirely the wrong reason: it proves the
+    // harness is wired up, not that the warn is missing.
+    // Seed with a WORKING store, then swap the backing to the failing one. Injecting the failure
+    // up front takes the SPAWN down with it -- the spawn reads the subscription it is about to
+    // write -- and the test then fails on its own setup, which says nothing about the warn.
+    const { storage: pre, arm } = armableStorage();
+    const warnings: string[] = [];
+    const runtime = createBackgroundTaskRuntime({
+      createInitialStorage: () => pre,
+      createLifecycle: () => new MockChildProcessLifecycle(),
+      logger: { info: () => undefined, warn: (m: string) => void warnings.push(m) },
+    });
+
+    await runtime.registry.transition(
+      {
+        kind: "spawn",
+        handle: { taskId: TASK_RUNNING, label: "pre-session", status: "running" },
+        record: spawnRecord(OWNER),
+      },
+      { clock: () => 1_000, callerId: OWNER },
+    );
+
+    // Now the reads fail, and the terminal wake is all that is left to trigger them.
+    arm("loadEvents", "injected: wake read failed");
+    await runtime.registry.transition(
+      { kind: "transition", taskId: TASK_RUNNING, to: "succeeded" },
+      { clock: () => 2_000, callerId: OWNER },
+    );
+
+    // The wake is a floating promise, so the warn lands a turn later.
+    await waitFor(() => warnings.length > 0);
+    expect(warnings[0]).toContain("terminal notification wake");
+    expect(warnings[0]).toContain("injected: wake read failed");
+  });
+
+  test("a task listing that throws during a drain is reported, and the drain returns empty (594)", async () => {
+    const storage = new InMemoryTaskStorage();
+    await seedRunningTask(storage);
+    const warnings: string[] = [];
+    const runtime = createBackgroundTaskRuntime({
+      createStorage: () => storage,
+      createInitialStorage: () => {
+        const a = armableStorage();
+        a.arm("listTasks", "injected: query read failed");
+        return a.storage;
+      },
+      createLifecycle: () => new MockChildProcessLifecycle(),
+      logger: { info: () => undefined, warn: (m: string) => void warnings.push(m) },
+    });
+
+    // Session-less on purpose: this is the PRE-session registry doing the listing.
+    const drain = await runtime.drainNotifications(OWNER as ULID);
+
+    expect(warnings.length, "the listing failure was reported").toBe(1);
+    expect(warnings[0]).toContain("drainNotifications: could not list tasks");
+    expect(warnings[0]).toContain("injected: query read failed");
+    // Reported AND contained: the caller still gets a well-formed empty drain, not a throw.
+    expect(drain.items).toEqual([]);
+    expect(drain.acks).toEqual([]);
+  });
+
+  test("one record whose events cannot be read is reported without starving the rest (616)", async () => {
+    // The interesting half of 616 is the CONTINUE: an unreadable record must not swallow its
+    // siblings' events, so this seeds TWO records and asserts both were reported independently.
+    //
+    // Both records are spawned through the runtime's OWN pre-session registry -- the one the
+    // injected double backs. Seeding a separate `storage` and draining from the pre-session
+    // registry finds nothing to loop over, which fails the count for a reason that has nothing to
+    // do with the log (the same trap 526 hit).
+    const { storage: pre, arm } = armableStorage();
+    const warnings: string[] = [];
+    const runtime = createBackgroundTaskRuntime({
+      createInitialStorage: () => pre,
+      createLifecycle: () => new MockChildProcessLifecycle(),
+      logger: { info: () => undefined, warn: (m: string) => void warnings.push(m) },
+    });
+
+    for (const taskId of [TASK_RUNNING, TASK_SECOND]) {
+      await runtime.registry.transition(
+        {
+          kind: "spawn",
+          handle: { taskId, label: "pre-session " + taskId, status: "running" },
+          record: spawnRecord(OWNER),
+        },
+        { clock: () => 1_000, callerId: OWNER },
+      );
+    }
+
+    arm("loadSubscription", "injected: drainPending read failed");
+    const drain = await runtime.drainNotifications(OWNER as ULID);
+
+    // One report per unreadable record, and the sweep continued rather than bailing on the first.
+    expect(warnings.length, "one report per unreadable record").toBe(2);
+    expect(warnings[0]).toContain("injected: drainPending read failed");
+    expect(warnings[1]).toContain("injected: drainPending read failed");
+    // The sweep continued past the first failure rather than bailing: BOTH records were reported.
+    // No items and no acks is the correct outcome here, not a shortfall -- an unreadable record is
+    // skipped without an ack, because acknowledging a cursor for events that were never delivered is
+    // exactly the data loss the at-least-once design exists to prevent.
+    expect(drain.items, "no events for an unreadable record").toHaveLength(0);
+    expect(drain.acks, "and no ack, so the cursor does not skip undelivered events").toHaveLength(
+      0,
+    );
+  });
+
+  test("a task listing that throws during shutdown is reported, and the sweep continues (663)", async () => {
+    const storage = new InMemoryTaskStorage();
+    await seedRunningTask(storage);
+    const warnings: string[] = [];
+    const runtime = createBackgroundTaskRuntime({
+      createStorage: () => storage,
+      createInitialStorage: () => {
+        const a = armableStorage();
+        a.arm("listTasks", "injected: shutdown query read failed");
+        return a.storage;
+      },
+      createLifecycle: () => new MockChildProcessLifecycle(),
+      logger: { info: () => undefined, warn: (m: string) => void warnings.push(m) },
+    });
+
+    const lost = await runtime.shutdown("session_ended_while_running");
+
+    expect(warnings.length, "the listing failure was reported").toBe(1);
+    expect(warnings[0]).toContain("shutdown: could not list tasks");
+    expect(warnings[0]).toContain("injected: shutdown query read failed");
+    // Contained: an unlistable sweep reports and returns empty rather than failing the teardown.
+    expect(lost).toEqual([]);
+  });
+
+  test("a task whose lost-marking throws is reported, and the sweep continues (683)", async () => {
+    // 683 is the inner catch of the shutdown sweep, and it needs the OPPOSITE shape from 663:
+    // the listing must SUCCEED and the transition must fail. So the record is seeded through the
+    // pre-session store first, and only the write the sweep performs is armed afterwards.
+    const { storage: pre, arm } = armableStorage();
+    const warnings: string[] = [];
+    const runtime = createBackgroundTaskRuntime({
+      createInitialStorage: () => pre,
+      createLifecycle: () => new MockChildProcessLifecycle(),
+      logger: { info: () => undefined, warn: (m: string) => void warnings.push(m) },
+    });
+
+    // Put the record the sweep will find into the pre-session store it will list from.
+    await runtime.registry.transition(
+      {
+        kind: "spawn",
+        handle: { taskId: TASK_RUNNING, label: "pre-session", status: "running" },
+        record: spawnRecord(OWNER),
+      },
+      { clock: () => 1_000, callerId: OWNER },
+    );
+
+    arm("saveTask", "injected: lost-marking write failed");
+    const lost = await runtime.shutdown("session_ended_while_running");
+
+    expect(
+      warnings.some((w) => w.includes("could not mark task")),
+      "the lost-marking failure was reported",
+    ).toBe(true);
+    expect(warnings.find((w) => w.includes("could not mark task"))).toContain(
+      "injected: lost-marking write failed",
+    );
+    // Contained: the failure did not become a lost record, and shutdown still returned.
+    expect(lost).toEqual([]);
+  });
 });

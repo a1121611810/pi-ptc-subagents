@@ -161,14 +161,25 @@ R4-1、R4-3、R4-6、R5-1、R5-2、R6-1、R6-2 —— 七例,同一个形状:**�
 PINNED 7 / UNPINNED 7 / SKIPPED 1 of 15
 ```
 
+**口径截至 `4b41101`(接缝落地之前),这是本周的数,不是常设比例。** 理由与上面 829 那张表相同:一份写在语料里的测量会随语料变化,而 5f5765a 之后 standards 轴正在补 pre-session 接缝,补完之后这七个UNPINNED 会变成别的分布。**引用之前先重测。** 这一节要证明的不是 "47% 的代码测不了",而是"存在一类生产代码是对的,却没有测试能把它和改坏区分开" —— 那个命题与具体计数无关,换任何数字都成立。
+
 七处 UNPINNED **全部在 `background-runtime.ts`**,七处 PINNED 全部在其他四个文件 —— 均为 catch 中的
 `logger.warn`。已补两条测试(`tests/unit/background-runtime.test.ts` 的 `cleanup-path failure logs
 (round 7)` describe),逐条反事实验证会红:站点 645 与 716。
 
-**另外五处(526 / 594 / 616 / 663 / 683)仍然没有测试,原因是生产代码缺少可替换的接缝**,而不是没人写测试:
-它们全部跑在**会话前**的 registry / outputStorage / pipeline 上,而这三者在构造时是就地
-`new InMemoryTaskStorage()`(:482),`createStorage` 只供给**会话绑定后**的 delegate。所以今天为这五处
-写测试,只能写出一个不会失败的测试 —— 正是这一整节要避免的东西。下一步应该读作「补接缝」,而不是「再写一遍测试」。
+**另外五处(526 / 594 / 616 / 663 / 683)已全部 pin 住,方法是先补接缝再写测试。** 上面这七处**在 round 8
+时**是「无法测试」的,原因是生产代码缺少可替换的接缝而不是没人写测试:它们全部跑在**会话前**的
+registry / outputStorage / pipeline 上,而这三者当时在构造时是就地 `new InMemoryTaskStorage()`,
+`createStorage` 只供给**会话绑定后**的 delegate。修法是一个可选字段 `createInitialStorage?: () => TaskStorage`,
+与 `createStorage` / `createLifecycle` / `logger` 放在同一个 options 对象上,默认行为完全不变 —— 所以
+**无 deps 的调用方不受影响**。
+
+**为什么是 options 字段而不是 module 级全局 + 导出的 setter**:后者正是 `setPromptFileWriter` 的形状,当初要为
+「它被 tree-shake 掉了」辩护两次;而辩护要在每次发版时重做一遍。字段不需要辩护。
+
+七个断言逐条反事实验证(每个都单独只红 1 个测试):543→526、611→594、633→616、680→663、700→683,
+各由本轮新增的测试抓住;662 是 round 7 已 pin 的 `acknowledgeNotifications`,由 round 7 的测试抓住。
+**表格变红不等于逐条成立**,所以数字是逐条跑出来的。
 
 ### 为什么不加 gate
 
