@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-30
+
 ### Added
 
 - **The surface default is detected from the pi that loaded us (ADR-0026).** With no
