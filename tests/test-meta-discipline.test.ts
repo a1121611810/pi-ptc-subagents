@@ -23,7 +23,7 @@ const SKIP_FILES = new Set(["test-meta-discipline.test.ts"]);
 interface Finding {
   file: string;
   line: number;
-  kind: "F1" | "F2" | "F3";
+  kind: "F1" | "F2" | "F3" | "F4";
   snippet: string;
 }
 
@@ -83,6 +83,39 @@ function findF2(content: string, file: string): Finding[] {
       if (depth <= 0 && j > i) break;
     }
     if (foundExpect) out.push({ file, line: i + 1, kind: "F2", snippet: ln.trim() });
+  }
+  return out;
+}
+
+/**
+ * F4: a test body that reaches the next declaration without an expect.
+ *
+ * The window is "this declaration line to the next declaration at the same
+ * indentation", not a brace match. A brace matcher was tried first and produced
+ * 24 false positives across this repository, because `test` also appears inside
+ * regexes and helper names. A checker that cries wolf on 24 real files is worse
+ * than no checker, so the simpler and dumber rule is the one that ships.
+ */
+function findF4(content: string, file: string): Finding[] {
+  const out: Finding[] = [];
+  const lines = content.split("\n");
+  const reDecl = /^(\s*)(?:test|it)(?:\.each)?\s*\(/;
+  for (let i = 0; i < lines.length; i++) {
+    const m = reDecl.exec(lines[i] ?? "");
+    if (!m) continue;
+    const indent = m[1] ?? "";
+    if (indent.length === 0) continue;
+    let asserted = false;
+    for (let j = i; j < lines.length; j++) {
+      const jl = lines[j] ?? "";
+      if (j > i && reDecl.test(jl) && (jl.match(/^(\s*)/)?.[1] ?? "") === indent) break;
+      // Any call whose name mentions expect or assert: a test that delegates its
+      // assertion to a helper -- assertSitesAgree(x) -- is still asserting.
+      if (/\w*(?:expect|assert)\w*\s*\(/.test(jl)) asserted = true;
+    }
+    if (!asserted) {
+      out.push({ file, line: i + 1, kind: "F4", snippet: (lines[i] ?? "").trim().slice(0, 90) });
+    }
   }
   return out;
 }
@@ -161,5 +194,23 @@ describe("test-meta-discipline", () => {
       }
     }
     expect(findings, "F3 opt-in gate findings (use test.skipIf instead)").toEqual([]);
+  });
+
+  test("F4: no test body without an assertion", () => {
+    // Three false-pass guards in this repo's review ledger all reached a state
+    // F1/F2/F3 cannot see: the test kept its name, the body kept a comment saying
+    // what it should do, and nothing asserted. vitest reports that as passed.
+    const findings: Finding[] = [];
+    for (const f of files) {
+      const c = readFileSync(f, "utf-8");
+      findings.push(...findF4(c, f));
+    }
+    if (findings.length > 0) {
+      console.error("[meta-discipline] F4 assertion-free test bodies:");
+      for (const fd of findings) {
+        console.error("  ", relative(REPO_ROOT, fd.file) + ":" + fd.line, "—", fd.snippet);
+      }
+    }
+    expect(findings, "F4 test bodies with no assertion (see logs)").toEqual([]);
   });
 });

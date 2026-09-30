@@ -128,6 +128,17 @@ either of those places is outside what the check sees. That is deliberate scope,
 not an oversight: the block is the text this record owns, and the rest of the
 description is prose this record did not add.
 
+The argument-table guard has the same scope, and that is worth saying because it
+was not said for two rounds: a signature pasted into the surrounding description
+rather than into the block is not caught. The spec's own counterfactual for this
+decision reads "re-declaring a binding's arguments so the **exported surface**
+grows an argument table", which describes a wider surface than this guard checks.
+The divergence is recorded here rather than resolved, because closing it means
+deciding whether the block or the whole description is this record's to own, and
+that is a decision about scope rather than about the guard. Either the guard
+widens or the spec's counterfactual is restated to say "inside the contract
+block"; both cannot stay as they are.
+
 The hand-maintained literals here are test expectations, not a second copy of
 the binding table. Nothing the resolver reads is written by hand on this side:
 the notes are typed against the real binding-name set, so a rename is a type
@@ -135,11 +146,12 @@ error. The failure mode both upstream designs avoid -- a list beside the real on
 that drifts from it -- is avoided here by keeping those literals on the test
 side, where a drift is a red test rather than a wrong answer.
 
-### 5. Budget: a 300-token ceiling with a 200-token floor
+### 5. Budget: a 320-token ceiling with a 200-token floor
 
-The block stays at or under 300 estimated tokens, using the same
+The block stays at or under 320 estimated tokens, using the same
 characters-per-token estimate upstream uses. The ceiling is a decision, not a
-target.
+target, and it is a ceiling with room rather than a round number: the point of the
+headroom is that the first genuine deviation does not have to reopen this argument.
 
 A 200-token floor sits under it. That is a deliberate widening beyond the
 original ceiling-only scope: a ceiling-only check passes on an empty block, and
@@ -147,26 +159,28 @@ the floor is what makes a stubbed-out contract red. Both numbers are recorded
 here so the record and the constants have one place that says them, and both are
 pinned by a test that names this record.
 
+The ceiling started at 300 and the block is 290, which left 40 characters --
+exactly one separator plus the shortest of the four notes, and nothing more. Three
+of the four notes that actually exist are longer than that, so the first realistic
+deviation would have reopened the question the headroom exists to avoid. 320 gives
+120 characters: room for one real note of the size this repository has written,
+with the separator. That is the whole argument for the number; a fifth note, or a
+note of twice the size, is a deliberate reopen and should come back here.
+
 Measured on the shipped text: **290** estimated tokens, 1160 characters, leaving
-40 characters under the ceiling. The four notes are 39, 69, 72 and 133 characters,
-so that headroom covers exactly one minimum-size note -- a separator plus the
-shortest one lands on 300 precisely, which passes -- and nothing larger. An earlier
-draft of this paragraph said the headroom no longer covered a note at all; that was
-false by one character, and the honest statement is the one above. The first cut
-of this record had 28 tokens free, and the catchability clause and the narrowed
-`edit` note ate the difference. Treat the ceiling as close, and raise it here with a
-reason rather than in a code comment.
+120 characters under the ceiling. The four notes are 39, 69, 72 and 133 characters.
 
 For scale, the registered `ptc_run_code` description was **402** estimated tokens
 before this change and is **672** after. Note the before figure is the pre-change
-description, not the current one minus the block: the change also folded away an
-82-character clause the body used to carry, so subtracting the block from today's
-description gives 382 and would understate what the model saw by that much. The
-block is 72% of the pre-change description gross, and the **net** addition -- block
-minus the clause it replaced, 1078 characters, 270 tokens -- is 67%. The net figure
-is the one to reason from. Measured against the whole PTC request prefix the
-addition is single-digit, but that denominator is not a thing the model sees on
-its own, so the per-surface figure is the one to reason from.
+description, not the current one minus the block: the change also folded away a
+clause the body used to carry, 82 characters raw, and subtracting the block and
+its two separator newlines from today's description gives 382 -- twenty tokens
+under the pre-change figure. The block is 72% of the pre-change description gross,
+and the **net** addition -- block less the clause it replaced and the separators it
+brings, 1078 characters, 270 tokens -- is 67%. The net figure is the one to reason
+from. The whole-request figure is deliberately not quoted: it depends on a prefix
+the model never sees on its own, and a number nobody can re-derive from this
+repository is not worth having here.
 
 ## Consequences
 

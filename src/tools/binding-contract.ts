@@ -16,11 +16,14 @@
  *    have used anyway.
  * 2. Arguments are deliberately absent. pi declares every tool's arguments
  *    natively in the same request, so restating them is pure token cost. The test
- *    that enforces this reads the emitted text for a parenthesised `name:` run --
- *    structurally, so a signature in any type is caught -- rather than the export
- *    names, because an export-name scan cannot see a text edit. It catches a typed
- *    parameter list; an untyped list such as `read(path, offset)` is not what a
- *    declaration looks like and is not what the decision is about.
+ *    that enforces this reads the emitted text for a declaration shape rather than
+ *    the export names, because an export-name scan cannot see a text edit. Three
+ *    shapes are matched: a parenthesised `name:` run (typed, in any type, required
+ *    or optional), a parenthesised bare call that is not namespaced through
+ *    `tools.`, and a brace-initialised map or type alias such as
+ *    `Args: { path: string }`. The one form still not caught is a signature in the
+ *    surrounding description rather than in this block; that is the scope this
+ *    record states, and it is where the other guard's scope limit applies too.
  * 3. A note exists only where behaviour genuinely deviates from the shared shape,
  *    so a new binding forces a decision about whether it needs one. The note map
  *    is typed against the binding-name set, so a typo in a key is a type error
@@ -29,7 +32,7 @@
 import { DISPATCH_BINDING_NAME, type BuiltinBindingName } from "../runtime/bindings.ts";
 
 /** The ceiling is a decision (ADR-0024 section 5), never a baseline to re-fit. */
-export const BINDING_CONTRACT_TOKEN_CEILING = 300;
+export const BINDING_CONTRACT_TOKEN_CEILING = 320;
 
 /**
  * A floor, because a ceiling-only budget test passes on an empty block. Set below

@@ -183,3 +183,46 @@ Two dispositions in round 1 were over-claimed and are corrected rather than quie
 
 The ceiling row is the one that settles S-5: the real block is bounded by something that fires
 when it grows, not by a counterfactual comparing a stub to a constant.
+
+## Round 4 (delta over 65bbc11)
+
+Standards 8 findings, Spec 7 findings with 2 blocking. Both axes independently found the same
+two defects, and the first is a claim of mine that was false.
+
+### The claim that was false
+
+Round 3's table says the budget guard and the array-of-blocks guard both became shared predicates
+and that "the guard and the counterfactual both call" them. What actually happened is that I
+**deleted the real assertions from both guard bodies** and left the only call inside
+describe("counterfactual"). Both guards kept their test names over bodies that asserted nothing
+or nothing about the fact in question. Proven by the exact counterfactual this record demands:
+delete the counterfactual block and grow the real one past the ceiling -- 22/22 green. Reword the
+content fact to "is a plain string" with the counterfactual gone -- 22/22 green.
+
+A counterfactual is a wrong-version check. It is not a guard, and a fact held by one deletable line
+inside it is the same defect class this ledger has now caught three times. Both assertions are
+back in the guard bodies; M4b is now red, and so is M7.
+
+### Round 4 findings
+
+| #    | finding                                                                                                                                                                                                                                                    | evidence                                                                                       | disposition                                                                                                                                                                                                                  |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R4-1 | The budget and content guards asserted nothing; only the counterfactual held each fact.                                                                                                                                                                    | two axes; delete the counterfactual, grow the block or reword the fact, 22/22 green twice each | fixed: both assertions restored in the guard bodies, proved red by M4b and M7.                                                                                                                                               |
+| R4-2 | The argument guard matched only parenthesised declarations, so `Args: { path: string }`, `type ReadArgs = { ... }` and `interface ReadArgs { ... }` shipped green -- the object-literal and interface forms being how pi itself declares object arguments. | Standards: 8 forms green, 7 controls caught                                                    | fixed: two more patterns, a brace-init pair and a brace-delimited property list. The nested JSON-schema literal is a recorded known limit with the reason.                                                                   |
+| R4-3 | A re-declaration pasted into the surrounding description rather than the block is not caught, and the spec's counterfactual names the exported surface while the record names the block.                                                                   | Spec: M3n green; the record documented the limit for the other guard only                      | the divergence is now stated in the record rather than resolved, because closing it is a scope decision. Either the guard widens or the spec's counterfactual is restated; both cannot stand.                                |
+| R4-4 | The module header said the untyped form was not caught; it is. The test comment said the opposite.                                                                                                                                                         | Standards                                                                                      | fixed: the header names the three shapes matched and the one that is not.                                                                                                                                                    |
+| R4-5 | Story 15 wants headroom for a future deviation; 40 characters held one minimum-size note, and three of the four real notes are longer. The record said both "the headroom is close" and "raise it".                                                        | Spec; measured                                                                                 | fixed: the ceiling is 320, giving 120 characters -- one real note plus its separator. The record states the whole argument for the number.                                                                                   |
+| R4-6 | The 82 was the raw clause length; the understatement is 20 tokens because the block brings its own separators, and "net 1078" is 1080.                                                                                                                     | Standards: 142-60 = 82 exact                                                                   | fixed, and the unsourced "single-digit" whole-request figure is dropped rather than cited.                                                                                                                                   |
+| R4-7 | The meta-discipline fixture could not see a test body with no assertion, which is how R4-1 survived a round.                                                                                                                                               | both axes                                                                                      | fixed: F4 added, clean across all 48 test files, and proved to fire on the exact gutted-guard shape. A brace-matching first attempt produced 24 false positives and was thrown away rather than tuned until it looked green. |
+
+### Round 4 closure
+
+| mutation                                                   | result    |
+| ---------------------------------------------------------- | --------- |
+| counterfactual block deleted + real block past the ceiling | 1 failed  |
+| `Args: { path: string }` in the block                      | 1 failed  |
+| `type ReadArgs = { path: string }` in the block            | 1 failed  |
+| budget guard body emptied                                  | F4 red    |
+| unmodified tree                                            | 28 passed |
+
+Full gate green: typecheck, lint, fmt:check, build, 833 tests, verify:dist 29 checks.

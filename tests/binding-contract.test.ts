@@ -107,10 +107,31 @@ const NON_BINDING_VOCABULARY: readonly string[] = [
  */
 const TYPED_PARAMETER = /\([^()]*[A-Za-z_$][A-Za-z0-9_$]*[ \t]*[?]?[ \t]*:/g;
 const BARE_PARAMETER = /(?<![\w$.])(?!tools\.)[A-Za-z_$][A-Za-z0-9_$]*\([^()]*[^()\s][^()]*\)/g;
+// A declaration that never opens a parenthesis: an object-literal argument map
+// or a type alias. The two patterns above both require a call shape, and an
+// argument table does not have to be written as a call -- `Args: { path: string }`
+// and `type ReadArgs = { path: string }` both shipped green until this existed.
+const BRACE_PARAMETER = /[A-Za-z_$][A-Za-z0-9_$]*[ \t]*[?]?[ \t]*[=:][ \t]*\{/g;
+// A brace-delimited property list, for the declaration that is neither a call nor
+// a `name: {` pair: `interface ReadArgs { path: string }`, and the destructured
+// default `read({ path = getPath() })`. `{ content, details }` and
+// `{ text, status, ... }` are the block's own shape and carry no colon, so they
+// stay clean. Known limit: a nested JSON-schema literal such as
+// `read args: {"path":{"type":"string"}}` spans two brace levels and is not
+// matched -- no re-declaration has needed that shape yet, and a pattern loose
+// enough to reach it would start matching the block's own prose.
+const BRACE_PROPERTY_LIST = /\{[^{}]*[A-Za-z_$][A-Za-z0-9_$]*[ \t]*[?:=][^{}]*\}/g;
 
 // ------------------------------------------------------------------- predicates
-// Shared by each guard and its counterfactual, so a counterfactual exercises the
-// real guard rather than a restatement of it.
+// Each is one predicate called by BOTH the guard that asserts the fact and the
+// counterfactual that shows the fact rejecting a wrong version. Neither half is
+// sufficient alone: a guard whose assertion is deleted leaves nothing, and a
+// counterfactual that re-derives its own comparison tests only its own literal.
+
+/** The array-of-blocks fact -- the crash class that made content a string. */
+function statesContentIsArrayOfBlocks(text: string): boolean {
+  return text.includes("is an ARRAY of content blocks");
+}
 
 /**
  * The budget rule, as one predicate. Both bounds live here so the guard and its
@@ -118,11 +139,6 @@ const BARE_PARAMETER = /(?<![\w$.])(?!tools\.)[A-Za-z_$][A-Za-z0-9_$]*\([^()]*[^
  * comparison is asserting on its own literal, and the real assertion can be
  * deleted without anything noticing.
  */
-/** The array-of-blocks fact, as one predicate the counterfactual can also call. */
-function statesContentIsArrayOfBlocks(text: string): boolean {
-  return text.includes("is an ARRAY of content blocks");
-}
-
 function withinBudget(text: string): boolean {
   const cost = estimatedTokens(text);
   return (
@@ -160,7 +176,12 @@ function unboundNamesNamed(text: string): string[] {
  * also happened to miss.
  */
 function argumentShapedTokens(text: string): string[] {
-  return [...text.matchAll(TYPED_PARAMETER), ...text.matchAll(BARE_PARAMETER)].map((m) => m[0]);
+  return [
+    ...text.matchAll(TYPED_PARAMETER),
+    ...text.matchAll(BARE_PARAMETER),
+    ...text.matchAll(BRACE_PARAMETER),
+    ...text.matchAll(BRACE_PROPERTY_LIST),
+  ].map((m) => m[0]);
 }
 
 /**
@@ -249,6 +270,10 @@ describe("the contract names nothing the extension cannot bind", () => {
 describe("the contract states the facts that kill the measured crash classes", () => {
   test("says content is an array of blocks and the text is content[0].text", () => {
     const text = contract.BINDING_CONTRACT;
+    // The guard proper. It was removed from here once and the assertion was left
+    // only in the counterfactual block, so the test kept its name while checking
+    // nothing about content at all.
+    expect(statesContentIsArrayOfBlocks(text), "content is an array of blocks").toBe(true);
     expect(text, "the text is the first block text").toContain("result.content[0].text");
   });
 
@@ -323,15 +348,24 @@ describe("the contract stays inside its budget", () => {
   // deviation can be documented without reopening the budget argument, and a
   // floor, because a ceiling-only check passes on an empty block.
   test("the block is above the floor and at or below the ceiling", () => {
-    // through withinBudget, not through the comparison spelled out here: an
-    // earlier version inlined both bounds, and deleting them left the suite green
-    // while the counterfactual below carried on passing against its own literal.
+    // The guard proper. An earlier fix moved this assertion into the
+    // counterfactual block and left this body holding nothing but comments --
+    // and a counterfactual is a wrong-version check, not a guard: deleting the
+    // counterfactual block and growing the real one past the ceiling was green.
+    expect(
+      withinBudget(contract.BINDING_CONTRACT),
+      "ADR-0024 section 5: the real block is in budget",
+    ).toBe(true);
+    expect(
+      estimatedTokens(contract.BINDING_CONTRACT),
+      "the headroom, in tokens",
+    ).toBeLessThanOrEqual(contract.BINDING_CONTRACT_TOKEN_CEILING);
   });
 
   test("the bounds are the ones the record states", () => {
     // Without this, editing the constant to 1000 keeps the suite green and the
     // record silently stops describing the code.
-    expect(contract.BINDING_CONTRACT_TOKEN_CEILING, "ADR-0024 section 5").toBe(300);
+    expect(contract.BINDING_CONTRACT_TOKEN_CEILING, "ADR-0024 section 5").toBe(320);
     expect(contract.BINDING_CONTRACT_TOKEN_FLOOR, "ADR-0024 section 5").toBe(200);
   });
 
@@ -480,6 +514,17 @@ describe("counterfactual", () => {
       `read(input: ReadInput, opts: ReadOptions)`,
       `write(bytes: Uint8Array)`,
       "call read(path: string) first",
+      "Args: { path: string }",
+      "type ReadArgs = { path: string }",
+      "interface ReadArgs { path: string }",
+      "read({ path = getPath() })",
+      "read<T extends object>(input: T): ReadResult<T>",
+      "read({ path, offset }: ReadInput)",
+      "read(...args: string[])",
+      "read(path: string = {}, opts: Opts = {})",
+      "read(onDone: (err: Error) => void)",
+      "read(input: runtime.ReadInput, opts: io.ReadOptions)",
+      "```\n`read(path: string)`\n```",
     ];
     for (const signature of cases) {
       const wrong = contract.BINDING_CONTRACT + "\n" + signature + ";";
