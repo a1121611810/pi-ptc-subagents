@@ -20,11 +20,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DispatchResult` with `text` and `status` and no `content`.
 
   Model-facing only: the wire, the worker and every existing program are
-  unchanged. Field report: a pty-driven run of the real TUI with PTC mode on
-  produced 31 program crashes across 16 runs, the largest error class being the
+  unchanged. Field report before: a pty-driven run of the real TUI with PTC mode
+  on produced 31 program crashes across 16 runs, the largest error class being the
   model treating a binding result as a string or as an object with a `files`
   field — neither is ever true, and nothing said so
   (`docs/research/ptc-binding-contract-measurement-20260930.md`).
+
+  Re-measured after the change, same harness and tasks: **0 of those three crash
+  classes in 16 runs**, the correct `result.content[0].text` access in 16 of 16,
+  and the context median for a PTC run down from 36,669 to 8,360 with median
+  turns from 8 to 2. Exact-match rate is not claimed to have improved — it moved
+  10/16 to 11/16 while the control arm moved 15/16 to 13/16, which is this
+  harness's noise floor
+  (`docs/research/ptc-binding-contract-re-measurement-20260930.md`).
 
 ### Fixed
 

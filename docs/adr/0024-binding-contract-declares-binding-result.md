@@ -199,11 +199,17 @@ repository is not worth having here.
   own tool deviates in a way this repository cannot see would still need a note.
 - `details` is declared as opaque. Its per-tool shape is pi's, and restating it
   would import a contract we do not own.
-- Nothing here measures whether the model _uses_ the declaration. Re-running the
-  benchmark and comparing crash counts is the only way to close that loop, and
-  the first measurement is the one that motivated this ADR. That re-measurement
-  is owed and tracked as issue #87; until it lands, this record's claim is that
-  the text is correct, not that it helped.
+- The re-measurement closed this one. 32 runs of the same pty-driven TUI harness,
+  before and after: the three measured crash classes drop to zero occurrences
+  in 16 runs, the correct access pattern appears in 16 of 16, and the context
+  median falls from 36,669 to 8,360 with median turns from 8 to 2. The quality
+  claim is still not made -- exact match moved 10/16 to 11/16 while the control
+  arm moved 15/16 to 13/16, which is the noise floor for this harness. Numbers,
+  method and the limitations are in
+  docs/research/ptc-binding-contract-re-measurement-20260930.md.
+- One program still reached for a field the contract says does not exist, and
+  wrote it defensively rather than fatally. The consequence of the mistake
+  changed; the mistake itself did not disappear.
 - The three per-binding notes are third-party facts about the installed pi, and a
   pi caret bump can falsify any of them with a green suite. The module cites the
   source for each, and the suite pins the `write` case by running a real binding.
@@ -215,6 +221,13 @@ better answer if the re-measurement shows crashes persist despite a correct
 declaration, or if a program's ergonomics prove to be the bottleneck rather than
 its correctness. That change is breaking, interacts with image hoisting, and
 deserves its own record with a migration story.
+
+**The first trigger did not fire.** The re-measurement found the crashes did not
+persist: zero occurrences of the three measured classes in 16 runs, against 31
+before. Declaring the shape was enough for this workload, so flattening stays
+deferred on the evidence rather than on preference. The second trigger is
+untested -- the runs got faster and cheaper, but nothing here measures program
+ergonomics, and "faster" is not the same claim.
 
 ## Cross-references
 
@@ -232,4 +245,7 @@ deserves its own record with a migration story.
   tool search open. A4 is narrowed, not closed.
 - docs/research/ptc-binding-contract-measurement-20260930.md: the benchmark,
   the crash taxonomy, and the before numbers.
-- Issue #87: the re-measurement, owed.
+- docs/research/ptc-binding-contract-re-measurement-20260930.md: the same 32
+  runs after the change, the crash counts that fell to zero, and what that does
+  not prove.
+- Issue #87: the re-measurement. Done, and closed by the note above.
