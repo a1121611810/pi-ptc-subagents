@@ -753,3 +753,104 @@ describe("session rebind pins an in-flight task to its owning registry", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Round 7: the catch-with-side-effect logs in this file (526/594/616/645/663/683/716).
+//
+// A measured sweep of every catch-with-side-effect call in src/ removed each one and ran the
+// suite: 7 of 15 stayed green, all seven in this file, every one a logger.warn in a catch. This
+// block pins the two a test can REACH. The other five are recorded at the end as unreachable,
+// with the reason, rather than given a test that cannot fail.
+//
+// Not a table on purpose: two sites driven through two different APIs, so a two-row table would
+// be indirection for its own sake. What the table was supposed to buy -- each site with its own
+// named test and its own counterfactual -- these two have individually.
+// ---------------------------------------------------------------------------
+
+describe("cleanup-path failure logs (round 7)", () => {
+  test("a cursor advance that throws is reported, not swallowed", async () => {
+    // background-runtime.ts:645. An ack carries the pipeline it read from, so a throwing
+    // `acknowledgeEvents` is substitutable with no production seam. The sink is the REAL one
+    // from a real drain, with one method replaced -- not a fabricated double.
+    const storage = new InMemoryTaskStorage();
+    await seedRunningTask(storage);
+    const warnings: string[] = [];
+    const runtime = createBackgroundTaskRuntime({
+      createStorage: () => storage,
+      createLifecycle: () => new MockChildProcessLifecycle(),
+      logger: { info: () => undefined, warn: (m: string) => void warnings.push(m) },
+    });
+    await runtime.bindSession("/sessions/r7-ack");
+
+    const drain = await runtime.drainNotifications(OWNER as ULID);
+    const realAck = drain.acks[0];
+    if (realAck === undefined) throw new Error("the seed produced no ack to advance");
+    const realSink = realAck.sink;
+    // Spreading the real pipeline and replacing ONE method, so the stub cannot drift from the
+    // interface the way a hand-written double would.
+    const throwingSink = {
+      ...realSink,
+      acknowledgeEvents: async (): Promise<void> => {
+        throw new Error("injected: acknowledge blew up");
+      },
+    };
+
+    await runtime.acknowledgeNotifications([{ ...realAck, sink: throwingSink }]);
+
+    // One warn, and it carries the cause. A silent catch here would satisfy neither.
+    expect(warnings.length, "the failure was reported exactly once").toBe(1);
+    expect(warnings[0]).toContain("injected: acknowledge blew up");
+  });
+
+  test("a bind reporter that throws is reported, not swallowed", async () => {
+    // background-runtime.ts:716. The reporter is a direct argument to `bindSession`, so this one
+    // needs no seam either. Asserting the bind still completed matters as much as the log: a
+    // reporter that throws must not take the session down with it.
+    const warnings: string[] = [];
+    const runtime = createBackgroundTaskRuntime({
+      createStorage: () => {
+        throw new Error("injected: storage unavailable");
+      },
+      createLifecycle: () => new MockChildProcessLifecycle(),
+      logger: { info: () => undefined, warn: (m: string) => void warnings.push(m) },
+    });
+    let reported = "";
+
+    await runtime.bindSession("/sessions/r7-bind", (message) => {
+      reported = message;
+      throw new Error("injected: reporter blew up");
+    });
+
+    expect(reported, "the reporter really ran, on the storage failure").toContain(
+      "injected: storage unavailable",
+    );
+    // Two warns: the original bind failure, then the reporter's own. A catch that swallowed the
+    // reporter throw would leave exactly one, which is the whole difference this test is about.
+    expect(warnings.length, "the bind failure AND the reporter failure were reported").toBe(2);
+    expect(warnings[1]).toContain("injected: reporter blew up");
+    // And the throw was contained: bindSession returned and the runtime is still usable.
+    expect((await runtime.drainNotifications(OWNER as ULID)).items).toEqual([]);
+  });
+
+  /*
+   * The other five, and why no test exists for each. This is a statement about the SHAPE of the
+   * class, not an omission:
+   *
+   *   526  #handleTransition -- `this.pipeline.notifyIdle` rejects.
+   *   594  `drainNotifications` -- `this.registry.query` throws.
+   *   616  `drainNotifications` -- the record's own `sink.drainPending` throws.
+   *   663  `shutdown` -- `this.registry.query` throws.
+   *   683  `shutdown` transitions -- `this.registry.transition` throws.
+   *
+   * All five run against the PRE-SESSION registry, output storage and pipeline, and those three
+   * are constructed in place at `new InMemoryTaskStorage()` (line 482) with no option to
+   * substitute one. `createStorage` only supplies the session-bound delegate, which is why the two
+   * tests above -- both of which bind a session or use a caller-supplied object -- are the two
+   * that can be driven at all.
+   *
+   * So the blocker for these five is a missing substitution seam in production code, not a
+   * missing test. The next round should read that as "add the seam", not "write the test
+   * again" -- and a test written today for any of them would be one that cannot fail, which is
+   * the failure mode this whole exercise exists to find.
+   */
+});

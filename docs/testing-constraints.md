@@ -143,6 +143,74 @@ emptied | F4 red」)。
 `test.concurrent(...)` 不匹配声明形态,整条用例对 F4 不可见;判定是行级的,注释或字符串
 里出现 `expect(` 会被算成断言;顶格(缩进 0)的 `test(` 不扫。
 
+## 正确的、但没有测试能区分的代码(为什么不加 gate)
+
+F1–F4 扫的是**测试体**本身假阳性。它旁边还有一个相邻的类别,连续六个 review 轮次各命中一次:
+R4-1、R4-3、R4-6、R5-1、R5-2、R6-1、R6-2 —— 七例,同一个形状:**生产代码是正确的,但没有任何测试能把它和「已经改坏」区分开**。这一节记录为什么**不加** gate,以及那七个是怎么数出来的。
+
+### 测量
+
+总体:取 `src/` 下**每一个** `catch` 块,向后 12 行内查找带副作用的调用
+(`.release .warn .unlinkSync .delete .clear .reset .restore .kill .abort .cancel`、`console.warn/error`、
+`rmSync`、`unlinkSync`)。共 16 处,实测 15 处(`task-registry.ts:777` 因语句跨度测量错误跳过)。
+
+对每一处把**整条语句**注释掉,`tsc --noEmit` 复检(避免把「改不动」当成「测不出」),再跑全量套件。
+变红 = 有测试能区分;仍然全绿 = 区分不了。
+
+```
+PINNED 7 / UNPINNED 7 / SKIPPED 1 of 15
+```
+
+七处 UNPINNED **全部在 `background-runtime.ts`**,七处 PINNED 全部在其他四个文件 —— 均为 catch 中的
+`logger.warn`。已补两条测试(`tests/unit/background-runtime.test.ts` 的 `cleanup-path failure logs
+(round 7)` describe),逐条反事实验证会红:站点 645 与 716。
+
+**另外五处(526 / 594 / 616 / 663 / 683)仍然没有测试,原因是生产代码缺少可替换的接缝**,而不是没人写测试:
+它们全部跑在**会话前**的 registry / outputStorage / pipeline 上,而这三者在构造时是就地
+`new InMemoryTaskStorage()`(:482),`createStorage` 只供给**会话绑定后**的 delegate。所以今天为这五处
+写测试,只能写出一个不会失败的测试 —— 正是这一整节要避免的东西。下一步应该读作「补接缝」,而不是「再写一遍测试」。
+
+### 为什么不加 gate
+
+**1. 源码谓词分不开这两组。** 实测 15 处里有 11 处是 `catch` 下一行的 `X.warn(`。已 pin 的七处与未 pin 的七处
+形状完全相同。差别只在于**有没有测试能走到那个 catch** —— 那是套件的属性,不是被测代码的属性。
+
+**2. 唯一能分开的谓词是本周提交状态的巧合,而且是陷阱。** 按文件分是 7/7。但文件级规则**今天是对的,下一次往
+`background-runtime.ts` 加一条已 pin 的 logger 就会变成 7 个假阳性** —— 而那次提交的净效果是让代码库**变得更好**。
+**一个会惩罚改进的 gate 比没有 gate 更糟。** 这个仓库已经有两个 checker 因为同样的问题被撤回(`findF2`、round 6 删除的
+动词表),这是第三个不该写的理由,不是第三个该写的理由。
+
+**3. 唯一能区分的信号已经被采集,并且被明确丢弃。** 每次 `vp test --run` 都输出 v8 覆盖率(branch **81.38%**),
+而 `vitest.config.ts:8` 把 `thresholds: { lines: 0, branches: 0, functions: 0, statements: 0 }` 全设为 0。
+「这个 catch 有没有被任何测试执行到」正是 branch 覆盖率回答的问题 —— 答案每次都算出来了,然后配置把它扔掉。
+
+但覆盖率这个**代理在关键方向上是有损的**:它说的是「这条分支从没跑过」,不是「这条分支重要」。把 branch 阈值
+调上去会同时标出这七处**和**树上所有良性未覆盖分支(那 18.6% 仅仅是套件还没走到的代码)。那是同一匹狼,只是数字更大。
+
+### 建议(是建议,不是既成事实 —— 尚未实现)
+
+值得做的不是新 gate,而是**把计数可见一次**:对已经生成的数据做一条 review 期查询 ——
+"哪些 catch-with-side-effect 分支是未覆盖的"。它没有假阳性问题,因为**没有任何东西 gate 在它上面**;
+它在 diff 碰到 `background-runtime.ts` 的那一刻把这七处摆到人面前,也就是第七轮那个发现本该被抓住的时刻。
+成本:一次覆盖率报告的解析,约 30 行脚本,加一条要不要维护的决定。
+
+### 两个关于「测量本身」的错误,值得留着
+
+下面两条和上面那个类别是同一种失败 —— 一次**不是测量**的测量,所以它们是这一节最可复用的部分。
+
+- **第一轮扫描 15 处里有 13 处 SKIP,而这看起来像结果。** 原因是把一个五行的 `logger.warn(` 只注释了**第一行**,
+  文件不再能解析,`tsc` 每次都拒,驱动脚本报 SKIP —— 如果不去看编译复检,这和「改动无效」长得一模一样。
+  改成注释**整条平衡语句**之后才拿到真数据;当时唯一那条真数据(`background-runtime.ts:663` UNPINNED)是对的,另外十三条**根本没被测到**。
+- **驱动脚本中途被杀,留下了改脏的 `src/runtime/dispatch.ts`**,于是「恢复后」的那次基线是 5 failed。
+  半恢复的树会给出一个自信的错误基线,而它的症状看起来正是「我正在 review 的这次改动引入了回归」。
+  恢复后复跑 877 passed 才继续。
+
+### 一条附带的测量:`tests/tool-visibility.test.ts` 的 flake
+
+5 次全量套件中有 1 次失败,是 2 条 `the probe never observed a provider request`(都是并行负载下的真实 pi 进程启动)
+;另外 4 次全绿,单跑该文件 5 passed。**按实测就是 1/5**。这里**不作为缺陷记录** —— 1/5 的比率不支持下结论 ——
+但仓库最贵的那个文件会按这个概率抖一下,值得知道。
+
 ## 与 code-review skill 的关系
 
 本文件被 `.agents/skills/code-review/SKILL.md` 的 spec 轴 audit 2 引用为 Oracle check 的判定依据。
