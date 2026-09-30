@@ -924,7 +924,16 @@ let promptFileWriter: (
   prompt: string,
 ) => Promise<{ dir: string; filePath: string }> = writePromptToTempFile;
 
-/** Point the prompt writer somewhere else, or pass `undefined` to restore the real one. */
+/**
+ * Point the prompt writer somewhere else, or pass `undefined` to restore the real one.
+ *
+ * BOTH branches go through this seam. That was not true when it was added: only the foreground
+ * did, which is why the round-6 finding -- the background catch's KEYED slot release is unpinned --
+ * could not be closed by a test. The background release is worse to lose than the foreground one:
+ * it is keyed by task id and the two releasers (the pump's terminal transition and `shutdown`) only
+ * ever fire for a task that got that far. On the spawn/registration/IO failure path there is no
+ * such task, so a dropped release is permanent for the life of the session.
+ */
 export function setPromptFileWriter(
   override:
     | ((agentName: string, prompt: string) => Promise<{ dir: string; filePath: string }>)
@@ -1066,7 +1075,7 @@ async function dispatchBackground(
     // program carries, the persisted record and the slot token all agree at creation.
     const label = input.label ?? input.task.slice(0, 64);
     const fullPrompt = appendDepthHint(agent.systemPrompt, childDepth, ctx.maxDispatchDepth);
-    const written = await writePromptToTempFile(agent.name, fullPrompt);
+    const written = await promptFileWriter(agent.name, fullPrompt);
     tmp = written;
     const argv = buildArgv(input, agent, written.filePath);
 

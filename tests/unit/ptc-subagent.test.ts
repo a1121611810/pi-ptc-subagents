@@ -9,7 +9,11 @@
  */
 import { describe, expect, test } from "vitest";
 import { MockChildProcessLifecycle } from "../../src/runtime/child-process-lifecycle.ts";
-import type { ChildHandle, ChildSpawnOptions } from "../../src/runtime/child-process-lifecycle.ts";
+import type {
+  ChildExitValue,
+  ChildHandle,
+  ChildSpawnOptions,
+} from "../../src/runtime/child-process-lifecycle.ts";
 import type { DispatchDeps, DispatchInput } from "../../src/runtime/dispatch.ts";
 import type { Static } from "typebox";
 import { DISPATCH_PARAMETERS } from "../../src/runtime/bindings.ts";
@@ -45,11 +49,33 @@ class RecordingLifecycle extends MockChildProcessLifecycle {
    */
   readonly requests: { argv: readonly string[]; opts: ChildSpawnOptions }[] = [];
 
+  /** Armed by {@link failNextExit}; consumed by the first `exit()` that runs after it. */
+  private exitFailure: Error | undefined;
+
+  /**
+   * Make the next `exit()` reject, so the caller's failure handling is observable. The base mock
+   * has no rejecting-exit control, which is why the constraint-3 log on the foreground `exit()` had
+   * no test: there was no way to make that call fail. Round 6 finding 2.
+   */
+  failNextExit(error: Error): void {
+    this.exitFailure = error;
+  }
+
   override spawn(argv: readonly string[], opts: ChildSpawnOptions): ChildHandle {
     this.requests.push({ argv, opts });
     const handle = super.spawn(argv, opts);
     this.spawned.push(handle);
     return handle;
+  }
+
+  /** One-shot: the next `exit()` rejects with this error, then the mock behaves normally. */
+  override exit(handle: ChildHandle): Promise<ChildExitValue> {
+    const failure = this.exitFailure;
+    if (failure !== undefined) {
+      this.exitFailure = undefined;
+      return Promise.reject(failure);
+    }
+    return super.exit(handle);
   }
 
   readonly spawned: ChildHandle[] = [];
@@ -410,6 +436,68 @@ describe("ptc_subagent and the dispatch cap", () => {
       h.lifecycle.resolveExit(h.lifecycle.handleAt(0), 0, null);
       await settled;
       expect(h.lifecycle.spawnCount, "the real writer ran and a child was launched").toBe(1);
+    });
+  });
+
+  test("a throw between the KEYED slot acquire and the spawn gives the reservation back", async () => {
+    // Round 6 finding 1, and the mirror of the test above. The background catch's release is the
+    // worse of the two to lose: the reservation is keyed by task id, and the only two things that
+    // ever release it are the pump's terminal transition and `shutdown` -- neither of which fires
+    // for a task that died on the spawn/registration/IO path. Drop the release and the reservation
+    // is gone for the life of the session.
+    //
+    // Measured before this test existed: removing `slots.release(taskId)` from that catch left the
+    // whole 875-test suite green.
+    await withAgent(async (dir) => {
+      const h = createHarness();
+      const slots = new DispatchSlotCounter(4);
+      setPromptFileWriter(() => Promise.reject(new Error("injected: mkdtemp failed")));
+      let outcome: unknown;
+      try {
+        outcome = await dispatch(
+          { agent: AGENT, task: "never gets to spawn", background: true },
+          { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          { ...h.deps, slots },
+        );
+      } finally {
+        setPromptFileWriter(undefined);
+      }
+
+      // ADR-0016 section 3: the binding never throws, so a failure is a settled rejection, not a
+      // raise. Asserting the shape is part of the claim -- a throw here would be a different bug.
+      const rejected = outcome as { status?: string; errorMessage?: string; taskId?: string };
+      expect(rejected.status, "a settled rejection, not a throw").toBe("rejected");
+      expect(rejected.errorMessage).toContain("injected");
+      expect(rejected.taskId, "and no handle, because nothing was spawned").toBeUndefined();
+      expect(
+        slots.active,
+        "the KEYED reservation came back; nothing else would ever release it",
+      ).toBe(0);
+    });
+  });
+
+  test("a failing exit() is reported, not swallowed", async () => {
+    // Round 6 finding 2. The `logger.warn` I added when I changed a silent `.catch` to a reported
+    // one had no witness: reverting it left 875 tests green, which makes a log no test observes
+    // indistinguishable from the silent catch it replaced. Constraint 3 is about exactly that shape.
+    await withAgent(async (dir) => {
+      const h = createHarness();
+      h.lifecycle.failNextExit(new Error("injected: exit blew up"));
+      const warnings: string[] = [];
+      const settled = dispatch(
+        { agent: AGENT, task: "exit will reject" },
+        { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+        {
+          ...h.deps,
+          logger: { info: () => undefined, warn: (m: string) => void warnings.push(m) },
+        },
+      ).catch(() => undefined);
+      await waitFor(() => h.lifecycle.spawnCount > 0);
+      h.lifecycle.resolveExit(h.lifecycle.handleAt(0), 0, null);
+      await settled;
+      await waitFor(() => warnings.length > 0);
+      expect(warnings.join("\n")).toContain("exit() failed for a foreground child");
+      expect(warnings.join("\n")).toContain("injected: exit blew up");
     });
   });
 });
