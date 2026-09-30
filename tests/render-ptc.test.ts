@@ -571,6 +571,47 @@ describe("renderPtcToolResultExpanded", () => {
     expect(out).not.toContain("└─ value");
   });
 
+  test("phases block reports how many phases it withheld, not just that it withheld some", () => {
+    // `MAX_PHASES_EXPANDED = 8` is module-private; the value is pinned by ADR-0013 §6, and
+    // `tests/render-bounds-registry.test.ts` keeps that table in sync with the source. So the
+    // number below is sourced from the ADR, not from reading the implementation.
+    const CAP = 8;
+    const theme = makeTheme();
+    const phases = (count: number): string[] =>
+      Array.from({ length: count }, (_, index) => `p${index + 1}`);
+    const render = (count: number): string =>
+      visible(
+        renderPtcToolResultExpanded(
+          {
+            content: [{ type: "text", text: "Phases: …" }],
+            details: makeDetails({
+              surface: "workflow",
+              phases: phases(count),
+              result: 42,
+              durationMs: 1500,
+            }),
+          },
+          codeArgs,
+          false,
+          theme,
+        ),
+      );
+
+    // At the cap: nothing withheld, so no tail at all.
+    expect(render(CAP)).toContain("└─ phases  p1 → p2 → p3 → p4 → p5 → p6 → p7 → p8");
+    expect(render(CAP)).not.toContain("more phases");
+    // One over: reports the count. A bare " …" satisfied ADR-0013 §3 in the letter while
+    // saying nothing about how much — the other four blocks all report `+N`.
+    expect(render(CAP + 1)).toContain(
+      "└─ phases  p1 → p2 → p3 → p4 → p5 → p6 → p7 → p8 …+1 more phases",
+    );
+    expect(render(CAP + 2)).toContain(
+      "└─ phases  p1 → p2 → p3 → p4 → p5 → p6 → p7 → p8 …+2 more phases",
+    );
+    // The count is the real one, not a constant: 20 phases withholds 12.
+    expect(render(20)).toContain("…+12 more phases");
+  });
+
   test("container result: tree rows replace the summary line, child blocks follow", () => {
     const theme = makeTheme();
     const result = {

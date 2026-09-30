@@ -948,7 +948,13 @@ export function renderPtcToolResultExpanded(
 
   if (details !== undefined && details.surface === "workflow" && details.phases.length > 0) {
     const shown = details.phases.slice(0, MAX_PHASES_EXPANDED);
-    const tail = details.phases.length > shown.length ? " …" : "";
+    // Report the count, not just that something was withheld. The `more` field that code /
+    // log / out / warn use renders a separate `…+N more lines` row, which is the wrong shape
+    // here: the phases block is one roll-up line, so the tail stays inline. A bare " …"
+    // satisfied the letter of ADR-0013 §3 ("reports what it withheld") while telling the
+    // reader nothing about how much — the other four blocks all report the count.
+    const withheld = details.phases.length - shown.length;
+    const tail = withheld > 0 ? ` …+${withheld} more phases` : "";
     children.push({ label: "phases", lines: [`${shown.join(" → ")}${tail}`] });
   }
 

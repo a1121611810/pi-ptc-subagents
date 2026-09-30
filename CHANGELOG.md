@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **The expanded `phases` block now says how many phases it withheld.**
+  When a run declared more than eight phases, the block appended a bare
+  ` …` to the roll-up line — it told the reader that something was hidden
+  but not how much. ADR-0013 §3 requires a block to report _what_ it
+  withheld, and the other four blocks (`code`, `log`, `out`, `warn`) all
+  report a count. The tail is now `…+N more phases`, inline, because the
+  phases block is a single roll-up line rather than a list of rows.
+
+### Changed
+
+- **Docs**: the README's `TUI rendering` section now documents the
+  model-facing text block's own bounds — 100 characters for the inline form,
+  200 per line (ADR-0012) — next to the on-screen tree's 4 / 6 / 120, so the
+  two contracts are no longer conflated and lowering one to match the other
+  does not read as a typo fix.
+
 ## [1.1.0] - 2026-09-29
 
 ### Fixed
