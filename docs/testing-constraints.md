@@ -177,14 +177,56 @@ correct citation carrying a wrong **verb**:
 A pinned citation list cannot catch those, because the line it pins is real and says what the
 sentence needs it to say. Catching them needs a reader, not a pattern.
 
-**So: claims are audited by review, citations are audited by the gate.** Both halves matter and
-the division is not a fudge. For the next round:
+**So the division is by SCOPE, not by kind.** The gate audits every claim it can recognise a
+**shape** for -- the F1-F4 meta-discipline fixture is a machine checker over test bodies, and 断言四
+is one over citations. Review audits claims that are **prose about control flow**, which have no
+shape to recognise. Writing that as "claims are audited by review" was itself an instance of this
+defect class: a record asserting what a gate covers, written once, never re-checked. Round 6 caught it.
 
-- Do not file "the gate does not check claims". It is a decision, recorded here deliberately so it
-  is not rediscovered as news every round.
-- Do audit **claims**, and read the code a sentence points at for what it does when that sentence's
-  condition is _not_ met. A claim with no branch, in a codebase with a branch, is where this lives.
-- The three words every drifted claim turned on: **owns**, **per-run**, **always**.
+### The standing instruction, and the three things that keep it honest
+
+- Do not file **the meta-observation** "the gate does not check claims" as a finding. It is answered
+  here, deliberately, so it is not rediscovered as news each round.
+- ...but you **may and must** report a **specific** claim that drifted. The specific claim is the
+  finding. The prohibition is on the generalisation, never on the instance.
+- To argue a gate gap hides a defect, **name the claim it hides**. A gap you cannot name is
+  theoretical, and belongs in this file rather than in a review round.
+- When you add a `file:line` citation to a normative doc, expect 断言四 to fail and re-confirm the
+  line by hand. That is the intended workflow, not an obstacle.
+- Before filing a doc defect, check the previous round did not already fix it. Round 5 filed one
+  against README text that round 4 had corrected.
+
+### There is no cheap filter, and naming three verbs was the mistake
+
+This guidance once listed the three words every drifted claim turned on -- **owns**, **per-run**,
+**always**. Round 6 deleted that list, on a measurement rather than a preference:
+
+|                                                                                                                                                            | count         |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
+| sentences in the 29 normative files carrying a strong universal verb (owns / always / never / guarantees / enforces / keeps / must / exactly / ONE / only) | **829**       |
+| of those, sentences containing any of the three named verbs                                                                                                | **168 — 20%** |
+| of those, sentences with no conditional qualifier at all                                                                                                   | **674 — 81%** |
+
+So a checklist built from those verbs would skip four fifths of the population while feeling like
+coverage, and a reviewer told to flag "unqualified strong-verb claims" would be handed 674 items,
+most of them titles and rationale sentences that are perfectly correct. Sampling 8 of those from
+the densest files (CONTEXT.md, ADR-0017, ADR-0022, ADR-0021) found **zero** defects -- they are dense
+records, not wrong ones.
+
+**There is no cheap predicate, and shipping something that looks like one is worse than shipping
+nothing.** What caught all three examples above, and caught the citation round 5 added, was one act:
+read the code a sentence points at, and ask what it does when that sentence's condition is _not_
+met. That is per-claim, not a filter, which is the honest answer rather than a three-item list that
+reads like one.
+
+### What would retire this decision
+
+A claim-class checker with a **measured** false-positive count over the whole corpus, in the spirit
+of the rule that ships elsewhere in this file: a checker that cries wolf on real files is worse than
+no checker. This is a hypothesis with an expiry, not a doctrine -- until that exists, review is the
+auditor for prose claims, and the right response to a specific drifted claim is to fix it, not to
+argue about the meta-question again.
+
 - When you add a `file:line` citation to a normative doc, expect 断言四 to fail and re-confirm the
   line by hand. That is the intended workflow, not an obstacle.
 - Before filing a doc defect, check the previous round did not already fix it. Round 5 filed one

@@ -185,6 +185,29 @@ record is the place to look up what was decided.
   missing file gives `full` was reading the real probe against the test runner's argv, which has
   no pi next to it. Both branches are now stated explicitly.
 
+## Accepted limitations
+
+Recorded here as **accepted**, with the trigger that would retire each, so a later round does not
+file them as new findings. Both were live questions at review round 6 and both were answered "we
+accept this for now", which is a decision and should not live only in a review ledger.
+
+1. **The two `session_start` notices are TUI-only.** `ctx.ui.notify` emits nothing in `--print`,
+   measured at 0 bytes on stdout and stderr across three runs that each emit a notice. A piped user
+   therefore learns why they got their surface from the README and nowhere else. **Accepted** because
+   `ui.notify` is this package's only session-scoped human channel and every `console.warn` site is a
+   runtime-failure path that would be wrong to overload here; writing to stdout from a library that is
+   silent by design is a worse trade than an under-documented notice. **Retired when** pi offers a
+   session-scoped non-TUI notification path, or when a test observes a notice end to end through a real
+   pi and the rendering question stops being theoretical.
+2. **A `ptc_subagent` background child gets no ADR-0022 session triple.** The binding forwards
+   `context.sessionDir` into the DispatchContext; the tool reads a value at session start and cannot,
+   so its children are spawned `--no-session` while the identical spawn from inside a program gets the
+   session dir. **Accepted** for now, and named here rather than left as a live gap: wiring it changes
+   what every `ptc_subagent` background child receives, and that is not a change to make inside a round
+   already repairing two regressions of its own. **Retired when** someone measures what the session
+   triple changes for a child -- output location, notification routing, or resume -- at which point it
+   is a small commit with a test rather than an unexamined side effect.
+
 ## Reopen triggers
 
 - pi gains a way to report registered tools to an extension during loading. That would retire
