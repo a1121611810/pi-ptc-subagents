@@ -31,6 +31,48 @@ Anything left in `SYSTEM-ONLY` is a missing anchor. This check is not optional: 
 
 `tests/ocr-anchor-coverage.test.ts` mechanises the invariants: no orphan rule file (a rule nothing references is dead — `general.md` was one for its entire life while SKILL.md and this file cited it as a live source), no dangling anchor target, catch-all last, catch-all merges the system rule, and `Source: Project` + resolved rule title for 8 sentinels. Its `ocr`-dependent assertions use `test.skipIf` so a machine without `ocr` reports SKIPPED rather than passing silently.
 
+## Stopping a review loop
+
+A review round with no stopping condition becomes a generator, not a detector: the reviewer is asked
+to produce findings, so it produces findings, and a round that finds nothing gets read as
+insufficient diligence rather than as the signal to stop. Nine rounds over one feature are the
+worked example -- rounds 1-5 found two defects that would have shipped (a concurrency gap, a
+handle leak), and rounds 6-9 changed **no product behaviour at all**. The defect class being
+chased had been measured to exhaustion by round 8. Three things made the drift possible, and all
+three are properties of the setup rather than of the reviewer:
+
+- **The reviewer is the author, and shares its model.** There is no external ground truth, so the
+  standard mitigations for self-evaluation bias -- blind review, external feedback, a stopping rule
+  -- are the only ones available, and the first two are not available here.
+- **"Fully resolved" has no external definition**, so the reviewer supplies one, and the one it
+  supplies is always "there is one more thing". Write the criterion down before round 1.
+- **The loop is closed and has no outside input**: run a review, find something, that finding is
+  read as evidence the loop is valuable, run it again. Findings became the loop's own evidence of
+  its own worth.
+
+Concretely, stop when **any** of these holds, and say which one:
+
+1. **Two consecutive rounds produce no change in product behaviour.** Records, tests and docs do
+   not count. A round that produces only those is a signal, not a finding -- it means the reviewer
+   has run out of defects and started manufacturing coverage for correct code.
+2. **The class being chased is measured to exhaustion.** Round 8 drew the line: 15 sites, 7
+   unpinned, all seven named, all seven pinned. Nothing was left in the class, and round 9 bought
+   test coverage for code that was already correct.
+3. **The thing was verified end to end against the built artifact.** Round 7 walked five cases
+   on real pi, including one with no codemode at all. That is a finished verification, not a start.
+
+Two anti-patterns this repo paid for directly, both recorded in the rounds above: a **round that
+produces only records and tests is a signal to stop, not a round to build on**, and a **reviewer
+that finds something is not evidence the review process is working** -- a green suite is, and here
+the suite flakes 1 in 5, so that signal needs re-establishing rather than assuming.
+
+The corollary for the reviewer itself: **a round that finds a defect in the previous round's fix is
+the expected rate, not an alarm.** Five rounds in a row found one, which reads as "review is
+catching real problems" and is equally consistent with "each fix is landing in unpinned ground".
+The way to tell them apart is the counterfactual discipline above: a round-9 finding was refuted by
+running it, and a round-7 finding about a log turned out to be _less_ unpinned than the sweep
+claimed. Findings rate is not defect rate.
+
 ## Review rounds and closure discipline
 
 A review of a large change is one round; its findings are recorded in a ledger under `docs/reviews/` (finding → evidence → disposition → the commit that closed it), and the next round is a **delta** over the fix commits. Two rules come from real over-claims in this repo:
