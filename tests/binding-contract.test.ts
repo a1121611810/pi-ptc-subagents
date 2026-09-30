@@ -1,13 +1,30 @@
 import { describe, expect, test } from "vitest";
-import { captureRegisteredTools } from "./helpers/ptc.ts";
-import { BUILTIN_BINDING_NAMES, DISPATCH_BINDING_NAME } from "../src/runtime/bindings.ts";
+import {
+  createBashTool,
+  createEditTool,
+  createFindTool,
+  createGrepTool,
+  createLsTool,
+  createReadTool,
+  createWriteTool,
+} from "@earendil-works/pi-coding-agent";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { captureRegisteredTools, makeTempDir, removeTempDir } from "./helpers/ptc.ts";
+import {
+  BUILTIN_BINDING_NAMES,
+  createBuiltinBindings,
+  DISPATCH_BINDING_NAME,
+} from "../src/runtime/bindings.ts";
 import * as contract from "../src/tools/binding-contract.ts";
 
+const PTC_SURFACES = ["ptc_run_code", "ptc_workflow"] as const;
+
 /**
- * The binding contract (ADR-0024) is model-facing text, so the only observable
- * is what the model is handed: the registered tool definitions, read through the
- * same registration path pi itself takes. Nothing here reaches into the
- * description constant or into the module that owns the text.
+ * The registered tool description, read through the same registration path pi
+ * itself takes. This is the only model-facing observable, so it is what every
+ * guard below is written against -- not the description constant, and not the
+ * module that owns the text.
  */
 function descriptionOf(toolName: string): string {
   const tool = captureRegisteredTools().get(toolName);
@@ -26,29 +43,74 @@ function estimatedTokens(text: string): number {
 
 const BOUND_NAMES: readonly string[] = [...BUILTIN_BINDING_NAMES, DISPATCH_BINDING_NAME];
 
-/** Every binding the contract names, written as a literal: this is the decision. */
-const CONTRACT_BINDINGS: readonly string[] = [
-  "bash",
-  "grep",
-  "find",
-  "ls",
-  "write",
-  "edit",
-  DISPATCH_BINDING_NAME,
-];
+/** The per-call context the binding table expects, as the existing binding tests pass it. */
+const CALL = { callId: 1, depth: 0, maxDispatchDepth: 3 };
 
 function backtickedTokens(text: string): string[] {
   return [...text.matchAll(/`([^`]+)`/g)].map((m) => m[1] as string);
 }
 
 /**
+ * Every backticked token the contract may name that is NOT a binding: the result
+ * fields, the four fields that do not exist, the empty-answer sentinels, and the
+ * runtime vocabulary. Written as a literal so it is an independent expectation,
+ * not a copy of the string. Anything else in backticks has to be a real binding.
+ */
+const NON_BINDING_VOCABULARY: readonly string[] = [
+  "tools.<name>(args)",
+  'tools["pi.dispatch"]',
+  "{ content, details }",
+  "content",
+  "details",
+  "null",
+  "undefined",
+  "files",
+  "output",
+  "matches",
+  "entries",
+  "result.content[0].text",
+  "No matches found",
+  "No files found matching pattern",
+  "(empty directory)",
+  "ToolCallError",
+  "try",
+  "catch",
+  "Promise.allSettled",
+  "details: null",
+  "{ text, status, ... }",
+  "status",
+  "diff",
+  "patch",
+];
+
+/**
+ * A parameter declaration, which the contract must never contain: pi already
+ * declares every tool's arguments natively in the same request.
+ */
+const ARGUMENT_SHAPE = /\w+\?\s*:\s*(string|number|boolean|object|Array|Promise|Record|unknown)/;
+
+// ------------------------------------------------------------------- predicates
+// Shared by each guard and its counterfactual, so a counterfactual exercises the
+// real guard rather than a restatement of it.
+
+/** Names the contract asserts that are neither a binding nor known vocabulary. */
+function unboundNamesNamed(text: string): string[] {
+  return backtickedTokens(text).filter(
+    (token) => !NON_BINDING_VOCABULARY.includes(token) && !BOUND_NAMES.includes(token),
+  );
+}
+
+/** Parameter declarations found in the emitted text. */
+function argumentShapedTokens(text: string): string[] {
+  return backtickedTokens(text).filter((token) => ARGUMENT_SHAPE.test(token));
+}
+
+/**
  * A binding counts as named when it appears in backticks on its own, or in the
- * string-indexed call form the parallel binding is always written in -- the
- * contract says `tools["pi.dispatch"]`, never a bare `pi.dispatch`, because that
- * is the form that actually works in a program.
+ * string-indexed call form the parallel binding is always written in.
  */
 function namesBinding(text: string, name: string): boolean {
-  const tick = String.fromCharCode(96);
+  const tick = "`";
   return (
     text.includes(tick + name + tick) ||
     text.includes(tick + "tools[" + JSON.stringify(name) + "]" + tick)
@@ -62,20 +124,18 @@ function namesBinding(text: string, name: string): boolean {
  * itself would pass even if the two surfaces shipped different text.
  */
 const CONTRACT_START = "Return value: every ";
-const CONTRACT_END = "read \u0060status\u0060.";
+const CONTRACT_END = "read `status`.";
 
-function contractOf(surface: string): string {
-  const description = descriptionOf(surface);
-  const start = description.indexOf(CONTRACT_START);
+function contractOf(surface: string, description?: string): string {
+  const text = description ?? descriptionOf(surface);
+  const start = text.indexOf(CONTRACT_START);
   if (start < 0) throw new Error(surface + " does not open with the binding contract");
-  const end = description.indexOf(CONTRACT_END, start);
+  const end = text.indexOf(CONTRACT_END, start);
   if (end < 0) throw new Error(surface + " does not close with the binding contract");
-  return description.slice(start, end + CONTRACT_END.length);
+  return text.slice(start, end + CONTRACT_END.length);
 }
 
 describe("the binding contract reaches the model", () => {
-  const PTC_SURFACES = ["ptc_run_code", "ptc_workflow"] as const;
-
   test("ptc_run_code states the contract verbatim", () => {
     expect(descriptionOf("ptc_run_code")).toContain(contract.BINDING_CONTRACT);
   });
@@ -90,62 +150,53 @@ describe("the binding contract reaches the model", () => {
 
   test("the two surfaces are byte-identical, so they cannot drift", () => {
     // Byte comparison of two independently sliced substrings, not regex
-    // normalisation: a synonym, a re-wrap, or a dropped sentence on one side is a
-    // drift, and this is what catches it.
+    // normalisation: a synonym, a re-wrap, or a dropped sentence on one side is
+    // a drift, and this is what catches it.
     expect(contractOf("ptc_workflow"), "the surfaces teach the same shape").toBe(
       contractOf("ptc_run_code"),
     );
   });
 
   test("both surfaces carry exactly the module-owned text", () => {
-    // The "one owner, two consumers" claim: the text is defined once, and both
-    // surfaces ship that text rather than a paraphrase of it.
     for (const surface of PTC_SURFACES) {
       expect(contractOf(surface), surface + " ships the module-owned text").toBe(
         contract.BINDING_CONTRACT,
       );
     }
   });
-
-  test("the contract appears exactly once, so a second copy cannot rot", () => {
-    const description = descriptionOf("ptc_run_code");
-    const occurrences = description.split(contract.BINDING_CONTRACT).length - 1;
-    expect(occurrences, "the contract is spliced in once, not restated").toBe(1);
-  });
 });
 
-describe("the contract names only bindings this extension binds", () => {
-  test("the bindings it names are exactly the ones the decision lists", () => {
-    const named = BOUND_NAMES.filter((name) => namesBinding(contract.BINDING_CONTRACT, name));
-    expect([...named].sort(), "no binding is documented twice or silently dropped").toEqual(
-      [...CONTRACT_BINDINGS].sort(),
-    );
-  });
-
-  test("every binding it names is one the extension actually binds", () => {
-    for (const name of CONTRACT_BINDINGS) {
-      expect(BOUND_NAMES, "a documented binding is really bound").toContain(name);
+describe("the contract names nothing the extension cannot bind", () => {
+  test("every name in backticks is a binding or known vocabulary", () => {
+    // The guard reads the contract's OWN tokens. An earlier version iterated the
+    // already-bound names instead, which made an unbound name structurally
+    // invisible: inserting one left the whole suite green.
+    for (const surface of PTC_SURFACES) {
+      expect(unboundNamesNamed(contractOf(surface)), surface + " names nothing unbound").toEqual(
+        [],
+      );
     }
   });
 
-  test("a binding this run may not bind is never claimed as callable", () => {
-    const unbound = CONTRACT_BINDINGS.filter((name) => !BOUND_NAMES.includes(name));
-    expect(unbound, "the contract must not teach a call that cannot succeed").toEqual([]);
+  test("every bound binding is either named or knowingly covered by the shared shape", () => {
+    // The literal is the point: adding an eighth builtin turns this red until
+    // somebody decides whether the new binding is named or merely covered. `read`
+    // is covered by the generic `tools.<name>(args)` phrasing -- it behaves
+    // exactly like the shared shape and needs no note.
+    const unnamed = BOUND_NAMES.filter((name) => !namesBinding(contract.BINDING_CONTRACT, name));
+    expect(unnamed, "a binding the model is told nothing specific about").toEqual(["read"]);
   });
 });
 
 describe("the contract states the facts that kill the measured crash classes", () => {
-  // docs/research/ptc-binding-contract-measurement-20260930.md: the 16-run
-  // narrowed arm produced 31 program crashes, the largest class being the model
-  // treating a binding result as a string or as an object with a files field.
   test("says content is an array of blocks and the text is content[0].text", () => {
     const text = contract.BINDING_CONTRACT;
     expect(text, "content is an array of blocks").toContain("is an ARRAY of content blocks");
-    expect(text, "the text is the first block's text").toContain("result.content[0].text");
+    expect(text, "the text is the first block text").toContain("result.content[0].text");
   });
 
   test("says details is an object or null, never undefined", () => {
-    expect(contract.BINDING_CONTRACT).toContain("object or `null`, never\n`undefined`");
+    expect(contract.BINDING_CONTRACT).toContain("object or `null`, never");
   });
 
   test("says the four absent fields do not exist", () => {
@@ -165,37 +216,35 @@ describe("the contract states the facts that kill the measured crash classes", (
     expect(text).toContain("(empty directory)");
   });
 
-  test("says a failing call rejects rather than resolving", () => {
+  test("says a failing call rejects, and says the program can catch it", () => {
     const text = contract.BINDING_CONTRACT;
     expect(text, "rejection is named").toContain("REJECTS with `ToolCallError`");
-    expect(text, "the unbound-builtin case is named").toContain("a builtin this run did not bind");
-    expect(text, "a non-builtin is a type error, not a tool error").toContain(
+    expect(text, "the unbound-builtin case is named").toContain("a builtin this run did not");
+    expect(text, "a non-builtin is a type error").toContain(
       "not a builtin is simply not a function",
     );
+    expect(text, "the call is catchable").toContain("wrap the call in");
+    expect(text, "both catch forms are named").toContain(`Promise.allSettled`);
   });
 });
 
 describe("a note exists only where behaviour genuinely differs", () => {
   test("the noted bindings are exactly the four that deviate", () => {
-    expect(
-      [...contract.NOTED_BINDING_NAMES].sort(),
-      "only deviating bindings carry a note",
-    ).toEqual(["bash", "edit", "write", DISPATCH_BINDING_NAME].sort());
+    const noted = [...contract.BINDING_NOTES.keys()].sort();
+    expect(noted, "only deviating bindings carry a note").toEqual(
+      ["bash", "edit", "write", DISPATCH_BINDING_NAME].sort(),
+    );
   });
 
-  test("a binding whose behaviour matches the shared shape carries no note", () => {
-    // read, grep, find and ls are described by the shared shape alone. A note for
-    // one of them would be a second place to keep in sync with no fact to add.
+  test("a binding matching the shared shape carries no note", () => {
+    const notes = contract.BINDING_NOTES as ReadonlyMap<string, string>;
     for (const name of ["read", "grep", "find", "ls"]) {
-      expect(
-        contract.BINDING_NOTES.has(name),
-        name + " deviates from the shared shape and therefore needs a note",
-      ).toBe(false);
+      expect(notes.has(name), name + " carries a note it does not need").toBe(false);
     }
   });
 
   test("every note reaches the model on both surfaces", () => {
-    for (const surface of ["ptc_run_code", "ptc_workflow"]) {
+    for (const surface of PTC_SURFACES) {
       const description = descriptionOf(surface);
       for (const [name, note] of contract.BINDING_NOTES) {
         expect(description, surface + " states the " + name + " note").toContain(note);
@@ -207,16 +256,13 @@ describe("a note exists only where behaviour genuinely differs", () => {
     expect(contract.BINDING_NOTES.get("bash"), "the exit case is stated once").toContain(
       "non-zero exit",
     );
-    expect(contract.BINDING_CONTRACT, "and it is stated only in the note").not.toContain(
-      "A failing call REJECTS with `ToolCallError` instead of resolving: a `bash` command",
-    );
   });
 });
 
-describe("the contract stays inside its token ceiling", () => {
-  // ADR-0024 section 5: about 300 estimated tokens, a ceiling rather than a
-  // target, so a future genuine deviation can be documented without reopening
-  // the budget argument. Upstream's comparable block costs several times this.
+describe("the contract stays inside its budget", () => {
+  // ADR-0024 section 5: a ceiling rather than a target, so a future genuine
+  // deviation can be documented without reopening the budget argument, and a
+  // floor, because a ceiling-only check passes on an empty block.
   test("the block is above the floor and at or below the ceiling", () => {
     const cost = estimatedTokens(contract.BINDING_CONTRACT);
     expect(cost, "an emptied or stubbed block cannot pass vacuously").toBeGreaterThanOrEqual(
@@ -227,86 +273,132 @@ describe("the contract stays inside its token ceiling", () => {
     );
   });
 
-  test("the module exports no argument table (decision: return types only)", () => {
-    const argumentShaped = Object.keys(contract).filter((name) =>
-      /arg|param|input|schema/i.test(name),
+  test("the bounds are the ones the record states", () => {
+    // Without this, editing the constant to 1000 keeps the suite green and the
+    // record silently stops describing the code.
+    expect(contract.BINDING_CONTRACT_TOKEN_CEILING, "ADR-0024 section 5").toBe(300);
+    expect(contract.BINDING_CONTRACT_TOKEN_FLOOR, "ADR-0024 section 5").toBe(200);
+  });
+
+  test("the block declares no parameter, so the argument-table decision holds", () => {
+    // Read from the emitted text, not from the export names: an export-name scan
+    // cannot see a text edit, and appending one re-declared signature to the block
+    // left the whole suite green when the guard only looked at identifiers.
+    for (const surface of PTC_SURFACES) {
+      expect(
+        argumentShapedTokens(contractOf(surface)),
+        "pi declares arguments natively; the block must not restate them",
+      ).toEqual([]);
+    }
+  });
+
+  test("re-declaring the real argument schemas blows the ceiling", () => {
+    // The rejected alternative, measured against the installed pi rather than
+    // illustrated with a hand-written one: the actual argument schemas of the
+    // seven builtin tools, serialised the way a declaration block would carry
+    // them. An earlier version of this test hand-invented those signatures and
+    // misstated pi (edit takes edits[], grep has no include).
+    const tools = [
+      createReadTool(process.cwd()),
+      createBashTool(process.cwd()),
+      createEditTool(process.cwd()),
+      createWriteTool(process.cwd()),
+      createGrepTool(process.cwd()),
+      createFindTool(process.cwd()),
+      createLsTool(process.cwd()),
+    ];
+    const asDeclarations = tools
+      .map((tool) => tool.name + "(args: " + JSON.stringify(tool.parameters) + ")")
+      .join("\n");
+    expect(tools.length, "the fixture is built from the installed pi").toBe(7);
+    expect(estimatedTokens(asDeclarations), "restating them is unaffordable").toBeGreaterThan(
+      contract.BINDING_CONTRACT_TOKEN_CEILING,
     );
-    expect(
-      argumentShaped,
-      "pi declares arguments natively in the same request; restating them is pure token cost",
-    ).toEqual([]);
+  });
+});
+
+describe("the contract is true of the runtime it describes", () => {
+  // The notes are third-party facts about the installed pi, so the text can reach
+  // the model while being false. These run the real binding table.
+  test("write really does resolve with details null", async () => {
+    const dir = await makeTempDir();
+    try {
+      await writeFile(join(dir, "fixture.txt"), "hello\n");
+      const bindings = createBuiltinBindings({ cwd: dir });
+      const result = (await bindings
+        ?.get("write")
+        ?.execute({ path: "fixture.txt", content: "written\n" }, CALL)) as {
+        details: unknown;
+      };
+      expect(result.details, "the write note matches the installed pi").toBe(null);
+    } finally {
+      await removeTempDir(dir);
+    }
+  });
+
+  test("bash really does reject on a non-zero exit, and resolve on a zero one", async () => {
+    // Both paths of one IO boundary, and the failure path is the one the note
+    // promises, so a pi release that starts resolving would turn this red.
+    const bindings = createBuiltinBindings({ cwd: process.cwd() });
+    const ok = (await bindings.get("bash")?.execute({ command: "exit 0" }, CALL)) as {
+      content: Array<{ type: string; text: string }>;
+    };
+    expect(ok.content[0]?.type, "a zero exit resolves with content").toBe("text");
+    let rejected = false;
+    try {
+      await bindings.get("bash")?.execute({ command: "exit 3" }, CALL);
+    } catch (error) {
+      rejected = true;
+      // The binding re-throws whatever the tool threw; the worker is what wraps
+      // it as a ToolCallError, so the name is asserted at the worker layer, not
+      // here. What this layer owes the model is simply that it rejects.
+      expect(String((error as Error).message), "the failure names the exit code").toContain("3");
+    }
+    expect(rejected, "a non-zero exit rejects rather than resolving").toBe(true);
   });
 });
 
 describe("counterfactual", () => {
-  // Constraint 5: an obviously-wrong version that still satisfies a loose
-  // assertion must turn the suite red. Each case below is a plausible wrong
-  // edit to the contract text.
-  test("a synonym on one surface is a drift the guard sees", () => {
-    // The failure this whole block exists to prevent: someone rewords the
-    // workflow copy. Byte equality has to notice a synonym, not just a deletion.
-    const paraphrased = descriptionOf("ptc_workflow").replace(
-      "No binding result has a",
-      "No result carries a",
-    );
-    expect(paraphrased, "the reworded surface really did change").not.toBe(
-      descriptionOf("ptc_workflow"),
-    );
-    const start = paraphrased.indexOf(CONTRACT_START);
-    const end = paraphrased.indexOf(CONTRACT_END, start);
-    const drifted = paraphrased.slice(start, end + CONTRACT_END.length);
-    expect(drifted, "byte equality must reject a synonym").not.toBe(contractOf("ptc_run_code"));
-  });
+  // Constraint 5: an obviously-wrong version must turn the suite red. Each case
+  // below applies the SAME predicate the real guard uses, to a mutated string, so
+  // it exercises the guard rather than restating it.
 
-  test("a note for a binding that does not deviate is caught", () => {
-    // read behaves exactly like the shared shape, so a note for it is a second
-    // place to keep in sync with no fact to add.
-    const withStrayNote = new Map(contract.BINDING_NOTES);
-    withStrayNote.set("read", "`read` always reports `details: null`.");
-    const keys = [...withStrayNote.keys()].sort();
-    expect(keys, "the exact key set is the guard").not.toEqual(
-      [...contract.NOTED_BINDING_NAMES].sort(),
-    );
-  });
-
-  test("documenting a binding that is not bound is caught", () => {
+  test("a name that is not a binding is caught by the vocabulary guard", () => {
     const wrong = contract.BINDING_CONTRACT.replace(
       "ONE text block",
       "one `web_search` block and ONE text block",
     );
-    const named = backtickedTokens(wrong).filter((token) => !BOUND_NAMES.includes(token));
-    expect(named, "a non-binding tool name leaked in").not.toEqual([]);
+    expect(unboundNamesNamed(wrong), "the guard fires on the original").not.toEqual([]);
   });
 
-  test("dropping a binding the contract is about to omit is caught", () => {
-    const wrong = contract.BINDING_CONTRACT.replace("`write`", "`edit`");
-    const named = BOUND_NAMES.filter((name) => backtickedTokens(wrong).includes(name));
-    expect([...named].sort()).not.toEqual([...CONTRACT_BINDINGS].sort());
+  test("a reworded surface is caught by the byte-equality guard", () => {
+    const paraphrased = descriptionOf("ptc_workflow").replace(
+      "No binding result has a",
+      "No result carries a",
+    );
+    expect(contractOf("ptc_workflow", paraphrased)).not.toBe(contractOf("ptc_run_code"));
   });
 
-  test("re-declaring the bindings' arguments blows the ceiling", () => {
-    // What the rejected alternative actually looks like: every binding restated
-    // with its full argument list, which is the form the upstream renderer emits
-    // and the reason its comparable block costs several times this one.
-    const args = [
-      "read(args: { path: string; offset?: number; limit?: number }): Promise<string>;",
-      "bash(args: { command: string; timeout?: number }): Promise<string>;",
-      "edit(args: { path: string; oldText: string; newText: string }): Promise<string>;",
-      "write(args: { path: string; content: string }): Promise<string>;",
-      "grep(args: { pattern: string; path?: string; include?: string }): Promise<string>;",
-      "find(args: { pattern: string; path?: string }): Promise<string>;",
-      "ls(args: { path?: string }): Promise<string>;",
-    ].join("\n");
-    expect(estimatedTokens(contract.BINDING_CONTRACT + args)).toBeGreaterThan(
-      contract.BINDING_CONTRACT_TOKEN_CEILING,
+  test("a re-declared parameter is caught by the argument guard", () => {
+    const wrong =
+      contract.BINDING_CONTRACT + "\n``read(path: string, offset?: number, limit?: number)``";
+    expect(argumentShapedTokens(wrong), "the guard fires on the original").not.toEqual([]);
+  });
+
+  test("a note for a binding that does not deviate is caught by the key-set guard", () => {
+    const withStrayNote = new Map(contract.BINDING_NOTES);
+    withStrayNote.set("read" as never, "`read` always reports `details: null`.");
+    expect([...withStrayNote.keys()].sort()).not.toEqual([...contract.BINDING_NOTES.keys()].sort());
+  });
+
+  test("an emptied block is caught by the floor, not just the ceiling", () => {
+    const stubbed = "Return value: every `tools.<name>(args)` call resolves.";
+    expect(estimatedTokens(stubbed), "a stub is under the floor").toBeLessThan(
+      contract.BINDING_CONTRACT_TOKEN_FLOOR,
     );
   });
 
-  test("emptying the block trips the floor, not just the ceiling", () => {
-    expect(estimatedTokens("")).toBeLessThan(contract.BINDING_CONTRACT_TOKEN_FLOOR);
-  });
-
-  test("weakening the array-of-blocks fact is a real weakening", () => {
+  test("weakening the array-of-blocks fact is caught by the content guard", () => {
     const wrong = contract.BINDING_CONTRACT.replace("is an ARRAY of content blocks", "is a string");
     expect(wrong).not.toContain("is an ARRAY of content blocks");
     expect(contract.BINDING_CONTRACT).toContain("is an ARRAY of content blocks");

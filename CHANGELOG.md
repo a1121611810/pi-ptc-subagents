@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   contract: a binding result is `{ content, details }`, `content` is an array of
   content blocks (the text of a text-file result is `result.content[0].text`),
   `details` is an object or `null`, and there is no `files` / `output` /
-  `matches` field to read — `bash`, `grep`, `find` and `ls` return one text block
+  `matches` / `entries` field to read — `bash`, `grep`, `find` and `ls` return one text block
   of newline-separated rows that the program splits itself. A `builtin binding`
   that fails rejects with `ToolCallError`; `pi.dispatch` resolves to a
   `DispatchResult` with `text` and `status` and no `content`.

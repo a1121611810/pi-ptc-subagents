@@ -102,19 +102,40 @@ program cannot infer from that shape: a binding that rejects instead of
 resolving, a binding whose `details` is never absent, and the one binding that
 resolves to a shape without `content` at all.
 
-### 4. The contract is keyed to the bound-name set, not to a parallel literal
+### 4. Two guards, because the names are checked in both directions
 
-The documented names are checked against the set the extension actually binds.
-A hand-maintained list beside the real one is precisely the failure mode both
-upstream designs avoid -- DSH by requiring an output schema unconditionally, pi
-by deriving the declaration from the same predicate the resolver uses.
+The per-binding notes are typed against the binding-name set, so a misspelled or
+renamed binding is a type error rather than an orphaned note. The _coverage_
+check then runs both ways against the set the extension actually binds:
 
-### 5. Budget: about 300 estimated tokens
+- nothing the contract names may be outside that set -- the guard reads the
+  contract's own backticked tokens and compares them against a literal of the
+  non-binding vocabulary, not against the bound names. Iterating the bound names
+  instead would make an unbound name structurally invisible, and an earlier draft
+  of this record's guard did exactly that.
+- every bound binding must be either named or knowingly covered by the shared
+  shape. `read` is the one covered-but-unnamed binding: it behaves exactly like
+  the shared shape, so it needs no note, and the test states that as a literal so
+  a new builtin turns the guard red until somebody decides.
 
-The whole added block stays inside roughly 300 estimated tokens, using the same
-characters-per-token estimate upstream uses. Current fixed overhead is about 3k
-tokens, so this is a single-digit percentage addition; the upstream equivalent
-costs roughly 6.8k.
+A hand-maintained list beside the real one is the failure mode both upstream
+designs avoid -- DSH by requiring an output schema unconditionally, pi by
+deriving the declaration from the same predicate the resolver uses.
+
+### 5. Budget: a 300-token ceiling with a 200-token floor
+
+The block stays at or under 300 estimated tokens and at or above 200, using the
+same characters-per-token estimate upstream uses. The ceiling is a decision; the
+floor exists because a ceiling-only check passes on an empty block, and it is
+recorded here rather than left in a code comment so the record and the constants
+have one place that says both numbers.
+
+Measured on the shipped text: 282 estimated tokens. For scale, the registered
+`ptc_run_code` description was 382 estimated tokens before this change and is
+654 after, so the block is roughly 71% of the pre-existing description. Measured
+against the whole PTC request prefix the addition is single-digit, but that
+denominator is not a thing the model sees on its own, so the per-surface figure
+is the one to reason from.
 
 ## Consequences
 
@@ -135,7 +156,12 @@ costs roughly 6.8k.
   would import a contract we do not own.
 - Nothing here measures whether the model _uses_ the declaration. Re-running the
   benchmark and comparing crash counts is the only way to close that loop, and
-  the first measurement is the one that motivated this ADR.
+  the first measurement is the one that motivated this ADR. That re-measurement
+  is owed and tracked as issue #87; until it lands, this record's claim is that
+  the text is correct, not that it helped.
+- The three per-binding notes are third-party facts about the installed pi, and a
+  pi caret bump can falsify any of them with a green suite. The module cites the
+  source for each, and the suite pins the `write` case by running a real binding.
 
 ## Reopen triggers
 
@@ -153,7 +179,12 @@ deserves its own record with a migration story.
   binding and the `DispatchResult` it resolves to.
 - [ADR-0007](./0007-no-os-sandbox.md): the execution boundary inside which these
   bindings run.
-- docs/research/ptc-upstream-parity-audit-20260930.md: the parity audit whose
-  gap A4 is closed by this record.
+- docs/research/ptc-upstream-parity-audit-20260930.md: the parity audit.
+  Its gap A4 asks for a generated TypeScript SDK section in the _system prompt_
+  carrying an argument map and an output map. This record closes the return-shape
+  half of that gap in a different place -- the tool description, return types
+  only -- and leaves the system-prompt injection, the argument map and the BM25
+  tool search open. A4 is narrowed, not closed.
 - docs/research/ptc-binding-contract-measurement-20260930.md: the benchmark,
   the crash taxonomy, and the before numbers.
+- Issue #87: the re-measurement, owed.

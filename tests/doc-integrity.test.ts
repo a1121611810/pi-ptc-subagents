@@ -860,7 +860,11 @@ describe("断言二：规范文档点名的具名符号在 src/ 有读点（doc-
       missingReason.map(([name]) => name),
       "每条排除都必须写明为什么",
     ).toEqual([]);
-  });
+    // This one rescans every document in the repository, so its cost grows with
+    // the corpus: ADR-0024 and its notes pushed it past vitest's 5s default when
+    // the suite runs in parallel. The assertion is unchanged; only the wall-clock
+    // budget is stated, the same way the pty-driven suites state theirs.
+  }, 30_000);
 
   test("反事实：伪造一个不存在的符号名必须被报出", () => {
     // 样本形态照抄 ADR-0023 的真实写法（ownerPid 是 doc-sync 必查 2 点名的符号）。
