@@ -88,6 +88,43 @@ _Avoid_: "subagent" (overloaded; CONTEXT.md §Out-of-glossary), "BINDING_NAMES
 whitelist" (the binding config is a _policy_, not a _filter_; Q1 grill round,
 2026-09-23).
 
+**binding result** — what a _builtin binding_ call resolves to: the tool's
+model-facing payload, `{ content, details }`, and nothing else. `content` is an
+**array of content blocks**, so the text of a text-file result is
+`result.content[0].text` and never the result itself; `details` is the tool's
+own detail object or `null`, never `undefined`. There is no `files` /
+`output` / `matches` field on any binding result -- `bash`, `grep`, `find`
+and `ls` hand back one text block of newline-separated rows that the program
+splits itself. A call that fails (a `bash` non-zero exit, a missing path, a name
+not bound this run) rejects with `ToolCallError`; a _parallel binding_ is the
+exception, resolving to a `DispatchResult` that carries `text` and `status`
+and has no `content` at all. The `{ content, details }` re-wrap is the only
+transformation between a pi tool's own result and the binding result.
+ADR-0024. _Avoid_: "binding return value" (a binding resolves to an object, not
+a scalar), "tool result" (that is the pre-rewrap shape, which a program never
+sees), "output" (the four senses of "output" are split above; this is none of
+them).
+
+**binding contract** — the model-facing block inside the `ptc_run_code` and
+`ptc_workflow` tool descriptions that states the _binding result_ shape, so the
+model never has to guess it. One module owns the text and renders it into both
+descriptions, so the two surfaces cannot drift; it is keyed to the bound-name set,
+so a test can prove no documented name is unbound and no bound name is
+undocumented. It declares return types only -- pi already declares every tool's
+arguments natively in the same request, so restating them is pure token cost.
+ADR-0024. _Avoid_: "TypeScript SDK section" (DSH's name for its system-prompt
+variant, which also ships a full argument map; ours is a description block
+carrying return types only), "tool signature" (no per-binding signature is
+emitted).
+
+**binding note** — a per-binding clause of the _binding contract_ stating where
+one binding departs from the shared _binding result_ shape: `bash` rejects on a
+non-zero exit, `write` always reports `details: null`, `edit` always reports
+a diff, `pi.dispatch` carries `text` instead of `content`. Written only where
+behaviour genuinely differs, so the common case stays one sentence. ADR-0024.
+_Avoid_: "per-binding documentation" (the contract is the block; a note is one
+exception inside it).
+
 **helper** — a global function injected into a worker's runtime. **Not all
 DSH helpers appear in plain PTC mode** — per R1 (`research/dsh-ptc-behaviour-inventory.md`,
 dsh-v0.1.6-alpha.2), `log / phase / parallel / pipeline / agent` are

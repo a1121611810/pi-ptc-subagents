@@ -25,6 +25,7 @@ import { createBuiltinBindings } from "../runtime/bindings.ts";
 import { runPtcProgram, type PtcRunOutcome } from "../runtime/dispatcher.ts";
 import type { WorkerPool } from "../runtime/worker-pool.ts";
 import { DEFAULT_CONFIG } from "../runtime/limits.ts";
+import { BINDING_CONTRACT } from "./binding-contract.ts";
 import {
   codeRunFailedError,
   createSubCallUpdater,
@@ -46,8 +47,7 @@ const DESCRIPTION = [
   "Inside the program, call this session's enabled built-in tools as `tools.<name>(args)` — e.g.",
   '`await tools.read({ path: "src/index.ts" })` or `await tools.bash({ command: "npm test" })`.',
   "The bound names mirror the session's active tools (a default session has `read`, `bash`, `edit`,",
-  "`write`); calling a name that is not bound rejects with an error the program can catch, and",
-  "independent calls may overlap under `Promise.all`.",
+  "`write`); independent calls may overlap under `Promise.all`.",
   "",
   "The parallel binding `pi.dispatch` is always available, registered under its literal dot name —",
   'call it with string indexing, e.g. `await tools["pi.dispatch"]({ agent: "reviewer", task: "..." })`;',
@@ -55,6 +55,8 @@ const DESCRIPTION = [
   "foreground dispatches compose under `Promise.all` exactly like the built-in calls. The run's",
   "actual bound names (this run, not a static list) are on the `ptcBindings` global, so the program",
   "never has to guess what is bound.",
+  "",
+  BINDING_CONTRACT,
   "",
   "Only the program's return value and its `console.log` output come back. This surface has no",
   "helpers: `log` / `phase` / `parallel` / `pipeline` exist only in `ptc_workflow`.",

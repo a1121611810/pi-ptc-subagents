@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The PTC tool descriptions now declare what a binding call resolves to
+  (ADR-0024).** `ptc_run_code` and `ptc_workflow` carry one shared binding
+  contract: a binding result is `{ content, details }`, `content` is an array of
+  content blocks (the text of a text-file result is `result.content[0].text`),
+  `details` is an object or `null`, and there is no `files` / `output` /
+  `matches` field to read — `bash`, `grep`, `find` and `ls` return one text block
+  of newline-separated rows that the program splits itself. A `builtin binding`
+  that fails rejects with `ToolCallError`; `pi.dispatch` resolves to a
+  `DispatchResult` with `text` and `status` and no `content`.
+
+  Model-facing only: the wire, the worker and every existing program are
+  unchanged. Field report: a pty-driven run of the real TUI with PTC mode on
+  produced 31 program crashes across 16 runs, the largest error class being the
+  model treating a binding result as a string or as an object with a `files`
+  field — neither is ever true, and nothing said so
+  (`docs/research/ptc-binding-contract-measurement-20260930.md`).
+
 ### Fixed
 
 - **A background task that produced no answer is no longer reported as a

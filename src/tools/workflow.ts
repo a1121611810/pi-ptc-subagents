@@ -27,6 +27,7 @@ import { Type } from "typebox";
 import type { Static, TArray, TObject, TOptional, TRecord, TString, TUnknown } from "typebox";
 import { createBuiltinBindings } from "../runtime/bindings.ts";
 import { runPtcProgram, type PtcRunOutcome } from "../runtime/dispatcher.ts";
+import { BINDING_CONTRACT } from "./binding-contract.ts";
 import { describeValue } from "../runtime/protocol.ts";
 import type { WorkerPool } from "../runtime/worker-pool.ts";
 import {
@@ -57,6 +58,8 @@ const DESCRIPTION = [
   'its literal dot name — call it with string indexing: `await tools["pi.dispatch"]({ agent, task })`;',
   "the run's actual bound names are on the `ptcBindings` global. What comes back is the script's",
   "return value, its `log`/`phase` narration and its `console.log` output.",
+  "",
+  BINDING_CONTRACT,
   "",
   "Image-bearing tool results inside the script are attached to you after the run — never return",
   "image data as the script's value.",
