@@ -145,3 +145,104 @@ because deleting it would remove the seam a future probe test needs.
 observe it, so it exists only inside `tsc --noEmit`. That is sound here because typecheck is
 the first step of the release gate, and the mutation proves it bites, but it should not be
 described as a test.
+
+## Round 3 (delta `c108b7e...7f05d3e`, fix commit `846aee6`)
+
+Round 3 covered the codemode-detection change, and the feature commit is part of this record's
+scope: it is the change whose default flip made R2-2 reachable in the first place. Both axes ran
+the whole-tree release gate independently and reported it green. Every blocking finding below is
+a test that could not fail, or a promise a record made that the code did not keep -- the same two
+shapes as rounds 1 and 2.
+
+### R3-1 [BLOCKING, FIXED] foreground `ptc_subagent` had no concurrency gate
+
+Carried from R2-2, which round 2 recorded rather than fixed. The Spec axis measured it rather
+than reading the ledger: with every slot held, a foreground call **reached the spawn site** and
+reported `failed to spawn pi: spawn pi ENOENT`, not a concurrency refusal. Depth and background
+gates fired in the same harness, so this was a true negative and not a blind spot.
+
+The gate moved into `dispatch()`'s foreground branch and the dispatcher's duplicate went away.
+Keeping both would have charged every foreground dispatch two slots -- `tryAcquire` has no dedup
+for the anonymous form -- and halved effective concurrency. The foreground reservation is
+anonymous because a keyed holder would be actively wrong: `createPtcSubagentTool` hardcodes
+`callId: 0`, so two concurrent calls would share a token and the second would refuse spuriously.
+
+Counterfactuals, both measured: gate removed -> 1 failed; pre-spawn release removed -> 1 failed.
+The second is the one worth having -- a missing release there would not fail any single-call test,
+it would just shrink the pool until a session slowly stopped being able to dispatch.
+
+**Stated consequence, not a side effect:** the program path's foreground calls now spend the
+session counter rather than a per-run one, so two concurrent programs that could each have 8 in
+flight share 8. That is what ADR-0022 §9 already asks for, and the suite is green, but it is a
+real reduction in effective foreground concurrency and belongs in the record rather than in a
+reviewer's memory.
+
+### R3-2 [BLOCKING, FIXED] the one end-to-end proof of the headline feature was vacuous
+
+Both axes found this independently, and the Standards axis falsified the test's own comment with
+a mutation: neutering the probe (`CODEMODE_PROBE_PATHS = []`) left it **passing**. The comment
+said "if the probe stops working, the two runs agree and this goes red"; the code asserted the
+opposite, because when the runs agreed it re-asserted the sibling test's expected set.
+
+The fix agent then found the reason the test could never have caught it, which also corrects the
+review's premise: **the pi the e2e suite spawns is the repo's own pinned 0.86.1 from
+node_modules/.bin, not the user's 0.99.1**, and 0.86.1 ships no codemode at all. The subagents
+branch had never been reached -- not in CI, not anywhere. A registry oracle measured against that
+pi is permanently stuck on the "no codemode" side, which is why the first cut of the fix also
+passed under the mutation.
+
+The test now asserts against pi's own registry (a second probe extension reads `getAllTools()` at
+`session_start`) and pins both branches on two different pis. Measured after: neutered probe ->
+1 failed; probe forced to always-present -> 1 failed on the sibling.
+
+### R3-3 [HIGH, FIXED] four tests inherited the machine, and their names asserted a replaced rule
+
+The malformed-file cases called `readSurfaceModeConfig(dir)` with no presence argument, so the real
+probe ran against vitest's argv. Change the default argument to `present: true` and all four go
+red. Their names -- "falls back to full" -- directly contradicted ADR-0026 decision 5, which
+replaced the constant with the detected default. Presence is now passed explicitly in each, both
+branches are asserted, and the names match the record.
+
+### R3-4 [HIGH, FIXED] a new e2e test timed out twice
+
+The only test in its file without a timeout override, doing two real pi spawns on vitest's 5000 ms
+default. Measured 4400 ms under parallel load, with `Test timed out in 5000ms` observed twice. All
+five tests in that file now carry `120_000`. This also explains a delta a reviewer saw in a
+hostile-agent-dir comparison and correctly declined to call a settings leak.
+
+### R3-5 [MEDIUM, FIXED] production and doc drift
+
+The probe result was carried on `SurfaceModeConfig.codemode` and read by nothing, so the ADR's
+stated remedy for the silent-fallback failure mode was unwired -- it now reports at session start,
+silent on the healthy case. `FALLBACK_SURFACE_MODE` was a dead export whose comment claimed
+callers; it is now `detectedSurfaceMode`'s false branch, because the new notice has to name the
+resolved default. The `presence` default parameter was eager, so the probe ran even when the user
+had set the key -- measured, one `argv[1]` read before and zero after. And several comments, a
+CHANGELOG line that still called `full` "the default" twenty lines below the entry that changed
+it, and two `loader.js` line citations that pointed at jiti setup rather than the
+`initializeExtension` catch.
+
+### R3-6 [MAJOR, FIXED] the probe cannot see the two ways pi withholds a tool it has on disk
+
+Found by accident, by the agent fixing R3-2, and it is a hole in the feature's core design rather
+than a test defect. The probe walks the filesystem, so under `--no-extensions` or
+`--exclude-tools codemode` it answers `present`, the surface becomes `subagents`, and pi
+registers no such tool -- a subagent front with no orchestrator. The ADR-0025 decision-4 warning
+cannot catch it: it asks whether codemode is ACTIVE, and with the tool absent both questions are
+false for the same reason.
+
+`session_start` now cross-checks the filesystem answer against `pi.getAllTools()` -- the one place
+both are available, since the listing is a `notInitialized` stub during loading -- and warns when
+they disagree. Counterfactual: forcing the registry check to always pass turns the new test red.
+
+### Still open after round 3
+
+- **S7 / R2-1 shape**: `findF2`'s keyword list cannot see `if (message !== "") { expect }`. The
+  test that had it is fixed; widening the detector needs a false-positive count over 49 files
+  first, per the rule that ships here.
+- **R2-4**: a `ptc_subagent` background child gets no ADR-0022 session triple, because the
+  binding forwards `context.sessionDir` into the DispatchContext and this tool does not. Wiring
+  it is a behaviour change to background children and belongs in its own commit.
+- **`src/index.ts:381`**: the always-on registration comment claims the tools survive every mode
+  loadout. True for `builtins-only`, false for `all-but-ptc`, which is not the shipped strategy.
+- **Issue #88's body** still states the pre-ADR-0026 defaults in four places.
