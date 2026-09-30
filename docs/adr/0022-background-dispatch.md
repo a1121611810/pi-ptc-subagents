@@ -8,6 +8,12 @@ Status: accepted (2026-09-24). Behavior change on the program-visible side (new 
 
 > Amended by ADR-0023 (2026-09-29): task ownership. Records carry optional `ownerPid` / `ownerBootMs`, and the sweeps specified below (startup reconcile → `lost`, session shutdown → `session_ended_while_running`) are **owner-scoped** — a record is only reaped by a runtime instance that owns it; at startup reconcile it is also reaped when its owner process is dead, or when it predates ownership (`ownerPid` absent). ADR-0023's text governs the sweep semantics; the tables below remain as the pre-amendment specification — as do this document's four "21 fields" mentions (Status line, G1, §3 intro, §3 heading): §3's code block lists 19 fields, and ADR-0023's two owner fields bring the record to 21.
 
+> Amended by §11 (2026-09-30): the five render caps of the background task panel are
+> registered with their values. §7 handed the panel's rendering to a follow-up without ever saying
+> what it would cap; §11 supplies the numbers and nothing else — no Decision above is changed, the
+> panel stays the presentation half of the three `ptc_task_*` tools, and ADR-0013 §6's eight
+> `render.ts` caps keep their own source and their own table.
+
 ## Context
 
 This ADR closes the bgdispatch map. The four research/decision tickets it crystallizes are:
@@ -223,6 +229,66 @@ Late-arrival stop: if model sends `ptc_task_stop` while the child is already `st
 - `ptc_parent_query` (v2): child->parent via subscription buffer; parent answers via `ptc_query_response`; Q4 verdict default L1 self-grill (no round-trip) with L2 reverse-query as fallback.
 - `ptc_task_resume` (v2): opens `pi -c --session-id <taskId>` continuation; Reasonix "interrupted 拒续、完成态才可续" rule (R1 limitation locked).
 
+### 11. The task panel's five render caps, and where their numbers come from
+
+ADR-0013 §6 registered the eight per-block caps of the PTC run row. It does not cover this panel,
+and never claimed to: a background spawn leaves only a one-shot `dispatched <label> -> <taskId>`
+anchor in the sub-call tree (G1), §7 handed the panel's own rendering to a follow-up ("TUI panel
+rendering is handled in P1"), and "What we deliberately don't add" 3 is what moved the child's live
+state onto that panel in the first place. The five bounds below have governed it since BG-09
+shipped `src/tools/task-panel-render.ts`, and until this section no document in the repository
+recorded any of them — not this ADR, not the README (whose "TUI rendering" section describes the
+run row, never the panel), not any other file under `docs/`. The audit that found the gap
+(`docs/reviews/2026-09-29-ocr-rule-coverage-audit-3.md`) asked for a table of values, or for an
+explicit statement that the values have no independent source. This section is the first.
+
+| constant                   | value | what it bounds                                                            | block                  |
+| -------------------------- | ----- | ------------------------------------------------------------------------- | ---------------------- |
+| `MAX_LABEL_CHARS`          | 48    | one task's label on its list row (free text, sanitised before truncation) | `task-list`            |
+| `MAX_ERROR_CHARS`          | 120   | the first non-blank line of a failed call, on the `failed: …` row         | none — the failure row |
+| `MAX_OUTPUT_LINE_CHARS`    | 160   | one line of the stored output preview                                     | `task-output`          |
+| `MAX_OUTPUT_PREVIEW_LINES` | 6     | how many lines of the output preview the panel shows                      | `task-output`          |
+| `MAX_TASK_PANEL_ROWS`      | 32    | how many task rows `ptc_task_list` shows at once                          | `task-list`            |
+
+**Four of the five have no independent source; the fifth has a declared kinship, not a
+derivation.** 48, 120, 160 and 6 were chosen for the panel's readability and were not derived from
+any specification, from third-party documentation, or from pi's defaults: before this section the
+four module-level declarations at the top of `src/tools/task-panel-render.ts` were the only place
+any of them had been written down. 32 is a different case and deserves to be read precisely,
+because the source comment above that constant declares `MAX_TASK_PANEL_ROWS` the flat-list
+analogue of `MAX_SUBCALLS` — declared in `src/tools/common.ts`, registered at 32 with its own
+empirical rationale in ADR-0021 §5 ("3 code blocks × 5 phases + 17 misc calls ≈ 32"). That is a
+stated kinship between two bounded display surfaces, not a re-derivation of one from the other: the
+panel's population is the session's background `TaskRecord`s, not one run's sub-calls, so ADR-0021's
+arithmetic does not carry over — and the same comment rules out the one other candidate source by
+name, since the README's "6 children per container" bounds completion-value containers and has
+nothing to do with a row count. The registry still hands the renderer up to
+`DEFAULT_TASK_LIST_LIMIT` records; the panel withholds the tail behind `…+N more tasks`. All five
+are registered here as frozen contract values: changing any one of them is a behaviour change and
+needs a new ADR, not a number to edit in the implementation.
+
+`AGE_TICK_MS` in the same module is a redraw cadence, not a bound — nothing is withheld when it
+elapses, the live age simply ticks — so it is deliberately left out of the table above rather than
+registered as a sixth cap.
+
+**What this section does and does not bind.** Nothing above is changed: the panel stays the
+presentation half of the three `ptc_task_*` tools, §2's status-to-colour mapping and §8's
+`fromStatus` transition arrow are untouched, and this section attaches numbers to a component that
+already reports what it withheld (`…+N more tasks`, `…+N more lines`, a trailing `…`). A cap
+whose tail marker went missing would not be a cap this section accepts, and dropping one is still a
+behaviour change.
+
+**These five are not ADR-0013 §6's eight, and none of the numbers move together.** §6 governs
+`src/tools/render.ts`; its closing paragraph already flags the same-named `MAX_ERROR_CHARS` in
+this panel's module as a separate constant and gives no value for it. The two modules cannot even
+share a row component — `render.ts` keeps `PtcRow` module-private and the panel mirrors the
+layout class instead — which is why these caps have to be registered twice rather than inherited.
+32 here and `MAX_SUBCALLS` are likewise two constants that happen to agree, not one number; the
+README's tree caps (`TREE_VALUE_MAX_DEPTH` / `TREE_VALUE_MAX_CHILDREN` /
+`TREE_VALUE_MAX_LINE_CHARS`) bound the completion-value tree, and ADR-0012's 200 / 100 bound the
+model's copy of the same run. Moving this panel's 120 to 200 to "match `text.ts`" is a change to
+this section, not a tidy-up.
+
 ## Boundary with ADR-0016
 
 ADR-0016 added `pi.dispatch` as a parallel binding that returns a `DispatchResult` once the child exits. That ADR documented (section "What we deliberately don't add") that the dispatch binding is **not** a tool with model-visible lifecycle.
@@ -261,6 +327,8 @@ Shipped on `main` as BG-01…BG-17. Commits: the module batch (`fe70e57`, `e220d
 - ADR-0014: image hoisting applies to background children exactly as foreground.
 - ADR-0017: worker pool applies to background tasks (one worker per in-flight run).
 - ADR-0020 / ADR-0021: row pulse / sub-call tree render -- sub-call tree is unaffected (background spawn is a one-shot anchor, per G1).
+- ADR-0013: the PTC run row. Its §6 registers the eight `render.ts` block caps; §11 above registers
+  the panel's five, which are separate constants in a separate module and keep their own table.
 
 ## What becomes of the deferred map items
 

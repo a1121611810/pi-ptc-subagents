@@ -13,7 +13,7 @@ subtly on a tool row":
 1. **DSH `TextShimmer`** — a CSS keyframe that moves a gradient highlight
    across the row's own title text, so the glyphs stay put and only brightness
    sweeps across them. Used in DSH's PTC `run_code` row + parent process
-   header (in lockstep). [`dsh-ptc-page-rendering.md`](../../dsh-ptc-page-rendering.md),
+   header (in lockstep). [`dsh-ptc-page-rendering.md`](../dsh-ptc-page-rendering.md),
    `ToolRow.tsx:212,222,226` and `ChatGroupSeat.tsx:117`.
 2. **Codex's animated OSC title** — the working indicator lives in the
    terminal window title via OSC 0, _not on the row_. A braille glyph from
@@ -70,7 +70,7 @@ esc to interrupt)`. The glyph does _not_ rotate; only the elapsed-seconds
     Implemented as a CSS keyframe with `background-clip: text`. Used by DSH for
     both the process-header label (`ChatGroupSeat.tsx:117`) and the tool-row
     title + summary (`ToolRow.tsx:212,222,226`).
-    [`dsh-ptc-page-rendering.md`](../../dsh-ptc-page-rendering.md).
+    [`dsh-ptc-page-rendering.md`](../dsh-ptc-page-rendering.md).
 13. **Static dot + colour pulse** — single dot whose foreground colour cycles
     between two values, no glyph change. tmux-agent-indicator uses this.
     Surveyed in [arXiv "Deterministic Motion Grammar"](https://arxiv.org/html/2608.10689).
@@ -124,7 +124,7 @@ esc to interrupt)`. The glyph does _not_ rotate; only the elapsed-seconds
     when state changes; no glyph. Used by DSH's `data-state="running"` vs
     `"ok"` attribute on `ToolRow`, plus `css.errorSummary` for errors
     (`tool-call-model.ts:218–220`, `ToolRow.tsx:335`).
-    [`dsh-ptc-page-rendering.md`](../../dsh-ptc-page-rendering.md).
+    [`dsh-ptc-page-rendering.md`](../dsh-ptc-page-rendering.md).
 25. **Reverse-video block highlight** — Aider highlights file names in
     approval prompts with `\033[7m`. Not a "running" indicator but the same
     colour-only mechanism.

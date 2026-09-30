@@ -12,6 +12,16 @@ model-facing-text changes (ADR-0012 governs the model's copy; this ADR governs t
 Amended by §5 (2026-09-22): a container completion value expands as a tree rather than
 degrading to a bare key list. The one-line invariant of §1 holds for scalars, not for containers.
 
+Amended by §6 (2026-09-29): the eight per-block caps of the expanded view are registered
+with their values. §3 decided the discipline (bounded, labelled, reports what it withheld) and
+named no number; §6 supplies the numbers and nothing else — no Decision above is changed, and the
+three value-tree caps in §5 keep their own source and their own table.
+
+Amended by §6 (2026-09-29, second pass): §6 now states the two bounds of the expanded failure-text
+block — line count and viewport width, not a `MAX_*` line cap — and records that
+`MAX_ERROR_CHARS` applies to the collapsed `failed: …` row alone. Completeness only: no Decision
+above is changed and no value in §6's table is revised.
+
 ## Decision
 
 **1. The collapsed row is a heading plus a summary, never a payload.**
@@ -120,3 +130,85 @@ remove rather than relocate.
   nesting, `maxDepth`, `maxChildren` tails, visible-width truncation, inline collapse, `moreAfter`) and
   the collapsed/expanded suites now assert the tree instead of the old `→ {keys}` hint and `value` block.
   `scripts/verify-dist-render.mjs` prints both shapes out of the built `dist`.
+
+## 6. The eight block caps, and where their numbers come from
+
+§3 decided the discipline and deliberately named no number: every block of the expanded view is
+bounded, opens with a label in a fixed gutter, and reports what it withheld. At the time the caps
+were whatever the renderer had grown into. §5 §2 did name its numbers — `maxDepth` 4,
+`maxChildren` 6, `maxLineChars` 120, for the value tree. The eight caps below never got the same
+treatment: they live in `src/tools/render.ts:78-85`, they have governed the row since they were
+written, and until this section no document in the repository recorded any of them — not this ADR,
+not the README (whose "each block labelled and capped" carries no number), not any other file under
+`docs/`. The audit that found the gap (`docs/reviews/2026-09-29-ocr-rule-coverage-audit-2.md`)
+asked for one of two closers: a table of values, or an explicit statement that the values have no
+independent source. This section is the first.
+
+| constant                    | value | what it bounds                                                                  | block                                       |
+| --------------------------- | ----- | ------------------------------------------------------------------------------- | ------------------------------------------- |
+| `MAX_RESULT_HINT_CHARS`     | 60    | the `→ …` completion-value hint on the summary row, and the inline-vs-shape cut | none — the summary row itself               |
+| `MAX_ERROR_CHARS`           | 120   | the failure text's first line on the collapsed `failed: …` row                  | none — the failure row                      |
+| `MAX_CODE_LINE_CHARS`       | 120   | one line of code, and the call row's no-description fallback                    | `code`                                      |
+| `MAX_CODE_LINES_EXPANDED`   | 3     | how many code lines the block shows                                             | `code`                                      |
+| `MAX_LOG_LINES_EXPANDED`    | 12    | how many lines a block shows                                                    | `log`, `out`, and the expanded failure text |
+| `MAX_PHASES_EXPANDED`       | 8     | how many phases the roll-up row carries                                         | `phases`                                    |
+| `MAX_WARNINGS_EXPANDED`     | 4     | how many plan-drift warnings are shown                                          | `warn`                                      |
+| `MAX_SUBCALL_PREVIEW_CHARS` | 40    | one argument preview in a sub-call row                                          | none — the sub-call tree (ADR-0021)         |
+
+**These eight numbers were chosen for TUI readability; they have no independent source.** They
+were not derived from any specification, from third-party documentation, or from pi's defaults:
+before this section, `src/tools/render.ts` was the only place any of these eight had been written
+down, and no document in the repository recorded these eight. This section registers them as
+frozen contract values — changing any one of them is a behaviour change and needs a new ADR, not a
+number to edit in the implementation.
+
+The claim is scoped to the eight constants in this table, not to the repository's render bounds as a
+whole. Other render caps are registered elsewhere: the model-facing text block's `MAX_LINE_CHARS`
+(200) and `INLINE_MAX_CHARS` (100) were already written down in this same ADR's sibling, ADR-0012,
+and the background task panel's five caps are registered by ADR-0022. A reader auditing a bound must
+check the table it belongs to — "no document recorded it" here means "no document recorded _these
+eight_", never "this repository has no other unrecorded caps".
+
+**The failure block is the one bound that is not a `MAX_*`.** `MAX_ERROR_CHARS` (120) is not
+that bound. It reaches exactly one line: the collapsed `failed: …` row,
+through `firstLine()` (`render.ts:145`) ← `errorText()` (`render.ts:693`) ← `render.ts:834` — and,
+expanded, only as the fallback source for a result that carries no text block at all
+(`render.ts:928`). Expanded, the failure block is bounded twice, and neither bound is a width
+constant: the line count is cut at `MAX_LOG_LINES_EXPANDED` (12, `render.ts:930`), and every line
+that survives is cut to the viewport by `alignRow` (`render.ts:127`).
+
+The absent per-line cap is intentional: the renderer says the failure text is "the reason the
+reader expanded the row at all" and gives it the full width under the summary instead of a cap of
+its own (`render.ts:925-926`). §3's "expanded is never unbounded" therefore holds for this block
+as **lines + viewport**, not as a `MAX_*` constant — it is bounded, just not by the kind of bound
+the other seven rows in the table carry, and a reader auditing that table should not go looking for
+a width constant here. Writing the deviation down is the point: every other block's bound is a
+nameable constant, and this one is not.
+
+**What this section does and does not bind.** §3 remains the rule; §6 only attaches numbers to it,
+and a number is not a licence to drop the "says what it withheld" half of §3 — every row above is
+paired with a tail (`…+N more lines`, a trailing `…`) in the renderer, and that pairing is what
+§3 bought. §3's block labels changed under §5 (the `value` block is gone, `image` arrived), so
+the `block` column above names today's blocks, not §3's original list.
+
+**These eight are not §5's three.** `TREE_VALUE_MAX_DEPTH` / `TREE_VALUE_MAX_CHILDREN` /
+`TREE_VALUE_MAX_LINE_CHARS` bound the completion-value tree and are sourced by the README; the
+eight above bound the labelled blocks, the summary row, the failure row and the sub-call tree, and
+are sourced only here. The number 120 appears on both sides — `MAX_CODE_LINE_CHARS` and
+`TREE_VALUE_MAX_LINE_CHARS` are two different constants that happen to agree — which is precisely
+why they are two tables and not one. Likewise `MAX_ERROR_CHARS` here is `render.ts`'s, and the
+same-named constant in `src/tools/task-panel-render.ts` is a third, separate one. None of these
+numbers move together; changing any of them needs its own decision.
+
+## Consequences
+
+- **The values are now pinned to a document, not just to the code.** A silent edit in
+  `src/tools/render.ts` is caught by `tests/render-bounds-registry.test.ts`, which re-reads the
+  registry table in `.opencodereview/rules/ptc-render-bounds.md`; that table's source column now
+  points here, so the chain implementation → registry → ADR is closed instead of dangling.
+- **The tests that exercise these caps are not their source.** `tests/render-ptc.test.ts` pins
+  the behaviour (a 20-line `out` block shows 12 lines and reports `…+8 more lines`; the sub-call
+  preview caps at 40 characters), which is regression protection — it would catch a change, but it
+  cannot tell you why 12 and not 10. Characterisation is not provenance.
+- **A change to any of the eight is a new ADR, not a tuning commit.** There is no upstream
+  default to re-derive them from, so "restore the pi default" is not available as an argument.

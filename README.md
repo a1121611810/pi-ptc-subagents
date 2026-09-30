@@ -140,6 +140,16 @@ printed as escaped JSON. Expanding a row (ctrl+e) adds the code head, phase roll
 output and plan-drift warnings, each block labelled and capped. `renderShell` stays at pi's default,
 so these rows keep the same box and colors as the built-in tools.
 
+The copy above is the human's. The text block the **model** reads is a separate contract with
+separate bounds ([ADR-0012](./docs/adr/0012-model-facing-result-text.md)): a completion value whose
+compact form fits in 100 characters stays on one line, and every line of the assembled block is
+capped at 200 characters with a trailing `…`. Those are not the numbers above, and they are not
+variants of them. **4 / 6 / 120** bound the on-screen tree — depth, children per container,
+characters per row, aligned by visible width — because they serve the eye; **100 / 200** bound the
+model's copy because they serve what the model has to read. Neither set derives from the other, so
+moving 200 to 120 so they "match" is a behaviour change that needs its own ADR, not an edit to a
+number on this page.
+
 ## Images
 
 An image read _inside_ a program — `await tools.read({ path: "shot.png" })` — is attached to the PTC
