@@ -327,7 +327,13 @@ export async function completeTask(
   h: Harness,
   spawned: SpawnedTask,
   exitCode = 0,
-  output?: string,
+  // A child that exits 0 in these scenarios is a child that answered: pi emits the assistant
+  // text on `message_end` before a clean close, and that is the same `PONG` literal the
+  // real-spawn e2e and the unit suite use. Since issue #70 an exit-0 child with *no* text
+  // resolves `failed`, so leaving this undefined would silently turn every `completeTask(…, 0)`
+  // caller — which means "succeeded" — into a failure fixture. Pass `""` deliberately to get a
+  // silent child back.
+  output = "PONG",
 ): Promise<TaskRecord> {
   if (output !== undefined) {
     h.lifecycle.pushEvent(spawned.child, {
@@ -452,8 +458,18 @@ export async function runWaves(
       ),
     );
     for (const spawned of wave) {
+      const exitCode = exitCodeFor(done.length);
+      // A child that exits 0 answers first, same as completeTask: pi emits the assistant
+      // message_end before a clean close, and since issue #70 an exit-0 child with no text
+      // resolves failed. A non-zero exit gets no text — that is what a killed child looks like.
+      if (exitCode === 0) {
+        h.lifecycle.pushEvent(spawned.child, {
+          type: "message_end",
+          message: { role: "assistant", content: [{ type: "text", text: "PONG" }] },
+        });
+      }
       h.clock.advance(5);
-      h.lifecycle.resolveExit(spawned.child, exitCodeFor(done.length), null);
+      h.lifecycle.resolveExit(spawned.child, exitCode, null);
       done.push(spawned);
     }
     await waitForWaveTerminal(h, wave);

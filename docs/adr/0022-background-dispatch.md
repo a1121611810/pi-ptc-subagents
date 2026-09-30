@@ -14,6 +14,16 @@ Status: accepted (2026-09-24). Behavior change on the program-visible side (new 
 > panel stays the presentation half of the three `ptc_task_*` tools, and ADR-0013 §6's eight
 > `render.ts` caps keep their own source and their own table.
 
+> **Amended by §2 (2026-09-30, issue #70): the `succeeded` trigger.** §2 originally read
+> "child exits 0", and that literal trigger was wrong: pi exits 0 when a child runs out of rate
+> limit or dies on a model error, so a task that produced no answer at all was recorded as a
+> success the model was then told about, and `ptc_task_output` answered "(no output yet; task X
+> is succeeded)". `succeeded` now requires the child to exit 0 **and** to have produced
+> assistant text — the same rule `decideCloseOutcome` already applied to the foreground path,
+> so one failure has one verdict and one sentence in both paths. No schema change: a failing
+> `resolve-exit` may now write `errorMessage`, and the pump hands the registry the child's own
+> `stopReason: "error"` text when there is one.
+
 ## Context
 
 This ADR closes the bgdispatch map. The four research/decision tickets it crystallizes are:
@@ -92,8 +102,8 @@ Why an opt, not a new binding `pi.dispatch_background(...)`: ADR-0016 already do
 | ----------- | ------------------------------------------------- | --------------------------------------------- |
 | `running`   | `(spawn)` (atomic)                                | emit `task:<id>:running`                      |
 | `stopping`  | `running` (model stop call)                       | emit `task:<id>:stopping`                     |
-| `succeeded` | `running`                                         | child exits 0                                 |
-| `failed`    | `running`                                         | child exits non-zero                          |
+| `succeeded` | `running`                                         | child exits 0 **and** produced assistant text |
+| `failed`    | `running`                                         | child exits non-zero; or exits 0 with no text |
 | `canceled`  | `running` / `stopping`                            | model stop; or `ptc_task_handoff` (v2, defer) |
 | `lost`      | `running` (session restart); or restart-reconcile | TASK_LOST_ON_STARTUP                          |
 

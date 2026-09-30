@@ -739,6 +739,12 @@ describe("session rebind pins an in-flight task to its owning registry", () => {
       // points at storageB, but the pump must keep writing to the registry that persisted it.
       await runtime.bindSession("/sessions/b");
 
+      // The child answers before it closes: an exit-0 child with no assistant text is
+      // `failed` (issue #70), and this test is about which registry the write lands in.
+      lifecycle.pushEvent(lifecycle.handleAt(0), {
+        type: "message_end",
+        message: { role: "assistant", content: [{ type: "text", text: "PONG" }] },
+      });
       lifecycle.resolveExit(lifecycle.handleAt(0), 0, null);
       const terminal = await waitForTerminalRecord(storageA, handle.taskId);
       expect(terminal.status).toBe("succeeded");

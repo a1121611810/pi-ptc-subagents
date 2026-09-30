@@ -567,17 +567,23 @@ describe("TaskRegistry.stop", () => {
 // ---------------------------------------------------------------------------
 
 describe("TaskRegistry.resolve-exit", () => {
-  test("running + exit 0 resolves succeeded and running + exit 1 resolves failed", async () => {
+  /**
+   * ADR-0022 §2 (amended 2026-09-30, issue #70): `succeeded` is "child exits 0 **and** produced
+   * assistant text", the same rule `decideCloseOutcome` already applied to the foreground path.
+   * The expectation carries the byte count because the writer decides from `outputBytes`; a
+   * registry that ignored it and read the exit code alone would resolve this task `succeeded`.
+   */
+  test("running + exit 0 + assistant text resolves succeeded, and the text is what decides it", async () => {
     const h = createHarness(1000);
     await spawnTask(h, TASK_1);
     await spawnTask(h, TASK_2);
 
     const ok = await h.registry.transition(
-      { kind: "resolve-exit", taskId: TASK_1, exitCode: 0 },
+      { kind: "resolve-exit", taskId: TASK_1, exitCode: 0, outputBytes: 4, outputPreview: "PONG" },
       callContext(h, CALLER),
     );
     const bad = await h.registry.transition(
-      { kind: "resolve-exit", taskId: TASK_2, exitCode: 1 },
+      { kind: "resolve-exit", taskId: TASK_2, exitCode: 1, outputBytes: 0 },
       callContext(h, CALLER),
     );
 
@@ -586,6 +592,96 @@ describe("TaskRegistry.resolve-exit", () => {
     expect(ok.fromStatus).toBe("running");
     expect(bad.record.status).toBe("failed");
     expect(bad.record.exitCode).toBe(1);
+  });
+
+  /**
+   * The defect issue #70 was filed against, as a registry-level test: a child that exits 0 having
+   * produced nothing is a failure. pi really does exit 0 here — a 429 or a model error leaves an
+   * empty `content` and a clean exit — so before this rule the record said `succeeded` and the
+   * model was told the task had worked.
+   *
+   * Counterfactual: restoring `command.exitCode === 0 ? "succeeded" : "failed"` turns this red.
+   * The message is asserted too, because "failed" with no reason is the other half of the
+   * report: `ptc_task_output` would have nothing to show the model.
+   */
+  test("running + exit 0 + no assistant text resolves failed, never succeeded (issue #70)", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+
+    const resolved = await h.registry.transition(
+      { kind: "resolve-exit", taskId: TASK_1, exitCode: 0, outputBytes: 0 },
+      callContext(h, CALLER),
+    );
+
+    expect(resolved.record.status).toBe("failed");
+    // The foreground path's exact wording, so one failure has one sentence in both paths.
+    expect(resolved.record.errorMessage).toBe("dispatch produced no final text");
+    // A non-zero exit stays unlabelled: the spawn-error path labels its own failures, and
+    // inventing a reason here would overwrite the record's real diagnosis.
+    const other = createHarness(1000);
+    await spawnTask(other, TASK_2);
+    const nonZero = await other.registry.transition(
+      { kind: "resolve-exit", taskId: TASK_2, exitCode: 1, outputBytes: 7, outputPreview: "boom!" },
+      callContext(h, CALLER),
+    );
+    expect(nonZero.record.status).toBe("failed");
+    expect(nonZero.record.errorMessage).toBeUndefined();
+  });
+
+  /**
+   * Issue #70's other half: the child's own diagnosis reaches the record. The fixture is the
+   * real pi 0.87.1 shape quoted in the report — `stopReason: "error"` with the provider's
+   * message — not a hand-invented string.
+   *
+   * Counterfactual: dropping `childError` from the transition turns this red.
+   */
+  test("the child's own stopReason error is written to the record (issue #70)", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    const providerError =
+      '429 {"type":"error","error":{"type":"rate_limit_error","message":"已达到 Token Plan 用量上限"}}';
+
+    const resolved = await h.registry.transition(
+      {
+        kind: "resolve-exit",
+        taskId: TASK_1,
+        exitCode: 0,
+        outputBytes: 0,
+        childError: providerError,
+      },
+      callContext(h, CALLER),
+    );
+
+    expect(resolved.record.status).toBe("failed");
+    expect(resolved.record.errorMessage).toBe(providerError);
+  });
+
+  /**
+   * A model stop must not be relabelled by the new failure rule: the record's own reason lives
+   * in `stopReason`, and writing `errorMessage` on a `canceled` task would replace an audit
+   * trail nobody asked to have replaced.
+   */
+  test("a model stop still resolves canceled and carries no errorMessage", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    await h.registry.transition(
+      { kind: "stop", taskId: TASK_1, reason: "model stop" },
+      callContext(h, CALLER),
+    );
+
+    const resolved = await h.registry.transition(
+      {
+        kind: "resolve-exit",
+        taskId: TASK_1,
+        exitCode: 0,
+        outputBytes: 0,
+        childError: "child reported stopReason: error",
+      },
+      callContext(h, CALLER),
+    );
+
+    expect(resolved.record.status).toBe("canceled");
+    expect(resolved.record.errorMessage).toBeUndefined();
   });
 
   /**

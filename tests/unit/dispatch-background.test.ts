@@ -393,7 +393,13 @@ describe("dispatch background gates", () => {
       expect(refused.errorMessage).toContain("ptc_task_stop");
       expect(h.lifecycle.spawnCount).toBe(1);
 
-      // Terminal transition releases the slot for the next spawn.
+      // Terminal transition releases the slot for the next spawn. The child answers first:
+      // a silent exit-0 child is `failed` (issue #70), and this test is about the slot, not
+      // about the terminal verdict.
+      h.lifecycle.pushEvent(h.lifecycle.handleAt(0), {
+        type: "message_end",
+        message: { role: "assistant", content: [{ type: "text", text: "PONG" }] },
+      });
       h.clock.set(1500);
       h.lifecycle.resolveExit(h.lifecycle.handleAt(0), 0, null);
       const terminal = await waitForTerminal(h.storage, first.taskId);
@@ -475,7 +481,7 @@ describe("dispatch background gates", () => {
 // ---------------------------------------------------------------------------
 
 describe("dispatch background pump", () => {
-  test("drives succeeded on exit 0 and failed on exit 1 with the exit code and duration", async () => {
+  test("drives succeeded on exit 0 with text and failed on exit 1 with the exit code and duration", async () => {
     await withAgent(async (dir) => {
       const h = createHarness({ start: 1000 });
       const ok = asHandle(
@@ -498,6 +504,14 @@ describe("dispatch background pump", () => {
       expect((await h.storage.loadTask(ok.taskId))?.status).toBe("running");
       expect((await h.storage.loadTask(bad.taskId))?.status).toBe("running");
 
+      // ADR-0022 §2 (amended, issue #70): exiting 0 is not enough on its own — the child has to
+      // have produced assistant text. The healthy child answers "PONG"; the failing one is
+      // killed mid-flight and never gets a word out.
+      h.lifecycle.pushEvent(h.lifecycle.handleAt(0), {
+        type: "message_end",
+        message: { role: "assistant", content: [{ type: "text", text: "PONG" }] },
+      });
+
       h.clock.set(1500);
       h.lifecycle.resolveExit(h.lifecycle.handleAt(0), 0, null);
       h.lifecycle.resolveExit(h.lifecycle.handleAt(1), 1, null);
@@ -517,6 +531,113 @@ describe("dispatch background pump", () => {
       expect(badRecord.durationMs).toBe(500);
 
       expect(h.slots.active).toBe(0);
+    });
+  });
+
+  /**
+   * Issue #70, end to end through the real pump: a child that exits 0 having said nothing is
+   * recorded as `failed`, not `succeeded`. The fixture is the real 429 run from the report —
+   * pi writes an assistant `message_end` with an empty `content`, retries, and exits clean.
+   *
+   * Counterfactual: routing the pump back to `exitCode === 0 ? "succeeded" : "failed"` turns
+   * this red, and it is the assertion the *model* sees: before the fix `ptc_task_output`
+   * answered "(no output yet; task X is succeeded)".
+   */
+  test("a silent child that exits 0 is failed, not succeeded, and says why (issue #70)", async () => {
+    await withAgent(async (dir) => {
+      const h = createHarness({ start: 1000 });
+      const handle = asHandle(
+        await dispatch(
+          { agent: AGENT, task: "silent", background: true, agentScope: "project" },
+          { callId: 20, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          h.deps,
+        ),
+      );
+
+      // The real pi 0.87.1 shape: a retried-out turn leaves an assistant message with no text.
+      h.lifecycle.pushEvent(h.lifecycle.handleAt(0), {
+        type: "message_end",
+        message: { role: "assistant", content: [] },
+      });
+      h.clock.set(1500);
+      h.lifecycle.resolveExit(h.lifecycle.handleAt(0), 0, null);
+
+      const record = await waitForTerminal(h.storage, handle.taskId);
+      expect(record.status).toBe("failed");
+      expect(record.exitCode).toBe(0);
+      expect(record.errorMessage).toBe("dispatch produced no final text");
+      expect(record.outputBytes).toBe(0);
+      expect(h.slots.active).toBe(0);
+    });
+  });
+
+  /**
+   * The other half of issue #70: the provider's own reason reaches the record, so the model is
+   * told *why* rather than only *that*. The string is the captured 429 body from the report.
+   *
+   * Counterfactual: deleting `childAssistantError` (or not threading `childError` into the
+   * transition) turns this red.
+   */
+  test("the child's own error is written to the record so the model is told why (issue #70)", async () => {
+    await withAgent(async (dir) => {
+      const h = createHarness({ start: 1000 });
+      const handle = asHandle(
+        await dispatch(
+          { agent: AGENT, task: "rate-limited", background: true, agentScope: "project" },
+          { callId: 21, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          h.deps,
+        ),
+      );
+      const providerError =
+        '429 {"type":"error","error":{"type":"rate_limit_error","message":"已达到 Token Plan 用量上限"}}';
+
+      h.lifecycle.pushEvent(h.lifecycle.handleAt(0), {
+        type: "message_end",
+        message: {
+          role: "assistant",
+          stopReason: "error",
+          errorMessage: providerError,
+          content: [],
+        },
+      });
+      h.clock.set(1500);
+      h.lifecycle.resolveExit(h.lifecycle.handleAt(0), 0, null);
+
+      const record = await waitForTerminal(h.storage, handle.taskId);
+      expect(record.status).toBe("failed");
+      expect(record.errorMessage).toBe(providerError);
+    });
+  });
+
+  /**
+   * A healthy child ends its turn with `stopReason: "stop"`, not `"error"`. Reading the
+   * stopReason loosely would flip every successful child to `failed`; this guards against that
+   * over-correction, and fails if `childAssistantError` stops checking the value.
+   */
+  test("a normal stopReason is not mistaken for a failure (issue #70)", async () => {
+    await withAgent(async (dir) => {
+      const h = createHarness({ start: 1000 });
+      const handle = asHandle(
+        await dispatch(
+          { agent: AGENT, task: "healthy", background: true, agentScope: "project" },
+          { callId: 22, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          h.deps,
+        ),
+      );
+      h.lifecycle.pushEvent(h.lifecycle.handleAt(0), {
+        type: "message_end",
+        message: {
+          role: "assistant",
+          stopReason: "stop",
+          content: [{ type: "text", text: "PONG" }],
+        },
+      });
+      h.clock.set(1500);
+      h.lifecycle.resolveExit(h.lifecycle.handleAt(0), 0, null);
+
+      const record = await waitForTerminal(h.storage, handle.taskId);
+      expect(record.status).toBe("succeeded");
+      expect(record.errorMessage).toBeUndefined();
     });
   });
 

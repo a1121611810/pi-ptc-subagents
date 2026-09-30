@@ -37,6 +37,14 @@ describe("bgdispatch run-level subscriber (production shape)", () => {
     for (const spawned of stopped) await stopTask(h, spawned, "run-level stop");
     for (const spawned of wave) {
       const wasStopped = stopped.includes(spawned);
+      if (!wasStopped) {
+        // The child answers before it closes: an exit-0 child with no assistant text resolves
+        // `failed` (issue #70), and this test asserts the `succeeded` terminal events.
+        h.lifecycle.pushEvent(spawned.child, {
+          type: "message_end",
+          message: { role: "assistant", content: [{ type: "text", text: "PONG" }] },
+        });
+      }
       await settleExit(h, spawned, wasStopped ? null : 0, wasStopped ? "SIGTERM" : null);
     }
 

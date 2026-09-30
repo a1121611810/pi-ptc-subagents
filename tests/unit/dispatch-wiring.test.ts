@@ -138,7 +138,12 @@ describe("bindings.ts forwards DispatchContext + DispatchDeps (Gap 2 + Gap 4)", 
       const record = await storage.loadTask(handle.taskId);
       expect(record?.spawnSource).toEqual({ kind: "ptc-program", callerId: "run-1" });
 
-      // Terminal transition releases the slot (ADR-0022 §9).
+      // Terminal transition releases the slot (ADR-0022 §9). The child answers first: an
+      // exit-0 child with no assistant text is `failed` (issue #70).
+      lifecycle.pushEvent(firstHandle(lifecycle), {
+        type: "message_end",
+        message: { role: "assistant", content: [{ type: "text", text: "PONG" }] },
+      });
       lifecycle.resolveExit(firstHandle(lifecycle), 0, null);
       const terminal = await waitForTerminal(storage, handle.taskId);
       expect(terminal.status).toBe("succeeded");
@@ -243,7 +248,12 @@ describe("dispatcher.ts threads the per-run counter + session identity (Gap 2 + 
       expect(outcome.error).toBeUndefined();
       expect(injected.active).toBe(1);
       // The injected slot is the one the background branch acquired, and the terminal
-      // transition releases it (ADR-0022 §9).
+      // transition releases it (ADR-0022 §9). The child answers first: an exit-0 child with
+      // no assistant text is `failed` (issue #70).
+      lifecycle.pushEvent(firstHandle(lifecycle), {
+        type: "message_end",
+        message: { role: "assistant", content: [{ type: "text", text: "PONG" }] },
+      });
       lifecycle.resolveExit(firstHandle(lifecycle), 0, null);
       const taskId = outcome.value as ULID;
       const terminal = await waitForTerminal(storage, taskId);

@@ -147,8 +147,13 @@ export type TaskCommand =
   /**
    * ADR-0022 §8 / R-M1: the terminal decision for a child close lives *inside* the registry so
    * the read-and-write is serialized against a concurrent `stop`. The registry resolves
-   * `stopping -> canceled`, otherwise `running -> {succeeded | failed}` from `exitCode`; a
-   * terminal record is rejected rather than overwritten.
+   * `stopping -> canceled`, otherwise `running -> {succeeded | failed}` from `exitCode` and
+   * whether the child produced usable assistant text; a terminal record is rejected rather than
+   * overwritten.
+   *
+   * `childError` is the failure the child itself reported (issue #70): pi's JSONL carries it on
+   * the assistant `message_end` as `stopReason: "error"` plus `errorMessage`, and the
+   * subprocess still exits 0. Without it the record would be a failure with no diagnosis.
    */
   | {
       kind: "resolve-exit";
@@ -157,6 +162,7 @@ export type TaskCommand =
       outputRef?: string;
       outputBytes?: number;
       outputPreview?: string;
+      childError?: string;
     };
 
 /** Outcome of one successful command: the persisted record, emitted events, and cursor. */
@@ -258,6 +264,31 @@ const TERMINAL_STATUSES: ReadonlySet<TaskStatus> = new Set<TaskStatus>([
  * forever.
  */
 const RECOVERY_SOURCES: ReadonlySet<TaskStatus> = new Set<TaskStatus>(["running", "stopping"]);
+
+/**
+ * The message a `resolve-exit` writes onto the record, or `undefined` for "add nothing".
+ *
+ * The vocabulary is deliberately the foreground path's: {@link decideCloseOutcome} labels an
+ * exit-0 child with no text as `"dispatch produced no final text"` and leaves a non-zero exit
+ * unlabelled, because the spawn-error path already labelled its own failures. Issue #70's
+ * complaint was that foreground and background reached opposite conclusions *and* that the
+ * child's real reason was dropped, so the background path now reuses the wording and adds the
+ * one thing the foreground has no access to — the `stopReason: "error"` /`errorMessage` pair
+ * pi put on the assistant `message_end` before exiting 0.
+ */
+function resolveExitErrorMessage(
+  record: TaskRecord,
+  command: Extract<TaskCommand, { kind: "resolve-exit" }>,
+  to: TaskStatus,
+  producedText: boolean,
+): string | undefined {
+  // A model stop already won this edge: the reason lives in `stopReason`, and labelling the
+  // task as a failure would overwrite the audit trail with a diagnosis nobody asked for.
+  if (to === "canceled" || to === "succeeded") return undefined;
+  if (command.childError !== undefined) return command.childError;
+  if (command.exitCode === 0 && !producedText) return "dispatch produced no final text";
+  return undefined;
+}
 
 /** Runtime narrowing for the runtime-untrusted `to` field of a transition command. */
 function isTaskStatus(value: unknown): value is TaskStatus {
@@ -608,6 +639,13 @@ export class DefaultTaskRegistry implements TaskRegistry {
    * ADR-0022 §8 / R-M1: resolve one child close to its terminal state inside the writer. A
    * `stopping` record always resolves `canceled` (the model stop wins over the exit code); a
    * `running` record resolves from `exitCode`; a terminal record is rejected, never overwritten.
+   *
+   * ADR-0022 §2 (amended 2026-09-30, issue #70): `succeeded` requires the child to exit 0
+   * **and** to have produced assistant text. `decideCloseOutcome` already applies exactly that
+   * rule to the foreground path ("exit 0 without final text -> rejected, the model never
+   * answered"); the background path used to read the exit code alone, so a child that died on a
+   * 429 or a model error — no text, exit 0 — was recorded as a success the model was then told
+   * about, with `ptc_task_output` returning "(no output yet; task X is succeeded)".
    */
   async #resolveExit(
     command: Extract<TaskCommand, { kind: "resolve-exit" }>,
@@ -620,14 +658,22 @@ export class DefaultTaskRegistry implements TaskRegistry {
           "the single terminal writer refuses to overwrite it",
       );
     }
+    // The pump reports what the child drained. `outputBytes` is `Buffer.byteLength` of that
+    // text, so `> 0` is exactly the foreground path's `finalText.length > 0` on the same input.
+    const producedText = (command.outputBytes ?? 0) > 0;
     const to: TaskStatus =
-      record.status === "stopping" ? "canceled" : command.exitCode === 0 ? "succeeded" : "failed";
+      record.status === "stopping"
+        ? "canceled"
+        : command.exitCode === 0 && producedText
+          ? "succeeded"
+          : "failed";
     this.#assertAllowed(record, to);
     return this.#apply(record, to, ctx, {
       exitCode: command.exitCode,
       outputRef: command.outputRef,
       outputBytes: command.outputBytes,
       outputPreview: command.outputPreview,
+      errorMessage: resolveExitErrorMessage(record, command, to, producedText),
     });
   }
 

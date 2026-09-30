@@ -379,6 +379,12 @@ describe("terminal delivery channel follows turn activity", () => {
       await stub.emit("session_start", ctx);
       const handle = await spawnBackground(runtime, dir, 21);
 
+      // The child answers before it closes: an exit-0 child with no assistant text is
+      // `failed` (issue #70), and the notification would then say so.
+      lifecycle.pushEvent(lifecycle.spawned[0] as ChildHandle, {
+        type: "message_end",
+        message: { role: "assistant", content: [{ type: "text", text: "PONG" }] },
+      });
       lifecycle.resolveExit(lifecycle.spawned[0] as ChildHandle, 0, null);
       await waitFor(() => stub.sentUserMessages.length > 0);
 

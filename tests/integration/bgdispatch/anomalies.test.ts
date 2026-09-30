@@ -144,8 +144,13 @@ describe("bgdispatch anomalies", () => {
     });
     pushEvent(h, spawned, { type: "message_end" });
 
-    const record = await completeTask(h, spawned, 0);
-    expect(record.status).toBe("succeeded");
+    // Explicitly empty output: this scenario is about the parse boundary, and a child whose
+    // every event was junk produced no assistant text. Since issue #70 that is a `failed`
+    // task, not a `succeeded` one — the same "child said nothing" case the pump test covers
+    // from the dispatch side.
+    const record = await completeTask(h, spawned, 0, "");
+    expect(record.status).toBe("failed");
+    expect(record.errorMessage).toBe("dispatch produced no final text");
     // Only assistant message_end text is captured; the junk events contribute 0 bytes, so the
     // run's explicit outcome is an empty preview rather than a fabricated payload.
     expect(record.outputBytes).toBe(0);

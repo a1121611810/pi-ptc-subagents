@@ -959,6 +959,33 @@ function assistantText(event: ParsedAgentEvent): string | undefined {
 }
 
 /**
+ * The failure pi reported about the child's own turn, if any (issue #70).
+ *
+ * A child that hits a rate limit or a model error still exits 0: pi writes the reason onto the
+ * assistant `message_end` as `stopReason: "error"` + `errorMessage` with an empty `content`,
+ * retries a few times, and exits clean. The exit code therefore carries no signal at all, and
+ * `assistantText` (correctly) returns nothing — so without this the background pump had no way
+ * to tell a silent failure from a silent success. Real captured shape, pi 0.87.1:
+ *
+ * ```json
+ * {"type":"message_end","message":{"role":"assistant","stopReason":"error",
+ *  "errorMessage":"429 {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",...}}",
+ *  "content":[]}}
+ * ```
+ *
+ * Only `stopReason === "error"` counts. A normal turn ends with `stopReason: "stop"`, and
+ * treating every stopReason as a failure would mark healthy children failed.
+ */
+function childAssistantError(event: ParsedAgentEvent): string | undefined {
+  if (event.type !== "message_end" || event.message?.role !== "assistant") return undefined;
+  const message = event.message;
+  if (message.stopReason !== "error") return undefined;
+  const detail = message.errorMessage;
+  if (typeof detail === "string" && detail.trim().length > 0) return detail.trim();
+  return "child reported stopReason: error";
+}
+
+/**
  * Background branch of {@link dispatch} (ADR-0022 §1/§3/§4/§9). It applies the same depth
  * and concurrency gates as the foreground path, spawns the child, registers a `running`
  * TaskRecord, starts a detached pump driving the terminal transition from the child's close
@@ -1091,10 +1118,15 @@ async function dispatchBackground(
     // the handle at once.
     void (async (): Promise<void> => {
       let output = "";
+      let childError: string | undefined;
       try {
         for await (const event of lifecycle.events(handle)) {
           const text = assistantText(event);
           if (text !== undefined) output = text;
+          // The last error wins: a child that retried and then gave up reports the reason that
+          // ended it, not the first transient one.
+          const error = childAssistantError(event);
+          if (error !== undefined) childError = error;
         }
         // The child has closed: no further signal may be delivered, and a pending escalation is
         // cleared before it can fire against a reaped handle (issue #68 §1).
@@ -1130,9 +1162,20 @@ async function dispatchBackground(
 
         // ADR-0022 §8 signal layering / R-M1: the registry resolves the terminal state under its
         // write lock — a model stop already at `stopping` wins and resolves `canceled`, while
-        // a running child resolves from the exit code. No read-then-write race in the pump.
+        // a running child resolves from the exit code and whether it produced text. No
+        // read-then-write race in the pump. `childError` is the reason the child itself gave
+        // (issue #70): an exit-0 child that reported `stopReason: "error"` and no assistant
+        // text is a failure, and the record has to say why.
         await registry.transition(
-          { kind: "resolve-exit", taskId, exitCode, outputRef, outputBytes, outputPreview },
+          {
+            kind: "resolve-exit",
+            taskId,
+            exitCode,
+            outputRef,
+            outputBytes,
+            outputPreview,
+            childError,
+          },
           { clock, callerId, logger },
         );
       } catch (err) {

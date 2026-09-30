@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **A background task that produced no answer is no longer reported as a
+  success (#70, field report).** A child that hits a rate limit or a model
+  error still exits 0: pi writes the reason onto the assistant `message_end`
+  as `stopReason: "error"`, retries, and closes clean. The background pump
+  read the exit code alone, so such a task was recorded `succeeded` and the
+  model was told it had worked — while `ptc_task_output` answered "(no output
+  yet; task X is succeeded)". `succeeded` now requires the child to exit 0
+  **and** to have produced assistant text, which is the rule
+  `decideCloseOutcome` already applied to the foreground path; one failure now
+  has one verdict and one sentence in both paths. A failing `resolve-exit`
+  writes `errorMessage`, and the child's own `stopReason: "error"` text is
+  carried onto the record so the model is told _why_, not only _that_
+  (ADR-0022 §2, amended). A non-zero exit is still left unlabelled and a model
+  stop still resolves `canceled` — neither is relabelled by this change.
+
 ## [1.1.1] - 2026-09-30
 
 ### Fixed
