@@ -853,11 +853,17 @@ describe("dispatch foreground", () => {
     await withAgent(async (dir) => {
       const h = createHarness();
       spawnRecorder.calls = 0;
-      const result = await dispatch(
+      // The foreground branch now honours the INJECTED lifecycle, so nothing real is spawned and
+      // the test drives the mock's exit. Before the seam it spawned a real child through the module
+      // level lifecycle, which is why this test used to take half a second and needed a real pi.
+      const settled = dispatch(
         { agent: AGENT, task: "ping", agentScope: "project" },
         { callId: 3, cwd: dir, depth: 0, maxDispatchDepth: 3 },
         h.deps,
       );
+      await waitFor(() => h.lifecycle.spawnCount > 0);
+      h.lifecycle.resolveExit(h.lifecycle.handleAt(0), 0, null);
+      const result = await settled;
 
       // Exact DispatchResult outcome produced by the mocked clean close with no assistant text.
       expect(result.status).toBe("rejected");
@@ -866,10 +872,16 @@ describe("dispatch foreground", () => {
       expect(result.started).toBe(true);
       expect("taskId" in result).toBe(false);
 
-      // The background seams were never touched and no TaskRecord was written.
-      expect(spawnRecorder.calls).toBe(1);
-      expect(h.lifecycle.spawnCount).toBe(0);
+      // One child, launched through the INJECTED lifecycle. That is the change round 5 made:
+      // the foreground branch used to read the module-level lifecycle only, so this line used
+      // to read 1 with the mock at 0, and a test could not assert that a saturated counter
+      // launches nothing without watching a real process on PATH. The seam is now honest for
+      // both fronts.
+      expect(h.lifecycle.spawnCount).toBe(1);
+      expect(spawnRecorder.calls, "the module-level lifecycle was not used").toBe(0);
+      // The slot is back: finalize is the one release, and this call reached it.
       expect(h.slots.active).toBe(0);
+      // The BACKGROUND seams really are still untouched, which is what this test is for.
       expect(await allTasks(h.storage)).toEqual([]);
     });
   });

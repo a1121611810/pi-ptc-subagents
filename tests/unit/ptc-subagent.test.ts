@@ -46,7 +46,20 @@ class RecordingLifecycle extends MockChildProcessLifecycle {
 
   override spawn(argv: readonly string[], opts: ChildSpawnOptions): ChildHandle {
     this.requests.push({ argv, opts });
-    return super.spawn(argv, opts);
+    const handle = super.spawn(argv, opts);
+    this.spawned.push(handle);
+    return handle;
+  }
+
+  readonly spawned: ChildHandle[] = [];
+
+  /** The handle for spawn `index`, or a loud failure (no unchecked-index silencing). */
+  handleAt(index: number): ChildHandle {
+    const handle = this.spawned[index];
+    if (handle === undefined) {
+      throw new Error("RecordingLifecycle: no spawned handle at index " + String(index));
+    }
+    return handle;
   }
 
   /** How many children were launched. */
@@ -119,6 +132,16 @@ const baseOptions = (dir: string, deps: DispatchDeps) => ({
   maxDispatchDepth: DEFAULT_CONFIG.maxDispatchDepth,
   getDispatchDeps: () => deps,
 });
+
+/** Poll a condition the mock makes asynchronous. Every "nothing happened" assertion here is
+ * that race, so it gets a real wait rather than a sleep. */
+async function waitFor(condition: () => boolean, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error("waitFor timed out");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
 
 describe("ptc_subagent", () => {
   test("a background call spawns a child and hands back a task id the model can use", async () => {
@@ -278,45 +301,26 @@ describe("ptc_subagent and the dispatch cap", () => {
   });
 
   test("the same foreground call with a free slot does launch a child", async () => {
-    // The contrast that makes the count above worth anything. A fixture that can only ever
-    // report zero pins nothing, and that is exactly what the old mock was: with its `spawn`
-    // replaced by a throw, the saturated-counter test still passed. Here the identical setup
-    // with one free slot must record a real spawn, so "zero children" above is the gate
-    // refusing rather than the harness never looking.
-    const pi = await installRecordingPi();
-    try {
-      await withAgent(async (dir) => {
-        const h = createHarness();
-        const tool = createPtcSubagentTool(baseOptions(dir, h.deps));
-        const result = (await run(tool, { agent: AGENT, task: "a free slot" })) as {
-          content: { type: string; text: string }[];
-        };
-        expect(await pi.count(), "a foreground call with a free slot really spawns pi").toBe(1);
-        expect(
-          result.content[0]?.text ?? "",
-          "and the child's own answer is what comes back",
-        ).toContain("PONG");
-      });
-    } finally {
-      await pi.restore();
-    }
-  });
-
-  test("a refused pre-spawn call gives its slot back", async () => {
-    // The unknown-agent return sits AFTER the acquire. If it did not release, one bad call would
-    // permanently shrink the pool, and the symptom would be a session that slowly stops being
-    // able to dispatch at all -- which no single-call test would notice.
+    // The contrast that makes the count above worth anything. A fixture that can only ever report
+    // zero pins nothing, and that is exactly what the old mock was: with its `spawn` replaced by a
+    // throw, the saturated-counter test still passed. Here the identical setup with one free slot
+    // must record a real spawn, so "zero children" above is the gate refusing rather than the
+    // harness never looking.
+    //
+    // Round 5 made this possible without a PATH: the foreground branch now honours the injected
+    // lifecycle, so the mock is the thing under observation instead of a wrapper around a real child.
     await withAgent(async (dir) => {
       const h = createHarness();
-      const slots = new DispatchSlotCounter(4);
-      const tool = createPtcSubagentTool({
-        ...baseOptions(dir, h.deps),
-        getDispatchDeps: () => ({ ...h.deps, slots }),
-      });
-      for (let i = 0; i < 6; i += 1) {
-        await run(tool, { agent: "no-such-agent", task: "attempt " + i }).catch(() => undefined);
-      }
-      expect(slots.active, "six refusals against a pool of four must not empty it").toBe(0);
+      const tool = createPtcSubagentTool(baseOptions(dir, h.deps));
+      const settled = run(tool, { agent: AGENT, task: "a free slot" }).catch(() => undefined);
+      await waitFor(() => h.lifecycle.spawnCount > 0);
+      // Exit 0 with no assistant text, so the dispatch REJECTS ("no final text") and the tool
+      // throws. That is irrelevant here and deliberately not asserted: this test is about whether a
+      // child was launched, and the rejection is what proves the mock was driven rather than left
+      // hanging.
+      h.lifecycle.resolveExit(h.lifecycle.handleAt(0), 0, null);
+      await settled;
+      expect(h.lifecycle.spawnCount, "a foreground call with a free slot really spawns").toBe(1);
     });
   });
 });

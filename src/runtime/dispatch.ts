@@ -122,10 +122,11 @@ const FALLBACK_DISPATCH_SLOTS: DispatchSlotCounter = new DispatchSlotCounter(
 );
 
 /**
- * Injected dependencies for the background branch. The foreground path ignores this object
- * entirely (it uses the module-level {@link DISPATCH_LIFECYCLE}); every field is optional so
- * existing zero-argument call sites keep working. Tests pass an in-memory registry and a
- * mock lifecycle so no real `pi` process is ever spawned.
+ * Injected dependencies. The background branch uses this object for everything; the foreground
+ * branch uses `slots` (the one cap both fronts share since ADR-0026 round 3) and
+ * `lifecycle`. Every field is optional so existing zero-argument call sites keep working, and
+ * both branches fall back to the module-level {@link DISPATCH_LIFECYCLE}. Tests pass an
+ * in-memory registry and a mock lifecycle so no real `pi` process is ever spawned.
  */
 export interface DispatchDeps {
   /** Session-level TaskRegistry (ADR-0022 §3). Defaults to a lazy in-memory registry. */
@@ -1313,6 +1314,11 @@ export async function dispatch(
   // and the session can never dispatch again. This is the same class of bug the gate fix was for,
   // so it gets the same treatment: the region between acquire and release owns its own cleanup.
   let tmp: { dir: string; filePath: string };
+  // The foreground branch resolved the lifecycle from module scope only, so its spawn could not be
+  // injected: a test asserting that a saturated counter launches NOTHING had to observe a real
+  // child process through a recording `pi` on PATH, because the mock lifecycle in deps was never
+  // consulted. One line makes the seam honest for both fronts, and those tests stop touching PATH.
+  const lifecycle = deps.lifecycle ?? DISPATCH_LIFECYCLE;
   let argv: readonly string[];
   try {
     tmp = await writePromptToTempFile(agent.name, fullPrompt);
@@ -1365,7 +1371,7 @@ export async function dispatch(
       // ADR-0016 §4: SIGTERM, then SIGKILL after the shared grace window. The lifecycle
       // adapter's kill() absorbs "process already gone" throws via safeKill, so the escalation
       // is safe to schedule unconditionally; `isDone` stops it after finalize clears it.
-      cancelKillEscalation = killWithEscalation(DISPATCH_LIFECYCLE, handle, {
+      cancelKillEscalation = killWithEscalation(lifecycle, handle, {
         isDone: () => resolved,
       });
     };
@@ -1374,7 +1380,7 @@ export async function dispatch(
     // stderr pipes, JSONL parsing, and the close / error event handlers; this function
     // is left to accumulate usage / finalText and decide the close outcome.
     try {
-      handle = DISPATCH_LIFECYCLE.spawn(
+      handle = lifecycle.spawn(
         // argv[0] is the command per the ChildProcessLifecycle contract; the rest are
         // forwarded verbatim. PI_COMMAND stays "pi" — see the constant's doc for why
         // we don't reuse process.execPath.
@@ -1407,7 +1413,7 @@ export async function dispatch(
       if (!handle) return;
       const h = handle;
       try {
-        for await (const ev of DISPATCH_LIFECYCLE.events(h)) {
+        for await (const ev of lifecycle.events(h)) {
           if (ev.type === "message_end" && ev.message && ev.message.role === "assistant") {
             const m = ev.message;
             if (m.usage) {
