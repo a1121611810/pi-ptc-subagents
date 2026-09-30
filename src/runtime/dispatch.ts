@@ -1304,9 +1304,23 @@ export async function dispatch(
   }
 
   const fullPrompt = appendDepthHint(agent.systemPrompt, childDepth, ctx.maxDispatchDepth);
-  const tmp = await writePromptToTempFile(agent.name, fullPrompt);
 
-  const argv = buildArgv(input, agent, tmp.filePath);
+  // Between the acquire above and the Promise whose `finalize` is the one release, there is an
+  // await and a call that can both throw -- a TMPDIR that is a file makes mkdtemp ENOTDIR, and
+  // buildArgv throws on a malformed argument. Neither path reaches `finalize`, so without this the
+  // slot is never returned. Measured at round 4: one such failure left `slots.active` at 1, where
+  // the pre-round-3 accounting returned it. The counter here is the SESSION one, so eight of those
+  // and the session can never dispatch again. This is the same class of bug the gate fix was for,
+  // so it gets the same treatment: the region between acquire and release owns its own cleanup.
+  let tmp: { dir: string; filePath: string };
+  let argv: readonly string[];
+  try {
+    tmp = await writePromptToTempFile(agent.name, fullPrompt);
+    argv = buildArgv(input, agent, tmp.filePath);
+  } catch (error) {
+    slots.release();
+    throw error;
+  }
 
   return await new Promise<DispatchResult>((resolve) => {
     let finalText = "";

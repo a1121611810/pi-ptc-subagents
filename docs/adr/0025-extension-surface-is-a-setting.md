@@ -43,7 +43,10 @@ values, the _orchestration surface_ it chooses between, and the _subagent surfac
    invented one. It reuses `dispatch()` unchanged, so `maxDispatchDepth`,
    `dispatchConcurrency` and the background registry all keep applying, and a spawned task
    is visible to `ptc_task_list` / `ptc_task_output` / `ptc_task_stop` exactly as one spawned
-   from a program is.
+   from a program is. `dispatchConcurrency` here means the **session** cap, not a per-tool one:
+   this tool spends the same counter a PTC program does, so two `ptc_subagent` calls and a
+   program's dispatch calls contend for the same 8 (ADR-0016's round-4 amendment; ADR-0022 §9 as
+   amended).
 2. **The `surfaceMode` key** in `ptc.json`, beside `defaultMode`, read **once before
    registration** so the decision is available to the `registerTool` calls rather than
    arriving a turn later.
@@ -91,7 +94,12 @@ values, the _orchestration surface_ it chooses between, and the _subagent surfac
   the key.
 - `ptc_subagent` is a second front for one dispatcher. Two entry points means the depth and
   concurrency rules are enforced in one place, which is the point of decision 7, and the
-  risk that a future change touches only one front.
+  risk that a future change touches only one front. The review that closed the hole this
+  record shipped (round 2, finding R2-2) showed the other side of the same coin: a front
+  that bypasses the one place is not merely a second code path, it is an **ungated** one.
+  Moving the cap into `dispatch()` closed it, and as a result the cap is now a single
+  session counter shared by this tool, the binding, and background children — the one owner
+  is now also the only budget.
 
 ## Known limitations
 
@@ -101,7 +109,13 @@ values, the _orchestration surface_ it chooses between, and the _subagent surfac
   removing a duplicate surface, not about routing the work to the better engine.
 - The warning in decision 4 is a `ui.notify`, which is TUI-only. A `--print` session in
   `subagents` without `codemode` gets no warning, and that is a real gap rather than a
-  deliberate omission.
+  deliberate omission. This one is genuinely inherited: decision 4 belongs to this record.
+  It is **not** true of the two notices ADR-0026 adds, which are new with detection and are
+  measured silent on `--print` — see ADR-0026's known-gap paragraph.
+- The decision-4 warning asks whether `codemode` is **active**, so it cannot see the one case
+  that produces a `subagents` surface with no orchestrator at all: `--no-extensions`, or
+  `--exclude-tools codemode`, where the probe finds `codemode` on disk and the session has no
+  such tool. ADR-0026 decision 8 is what covers it.
 - Nothing here is measured for crash rate. The orchestration surface the model uses in
   `subagents` mode is pi's, so ADR-0024's binding contract does not reach it: a
   `codemode` program still infers a nested tool's shape from its description. That is pi's
@@ -132,7 +146,8 @@ subagents.
 - docs/research/codemode-vs-ptc-capability-20260930.md: the measured capability
   comparison this record's context rests on.
 - [ADR-0016](./0016-ptc-dispatch-binding.md): `pi.dispatch` and the depth and
-  concurrency rules `ptc_subagent` inherits unchanged.
+  concurrency rules `ptc_subagent` inherits — the depth rule unchanged, the
+  concurrency rule as amended on 2026-09-30 to be one session counter.
 - [ADR-0022](./0022-background-dispatch.md): the six-state lifecycle behind the
   `ptc_task_*` face.
 - [ADR-0024](./0024-binding-contract-declares-binding-result.md): the declaration that

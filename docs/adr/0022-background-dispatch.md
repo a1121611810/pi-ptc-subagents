@@ -14,6 +14,16 @@ Status: accepted (2026-09-24). Behavior change on the program-visible side (new 
 > panel stays the presentation half of the three `ptc_task_*` tools, and ADR-0013 §6's eight
 > `render.ts` caps keep their own source and their own table.
 
+> **Amended by §9 (2026-09-30, review round 4): the cap is one session counter, not a per-run
+> one.** §9 was titled "Concurrency and depth caps: unchanged from ADR-0016" and said nothing about
+> counter scope. It is no longer accurate to call the concurrency cap unchanged, and the change is
+> recorded where the section already said nothing needed recording. `dispatchConcurrency` is now a
+> **single `DispatchSlotCounter` per pi session**, acquired inside `dispatch()` and therefore shared
+> by every front: concurrent programs in the same session, `ptc_subagent` calls, and background
+> children. Before, the cap on the program path was per-run and background children counted against
+> a session one. The two observable consequences are in §9 as amended, and the measurement behind
+> them is in ADR-0016's round-4 amendment. The depth cap is genuinely unchanged.
+
 > **Amended by §2 (2026-09-30, issue #70): the `succeeded` trigger.** §2 originally read
 > "child exits 0", and that literal trigger was wrong: pi exits 0 when a child runs out of rate
 > limit or dies on a model error, so a task that produced no answer at all was recorded as a
@@ -72,7 +82,7 @@ TaskStorage interface is unchanged and both adapters are kept.
 
 1. **No `/ptc off` orphan** -- map Notes clause 5: in-flight tasks continue to deliver notifications and update TaskRecord even when `/ptc off` is on. The mode toggle affects _new spawn_ (ADR-0016 R6); it does not affect in-flight lifecycle.
 
-2. **No spawned-into-quota** -- the existing `dispatchConcurrency` (default 8, ADR-0016) is the only concurrency gate. There is no in-task queue (`queued` state absent, per G1). Spawn above the cap resolves with `rejected` immediately. codex's `agent_max_depth` analogue maps to the existing `maxDispatchDepth` (default 3, ADR-0016 recursive section).
+2. **No spawned-into-quota** -- the existing `dispatchConcurrency` (default 8, ADR-0016) is the only concurrency gate, and since the round-4 amendment it is one session-wide counter shared with the foreground path rather than a gate background alone. There is no in-task queue (`queued` state absent, per G1). Spawn above the cap resolves with `rejected` immediately. codex's `agent_max_depth` analogue maps to the existing `maxDispatchDepth` (default 3, ADR-0016 recursive section).
 
 3. **No transparency into the spawned child's tool-calling** -- the model sees `dispatched <label> -> <taskId>` once; mid-flight it sees nothing. Live child state moves to the TUI backend panel (P1), not to the sub-call tree. (G1 verdict section 5.)
 
@@ -227,11 +237,13 @@ Three `lost` reasons are named (distinct strings in `errorMessage` field) to pre
 
 Late-arrival stop: if model sends `ptc_task_stop` while the child is already `stopping`, the call is idempotent (cursor advances past `canceled` once, not twice). codex's `start_or_steer_turn` semantic with `interrupt:true` first cancels, then delivers -- we don't need that here because the binding is fire-and-forget (cursor advances, not the child turn itself).
 
-### 9. Concurrency and depth caps: unchanged from ADR-0016
+### 9. Concurrency and depth caps: the cap is one session counter; the depth cap is unchanged from ADR-0016
 
-- `dispatchConcurrency` = 8 (ADR-0016) -- hard reject above cap, no in-task queue.
-- `maxDispatchDepth` = 3 (ADR-0016 recursive section) -- same cap on background as on foreground.
-- Background tasks **count against** `dispatchConcurrency` while running (per Q3 resolved `completed tasks don't count toward cap` rule from codex; G2 v4 prototype confirmed -- burst scenarios at 100/500 tasks all delivered without overflow).
+- `dispatchConcurrency` = 8 (ADR-0016) -- hard reject above cap, no in-task queue. The cap is **one counter per pi session**, not per run, and it is acquired inside `dispatch()` so that one owner gates every front.
+- `maxDispatchDepth` = 3 (ADR-0016 recursive section) -- same cap on background as on foreground. Unchanged.
+- Background tasks **count against** `dispatchConcurrency` while running (per Q3 resolved `completed tasks don't count toward cap` rule from codex; G2 v4 prototype confirmed -- burst scenarios at 100/500 tasks all delivered without overflow). Since the 2026-09-30 round-4 amendment they count against the _same_ counter the foreground path uses, rather than a second one held beside it.
+- **What that costs, stated as a consequence rather than a side effect.** Two programs running concurrently in one session now share 8 rather than 8 each, and a program sharing a session with eight live background children can be refused **every** foreground slot. Measured: two concurrent programs at 24 foreground calls each went from 16 spawned to 8, and 8 live background children plus one program at 24 foreground calls went from 8 foreground spawned to **0**. The last is not a rounding difference. Because the refusal is a hard reject with no queue, a foreground call is not made to wait for a background child to finish; if a session needs foreground headroom while long background children are live, it needs a bigger cap, not a later retry.
+- **Where the cap is sized.** The session counter is built by `createBackgroundTaskRuntime({ concurrency })` in `src/index.ts`, with the value taken from `PtcConfig.dispatchConcurrency` (default 8). That constructor call is the live control for a pi session, and it governs both fronts; the per-run counter the dispatcher used to own is no longer consulted once a session supplies one.
 
 ### 10. Reverse query, handoff, resume: deferred to v2
 
@@ -311,6 +323,8 @@ The flip preserves ADR-0016's other invariants:
 - binding is called by the program, not by the model's tool-call surface
 - no per-call gate on bindings
 - Promise semantics (no throw) for foreground
+
+One invariant is **not** preserved, and it should be named rather than left for the next reader to discover: the dispatch concurrency cap is no longer a per-run budget. It is one session counter, so "this run may have eight children in flight" is no longer a statement about this run. §9 as amended gives the measurement; the depth cap and the untrusted-input boundary are untouched.
 
 What changes: the **result tree** now contains a `DispatchHandle` (background) or `DispatchResult` (foreground), not just `DispatchResult`. The model can still not _call_ `pi.dispatch`; it can only observe tasks that the program called.
 

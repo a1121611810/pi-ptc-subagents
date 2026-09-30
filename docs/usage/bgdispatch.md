@@ -25,8 +25,9 @@ something else, a batch of children fanned out from one program.
 | observation        | the return value                        | `ptc_task_list` / `ptc_task_output` / `ptc_task_stop` and `<bg-task-notification>` events                                                      |
 | failure            | `status: "rejected"` on the result      | a terminal `TaskStatus` on the `TaskRecord`                                                                                                    |
 
-Both forms share the same depth and concurrency gates (see [Limits](#limits)). A pre-spawn refusal
-uses the foreground `DispatchResult` shape, so a background call returns either a
+Both forms share the same depth and concurrency gates — and, since the concurrency gate moved into
+`dispatch()`, they share one **counter** for them rather than one each (see [Limits](#limits)). A
+pre-spawn refusal uses the foreground `DispatchResult` shape, so a background call returns either a
 `DispatchHandle` **or** a refusal `DispatchResult`.
 
 ## Spawning
@@ -269,14 +270,36 @@ subscription unchanged.
 
 ## Limits
 
-Two per-run caps apply to background dispatch exactly as they do to foreground; both are
-`PtcConfig` fields.
+Two caps apply to dispatch; both are `PtcConfig` fields, and the first is no longer per-run.
 
-- **`dispatchConcurrency` — default 8.** A hard cap on concurrently in-flight dispatches per run.
-  The N+1th resolves immediately with
+- **`dispatchConcurrency` — default 8, one counter per pi session.** A hard cap on concurrently
+  in-flight dispatches across the whole session. The N+1th resolves immediately with
   `{ status: "rejected", errorMessage: "dispatch concurrency limit reached" }` — never queued.
   A background task **counts against the cap for its whole lifetime**, from spawn to its terminal
   transition, not just until `pi.dispatch` returns.
+
+  Three things follow, and they are the difference from the per-run cap this used to be:
+
+  - **Foreground and background draw on the same 8.** A session with eight long background children
+    running has no foreground dispatch headroom left, and a program issuing
+    `Promise.all([...pi.dispatch])` in that state gets **every** call refused. Measured, with a real
+    fake-`pi` spawn and 24 concurrent foreground calls: 8 live background children plus one program
+    went from 8 foreground calls spawned to **0**. That is not a rounding difference.
+  - **Two concurrent programs share it.** Measured: two programs at 24 foreground calls each went
+    from 16 spawned to 8. One program on its own is unchanged (8 of 24, before and after), which is
+    why the change survived three review rounds.
+  - **A refusal is not a wait.** Because the overflow is a hard reject with no queue, a foreground
+    call is never parked behind a background child that has twenty minutes left to run. If a
+    session needs both, raise the cap rather than retrying.
+
+  **The live control is `createBackgroundTaskRuntime({ concurrency })`** — the call that builds the
+  session counter, in `src/index.ts`, handed the value of `PtcConfig.dispatchConcurrency`. It is not
+  a background-only knob: it is the session's whole dispatch budget. The `dispatchConcurrency` a
+  caller passes to `runPtcProgram({ config })` sizes the dispatcher's own per-run counter, and that
+  counter is only reached when no session counter is supplied; in a pi session one always is, so the
+  per-run one is not what enforces the cap you are looking at. `ptc_subagent` spends this same
+  counter, so two of those calls contend with a program's dispatches for the same slots.
+
 - **`maxDispatchDepth` — default 3.** Each dispatch computes `childDepth = parentDepth + 1` and is
   rejected when `childDepth > maxDispatchDepth` with
   `{ status: "rejected", errorMessage: "dispatch depth limit reached" }`. The child subprocess also

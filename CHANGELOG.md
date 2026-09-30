@@ -26,11 +26,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   list.
 
   A detection the user cannot see is the one failure this design has, so the outcome is
-  reported: a TUI session with no `surfaceMode` set is told how the probe came out whenever
-  it could not answer, and which surface the default therefore is. The expected case — a pi
-  that ships `codemode`, detected as `subagents` — stays silent. The notice is `ui.notify`,
-  so a `--print` session gets no line; that gap is the one ADR-0025 already records for the
-  surface-mode warnings.
+  reported: at session start, through the TUI notification channel, a session with no
+  `surfaceMode` set is told how the probe came out whenever it could not answer, and which
+  surface the default therefore is. The expected case — a pi that ships `codemode`, detected as
+  `subagents` — stays silent. A second notice covers the case the probe structurally cannot
+  see: it walks the filesystem, so under `--no-extensions` or `--exclude-tools codemode` it
+  answers `present` for a tool the session does not have. `session_start` cross-checks the
+  probe against pi's own `getAllTools()` and reports a disagreement in either direction.
+
+  Both notices are `ui.notify`, which is TUI-only — and that gap is **new here**, not inherited:
+  measured, three `--print` runs that each emit one produced 0 bytes on stdout and 0 on
+  stderr. The README is the only channel on which a `--print` user learns why they got the
+  surface they got. What is established is that the outcome is issued through the documented
+  TUI channel; no test observes either notice end to end through a real pi TUI.
 
 - **The model-facing surface is now a setting, and a subagent can be started
   without writing a program (ADR-0025).** A new `surfaceMode` key in
@@ -74,6 +82,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   10/16 to 11/16 while the control arm moved 15/16 to 13/16, which is this
   harness's noise floor
   (`docs/research/ptc-binding-contract-re-measurement-20260930.md`).
+
+### Changed
+
+- **The dispatch concurrency cap is one counter per session, not one per run.** The acquire
+  moved out of the dispatcher and into `dispatch()`, so a single `DispatchSlotCounter` now
+  serves every front: concurrent programs in the same session, the `ptc_subagent` tool, and
+  background children. The value is still `PtcConfig.dispatchConcurrency` (default 8) and the
+  refusal shape is unchanged; what changed is whose calls the cap counts.
+
+  This reduces effective concurrency in two measurable ways, and neither is a rounding
+  difference — 24 concurrent foreground calls against a real fake-`pi` spawn:
+
+  - two concurrent programs that could each have 8 in flight now share 8 (16 spawned -> 8);
+  - a program sharing a session with 8 live background children can now be refused **every**
+    foreground slot (8 foreground spawned -> 0). The refusal is a hard reject with no queue, so
+    an over-cap call is not parked behind a long-running child.
+
+  A single program on its own is unchanged (8 of 24, before and after), which is why the
+  change passed three review rounds. ADR-0016 §2 and ADR-0022 §9 are amended; the depth cap is
+  not.
+
+  The knob is now live rather than dead: the live control is
+  `createBackgroundTaskRuntime({ concurrency })`, which sizes the session counter from
+  `PtcConfig.dispatchConcurrency`. Passing `dispatchConcurrency` through
+  `runPtcProgram({ config })` no longer sizes the cap a pi session uses (measured: 2
+  configured, 8 dispatched).
 
 ### Fixed
 

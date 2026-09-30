@@ -37,13 +37,26 @@ export interface PtcConfig {
    */
   maxParallelSubCalls: number;
   /**
-   * Per-run hard cap on concurrently in-flight `pi.dispatch(...)` calls,
-   * enforced by the dispatcher: the next concurrent call resolves
-   * immediately with `{ status: "rejected", errorMessage: "dispatch
-   * concurrency limit reached" }` — never queued, never spawned.
+   * Hard cap on concurrently in-flight dispatch in ONE pi session, not
+   * per run. Enforced inside `dispatch()` by a single
+   * `DispatchSlotCounter`, so every front spends it: concurrent programs,
+   * the `ptc_subagent` tool, and background children (which hold their
+   * slot for the task's whole lifetime). The next call over the cap
+   * resolves immediately with `{ status: "rejected", errorMessage:
+   * "dispatch concurrency limit reached" }` — never queued, never
+   * spawned, and never parked behind a long-running child.
    * Default 8, matches pi's `subagent` extension `MAX_PARALLEL_TASKS`.
-   * ADR-0016 section 2. Independent of `maxParallelSubCalls`: builtin
-   * calls never consume a dispatch slot and vice versa.
+   * ADR-0016 section 2 (as amended 2026-09-30), ADR-0022 section 9.
+   *
+   * Where the number is READ from is the counter's construction, not
+   * this field alone: a pi session's counter is built by
+   * `createBackgroundTaskRuntime({ concurrency })` with this value, and
+   * the dispatcher hands the binding `options.dispatchDeps?.slots ??
+   * dispatchSlots` — so a `runPtcProgram({ config })` override sizes only
+   * the per-run counter, which a pi session never reaches.
+   *
+   * Independent of `maxParallelSubCalls`: builtin calls never consume a
+   * dispatch slot and vice versa.
    */
   dispatchConcurrency: number;
   /** Maximum recursion depth for `pi.dispatch`. The child PTC run spawned by

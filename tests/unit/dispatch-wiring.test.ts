@@ -42,12 +42,25 @@ import {
 import { runPtcProgram } from "../../src/runtime/dispatcher.ts";
 import { createPtcRunCodeTool } from "../../src/tools/run-code.ts";
 import { createBackgroundTaskRuntime } from "../../src/runtime/background-runtime.ts";
-import { makeBindings, makeTempDir, removeTempDir, toolContext } from "../helpers/ptc.ts";
+import {
+  installRecordingPi,
+  makeBindings,
+  makeTempDir,
+  removeTempDir,
+  toolContext,
+} from "../helpers/ptc.ts";
 
 const AGENT = "wiring-probe";
 const AGENT_MD = "---\nname: wiring-probe\n---\nYou are wired.\n";
 /** Canonical ULID literal (Crockford base32) used as the parent task id. */
 const PARENT_TASK = "01ARZ3NDEKTSV4RRFFQ69G5FAV" as ULID;
+/**
+ * The cap's refusal message, written out rather than imported from
+ * `src/runtime/dispatch.ts`: a test that reads the production constant cannot notice the
+ * constant changing, and this is the string the model is told (constraint 4 -- the expected
+ * value is a literal, not the thing under test).
+ */
+const LIMIT_MESSAGE = "dispatch concurrency limit reached";
 
 const TERMINAL: ReadonlySet<TaskStatus> = new Set<TaskStatus>([
   "succeeded",
@@ -383,4 +396,106 @@ describe("parentTaskId reaches the nested TaskRecord (reopen R-m12)", () => {
       lifecycle.resolveExit(firstHandle(lifecycle), 0, null);
     });
   });
+});
+
+// ---------------------------------------------------------------------------
+//  ONE acquire per foreground dispatch (reopen the round-3 concurrency finding)
+// ---------------------------------------------------------------------------
+
+/**
+ * What one foreground `pi.dispatch` call returned, flattened to the three fields the
+ * admission question is about. `started: false` plus the concurrency message is the gate
+ * refusing; anything with `started: true` really put a child on the machine.
+ */
+interface AdmissionRecord {
+  started: boolean;
+  status: string;
+  error: string;
+}
+
+describe("the per-run counter is charged once per foreground dispatch (reopen round 3)", () => {
+  /**
+   * The gap this closes, stated as a counterfactual rather than as a claim.
+   *
+   * Round 3 moved the dispatch cap INTO `dispatch()` and removed the duplicate acquire at
+   * the dispatcher's own call site, and the ledger recorded "the dispatcher's duplicate went
+   * away" as FIXED. Round 4 measured that row as unpinned: re-adding a foreground-only
+   * acquire+release at the dispatcher's call site left the whole suite green, and so did
+   * restoring the pre-fix split. Nothing could see it because the two halves that would have
+   * seen it each look somewhere else -- the dispatcher-level tests hand `runPtcProgram` a
+   * stand-in `pi.dispatch` binding, so they never reach `dispatch()`'s acquire at all, and
+   * `tests/unit/ptc-subagent.test.ts` calls `dispatch()` with no dispatcher in the picture.
+   *
+   * So this is the black-box shape neither of those files can be: a REAL program, the REAL
+   * dispatch binding, the run's own counter sized by `dispatchConcurrency`, and a burst
+   * wider than the cap. The number of children that actually came up is the assertion.
+   *
+   * The foreground branch spawns through the module-level `DISPATCH_LIFECYCLE` and never
+   * reads `deps.lifecycle`, so no lifecycle double can be injected from here (that is the
+   * seam the round-4 review asked about, and it is a production-side gap, not a test-side
+   * one). `installRecordingPi` observes the same fact from outside: `dispatch()` spawns the
+   * command `"pi"` with the inherited environment, so a real `pi`-named program first on
+   * PATH records the spawns the production path really performs.
+   *
+   * A duplicate acquire cannot show up in this test as a *smaller* number than the cap alone
+   * would allow -- it shows up as exactly half of it: two slots per call means two admitted
+   * calls out of a pool of four. Measured: HEAD admits 4, the duplicate admits 2.
+   */
+  test("a burst wider than dispatchConcurrency admits exactly that many foreground children", async () => {
+    // Long enough that every admitted child is still running when the sixth call asks for a
+    // slot, so the count is an admission measurement rather than a race against startup.
+    const pi = await installRecordingPi({ holdMs: 1_500 });
+    try {
+      await withAgent(async (dir) => {
+        const outcome = await runPtcProgram({
+          code:
+            "const call = (i) => tools['pi.dispatch']({agent:'" +
+            AGENT +
+            "',task:'wave ' + i,agentScope:'project'});\n" +
+            "const rs = await Promise.all([0,1,2,3,4,5].map((i) => call(i)));\n" +
+            "return rs.map((r) => ({started: r.started === true, status: String(r.status)," +
+            " error: String(r.errorMessage === undefined ? '' : r.errorMessage)}));",
+          surface: "run_code",
+          cwd: dir,
+          bindings: createBuiltinBindings({ cwd: dir, includeDispatch: true }),
+          config: { dispatchConcurrency: 4 },
+        });
+
+        expect(outcome.error, "the run itself completed").toBeUndefined();
+        const results = outcome.value as unknown as AdmissionRecord[];
+        expect(results, "all six calls answered").toHaveLength(6);
+
+        const admitted = results.filter((r) => r.started);
+        const refused = results.filter((r) => r.error.includes(LIMIT_MESSAGE));
+        expect(
+          admitted.length,
+          "four of six concurrent foreground calls got a child; two did not",
+        ).toBe(4);
+        expect(
+          refused.length,
+          "the other two were refused by the gate, with the dispatcher's own message",
+        ).toBe(2);
+        expect(
+          results.every((r) => (r.started ? r.error === "" : r.error === LIMIT_MESSAGE)),
+          "every call is one of those two outcomes: none failed some other way",
+        ).toBe(true);
+        expect(
+          admitted.map((r) => r.status),
+          "each admitted child ran to completion and returned its text",
+        ).toEqual(["fulfilled", "fulfilled", "fulfilled", "fulfilled"]);
+
+        // The same number, counted on the machine rather than inferred from the results: this
+        // is the observation a double could not make. Four children, four DIFFERENT tasks --
+        // so it is four calls that spawned, not one call spawned four times.
+        const spawns = await pi.spawns();
+        expect(spawns.length, "exactly four children were actually launched").toBe(4);
+        expect(
+          new Set(spawns.map((argv) => argv[argv.length - 1])).size,
+          "each from a different dispatch, so no single call spawned twice",
+        ).toBe(4);
+      });
+    } finally {
+      await pi.restore();
+    }
+  }, 60_000);
 });

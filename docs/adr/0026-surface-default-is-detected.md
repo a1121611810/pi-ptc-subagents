@@ -93,6 +93,34 @@ API does work -- is recorded as rejected below. It is the only approach that see
    to three `statSync` per factory construction to set one line of JSON and get a constant. That
    was measured, not assumed: with an explicit key the probe's `argv[1]` read goes from 1 to 0.
 
+8. A probe that walks the filesystem fails in **both** directions, and the first fix only handled
+   one of them. Decision 3's notice covers the under-estimate (probe `not-found`, default quietly
+   becomes `full`). The over-estimate is the one this decision is about:
+
+   - The probe answers `present`, so the surface becomes `subagents`; the session runs under
+     `--no-extensions` or `--exclude-tools codemode`, so pi registers no `codemode` at all. The
+     user is left holding `ptc_subagent` and no way to compose anything. **ADR-0025 decision 4's
+     warning cannot catch it**: that one asks whether `codemode` is _active_, and with the tool
+     absent both questions are false for the same reason.
+   - The mirror: the probe answers `not-found` on a pi that plainly registers `codemode` (a
+     restructured `dist`, a layout no candidate covers), so the session gets `ptc_run_code` and
+     `ptc_workflow` **beside** a live `codemode` -- the duplicate model-facing surface this whole
+     setting exists to remove -- while decision 3's notice calls that outcome "the safe direction,
+     not an error", which is the opposite of what the user just got.
+
+   So at `session_start`, where -- and only where -- `pi.getAllTools()` is real rather than a
+   `notInitialized` stub, the filesystem answer is cross-checked against pi's own registry and a
+   disagreement is reported, in **both** directions. It asks `getAllTools()`, not
+   `getActiveTools()`: the question is "does pi know this tool at all", not "can this session call
+   it", and only the registry answer survives `--no-extensions`. A session whose surface came from
+   the file (`source === "file"`) is exempt: the user decided, and a notice telling them their own
+   key is wrong for this session is a different product.
+
+   This makes the probe result read at **`session_start` by two readers** -- decision 3's outcome
+   notice and this cross-check -- not once. What the cross-check adds is one registry read
+   (`pi.getAllTools()`) on a path that already reads the active set for the mode decision, so the
+   cost of asking the question the probe cannot is one `some()` over the registry.
+
 ## What this costs, stated plainly
 
 ADR-0025's story 3 -- an upgrade must change nobody's behaviour -- is **false for this**
@@ -127,12 +155,29 @@ record is the place to look up what was decided.
 
 - The filesystem layout becomes an input. If pi restructures its `dist`, the probe returns
   `not-found` and the default becomes `full` -- the safe direction, but one the user cannot
-  otherwise see. The probe result is carried on `SurfaceModeConfig.codemode` and read exactly
-  once, by the `session_start` notice in `src/index.ts`; that reader is the reason the field
-  exists, and it is the only place the detection is visible to a human.
-- That notice is a `ui.notify`, so it is TUI-only: a `--print` session whose probe came back
-  false still gets no line. This is the same gap ADR-0025 records for the `subagents` warning,
-  and it is inherited rather than introduced here.
+  otherwise see. The probe result is carried on `SurfaceModeConfig.codemode` and read at
+  `session_start` by **two** readers in `src/index.ts`: decision 3's outcome notice and
+  decision 8's registry cross-check. Those readers are why the field exists, and they are the
+  only place the detection is visible to a human.
+- **The `--print` gap is new here, and it is worse than the one ADR-0025 records.** Both notices
+  this record adds are `ctx.ui.notify`, which is TUI-only. That is inherited for the ADR-0025
+  decision-4 warning, which that record introduced; it is **introduced here**, and measured: three
+  `--print` runs that each emit one of these notices produced **0 bytes on stdout and 0 on
+  stderr**. A `--print` session is scripted or piped, so the consequence is not "a line the user
+  misses" -- it is that the diagnostic this record's whole reporting design rests on does not
+  exist on that channel at all, and the README is the only place a `--print` user can learn it.
+  Nothing here is deleted on that account: `ui.notify` is the documented TUI channel and the
+  mechanism is the right one where it works. The obligation it leaves is a channel that is not
+  the TUI.
+- **What is established about the notices, and what is not.** What is established: the outcome is
+  reported through the documented TUI channel (`ctx.ui.notify`) at `session_start`, and the
+  registry cross-check is covered by a test that forces the check to fail. What is **not**
+  established: that a user sees either notice in a real pi TUI. A pty capture of the round-4
+  review showed neither the notice nor a control marker, and the reason is the harness's, not the
+  code's -- a TUI quits on stdin EOF before a toast paints -- so this is an unproven end to end,
+  not a refuted one. No test in this repository observes a notice through a real TUI. Anyone
+  reading this record should treat "the user is told" as the design intent and "the user is
+  shown" as unmeasured.
 - `scripts/verify-dist-render.mjs` must keep writing an explicit `surfaceMode`, and its reason
   is now stronger: a gate run under a pi that ships codemode would resolve to `subagents` and
   fail on a set difference unrelated to the build.

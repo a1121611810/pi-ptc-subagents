@@ -83,6 +83,18 @@ the clearest evidence that what changed is the consequence of the mistake, not t
   pty runs share a provider and a model; the dollar figures are the session's own accounting.
 - The harness scores a final answer against a ground truth per task. It does not measure whether
   a program was _elegant_, only whether the run got the right answer.
+- **The `after` arm predates the move of the dispatch concurrency gate.** Both arms above were
+  taken while `dispatchConcurrency` was a per-run cap enforced at the dispatcher's call site. A
+  later change (review round 4) moved the acquire into `dispatch()`, so that one session counter
+  now serves foreground and background alike. The numbers in this note are not re-read here and
+  nothing in them is retracted; this is a timing fact, not a re-interpretation. What it leaves
+  unrecorded: **the note observes no fan-out either way.** The mechanism it does record — programs
+  adopting the declared result shape and stopping — involves no `pi.dispatch` fan-out, so the gate
+  move has no path into the measured effect. Whether any of the eight tasks issued enough concurrent
+  dispatches to reach the cap at all (that is, whether any single program had 8 or more `pi.dispatch`
+  calls in flight) is **not recorded** in this note or observable in the numbers above. A reader
+  treating the table as post-gate evidence is reading it as something it is not; a reader wanting to
+  know whether the gate can explain any part of the collapse still has to go measure it.
 
 ## What this does to ADR-0024
 

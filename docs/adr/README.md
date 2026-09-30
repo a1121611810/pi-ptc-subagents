@@ -32,3 +32,5 @@ ADRs for pi-ptc-subagents, per `docs/agents/domain.md` (single-context repo).
 | [0026](./0026-surface-default-is-detected.md)              | The surface default is detected from the pi that loaded us                       | accepted |
 
 Numbering gaps are deliberate: 0001/0006 were reserved while wayfinder map #7 was charting and dropped when G1 resolved; keeping their slots means every cross-reference in the map and its tickets stays valid.
+
+**Amended records carry their amendment in the record, not here.** ADR-0016 §2 and ADR-0022 §9 were amended on 2026-09-30 (review round 4): the dispatch concurrency cap is one counter per pi session serving both the foreground and the background front, rather than a per-run cap. The titles above are the original decisions; open either record for the amendment, the measurement, and what it costs.

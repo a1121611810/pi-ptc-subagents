@@ -30,6 +30,7 @@ import {
   resolveParentTaskIdFromEnv,
 } from "./tools/common.ts";
 import { TurnPools } from "./runtime/turn-pools.ts";
+import { resolveConfig } from "./runtime/limits.ts";
 import { DEFAULT_CONFIG } from "./runtime/limits.ts";
 import {
   createBackgroundTaskRuntime,
@@ -255,8 +256,20 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
    * delegates, so they never have to be re-registered. This factory body creates objects only —
    * `pi.*` is never called here (R2); the delivery below runs from event handlers.
    */
+  // ADR-0026 round 4: since the cap moved into dispatch(), the SESSION counter is the one budget
+  // for every dispatch front, so it is the one that has to be sized. Constructed without options it
+  // silently took DEFAULT_CONFIG.dispatchConcurrency.
+  //
+  // Read the round-4 measurement "dispatchConcurrency went from 2 to 8, the knob died" with care:
+  // it is a half-truth. There is NO session-level source for this key -- `resolveConfig` takes a
+  // programmatic override, `runPtcProgram({config})` is a library option, and the extension never
+  // passes one. So in a session this was 8 before this line and is 8 after it; what changed is
+  // that the number now comes from one place instead of two that could disagree. A library caller
+  // that DID pass a config still sees it sized per program by the dispatcher's own counter, which
+  // a session's counter shadows -- and that shadowing is the decision, not an accident.
   const background: BackgroundTaskRuntime =
-    options.backgroundRuntime ?? createBackgroundTaskRuntime();
+    options.backgroundRuntime ??
+    createBackgroundTaskRuntime({ concurrency: resolveConfig({}).dispatchConcurrency });
 
   /** R2: whether an agent turn is in flight. `turn_start` sets it; `agent_settled` clears it. */
   let turnActive = false;
@@ -625,6 +638,29 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
      */
     if (detected !== undefined && surface.source !== "file") {
       const known = pi.getAllTools().some((tool) => tool.name === "codemode");
+      if (!detected.present && known) {
+        /*
+         * The mirror, and round 4 caught that only the over-estimate was handled. The probe is a
+         * filesystem guess, so it fails in BOTH directions: a pi that restructures its `dist`, or a
+         * layout no candidate covers, answers `not-found` while pi plainly registers codemode. The
+         * session then registers `ptc_run_code` AND `ptc_workflow` beside a live codemode -- the
+         * duplicate model-facing surface this whole setting exists to remove -- and the `info`
+         * notice above calls that "the safe direction, not an error", which is the opposite of what
+         * the user just got. `known` is the registry's own answer and it costs one line to use.
+         */
+        ctx.ui.notify(
+          "pi-ptc-subagents: this session registers pi's codemode, but the probe did not find " +
+            "it (" +
+            detected.how +
+            "), so the surface defaulted to " +
+            FALLBACK_SURFACE_MODE +
+            ", and your model is being offered two orchestration tools. Set an explicit " +
+            '"surfaceMode" in ' +
+            PTC_MODE_CONFIG_FILE +
+            " to pick one.",
+          "warning",
+        );
+      }
       if (detected.present && !known) {
         ctx.ui.notify(
           "pi-ptc-subagents: the codemode probe found pi's codemode on disk, but this " +

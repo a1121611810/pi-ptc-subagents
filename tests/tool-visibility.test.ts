@@ -15,7 +15,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, delimiter } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "vitest";
 import type { RegistryRecord } from "./fixtures/codemode-registry-probe.ts";
@@ -29,38 +29,107 @@ const REGISTRY_PROBE = join(repoRoot, "tests", "fixtures", "codemode-registry-pr
 const BUILTIN_CODEMODE = "builtin:codemode";
 
 /**
- * The pi the detection test measures, if the machine has one that is not this repo's own.
+ * The pi the detection test measures, if this machine has one that can have a codemode.
  *
  * `spawn("pi")` resolves through PATH, and under vitest PATH begins with `node_modules/.bin`,
- * so the bare name lands on the pinned `@earendil-works/pi-coding-agent@0.86.1` rather than on
- * the pi the developer actually runs. That one ships no `codemode` at all, so the detection
- * this test exists to verify could never be observed against it -- the filesystem probe and
- * pi's own registry would both answer "absent" forever, and any comparison between them would
- * agree for the wrong reason. Measured on this machine:
+ * so the bare name lands on the pinned `@earendil-works/pi-coding-agent@0.86.1`, which ships no
+ * codemode at all. That one is still the right pi for the other tests in this file (it is the
+ * version this repo compiles against, and they are about the built dist loading and about tool
+ * visibility) -- and the no-codemode branch of detection is pinned against it, unconditionally,
+ * by the last test in this file.
  *
- *   node_modules/.bin/pi 0.86.1  ->  registry absent, probe not-found, surface full
- *   ~/.bun/bin/pi       0.99.1  ->  registry present, probe found,     surface subagents
+ * What cannot be done with it is the OTHER branch. The previous resolution here was
+ * `findRealPi()`: the first executable named `pi` outside a `node_modules/.bin`, chosen with
+ * `existsSync` and nothing else. That answers a question about the filesystem -- is there a
+ * file called `pi` -- and not the question the test then asked, which is about pi's registry.
+ * Round 4 measured both ways that goes wrong, and both are silent:
  *
- * The other tests in this file keep using the bare name: they are about the built dist
- * loading and about tool visibility, and the pinned pi is the version this repo compiles
- * against. Only detection needs a pi that can have a codemode.
+ *   - a stray non-pi executable named `pi` first on PATH: the test failed in 308 ms here
+ *     (89 ms in the round-4 measurement) with 'the probe never observed a provider request',
+ *     which blames the harness over a binary that was never a pi at all.
+ *   - a no-codemode pi first on PATH: the test PASSED, because the expectation was written as
+ *     "whatever this pi's registry says", so the wrong pi agreed with itself.
  *
- * Falling back to the bare name is not a skip: the run still asserts the relationship and still
- * turns red for a probe that answers the wrong way. It simply cannot cover the "this pi has
- * codemode" branch on a machine where no such pi is installed, because there the true answer
- * genuinely is "no codemode".
+ * So the resolution asks pi instead of the filesystem: walk the candidates in PATH order and
+ * keep the first one whose OWN registry, read in a real run of that pi, reports
+ * `hasCodemode: true` (`codemodeSupport` below). A candidate that cannot answer -- not a pi,
+ * or a pi too old to have a registry -- is recorded and stepped over rather than being allowed
+ * to decide the answer by being first.
+ *
+ * Cost: one pi startup per candidate until one says yes. On this machine that is one.
  */
-const REAL_PI = findRealPi();
+const CODEMODE_PI = await resolveCodemodePi();
 
-/** First `pi` on PATH that is not one of this repo's own bin directories, if any. */
-function findRealPi(): string | undefined {
-  for (const dir of (process.env.PATH ?? "").split(":").filter(Boolean)) {
-    if (dir.endsWith("node_modules/.bin") || dir.endsWith("node_modules\\.bin")) continue;
+/**
+ * Executables named `pi` on PATH, in resolution order, minus this repo's own bin directories.
+ *
+ * Excluding `node_modules/.bin` is not a preference: the pinned devDependency sits there, and
+ * it is a pi with no codemode, so letting it answer would make every machine's detection test
+ * measure the pinned pi instead of the one the developer runs.
+ */
+function piCandidates(): string[] {
+  const out: string[] = [];
+  for (const dir of (process.env.PATH ?? "").split(delimiter).filter(Boolean)) {
+    // Both separators: PATH entries are joined with `delimiter` but the "inside a
+    // node_modules" part is always a path separator, so checking for `node_modules:.bin`
+    // (a colon, on POSIX) silently keeps this repo's own pinned pi in the candidate list --
+    // measured, and visible in the survey the skip message prints.
+    if (/(^|[/\\])node_modules[/\\]\.bin$/.test(dir)) continue;
     const candidate = join(dir, "pi");
-    if (existsSync(candidate)) return candidate;
+    if (existsSync(candidate)) out.push(candidate);
   }
-  return undefined;
+  return out;
 }
+
+interface CodemodePiResolution {
+  /** The first candidate whose registry reports codemode; absent when none does. */
+  bin: string | undefined;
+  /** What every candidate answered, so a skip says which pis were asked and what they said. */
+  survey: string;
+}
+
+async function resolveCodemodePi(): Promise<CodemodePiResolution> {
+  const answers: string[] = [];
+  for (const candidate of piCandidates()) {
+    let ships: boolean;
+    try {
+      ships = await codemodeSupport(candidate);
+    } catch (error) {
+      // A candidate that cannot be asked is a measurement, not a crash: the next one may
+      // still be the pi this test needs. The reason goes into the survey so a skip names it
+      // rather than reporting a bare "nothing found".
+      answers.push(
+        candidate + " -> no answer: " + (error instanceof Error ? error.message : error),
+      );
+      continue;
+    }
+    answers.push(candidate + " -> " + (ships ? "ships codemode" : "no codemode"));
+    if (ships) return { bin: candidate, survey: answers.join("; ") };
+  }
+  return {
+    bin: undefined,
+    survey:
+      answers.length === 0
+        ? "no executable named pi on PATH outside node_modules/.bin"
+        : answers.join("; "),
+  };
+}
+
+/** The named reason the subagents half of detection is skipped, and why it is not a defect. */
+const NO_CODEMODE_PI_REASON =
+  "no installed pi ships codemode, so the 'this pi has codemode' branch of detection has nothing " +
+  "to measure here (" +
+  CODEMODE_PI.survey +
+  "); the no-codemode branch is still pinned " +
+  "unconditionally by the last test in this file";
+
+/**
+ * The title carries the skip reason because `test.skipIf` takes no reason argument and vitest
+ * prints the title. A skip that says only "skipped" is indistinguishable from a broken machine.
+ */
+const SUBAGENTS_HALF_TITLE =
+  "with no key, a pi that ships codemode is handed the subagent surface, never the run-code front" +
+  (CODEMODE_PI.bin === undefined ? " -- SKIPPED: " + NO_CODEMODE_PI_REASON : "");
 
 interface ProbeRecord {
   tools: string[];
@@ -92,7 +161,7 @@ const FULL_SURFACE = [
  */
 /**
  * Run pi until it exits. `bin` defaults to the bare name, i.e. whatever PATH resolves; see
- * {@link REAL_PI} for why the detection test overrides it.
+ * {@link CODEMODE_PI} for why the detection test overrides it.
  */
 function runPi(args: string[], env: NodeJS.ProcessEnv, bin = "pi"): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -125,7 +194,7 @@ async function capturePayload(options: {
   narrow?: string;
   /** ADR-0025: which surface the built extension registers. Defaults to `full`. */
   surfaceMode?: "off" | "subagents" | "full" | "detected";
-  /** Which pi binary to spawn. Defaults to the bare name; see {@link REAL_PI}. */
+  /** Which pi binary to spawn. Defaults to the bare name; see {@link CODEMODE_PI}. */
   bin?: string;
 }): Promise<ProbeRecord> {
   const dir = await makeTempDir("pi-ptc-probe-");
@@ -290,58 +359,71 @@ test("narrowing the loadout really does change what the provider is offered (the
   // the live loadout, so a binding table derived from it would be empty.
   expect(narrowed.tools).not.toContain("read");
 }, 120_000);
-test("with no key, the surface follows the pi's own registry, not our filesystem guess", async () => {
-  // ADR-0026 decisions 1 and 6, end to end. Every other test in this file pins a mode; this one
-  // pins nothing and lets the built extension run its real codemode probe against the pi actually
-  // launching it. The probe walks a filesystem layout, and a hand-built tree in a unit test is
-  // exactly the kind of fixture that gets a real install's layout wrong.
-  //
-  // The discriminator is measured FROM PI: `codemodeSupport` reads pi's own tool registry, in a
-  // separate pi run of pi's own choosing. The previous version compared the detected run against
-  // an explicit `full` run, which is a comparison between two of our OWN runs -- a probe that
-  // never finds codemode yields the full surface, the explicit run yields the full surface, the
-  // two agree, and the test passes on a pi that does ship codemode. Measured: with
-  // CODEMODE_PROBE_PATHS emptied, the old test stayed green. It also returned early exactly when
-  // the two agreed, so the one case that mattered was the case that asserted nothing.
-  //
-  // Both directions are asserted, and the assertion always runs: the expected VALUE is pi's
-  // answer, not a branch on what we produced. On a pi with no codemode the expectation is the
-  // full surface, which is ADR-0026 decision 3's documented fallback, so that case is a real
-  // assertion rather than a skip.
-  // One binary for both halves, or the two are talking about different pis. See REAL_PI.
-  const bin = REAL_PI ?? "pi";
-  const [registryHasCodemode, detected] = await Promise.all([
-    codemodeSupport(bin),
-    capturePayload({ withDist: true, surfaceMode: "detected", bin }),
-  ]);
-  const detectedPtc = detected.tools.filter((name) => name.startsWith("ptc_")).sort();
+test.skipIf(CODEMODE_PI.bin === undefined)(
+  SUBAGENTS_HALF_TITLE,
+  async () => {
+    // ADR-0026 decisions 1 and 6, end to end. Every other test in this file pins a mode; this one
+    // pins nothing and lets the built extension run its real codemode probe against the pi actually
+    // launching it. The probe walks a filesystem layout, and a hand-built tree in a unit test is
+    // exactly the kind of fixture that gets a real install's layout wrong.
+    //
+    // The other half -- a pi that does NOT ship codemode gets the full surface -- is the last
+    // test in this file, and it runs on every machine. This half needs a pi that really does ship
+    // one, or there is nothing to detect, so it is skipped by name when the machine has none
+    // rather than being run against a pi that cannot answer the question.
+    //
+    // What the expected value is anchored to, and why it is a literal now: the bin under test is
+    // chosen by asking each candidate's own registry (see `resolveCodemodePi`), and the
+    // expectation is `SUBAGENTS_SURFACE` as written above it. The previous version computed the
+    // expectation FROM the same measurement (`registryHasCodemode ? SUBAGENTS : FULL`), which is
+    // what let a wrong binary on PATH pass the test by agreeing with itself. Here the
+    // measurement is a PRECONDITION: if the chosen pi turns out not to ship codemode, the run
+    // says so and fails, rather than quietly expecting the fallback.
+    const bin = CODEMODE_PI.bin;
+    if (bin === undefined) {
+      // Unreachable: `skipIf` is driven by the same value. Throwing (rather than falling back to
+      // a bare name) keeps a resolution bug from turning into a silent measurement of some other
+      // pi, which is the failure this whole change exists to remove.
+      throw new Error(
+        "the subagents half was reached with no codemode pi: " + NO_CODEMODE_PI_REASON,
+      );
+    }
+    const [registryHasCodemode, detected] = await Promise.all([
+      codemodeSupport(bin),
+      capturePayload({ withDist: true, surfaceMode: "detected", bin }),
+    ]);
+    expect(
+      registryHasCodemode,
+      "the pi this half measures really does ship codemode (" + bin + ")",
+    ).toBe(true);
+    const detectedPtc = detected.tools.filter((name) => name.startsWith("ptc_")).sort();
 
-  // The whole surface, not just the orchestrator name: a probe that reached `subagents` while
-  // still registering a `ptc_run_code` beside it, or that dropped a task tool, fails here.
-  expect(
-    detectedPtc,
-    "this pi " +
-      (registryHasCodemode ? "ships" : "does not ship") +
-      " codemode, so the detected default must be " +
-      (registryHasCodemode ? "subagents" : "full") +
-      " (ADR-0026 decision 1)",
-  ).toEqual(registryHasCodemode ? SUBAGENTS_SURFACE : FULL_SURFACE);
+    // The whole surface, not just the orchestrator name: a probe that reached `subagents` while
+    // still registering a `ptc_run_code` beside it, or that dropped a task tool, fails here.
+    // One binary for both measurements, or the two are talking about different pis.
+    expect(
+      detectedPtc,
+      "a pi that ships codemode is handed the subagent face and nothing else (ADR-0026 decision 1)",
+    ).toEqual(SUBAGENTS_SURFACE);
 
-  // The two orchestrators, named one at a time so a failure says which half moved. This pair is
-  // what the mutation breaks: with the probe emptied this pi still ships codemode, so it is the
-  // expectation above that turns red.
-  expect(
-    detectedPtc.includes("ptc_subagent"),
-    "a pi that ships codemode is handed the subagent face",
-  ).toBe(registryHasCodemode);
-  expect(
-    detectedPtc.includes("ptc_run_code"),
-    "and never both orchestrators at once — the thing this setting exists to prevent",
-  ).toBe(!registryHasCodemode);
-}, 120_000);
+    // The two orchestrators, named one at a time so a failure says which half moved. This pair is
+    // what the neutered-probe mutation breaks: with CODEMODE_PROBE_PATHS emptied this pi still
+    // ships codemode, so the expectation above turns red.
+    expect(
+      detectedPtc.includes("ptc_subagent"),
+      "a pi that ships codemode is handed the subagent face",
+    ).toBe(true);
+    expect(
+      detectedPtc.includes("ptc_run_code"),
+      "and never both orchestrators at once — the thing this setting exists to prevent",
+    ).toBe(false);
+  },
+  120_000,
+);
 
 test("on the pi this repo pins as a devDependency -- which ships no codemode -- the detected default is full", async () => {
-  // The other branch of the same rule, and the one that can be measured on EVERY machine.
+  // The other half of the pair above, and the one that can be measured on EVERY machine: it
+  // runs unconditionally, including on a machine where nothing installed ships codemode.
   //
   // The detection test above needs a pi that actually ships codemode, or there is nothing to
   // detect and the "pi has codemode" half is untestable. This half is the mirror image: the pi

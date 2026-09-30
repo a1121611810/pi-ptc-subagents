@@ -74,9 +74,26 @@ const [read, scoutA, scoutB] = await Promise.all([
 
 **Bounded.** Three knobs keep fan-out from running away:
 
-- `PtcConfig.dispatchConcurrency` (default **8**) — hard cap on concurrently in-flight `pi.dispatch` calls per run. The N+1th concurrent call resolves immediately with `{ status: "rejected", errorMessage: "dispatch concurrency limit reached" }` instead of queuing or spawning.
+- `PtcConfig.dispatchConcurrency` (default **8**) — hard cap on concurrently in-flight dispatch **in one pi session**. It is one counter, not one per run: foreground `pi.dispatch`, the top-level `ptc_subagent` front, and live background children all spend it, and a background child holds its slot for its whole lifetime. The N+1th concurrent call resolves immediately with `{ status: "rejected", errorMessage: "dispatch concurrency limit reached" }` instead of queuing or spawning — so a call over the cap is not made to wait for a slot to come back.
 - `PtcConfig.maxDispatchDepth` (default **3**) — recursion bound. The child subprocess loads pi-ptc too, so it can write its own PTC programs and call `pi.dispatch` itself; the `childDepth = parentDepth + 1` is rejected when it would exceed `maxDispatchDepth`. The child sees a `<pi-ptc-context depth="N" max-depth="M">…</pi-ptc-context>` hint appended to its system prompt so it can budget its recursion.
 - `signal` — when the parent run is cancelled (deadline, abort, user Esc), every in-flight child receives `SIGTERM` followed by `SIGKILL` after a 5-second grace window, the same shape as pi's `examples/extensions/subagent/index.ts` reference.
+
+**What the concurrency cap now governs, and which knob is live.** The cap is **one counter per pi
+session** ([ADR-0016](./docs/adr/0016-ptc-dispatch-binding.md) §2 as amended,
+[ADR-0022](./docs/adr/0022-background-dispatch.md) §9), acquired inside `dispatch()` so a single
+owner gates every front. Two consequences are worth stating plainly, because both were measured and
+neither is a rounding difference: two programs running concurrently in one session now share 8
+rather than 8 each, and a program sharing a session with eight live background children can be
+refused **every** foreground slot. The live control is `createBackgroundTaskRuntime({ concurrency })`,
+the call that builds that session counter, and the value it is given is `PtcConfig.dispatchConcurrency`.
+It is not a background-only knob: changing it changes how many foreground children a whole session
+can have in flight.
+
+The `dispatchConcurrency` a caller passes to `runPtcProgram({ config })` sizes the
+dispatcher's own per-run counter, and that counter is only reached when no session counter is
+supplied (`dispatcher.ts` hands the binding `options.dispatchDeps?.slots ?? dispatchSlots`). In a
+pi session a session counter always is, so the per-run one is not what enforces the cap you are
+looking at.
 
 **Opt out.** Pass an explicit binding subset to `createBuiltinBindings` to opt out — the parallel binding is mixed in only when the caller accepts the default set:
 
@@ -111,7 +128,7 @@ A detached pump drives the task's lifecycle (`running` -> `succeeded` / `failed`
 - `ptc_task_output({ taskId, sinceBytes? })` — read a task's captured output, tail-truncated to pi's 50 KB / 2000-line contract (ADR-0015).
 - `ptc_task_stop({ taskId, reason? })` — ask a running task to stop.
 
-Background tasks count against the same `dispatchConcurrency` (default 8) for their whole lifetime and share the `maxDispatchDepth` (default 3) recursion bound. A pre-spawn refusal (depth or concurrency cap, unknown agent) still comes back as the familiar `DispatchResult` with `status: "rejected"`. Full guide: [`docs/usage/bgdispatch.md`](./docs/usage/bgdispatch.md).
+Background tasks count against the same `dispatchConcurrency` (default 8) for their whole lifetime and share the `maxDispatchDepth` (default 3) recursion bound — and since the gate moved into `dispatch()` that cap is the **one session counter** the foreground path uses too, not a second one held beside it. A session running eight long background children therefore has no foreground dispatch headroom left, and a foreground call over the cap is refused outright rather than queued behind them. A pre-spawn refusal (depth or concurrency cap, unknown agent) still comes back as the familiar `DispatchResult` with `status: "rejected"`. Full guide: [`docs/usage/bgdispatch.md`](./docs/usage/bgdispatch.md).
 
 ## TUI rendering
 
@@ -212,16 +229,33 @@ No file, or a value outside that set, falls back to the detected default and say
 rather than half-applying: which tools exist is not something to change on a guess.
 
 **A detection you cannot see is the failure this design has**, so the result is reported. With no
-`surfaceMode` key, a TUI session says how the probe came out and which surface the default
-therefore is — but only when the probe could not answer. A pi that ships `codemode` and is
-detected as `subagents` is the expected case and says nothing. If pi ever restructures its `dist`,
-you will see the line instead of silently keeping `full`. (It is a `ui.notify`, so a `--print`
-session gets no line; ADR-0025 records that gap for the surface-mode warnings too.)
+`surfaceMode` key, the outcome is issued through the TUI notification channel at session start —
+how the probe came out and which surface the default therefore is — but only when the probe could
+not answer. A pi that ships `codemode` and is detected as `subagents` is the expected case and says
+nothing. A second notice is issued when the probe and pi's own tool registry disagree, which is the
+case the probe structurally cannot see: it walks the filesystem, so under `--no-extensions` or
+`--exclude-tools codemode` it answers `present` for a tool this session does not have (and the
+mirror: a restructured `dist` answers `not-found` for one pi plainly registers). What is **not**
+established is that either line actually paints in a real pi TUI: a pty capture at review time
+showed neither the notice nor a control marker, and a TUI quits on stdin EOF before a toast
+renders, so that is an unmeasured end to end rather than a broken one. No test in this repository
+observes a notice through a real TUI. If you are relying on the notice rather than on your own
+`surfaceMode` key, verify it once.
+
+**On a `--print` session, none of it prints.** `ui.notify` is the TUI channel; measured across
+three `--print` runs that each emit one of these notices, stdout and stderr received **0 bytes**
+each. That makes this page the only channel on which a `--print` user learns why they got the
+surface they got — ADR-0025's decision-4 warning shares the gap, and there the answer is the same
+one line of JSON: set `surfaceMode` yourself and the detection no longer matters.
 
 **Where it does not run.** Print / JSON / RPC sessions are left exactly as launched, and so is a
 session started with an explicit tool restriction (`--tools`, `--exclude-tools`,
-`--no-builtin-tools`) — the extension does not override what you asked for. If another extension
-changes the tool set while the mode is on, the mode yields and tells you.
+`--no-builtin-tools`, `--no-extensions`) — the extension does not override what you asked for.
+`--no-extensions` is the one flag in that list that produces a `subagents` surface with **no
+orchestrator at all**: pi's own `codemode` is a built-in extension, so turning extensions off does
+not remove the probe's answer (`present`), and the model is left with `ptc_subagent` and nothing to
+compose with. If that is the session you want, set `"surfaceMode": "full"` in `ptc.json` yourself.
+If another extension changes the tool set while the mode is on, the mode yields and tells you.
 
 **The important consequence:** in a TUI session, bindings come from the loadout recorded _before_
 the mode narrowed it. That is what keeps `tools.read(…)` working — and it is why a `--tools`

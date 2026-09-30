@@ -228,8 +228,9 @@ concurrently); the PTC program composes with `Promise.all` /
 fresh `pi` subprocess (`--mode json -p` plus session-file flags from R1
 when `{ background: true }` is set) and returns a structured result
 (see _DispatchResult_ for foreground, _DispatchHandle_ for background).
-Subject to a per-run _dispatch concurrency_ cap (default 8, matches pi's
-`subagent` extension `MAX_PARALLEL_TASKS`).
+Subject to a session-wide _dispatch concurrency_ cap (default 8, matches pi's
+`subagent` extension `MAX_PARALLEL_TASKS`): one counter per pi session,
+spent by programs, by the `ptc_subagent` front, and by background children.
 The spawn surface is binding-only (the model cannot call `pi.dispatch`);
 but the **lifecycle face** for background tasks is model-visible via
 `ptc_task_*` tools and `<bg-task-notification>` events (see ADR-0022).
@@ -244,14 +245,23 @@ block), `stderr?`, `errorMessage?`. Shape matches `Promise.allSettled`
 settled records, so PTC programs compose without `try/catch`. See
 ADR-0016.
 
-**dispatch concurrency** — the per-run hard cap on concurrently
-in-flight `pi.dispatch(...)` calls from one PTC run. Default 8,
-configurable via `PtcConfig.dispatchConcurrency`. Enforced at the
-dispatcher (today the `acquireDispatchSlot` site); the 9th concurrent
-call resolves immediately with `{ status: "rejected", errorMessage:
-"dispatch concurrency limit reached" }`. Distinct from the soft
-hint for ordinary tool-call concurrency (where pi's own parallel-tool
-limits are the real ceiling).
+**dispatch concurrency** — the hard cap on concurrently in-flight
+dispatch in one pi session. Default 8, configurable via
+`PtcConfig.dispatchConcurrency`; the live control is the
+`createBackgroundTaskRuntime({ concurrency })` call that sizes the
+session's one `DispatchSlotCounter`, which is acquired inside
+`dispatch()`. The cap is session-scoped, **not per-run**: every front
+spends it, and a background child holds its slot for its whole
+lifetime. So two concurrent programs in one session share 8 rather
+than 8 each, and a program sharing a session with eight live
+background children can be refused every foreground slot. The 9th
+concurrent call resolves immediately with `{ status: "rejected",
+errorMessage: "dispatch concurrency limit reached" }` — a hard
+reject, never a queue, so an over-cap call is not parked behind a
+long-running child. Distinct from the soft hint for ordinary tool-call
+concurrency (where pi's own parallel-tool limits are the real ceiling)
+and from `maxParallelSubCalls`, which has its own counter for builtin
+fan-out.
 
 **dispatch depth** — the per-run depth in a recursive `pi.dispatch` chain.
 The parent turn's PTC run is depth 0; a child spawned by `pi.dispatch`

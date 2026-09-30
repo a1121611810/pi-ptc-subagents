@@ -3,9 +3,9 @@
  *
  * Nothing here ends in `.test.ts`, so `scripts/test.mjs` never picks it up as a suite.
  */
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -98,6 +98,19 @@ export function makeExtensionStub(
      * `surfaceMode: "from-file"`, because an explicit surface never consults the probe.
      */
     codemode?: CodemodePresence;
+    /**
+     * Tools pi's registry knows about that are NOT in the active loadout.
+     *
+     * pi's `getAllTools()` answers EVERY configured tool, active or not (ADR-0026 decision 6:
+     * `codemode` ships `defaultActive: false`, so on a real install it is registered and
+     * inactive at the same time). The stub used to answer with the active set plus what the
+     * factory registered, which is the same list twice over -- it could not express the shipped
+     * state at all, so every test that asked "does pi know codemode" was really asking "is
+     * codemode active". `session_start`'s registry cross-check reads `getAllTools()` and the
+     * decision-4 warning reads `getActiveTools()`, and with one name for both, only the
+     * active-codemode case was reachable.
+     */
+    registeredInactive?: readonly string[];
   } = {},
 ): ExtensionStub {
   const tools = new Map<string, ToolDefinition>();
@@ -113,6 +126,7 @@ export function makeExtensionStub(
   const sentMessages: ExtensionStub["sentMessages"] = [];
   const sentUserMessages: ExtensionStub["sentUserMessages"] = [];
   const active = [...(options.active ?? DEFAULT_SESSION_TOOLS), "ptc_run_code", "ptc_workflow"];
+  const registeredInactive = options.registeredInactive ?? [];
 
   const stub: ExtensionStub = {
     tools,
@@ -152,9 +166,13 @@ export function makeExtensionStub(
     },
     getActiveTools: () => [...active],
     // ADR-0026: the factory-time filesystem probe cannot see --no-extensions or
-    // --exclude-tools codemode, so session_start cross-checks it against pi own registry.
-    // The stub registry is the declared active set plus what the factory registered.
-    getAllTools: () => [...new Set([...active, ...tools.keys()])].map((name) => ({ name })),
+    // --exclude-tools codemode, so session_start cross-checks it against pi's own registry.
+    // The stub registry is the active set, plus what the factory registered, plus whatever
+    // the caller declared as registered-but-inactive -- which is the state a real pi is in
+    // for `codemode`, and the only way a test can tell "pi does not know this tool" apart
+    // from "pi knows it but did not activate it".
+    getAllTools: () =>
+      [...new Set([...active, ...registeredInactive, ...tools.keys()])].map((name) => ({ name })),
     setActiveTools: (names: string[]) => {
       active.splice(0, active.length, ...names);
       activeWrites.push([...names]);
@@ -320,4 +338,170 @@ export function deferred<T>(): Deferred<T> {
     reject = rej;
   });
   return { promise, resolve, reject };
+}
+
+// ---------------------------------------------------------------------------
+//  A recording `pi` on PATH -- the only observation seam the FOREGROUND
+//  `dispatch()` branch can be given. See `installRecordingPi`.
+// ---------------------------------------------------------------------------
+
+/**
+ * What the recording `pi` child does: append one JSON line per invocation, wait out the
+ * hold, then answer with the single event line pi's JSONL mode emits and exit 0.
+ *
+ * The argv is recorded whole rather than a count, so a test can assert on WHICH dispatch
+ * reached a child (which task text, which prompt file) and not only how many did.
+ */
+const RECORDING_PI_SOURCE = [
+  '"use strict";',
+  "const fs = require('node:fs');",
+  "fs.appendFileSync(__LOG__, JSON.stringify(process.argv.slice(2)) + '\\n');",
+  "const answer = JSON.stringify({",
+  "  type: 'message_end',",
+  "  message: { role: 'assistant', content: [{ type: 'text', text: __TEXT__ }] },",
+  "});",
+  "setTimeout(() => {",
+  // Written in the write callback, not before it: `process.exit` truncates a pipe that has
+  // not drained, and the host reads the child's final text out of exactly this line.
+  "  process.stdout.write(answer + '\\n', () => process.exit(0));",
+  "}, __HOLD_MS__);",
+  "",
+].join("\n");
+
+/** A `pi` first on PATH that records every invocation and answers pi's JSONL shape. */
+export interface RecordingPi {
+  /** The directory prepended to PATH; it holds the `pi` executable and its script. */
+  readonly dir: string;
+  /** The argv of every child launched so far, in spawn order. */
+  spawns(): Promise<readonly string[][]>;
+  /** How many children were actually launched. Zero is a measurement, not an absence. */
+  count(): Promise<number>;
+  /**
+   * The invocations recorded once the log has stopped growing, or the budget runs out.
+   *
+   * A "no child was launched" assertion has to outlast the launch it is looking for. A spawn
+   * is fire-and-forget from the dispatch call's point of view, and a child that has only just
+   * been forked writes its line tens of milliseconds later -- measured: a mutant that launched
+   * a child and THEN returned the refusal passed a count read straight after the call. So a
+   * test asserting an absence waits for the log to settle first; a test asserting a presence
+   * can read {@link spawns} directly, because the calls it counts have already completed.
+   */
+  settle(): Promise<readonly string[][]>;
+  /** Put PATH back exactly as it was and delete the directory. Idempotent. */
+  restore(): Promise<void>;
+}
+
+/**
+ * Put a recording `pi` at the front of PATH, so a test can count what a FOREGROUND
+ * `dispatch()` really spawned.
+ *
+ * ## Why this exists rather than an injected mock lifecycle
+ *
+ * `dispatchBackground` takes its lifecycle from `deps.lifecycle`, so a test can hand it a
+ * `MockChildProcessLifecycle` and count spawns through it. The foreground branch does not:
+ * it uses the module-level `DISPATCH_LIFECYCLE` (`src/runtime/dispatch.ts`) and never reads
+ * `deps.lifecycle`. There is no seam to inject, and none can be added from a test file --
+ * round 4 named this as the reason no test could see a foreground spawn.
+ *
+ * What the foreground branch does do is spawn the command `"pi"` (`PI_COMMAND`) with
+ * `env: { ...process.env }`. So the observation that needs no production change is the
+ * executable itself: a real `pi`-named program at the front of PATH. The child really runs,
+ * the spawn really is the production one, and the log is written by the child. That is
+ * closer to an end-to-end measurement than a mock would be, at the cost of one `node`
+ * startup per dispatch.
+ *
+ * The stub answers the JSONL line shape `src/runtime/child-process-lifecycle.ts` parses (one
+ * `message_end` carrying assistant text, then exit 0), so a dispatched call settles as
+ * `fulfilled` carrying that text. A real pi would need a provider and credentials; the
+ * assertions this seam supports are about how many children were launched, not about what a
+ * model would have said.
+ *
+ * `holdMs` keeps each child alive. A foreground dispatch holds its slot until the child
+ * closes, so a burst only measures an admission count while the children are still running --
+ * otherwise the number is a race against process startup.
+ *
+ * PATH is process-wide, so a test must `restore()` it (in a `finally`). Vitest gives each
+ * test FILE its own worker, so this cannot leak into another file.
+ */
+export async function installRecordingPi(
+  options: {
+    /** How long each child stays alive before answering. Default 0: answer immediately. */
+    holdMs?: number;
+    /** The text the child puts in its assistant message. Default `"PONG"`. */
+    text?: string;
+  } = {},
+): Promise<RecordingPi> {
+  const dir = await makeTempDir("pi-ptc-recording-pi-");
+  const logPath = join(dir, "spawns.jsonl");
+  const scriptPath = join(dir, "recording-pi.cjs");
+  const source = RECORDING_PI_SOURCE.replace("__LOG__", JSON.stringify(logPath))
+    .replace("__TEXT__", JSON.stringify(options.text ?? "PONG"))
+    .replace("__HOLD_MS__", String(options.holdMs ?? 0));
+  // A `.cjs` file is CommonJS whatever the nearest package.json says, and the `pi`
+  // executable is an extensionless shell wrapper around it, so module resolution is not a
+  // factor here. `process.execPath` is the node actually running the test.
+  await writeFile(scriptPath, source, "utf8");
+  const piPath = join(dir, "pi");
+  await writeFile(
+    piPath,
+    "#!/bin/sh\nexec " +
+      JSON.stringify(process.execPath) +
+      " " +
+      JSON.stringify(scriptPath) +
+      ' "$@"\n',
+    "utf8",
+  );
+  await chmod(piPath, 0o755);
+
+  const previousPath = process.env.PATH;
+  process.env.PATH = previousPath === undefined ? dir : dir + delimiter + previousPath;
+  let restored = false;
+
+  const spawns = async (): Promise<readonly string[][]> => {
+    let raw: string;
+    try {
+      raw = await readFile(logPath, "utf8");
+    } catch {
+      // No file at all is a real measurement -- nothing was launched -- not a broken fixture.
+      return [];
+    }
+    return raw
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line) as string[]);
+  };
+
+  // Polls until the count has held steady for a full quiet window, so the line a just-forked
+  // child writes is counted rather than raced. The window is generous on purpose: the child is
+  // a shell wrapper that execs node, so two startups stand between the spawn and the write
+  // (measured: a 100 ms window still lost the race, 500 ms does not). The iteration cap bounds
+  // the wait for a child that never comes up at all.
+  const QUIET_READS = 5;
+  const POLL_MS = 100;
+  const settle = async (): Promise<readonly string[][]> => {
+    let previous = -1;
+    let steady = 0;
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, POLL_MS));
+      const current = (await spawns()).length;
+      steady = current === previous ? steady + 1 : 0;
+      previous = current;
+      if (steady >= QUIET_READS) break;
+    }
+    return await spawns();
+  };
+
+  return {
+    dir,
+    spawns,
+    count: async () => (await spawns()).length,
+    settle,
+    restore: async () => {
+      if (restored) return;
+      restored = true;
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      await removeTempDir(dir);
+    },
+  };
 }

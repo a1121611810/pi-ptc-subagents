@@ -171,11 +171,54 @@ Counterfactuals, both measured: gate removed -> 1 failed; pre-spawn release remo
 The second is the one worth having -- a missing release there would not fail any single-call test,
 it would just shrink the pool until a session slowly stopped being able to dispatch.
 
-**Stated consequence, not a side effect:** the program path's foreground calls now spend the
-session counter rather than a per-run one, so two concurrent programs that could each have 8 in
-flight share 8. That is what ADR-0022 §9 already asks for, and the suite is green, but it is a
-real reduction in effective foreground concurrency and belongs in the record rather than in a
-reviewer's memory.
+**Stated consequence, not a side effect — and, as first written here, mis-cited.** The program
+path's foreground calls now spend the session counter rather than a per-run one, so two concurrent
+programs that could each have 8 in flight share 8. The suite is green, but this is a real reduction
+in effective foreground concurrency and it belongs in the record rather than in a reviewer's memory.
+
+> **Round 4 correction (DOC-TRUTH).** The original text said this "is what ADR-0022 §9 already asks
+> for". It does not. §9 was titled _Concurrency and depth caps: unchanged from ADR-0016_ and said
+> nothing whatever about counter scope, and the ADR it names as unchanged says the cap is
+> **per-run** — the opposite of what happened. The claim removed a real trade-off behind a citation
+> that could not support it. §9 is retitled and amended, and ADR-0016 §2 carries a round-4 amendment
+> of its own.
+
+> **The decision, on its own merits.** One cap with one owner beats two counters that can disagree.
+> Before this change the session held two notions of "how many pi subprocesses is this session
+> running" — a per-run one for the program path and a session one for background — and nothing
+> reconciled them, so the two could each be individually correct and jointly wrong. The move into
+> `dispatch()` makes `dispatchConcurrency` a number about a session rather than about a run, which
+> is also the only reason the knob now provably works: the counter that enforces the cap is the one
+> built from the value, so setting the value changes the behaviour (measured: 2 → 2, where the
+> session counter previously ignored the setting entirely).
+>
+> **What it costs, measured rather than asserted.** 24 concurrent foreground calls against a real
+> fake-`pi` spawn, before vs after:
+>
+> | scenario                                                    | before                              | after                                          |
+> | ----------------------------------------------------------- | ----------------------------------- | ---------------------------------------------- |
+> | (a) one program, 24 concurrent foreground                   | 8 spawned / 16 capped               | 8 / 16 — unchanged                             |
+> | (b) two concurrent programs, 24 each                        | 8 + 8 = 16                          | 8 total                                        |
+> | (c) 8 live background children + one program, 24 foreground | 8 foreground spawned (16 in flight) | 0 foreground spawned (8 total, all background) |
+> | `runPtcProgram({config:{dispatchConcurrency:2}})`           | 2 spawned                           | 8 — the setting stopped taking effect          |
+> | `createBackgroundTaskRuntime({concurrency:2})`              | ignored                             | 2 — the only live control                      |
+>
+> The original paragraph cited only the (b) shape. Row (c) is the one a reader needs and it is the
+> one the first account left out: a program sharing a session with eight live background children
+> can be refused **every** foreground slot, and the refusal is a hard reject with no queue, so
+> nothing waits. Row (a) is why this survived three review rounds — the common case did not move.
+>
+> **One row of this table is not settled, and the corrected documents do not lean on it.** The
+> `runPtcProgram({config:{dispatchConcurrency:2}})` row reads "2 configured, 8 dispatched", but a
+> static read of the wiring does not obviously produce that: `dispatcher.ts:709` hands the binding
+> `options.dispatchDeps?.slots ?? dispatchSlots`, and `dispatchSlots` IS built from
+> `config.dispatchConcurrency` — so a `runPtcProgram` call passing no `dispatchDeps` should still
+> get 2. The 8 is what `dispatch()` falls back to (`FALLBACK_DISPATCH_SLOTS`, `dispatch.ts:120`)
+> when it is handed no `slots` at all, which is a direct `dispatch()` call, or a `ptc_subagent` call
+> made without deps. The doc half therefore states the _mechanism_ — the session counter is supplied
+> ahead of the per-run one, so a `runPtcProgram` override sizes a counter a pi session never
+> reaches — rather than this row's number, and the row is left here as this review's own record.
+> Whoever owns the next harness run should re-derive it and say which call site produced the 8.
 
 ### R3-2 [BLOCKING, FIXED] the one end-to-end proof of the headline feature was vacuous
 
@@ -246,3 +289,151 @@ they disagree. Counterfactual: forcing the registry check to always pass turns t
 - **`src/index.ts:381`**: the always-on registration comment claims the tools survive every mode
   loadout. True for `builtins-only`, false for `all-but-ptc`, which is not the shipped strategy.
 - **Issue #88's body** still states the pre-ADR-0026 defaults in four places.
+
+## Round 4 (delta `846aee6...HEAD`, docs-only fix pass)
+
+Round 4 is a **DOC-TRUTH** round: the code side of the concurrency-gate change is being fixed in
+`src/index.ts` and `src/runtime/dispatch.ts` by another agent, and this pass is the documentation
+half. The theme is the same in both halves — a measurement exists that the shipped documentation
+does not reflect, and one record cites another record for a claim that record does not make. Each
+row below names the file and line it was found at and the line the fix landed on, so the next
+round does not have to re-derive them.
+
+| id   | sev      | finding                                                                                                                                                                                                                                                                                                                                                                                                                    | evidence                                                                                                                                                                                                                               | disposition                                                                                                                                                                                                                                                             |
+| ---- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R4-1 | blocking | Ten shipped lines state the cap is **per-run**. `docs/adr/0016-ptc-dispatch-binding.md` §2 ("the 9th concurrent `pi.dispatch` from one run"), `docs/adr/0022-background-dispatch.md` §9 and "deliberately don't add" 2, `docs/adr/0025` item 1 and Consequences, `docs/usage/bgdispatch.md` Limits, `README.md:77` and `:114`, `CONTEXT.md:231,247`, and the `dispatchConcurrency` doc comment in `src/runtime/limits.ts`. | The gate moved into `dispatch()`, so one session counter now serves every front. Measured rows (a)-(c) in the R3-1 correction above.                                                                                                   | **fixed** — ADR-0016 §2 + a round-4 amendment; ADR-0022 §9 retitled and amended; ADR-0025, bgdispatch Limits, README, CONTEXT and the `limits.ts` comment all rewritten.                                                                                                |
+| R4-2 | blocking | R3-1 cited ADR-0022 §9 for a claim §9 does not make.                                                                                                                                                                                                                                                                                                                                                                       | §9 is titled _unchanged from ADR-0016_ and is silent on counter scope; ADR-0016 §2 says **per-run**.                                                                                                                                   | **fixed** — the R3-1 paragraph carries an explicit round-4 correction, the decision is restated on its own merits, and the full measured table replaces the one shape the first account cited.                                                                          |
+| R4-3 | high     | The knob is named in no document.                                                                                                                                                                                                                                                                                                                                                                                          | `createBackgroundTaskRuntime({concurrency})` is the only construction of the live counter (`src/index.ts`, `src/runtime/background-runtime.ts:505`); `grep -c` over `docs/`, `README.md` and `CONTEXT.md` returned 0 before this pass. | **fixed** — named in the README dispatch section and in `docs/usage/bgdispatch.md` Limits, both stating that it governs both fronts, not background alone.                                                                                                              |
+| R4-4 | blocking | ADR-0026 called the `ui.notify`-is-TUI-only problem "inherited rather than introduced". True of the ADR-0025 decision-4 warning, **false** of the two notices ADR-0026 itself adds.                                                                                                                                                                                                                                        | 0 bytes on stdout and 0 on stderr across three `--print` runs that each emit one.                                                                                                                                                      | **fixed** — ADR-0026 Consequences and the README now state that the gap is new, give the measurement, and name where a `--print` user actually meets it (this README is the only channel).                                                                              |
+| R4-5 | medium   | ADR-0026 has no numbered decision for the `session_start` cross-check against `pi.getAllTools()` — the fix for the `--no-extensions` hole R3-6 found — and Consequences says the probe result "is read exactly once" when there are two readers.                                                                                                                                                                           | R3-6's fix landed in `src/index.ts`; ADR-0026 decisions stop at 7.                                                                                                                                                                     | **fixed** — added as **decision 8**, Consequences corrected to two readers, and `--no-extensions` added to the README's "Where it does not run" list (it is the one flag that actually yields a subagent front with no orchestrator).                                   |
+| R4-6 | medium   | `docs/research/ptc-binding-contract-re-measurement-20260930.md` records 2 median turns and an 8,360 median context cost with no note that its _after_ arm predates the cap move.                                                                                                                                                                                                                                           | The note's own limitations list covers correlation and the overwritten before-sessions, but not this.                                                                                                                                  | **fixed** — a note added saying the numbers were taken before the cap moved, that the recorded mechanism involves no fan-out, and that whether any of the eight tasks fanned out at or above the cap is unrecorded. The numbers are neither restated nor reinterpreted. |
+| R4-7 | medium   | ADR-0026, `README.md:214-220` and this ledger all assert the user **sees** the notice.                                                                                                                                                                                                                                                                                                                                     | A pty capture showed neither the notice nor a control marker. The TUI quits on stdin EOF before a toast paints, so the reviewer's harness is the limitation rather than the code — unproven, not refuted.                              | **weakened, mechanism kept** — the claims now say the notice is issued through the documented TUI channel and that no test observes it end to end through a real TUI. Nothing deleted.                                                                                  |
+
+### Still open after round 4
+
+- **R4-7, unclosed by design.** "A user sees the surface-mode notice in a real pi TUI" is now
+  recorded as unmeasured rather than fixed. Closing it needs a harness that holds stdin open long
+  enough for a toast to paint; that is a test-writing job, not a docs job, and the honest state of
+  the claim is now written down in three places.
+- **R4-1 / R4-2, second consumers swept — one stale citation left, and it is out of scope.** A
+  repo-wide sweep for the per-run claim across `docs/`, `README.md` and `CONTEXT.md` found no
+  further normative statement to correct: `docs/specs/0020-0021` says nothing about concurrency,
+  `docs/agents/` is about tooling, and every remaining hit is either an amendment this pass wrote
+  or a historical snapshot that is correct as a record of its time
+  (`docs/reviews/2026-09-24-bgdispatch-code-review.md` R-M3). The one file still describing the old
+  wiring is **`.opencodereview/rules/ptc-config-wiring.md:43`**, which lists `dispatcher.ts:455`
+  among the read points of `dispatchConcurrency`; the session counter is supplied ahead of that one,
+  so the row overstates where the value is read. Reported, not edited — it is outside this pass's
+  write scope. Its sibling `ptc-bgdispatch-contract.md:56` already requires the quota to be
+  session-scoped, so the rules do not contradict the corrected records; they carry one stale
+  citation between them.
+
+## Round 4 (delta `7f05d3e...846aee6`, fix commit below)
+
+Round 4 reviewed the round-3 fixes. Both axes ran the whole-tree gate independently and reported
+it green. Two of the three blocking findings were **regressions the round-3 fix introduced**, which
+is the fourth time in five rounds that fixing a false pass produced a new one. Both were found by
+mutation, not by reading.
+
+### R4-1 [BLOCKING, FIXED] the fix for the missing gate introduced a slot leak
+
+The new acquire sits before an `await writePromptToTempFile` and a `buildArgv` that can both
+throw, and neither path reaches the Promise whose `finalize` is the one release. Measured against
+the pre-round-3 base: a TMPDIR pointed at a file (mkdtemp -> ENOTDIR) left `slots.active` at 1
+where the old dispatcher's unconditional `finally` returned it. The rejection is pre-existing; the
+**leak** is new, and the severity driver is that this counter is the SESSION one -- eight such
+failures and the session can never dispatch again. That is the same class of bug R4-1's own fix
+was for, which is the part worth remembering: the region between an acquire and its release owns
+its own cleanup, and adding a release in one place does not add one in the others.
+
+### R4-2 [BLOCKING, FIXED] the e2e proof was vacuous again, on a whole class of machines
+
+Round 3's replacement asked pi's own registry, which was right. But `findRealPi()` returned the
+first executable named `pi` outside a `node_modules/.bin`, without checking it was a pi or that it
+had codemode. Measured: probe neutered AND a no-codemode pi first on PATH -> the test still
+**passed**; a stray non-pi executable named `pi` first -> it failed in 89 ms blaming the harness.
+The comment's claim that the fallback "is not a skip" held for `undefined` and not for a
+successfully resolved wrong binary.
+
+The fix surveys the candidates and keeps the first that answers `hasCodemode: true` from its own
+registry; a candidate that cannot answer is recorded and stepped over, so it can no longer decide
+the answer by being first. With no codemode pi anywhere the subagents half is `skipIf`'d with a
+named reason and the full-surface half still runs.
+
+### R4-3 [BLOCKING, FIXED] a `[FIXED]` row with nothing holding it
+
+R3-1 claimed the dispatcher's duplicate gate "went away" was fixed. It was not: re-adding a
+foreground acquire at the call site left the **full suite green**, and so did restoring the exact
+pre-round-3 split. Structurally the dispatcher-level tests drive a stand-in binding and never see
+`dispatch()`'s acquire, while the subagent tests bypass the dispatcher.
+
+Now a black-box test: a real program, the real binding, `dispatchConcurrency: 4`, six concurrent
+foreground dispatches. HEAD admits 4 and launches 4 children; the duplicate restored admits 2 and
+the whole suite goes red at exactly that test. The round-3 `[FIXED]` was an over-claim and this
+row is the first thing in the ledger to say so about itself.
+
+### R4-4 [BLOCKING, FIXED] ten shipped lines stated the old cap, and a record mis-cited another
+
+Measured before/after with a real spawn: one program is unchanged at 8; two concurrent programs go
+16 -> 8; a program sharing a session with 8 live background children goes from 8 foreground
+spawned to **zero**. That last one is not a rounding difference, and ten lines across ADR-0016,
+ADR-0022, ADR-0025, `docs/usage/bgdispatch.md`, README and CONTEXT still said the cap was
+per-run. All corrected, with the table.
+
+The R3-1 line "that is what ADR-0022 §9 already asks for" was a mis-citation: §9 is titled
+"unchanged from ADR-0016" and says nothing about counter scope, and the ADR it names as unchanged
+says the cap is per-run. The decision now stands on its own merits -- one cap with one owner
+cannot disagree with itself -- and the mis-citation is recorded as one rather than quietly fixed.
+
+**A correction to that finding, and it matters.** The review reported `dispatchConcurrency: 2`
+granting 2 before and 8 after, i.e. a dead knob. That is a half-truth: there is no session-level
+source for this key at all. `resolveConfig` takes a programmatic override, `runPtcProgram({config})`
+is a library option, and the extension never passes one -- so in a session the value was 8 before
+and is 8 after. What changed is that the number now comes from one place instead of two. A library
+caller that does pass a config has its per-run counter shadowed by the session counter, and that
+shadowing is the decision rather than an accident. The normative docs state the mechanism; the
+disputed number stays in the ledger with the discrepancy spelled out.
+
+### R4-5 [BLOCKING, FIXED] the `--print` gap is new here, not inherited
+
+ADR-0026 called the `ui.notify`-is-TUI-only problem "inherited rather than introduced". True of
+the ADR-0025 decision-4 warning; false of the two notices this feature adds. Measured: 0 bytes on
+stdout and 0 on stderr across three `--print` runs that each emit one. For a print user the README
+is the only channel, and that is now stated where they meet it.
+
+### R4-6 [MEDIUM, FIXED] the mirror case the cross-check missed
+
+The `getAllTools()` cross-check handled the over-estimate (`--no-extensions`) and not the
+under-estimate: a pi that restructures its `dist` answers `not-found` while pi plainly registers
+codemode, and the session then registers our orchestrator _beside_ a live one -- the exact
+duplicate surface this setting exists to remove -- under an `info` notice calling it "the safe
+direction, not an error". Both directions are handled now; counterfactual forces the check to
+always pass and the test goes red.
+
+### Also closed
+
+A vacuous `spawnCount` assertion (the foreground path never touches the injected mock) replaced by
+a real recording-`pi` count plus the contrast case that makes the count mean something, and a
+third mutation -- a "late gate" that returns the right refusal but spawns first -- that catches a
+bug the first two would not. The stub gained a way to express registered-but-inactive, which is
+the state `codemode` actually ships in. Two stale comments in `dispatch.ts` and two doc claims no
+test observes were weakened to what is established.
+
+### Still open after round 4
+
+- The foreground branch spawns through a module-level lifecycle, so its spawn cannot be injected;
+  the tests observe a real child process through a recording `pi` on PATH instead. The production
+  seam (`deps.lifecycle ?? DISPATCH_LIFECYCLE` in the foreground branch too) is a one-line
+  change that would make those tests fast and PATH-free, and it is not taken here.
+- No test observes either notice end to end through a real pi TUI. A pty capture showed neither the
+  notice nor a control marker -- though the TUI quits on stdin EOF before a toast paints, so the
+  reviewer's harness is the limitation, not the code. Recorded as unverified rather than as a claim.
+- `findF2`'s keyword list still cannot see `if (message !== "") { expect }`; the test that had it
+  is fixed, widening the detector needs a false-positive count over 50 files first.
+- A `ptc_subagent` background child gets no ADR-0022 session triple, because the binding forwards
+  `context.sessionDir` and this tool does not. Wiring it is a behaviour change to background
+  children and belongs in its own commit.
+- `.opencodereview/rules/ptc-config-wiring.md:43` still lists the dispatcher's per-run counter as
+  a read point of `dispatchConcurrency`; the session counter is supplied ahead of it.
+- `src/index.ts:381`'s always-on registration comment claims the tools survive every mode loadout
+  -- true for `builtins-only`, false for `all-but-ptc`, which is not the shipped strategy.

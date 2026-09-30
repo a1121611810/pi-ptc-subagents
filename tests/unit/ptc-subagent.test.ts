@@ -19,7 +19,7 @@ import { createPtcSubagentTool } from "../../src/tools/subagent.ts";
 import { createTaskRegistry, type TaskRegistry } from "../../src/runtime/task-registry.ts";
 import { InMemoryTaskStorage } from "../../src/runtime/task-storage.ts";
 import type { ULID } from "../../src/runtime/task-storage.ts";
-import { makeTempDir, removeTempDir } from "../helpers/ptc.ts";
+import { installRecordingPi, makeTempDir, removeTempDir } from "../helpers/ptc.ts";
 
 // A REAL registered agent, not one this file invents. The agent registry is read from the
 // host config and does not see a markdown file written into a temp dir, so a locally authored
@@ -238,26 +238,68 @@ describe("ptc_subagent and the dispatch cap", () => {
     // The defect this closes: the only slot acquire lived at the dispatcher's program call site,
     // which ptc_subagent bypasses. Measured before the fix -- with every slot held the call
     // reached lifecycle.spawn and reported a spawn failure, never a concurrency refusal.
-    await withAgent(async (dir) => {
-      const h = createHarness();
-      const slots = new DispatchSlotCounter(1);
-      slots.tryAcquire("someone-else");
-      const tool = createPtcSubagentTool({
-        ...baseOptions(dir, h.deps),
-        getDispatchDeps: () => ({ ...h.deps, slots }),
+    //
+    // "No child was launched" is observed through `installRecordingPi`, not through
+    // `h.lifecycle`. Round 4 measured the mock version of that line to be vacuous: the
+    // FOREGROUND branch of `dispatch()` spawns through the module-level `DISPATCH_LIFECYCLE`
+    // and never reads `deps.lifecycle`, so the mock recorded nothing either way and making
+    // its `spawn` throw left this test green. The background test above can still use the mock
+    // -- `dispatchBackground` really does honour `deps.lifecycle` -- but this one cannot, and
+    // there is no test-side seam that would make it able to.
+    const pi = await installRecordingPi();
+    try {
+      await withAgent(async (dir) => {
+        const h = createHarness();
+        const slots = new DispatchSlotCounter(1);
+        slots.tryAcquire("someone-else");
+        const tool = createPtcSubagentTool({
+          ...baseOptions(dir, h.deps),
+          getDispatchDeps: () => ({ ...h.deps, slots }),
+        });
+        let message = "";
+        try {
+          await run(tool, { agent: AGENT, task: "no slot is free" });
+        } catch (error) {
+          message = error instanceof Error ? error.message : String(error);
+        }
+        expect(message, "the gate, not a spawn failure").toContain(
+          "dispatch concurrency limit reached",
+        );
+        expect(
+          (await pi.settle()).length,
+          "and no child was launched -- waited for the log to settle, because a spawn that " +
+            "happened anyway would land in it after this call returned",
+        ).toBe(0);
+        expect(slots.active, "a refusal must not consume a slot").toBe(1);
       });
-      let message = "";
-      try {
-        await run(tool, { agent: AGENT, task: "no slot is free" });
-      } catch (error) {
-        message = error instanceof Error ? error.message : String(error);
-      }
-      expect(message, "the gate, not a spawn failure").toContain(
-        "dispatch concurrency limit reached",
-      );
-      expect(h.lifecycle.spawnCount, "and no child was launched").toBe(0);
-      expect(slots.active, "a refusal must not consume a slot").toBe(1);
-    });
+    } finally {
+      await pi.restore();
+    }
+  });
+
+  test("the same foreground call with a free slot does launch a child", async () => {
+    // The contrast that makes the count above worth anything. A fixture that can only ever
+    // report zero pins nothing, and that is exactly what the old mock was: with its `spawn`
+    // replaced by a throw, the saturated-counter test still passed. Here the identical setup
+    // with one free slot must record a real spawn, so "zero children" above is the gate
+    // refusing rather than the harness never looking.
+    const pi = await installRecordingPi();
+    try {
+      await withAgent(async (dir) => {
+        const h = createHarness();
+        const tool = createPtcSubagentTool(baseOptions(dir, h.deps));
+        const result = (await run(tool, { agent: AGENT, task: "a free slot" })) as {
+          content: { type: string; text: string }[];
+        };
+        expect(await pi.count(), "a foreground call with a free slot really spawns pi").toBe(1);
+        expect(
+          result.content[0]?.text ?? "",
+          "and the child's own answer is what comes back",
+        ).toContain("PONG");
+      });
+    } finally {
+      await pi.restore();
+    }
   });
 
   test("a refused pre-spawn call gives its slot back", async () => {
