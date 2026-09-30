@@ -330,18 +330,6 @@ const SYMBOL_SHAPES: readonly RegExp[] = [
 /** 7–40 位且含至少一个十六进制字母：commit 短 SHA，不是符号。 */
 const HEX_SHA_LIKE = /^(?=.*[a-f])[0-9a-f]{7,40}$/;
 
-/**
- * Every declaration-shaped token named anywhere in the documentation, built once,
- * after the extractor that produces it. Two assertions filter this same set, so
- * building it per-assertion meant scanning the whole corpus twice; with the corpus
- * growing that alone was enough to push a test past vitest's default timeout under
- * a parallel run, and widening the budget by orders of magnitude would have hidden
- * a real regression instead.
- */
-const ALL_SCANNED_NAMES: ReadonlySet<string> = new Set(
-  ALL_DOCS.flatMap((doc) => extractDeclaredSymbols(doc)).map((ref) => ref.name),
-);
-
 interface SymbolRef {
   readonly doc: string;
   readonly line: number;
@@ -366,6 +354,24 @@ function extractDeclaredSymbols(doc: DocEntry): SymbolRef[] {
   }
   return refs;
 }
+
+/**
+ * Every declaration-shaped token named anywhere in the documentation, built once
+ * and deliberately below the extractor that produces it: the function has to be
+ * in scope, and relying on function hoisting for that is a trap waiting for the
+ * day someone writes it as a const arrow.
+ *
+ * The point is not deduplication -- there is exactly one scan here and there was
+ * exactly one before. The point is that the scan is not inside a timed test body:
+ * it runs once at import, and the assertion that uses it is then O(exclusion list).
+ * Growing the corpus by a few hundred lines had been enough to push that assertion
+ * past vitest's default timeout in a fully parallel run, and the budget fix that
+ * first seemed obvious -- raising the timeout -- was three hundred times the real
+ * cost and would have hidden a genuine regression.
+ */
+const ALL_SCANNED_NAMES: ReadonlySet<string> = new Set(
+  ALL_DOCS.flatMap((doc) => extractDeclaredSymbols(doc)).map((ref) => ref.name),
+);
 
 /**
  * 外部词汇排除清单：**名字 + 为什么排除**。

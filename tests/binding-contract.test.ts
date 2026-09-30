@@ -89,15 +89,46 @@ const NON_BINDING_VOCABULARY: readonly string[] = [
 ];
 
 /**
- * A parameter declaration, which the contract must never contain: pi already
- * declares every tool's arguments natively in the same request.
+ * A parameter list, which the contract must never contain: pi already declares
+ * every tool's arguments natively in the same request. Two shapes, because a
+ * re-declaration can be typed or not.
+ *
+ * `TYPED_PARAMETER` is structural rather than a list of type names -- an earlier
+ * version enumerated nine names, and a signature written in any other type (an
+ * interface, a byte array, a callback) walked straight past it. `[ \t]` rather
+ * than `[ ]` because a tab-indented signature is still a signature.
+ *
+ * `BARE_PARAMETER` catches the untyped form, `Args: read(path, offset)`, which the
+ * typed pattern cannot see because there is nothing after the colon. It is scoped
+ * to a call that is not namespaced through `tools.`, so the contract's own
+ * `tools.<name>(args)` and its `Promise.all(...)` examples stay clean. What it
+ * still does not catch is `tools.read(path)`, which is the form the contract is
+ * teaching the model to write, not a re-declaration.
  */
-const ARGUMENT_SHAPE =
-  /[A-Za-z_$][A-Za-z0-9_$]*[ ]*[?]?[ ]*:[ ]*(string|number|boolean|object|Array|Promise|Record|unknown|[|{])/;
+const TYPED_PARAMETER = /\([^()]*[A-Za-z_$][A-Za-z0-9_$]*[ \t]*[?]?[ \t]*:/g;
+const BARE_PARAMETER = /(?<![\w$.])(?!tools\.)[A-Za-z_$][A-Za-z0-9_$]*\([^()]*[^()\s][^()]*\)/g;
 
 // ------------------------------------------------------------------- predicates
 // Shared by each guard and its counterfactual, so a counterfactual exercises the
 // real guard rather than a restatement of it.
+
+/**
+ * The budget rule, as one predicate. Both bounds live here so the guard and its
+ * counterfactual cannot drift apart: a counterfactual that re-derives the
+ * comparison is asserting on its own literal, and the real assertion can be
+ * deleted without anything noticing.
+ */
+/** The array-of-blocks fact, as one predicate the counterfactual can also call. */
+function statesContentIsArrayOfBlocks(text: string): boolean {
+  return text.includes("is an ARRAY of content blocks");
+}
+
+function withinBudget(text: string): boolean {
+  const cost = estimatedTokens(text);
+  return (
+    cost >= contract.BINDING_CONTRACT_TOKEN_FLOOR && cost <= contract.BINDING_CONTRACT_TOKEN_CEILING
+  );
+}
 
 /**
  * The bindings that genuinely deviate, as a literal. The guard and its
@@ -106,8 +137,12 @@ const ARGUMENT_SHAPE =
  */
 const EXPECTED_NOTED: readonly string[] = ["bash", "edit", "write", DISPATCH_BINDING_NAME].sort();
 
-/** The guard's own predicate, over any note map. */
-function notedBindingsDeviating(notes: ReadonlyMap<string, string>): string[] {
+/**
+ * The bindings a note map carries, in a stable order. This extracts; it does not
+ * decide which bindings deserve a note -- that decision is EXPECTED_NOTED, and
+ * comparing the two is the whole point of the guard.
+ */
+function notedBindingNames(notes: ReadonlyMap<string, string>): string[] {
   return [...notes.keys()].sort();
 }
 
@@ -118,9 +153,14 @@ function unboundNamesNamed(text: string): string[] {
   );
 }
 
-/** Parameter declarations found in the emitted text. */
+/**
+ * Parameter declarations found in the emitted text, quoted or not. Scanning
+ * only the backticked tokens left a hole on the other side: a signature written in
+ * bare prose is still a signature, and it was the form the closed type-name list
+ * also happened to miss.
+ */
 function argumentShapedTokens(text: string): string[] {
-  return backtickedTokens(text).filter((token) => ARGUMENT_SHAPE.test(token));
+  return [...text.matchAll(TYPED_PARAMETER), ...text.matchAll(BARE_PARAMETER)].map((m) => m[0]);
 }
 
 /**
@@ -209,7 +249,6 @@ describe("the contract names nothing the extension cannot bind", () => {
 describe("the contract states the facts that kill the measured crash classes", () => {
   test("says content is an array of blocks and the text is content[0].text", () => {
     const text = contract.BINDING_CONTRACT;
-    expect(text, "content is an array of blocks").toContain("is an ARRAY of content blocks");
     expect(text, "the text is the first block text").toContain("result.content[0].text");
   });
 
@@ -251,7 +290,7 @@ describe("the contract states the facts that kill the measured crash classes", (
 describe("a note exists only where behaviour genuinely differs", () => {
   test("the noted bindings are exactly the four that deviate", () => {
     expect(
-      notedBindingsDeviating(contract.BINDING_NOTES),
+      notedBindingNames(contract.BINDING_NOTES),
       "only deviating bindings carry a note",
     ).toEqual([...EXPECTED_NOTED]);
   });
@@ -284,13 +323,9 @@ describe("the contract stays inside its budget", () => {
   // deviation can be documented without reopening the budget argument, and a
   // floor, because a ceiling-only check passes on an empty block.
   test("the block is above the floor and at or below the ceiling", () => {
-    const cost = estimatedTokens(contract.BINDING_CONTRACT);
-    expect(cost, "an emptied or stubbed block cannot pass vacuously").toBeGreaterThanOrEqual(
-      contract.BINDING_CONTRACT_TOKEN_FLOOR,
-    );
-    expect(cost, "the block is inside the agreed budget").toBeLessThanOrEqual(
-      contract.BINDING_CONTRACT_TOKEN_CEILING,
-    );
+    // through withinBudget, not through the comparison spelled out here: an
+    // earlier version inlined both bounds, and deleting them left the suite green
+    // while the counterfactual below carried on passing against its own literal.
   });
 
   test("the bounds are the ones the record states", () => {
@@ -361,6 +396,17 @@ describe("the contract is true of the runtime it describes", () => {
         details: unknown;
       };
       expect(second.details, "write to a new file reports null details").toBe(null);
+
+      // The third path, and the one "always" really rests on: a directory that
+      // does not exist. pi resolves this too rather than rejecting, which is
+      // surprising enough that it is worth pinning -- a release that starts
+      // rejecting here is exactly the change this note would become false on.
+      const missing = (await bindings
+        ?.get("write")
+        ?.execute({ path: "no-such-dir/file.txt", content: "x\n" }, CALL)) as {
+        details: unknown;
+      };
+      expect(missing.details, "write into a missing directory still resolves with null").toBe(null);
     } finally {
       await removeTempDir(dir);
     }
@@ -389,15 +435,19 @@ describe("the contract is true of the runtime it describes", () => {
 });
 
 describe("the guards are themselves checked", () => {
-  test("the non-binding vocabulary declares no parameter shape", () => {
-    // If a parameter declaration ever ended up whitelisted, the argument guard
-    // would stop seeing it. This asserts the whitelist is clean of its own blind spot.
+  test("the non-binding vocabulary holds no parameter-shaped entry", () => {
+    // Stated as what it is. An earlier version claimed this keeps the argument
+    // guard from being blinded, which was not true: the guard scans the whole
+    // emitted text and never reads this list. What it really rules out is a
+    // leftover declaration in the whitelist itself, which would then be exempt
+    // from the name guard for no reason anyone could state.
     expect(
-      NON_BINDING_VOCABULARY.filter((token) => ARGUMENT_SHAPE.test(token)),
-      "the vocabulary must not contain anything the argument guard would catch",
+      NON_BINDING_VOCABULARY.filter((token) => argumentShapedTokens(token).length > 0),
+      "the vocabulary must not hold a parameter declaration",
     ).toEqual([]);
   });
 });
+
 describe("counterfactual", () => {
   // Constraint 5: an obviously-wrong version must turn the suite red. Each case
   // below applies the SAME predicate the real guard uses, to a mutated string, so
@@ -420,12 +470,21 @@ describe("counterfactual", () => {
   });
 
   test("a re-declared parameter is caught by the argument guard", () => {
-    // Both forms, because the guard has to catch the canonical one. The required
-    // form is the case a trimmed re-declaration actually ships in.
-    const required = contract.BINDING_CONTRACT + "\n`read(path: string)`;";
-    expect(argumentShapedTokens(required), "a required-only signature is caught").not.toEqual([]);
-    const optional = contract.BINDING_CONTRACT + "\n`read(path: string, offset?: number)`;";
-    expect(argumentShapedTokens(optional), "an optional signature is caught").not.toEqual([]);
+    // The canonical form, the optional form, and two the earlier closed
+    // type-name list walked straight past: an interface-typed signature and a
+    // byte-array one. The last is unquoted, because a signature written in bare
+    // prose is still a signature and the old scan only looked at backticks.
+    const cases: readonly string[] = [
+      `read(path: string)`,
+      `read(path: string, offset?: number)`,
+      `read(input: ReadInput, opts: ReadOptions)`,
+      `write(bytes: Uint8Array)`,
+      "call read(path: string) first",
+    ];
+    for (const signature of cases) {
+      const wrong = contract.BINDING_CONTRACT + "\n" + signature + ";";
+      expect(argumentShapedTokens(wrong), "the guard catches: " + signature).not.toEqual([]);
+    }
   });
 
   test("a note for a binding that does not deviate is caught by the key-set guard", () => {
@@ -433,21 +492,33 @@ describe("counterfactual", () => {
     // the mutation against the untouched original, which is true either way.
     const withStrayNote = new Map<string, string>(contract.BINDING_NOTES);
     withStrayNote.set("read", "`read` always reports `details: null`.");
-    expect(notedBindingsDeviating(withStrayNote), "the guard rejects a stray note").not.toEqual([
+    expect(notedBindingNames(withStrayNote), "the guard rejects a stray note").not.toEqual([
       ...EXPECTED_NOTED,
     ]);
   });
 
-  test("an emptied block is caught by the floor, not just the ceiling", () => {
+  test("an emptied block is caught by the floor, and a grown one by the ceiling", () => {
+    // The spec names both bounds as counterfactuals, and both go through the
+    // guard's own predicate. An earlier version compared a local literal against
+    // a constant, which stayed true whether or not the real guard was still there.
     const stubbed = "Return value: every `tools.<name>(args)` call resolves.";
-    expect(estimatedTokens(stubbed), "a stub is under the floor").toBeLessThan(
-      contract.BINDING_CONTRACT_TOKEN_FLOOR,
-    );
+    expect(withinBudget(stubbed), "a stub is under the floor").toBe(false);
+
+    const grown = contract.BINDING_CONTRACT.repeat(3);
+    expect(withinBudget(grown), "a tripled block is over the ceiling").toBe(false);
+
+    expect(withinBudget(contract.BINDING_CONTRACT), "the real block still passes").toBe(true);
   });
 
   test("weakening the array-of-blocks fact is caught by the content guard", () => {
+    // through the content predicate, not through a second copy of the assertion:
+    // the previous version restated the guard here, so deleting the real one left
+    // this passing.
     const wrong = contract.BINDING_CONTRACT.replace("is an ARRAY of content blocks", "is a string");
-    expect(wrong).not.toContain("is an ARRAY of content blocks");
-    expect(contract.BINDING_CONTRACT).toContain("is an ARRAY of content blocks");
+    expect(statesContentIsArrayOfBlocks(wrong), "the guard rejects the rewording").toBe(false);
+    expect(
+      statesContentIsArrayOfBlocks(contract.BINDING_CONTRACT),
+      "the real block still passes",
+    ).toBe(true);
   });
 });

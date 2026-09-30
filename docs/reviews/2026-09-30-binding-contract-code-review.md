@@ -88,11 +88,16 @@ Growing the normative corpus by roughly 250 lines made this test exceed vitest's
 at 5646ms in a full-suite parallel run. Isolated it measured 90ms, so the first budget this record
 set (30s) was 333x the real cost and would have let a genuine regression pass; it is reverted.
 
-The revert alone was not enough -- the timeout came back on the next full-suite run, so it was
-never a one-off. The cause was in the test: two assertions each built their own Set over the whole
-corpus. The Set is now built once at module scope, after the extractor that produces it, and each
-assertion filters it. The default timeout is kept, and three consecutive full-suite runs are green,
-so the fix is at the cause rather than in the budget.
+**The cause was never established, and the first account of it in this ledger was wrong.**
+Round 3 put the hoist back exactly as it was at 368d046 and the suite stayed green, which
+rules out the stated reason: there was one scan, in one test, not two scans in two
+assertions. What the hoist actually does is move that one scan out of the timed body --
+the body now runs in 1-2ms and the scan happens at import, outside the per-test timeout
+window. The outcome is good and three consecutive full-suite runs are green with the
+default timeout kept, but that is **green by measurement, cause unestablished**, not a
+closed finding. The flake was load-dependent: the same test was observed at 5646ms under a
+fully parallel run and at 857-1985ms on three others, and nobody has explained the spread.
+If it comes back, that spread is the thing to look at.
 
 ### Round 2 closure
 
@@ -106,3 +111,75 @@ All blocking findings fixed. Final mutation proof, each run against the suite an
 | unmodified tree                            | 28 passed |
 
 Full gate green: typecheck, lint, fmt:check, build, 832 tests, verify:dist 29 checks.
+
+## Round 3 (delta over 6768efb)
+
+Standards 8 findings, 0 blocking. Spec 8 findings, 3 blocking. The headline is not a new defect but a correction to this
+ledger, so it is recorded first.
+
+### The correction
+
+R2-S6's account of the doc-integrity timeout was fabricated. This record claimed two assertions
+each rebuilt a Set over the corpus. There was one scan, in one test. Putting the hoist back
+exactly as it was at 368d046 leaves the suite green, which is the counterfactual this record's
+own closure discipline requires. The hoist does one real thing -- it moves the scan out of the
+timed body into import, which is outside the per-test window -- and the row is now marked
+**green by measurement, cause unestablished**. The flake was load-dependent (5646ms once,
+857-1985ms on three later runs) and the spread is unexplained. That is what the next reader needs,
+not a cause story that was never measured.
+
+| #    | finding                                                                                                                                                                                                                                                                                  | evidence                                                                  | disposition                                                                                                                                                                                                                                                           |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R3-1 | The argument guard enforced neither its scope nor its types: a closed list of nine type names plus backtick-only scanning missed interface-typed, byte-array and callback signatures, and bare-prose ones. It also regressed against round 1, where a tab-indented signature was caught. | Standards: five measured misses, all green                                | fixed: the pattern is structural -- a parenthesised name-colon run -- and the scan covers the whole emitted text. All five now go red, including the tab case. The module header states the one form that is not caught and why it is not what the decision is about. |
+| R3-2 | R2-S6's stated cause was false.                                                                                                                                                                                                                                                          | Standards: reverting the hoist is green                                   | corrected above; the row is reclassified, not closed.                                                                                                                                                                                                                 |
+| R3-3 | The hoisted Set sat before the extractor, contradicting its own comment, and only survived on function hoisting.                                                                                                                                                                         | Standards: converting the extractor to a const arrow kills the whole file | fixed: the block is below the extractor, and the comment says why it is there rather than why it was moved.                                                                                                                                                           |
+| R3-4 | The write test's two paths were both successes, under a blocking-level rule that wants success and failure. pi's write into a missing directory resolves rather than rejecting.                                                                                                          | Standards measurement                                                     | fixed: the missing-directory path is pinned, and the comment names it as the one a pi bump would flip.                                                                                                                                                                |
+| R3-5 | notedBindingsDeviating was a key extractor wearing the name of a decision.                                                                                                                                                                                                               | reading                                                                   | fixed: renamed to notedBindingNames, and the deviation claim moved onto the literal it is compared with.                                                                                                                                                              |
+| R3-6 | The vocabulary test claimed to keep the argument guard from being blinded; the guard never reads the vocabulary.                                                                                                                                                                         | Standards: whitelisting a signature does not change the guard's result    | fixed: restated as what it checks -- no parameter declaration may sit in the whitelist.                                                                                                                                                                               |
+| R3-7 | The record said the shortest note was 41 characters; it is 39.                                                                                                                                                                                                                           | measured: 39, 69, 72, 133                                                 | fixed.                                                                                                                                                                                                                                                                |
+
+### Round 3 closure
+
+| mutation                                     | result    |
+| -------------------------------------------- | --------- |
+| an interface-typed signature in the contract | 3 failed  |
+| a bare-prose `tools.read(path: string)` call | 1 failed  |
+| unmodified tree                              | 28 passed |
+
+Full gate green: typecheck, lint, fmt:check, build, 832 tests, verify:dist 29 checks.
+
+### Round 3 Spec axis (delta over 6768efb, 8 findings, 3 blocking)
+
+Run against the same commit as the Standards axis. Its sharpest result was a counterexample to a
+claim in the round-1 table above, recorded here rather than edited there.
+
+| #     | finding                                                                                                                                                                                                                                                            | evidence                                                | disposition                                                                                                                                                                                    |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R3-S1 | The floor counterfactual compared a local literal against a constant and never touched the module, so deleting the real budget assertions left the suite green. This is round-1 S-5, recorded above as fixed by deletion; the test had been reworded, not deleted. | Spec: deleting both real budget assertions, 28/28 green | fixed: withinBudget is one predicate; the guard and the counterfactual both call it, and the counterfactual now also covers the ceiling, which the spec names and no test exercised.           |
+| R3-S2 | The array-of-blocks counterfactual asserted on a local string and duplicated the guard, so deleting the real assertion left it passing.                                                                                                                            | Spec: delete the real assertion, 28/28 green            | fixed: statesContentIsArrayOfBlocks is the shared predicate.                                                                                                                                   |
+| R3-S3 | The argument guard read only backticked tokens, so a bare-prose `Args: read(path).` shipped green; the record's documented scope limit was attributed to the other guard, which is why the hole read as closed.                                                    | Spec: twice, 28/28 green                                | fixed: a second, structural pattern catches the untyped form without matching the contract's own `tools.<name>(args)` or `Promise.all(...)`. See the Standards table above for the typed form. |
+| R3-S4 | The record said the shortest note was 41 characters (it is 39) and concluded the headroom covered no note; 40 characters of headroom covers exactly one.                                                                                                           | Spec: measured                                          | fixed, with the arithmetic stated rather than rounded toward the comfortable answer.                                                                                                           |
+| R3-S5 | The record's 382-token before-figure is the current description minus the block, not the pre-change description, which is 402. The difference is the clause this change was supposed to fold away.                                                                 | Spec: `git show 2074832`                                | fixed: 402 to 672, 72% gross and 67% net, with the subtraction trap named.                                                                                                                     |
+| R3-S6 | The spec's decision-encoding block has drifted from what ships: six facts have no basis in the spec text.                                                                                                                                                          | Spec line-by-line                                       | **not a code fix.** The divergence is the spec owner's to close, and nothing in the tree contradicts itself because the module is the only literal.                                            |
+| R3-S7 | The round-2 header claimed nine Spec findings while the table recorded one, so the other eight were unauditable.                                                                                                                                                   | Spec                                                    | corrected below.                                                                                                                                                                               |
+
+### Corrections to the round-1 table
+
+Two dispositions in round 1 were over-claimed and are corrected rather than quietly dropped:
+
+- **S-5** said the floor counterfactual was deleted. It was reworded into the same shape, and the flaw
+  survived two more rounds. Closed this round, against the counterfactual now calling withinBudget.
+- **P-6** said every counterfactual applies the real guard's predicate. Two of six did not. The
+  claim held for the four name and key-set cases, which is why rounds 1 and 2 both believed it.
+
+### Round 3 closure
+
+| mutation                                  | result    |
+| ----------------------------------------- | --------- |
+| interface-typed signature in the contract | 3 failed  |
+| bare-prose tools.read(path: string) call  | 1 failed  |
+| the real block grown past the ceiling     | 1 failed  |
+| unmodified tree                           | 28 passed |
+
+The ceiling row is the one that settles S-5: the real block is bounded by something that fires
+when it grows, not by a counterfactual comparing a stub to a constant.

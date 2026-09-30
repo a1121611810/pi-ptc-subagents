@@ -16,8 +16,11 @@
  *    have used anyway.
  * 2. Arguments are deliberately absent. pi declares every tool's arguments
  *    natively in the same request, so restating them is pure token cost. The test
- *    that enforces this reads the emitted text for argument-shaped declarations,
- *    not the export names, because an export-name scan cannot see a text edit.
+ *    that enforces this reads the emitted text for a parenthesised `name:` run --
+ *    structurally, so a signature in any type is caught -- rather than the export
+ *    names, because an export-name scan cannot see a text edit. It catches a typed
+ *    parameter list; an untyped list such as `read(path, offset)` is not what a
+ *    declaration looks like and is not what the decision is about.
  * 3. A note exists only where behaviour genuinely deviates from the shared shape,
  *    so a new binding forces a decision about whether it needs one. The note map
  *    is typed against the binding-name set, so a typo in a key is a type error

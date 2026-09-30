@@ -147,16 +147,24 @@ the floor is what makes a stubbed-out contract red. Both numbers are recorded
 here so the record and the constants have one place that says them, and both are
 pinned by a test that names this record.
 
-Measured on the shipped text: **290** estimated tokens, leaving 10 under the
-ceiling. The shortest note in the block is 41 characters, so that headroom no
-longer covers a future genuine deviation -- the first cut of this record had 28
-tokens free and claimed otherwise, and the catchability clause and the narrowed
-`edit` note ate the difference. Treat the ceiling as close, and raise it here
-with a reason rather than in a code comment.
+Measured on the shipped text: **290** estimated tokens, 1160 characters, leaving
+40 characters under the ceiling. The four notes are 39, 69, 72 and 133 characters,
+so that headroom covers exactly one minimum-size note -- a separator plus the
+shortest one lands on 300 precisely, which passes -- and nothing larger. An earlier
+draft of this paragraph said the headroom no longer covered a note at all; that was
+false by one character, and the honest statement is the one above. The first cut
+of this record had 28 tokens free, and the catchability clause and the narrowed
+`edit` note ate the difference. Treat the ceiling as close, and raise it here with a
+reason rather than in a code comment.
 
-For scale, the registered `ptc_run_code` description was 382 estimated tokens
-before this change and is 672 after, so the block is roughly 76% of the
-pre-existing description. Measured against the whole PTC request prefix the
+For scale, the registered `ptc_run_code` description was **402** estimated tokens
+before this change and is **672** after. Note the before figure is the pre-change
+description, not the current one minus the block: the change also folded away an
+82-character clause the body used to carry, so subtracting the block from today's
+description gives 382 and would understate what the model saw by that much. The
+block is 72% of the pre-change description gross, and the **net** addition -- block
+minus the clause it replaced, 1078 characters, 270 tokens -- is 67%. The net figure
+is the one to reason from. Measured against the whole PTC request prefix the
 addition is single-digit, but that denominator is not a thing the model sees on
 its own, so the per-surface figure is the one to reason from.
 
