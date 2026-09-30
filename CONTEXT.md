@@ -154,8 +154,11 @@ which of the registered tools are _active_). Read from the agent-dir
 this package takes responsibility for: `off`, `subagents`, `full`.
 With no key set it is **detected**: a pi that ships its own `codemode`
 resolves to `subagents`, a pi that does not resolves to `full`, and a probe
-that cannot answer resolves to `full` in the safe direction. ADR-0025,
-ADR-0026. _Avoid_: "PTC mode" (that is the hide-the-built-ins toggle; the
+that cannot answer resolves to `full` in the safe direction -- and the session
+names that outcome at startup rather than defaulting in silence, because a
+detection that cannot be seen is indistinguishable from a pi that moved its
+`dist`. ADR-0025, ADR-0026. _Avoid_: "PTC mode" (that is the hide-the-built-ins
+toggle; the
 two are separate and both exist), "mode" unqualified (ambiguous in this
 repository), "enable" (a surface mode of `off` leaves the package
 installed and doing nothing, which "disabled" would hide), "default"

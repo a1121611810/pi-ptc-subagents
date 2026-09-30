@@ -151,6 +151,10 @@ export function makeExtensionStub(
       return () => {};
     },
     getActiveTools: () => [...active],
+    // ADR-0026: the factory-time filesystem probe cannot see --no-extensions or
+    // --exclude-tools codemode, so session_start cross-checks it against pi own registry.
+    // The stub registry is the declared active set plus what the factory registered.
+    getAllTools: () => [...new Set([...active, ...tools.keys()])].map((name) => ({ name })),
     setActiveTools: (names: string[]) => {
       active.splice(0, active.length, ...names);
       activeWrites.push([...names]);
@@ -182,9 +186,9 @@ export function makeExtensionStub(
     // ADR-0025: the surface is PINNED to `full` unless the caller asks for something else,
     // and `"from-file"` is the only way to reach the production read. Both halves are load-bearing
     // and the second was learned the hard way in review round 2: an earlier version passed NO
-    // override when the caller said nothing, which let seven test files inherit the developer's
+    // override when the caller said nothing, which let the factory-driven test files inherit the developer's
     // real `~/.pi/agent/ptc.json` -- 31 failures with a `surfaceMode: off` dir set, against 4
-    // before. An unspecified surface is a pin, never a read.
+    // before. An unspecified surface is a pin, never a read. (The count is deliberately not written here: round 2 put "eight" in a comment and round 3 found "seven" in another, and both were wrong. grep it.)
     ...(options.surfaceMode === "from-file"
       ? options.codemode === undefined
         ? {}

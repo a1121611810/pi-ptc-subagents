@@ -1283,8 +1283,23 @@ export async function dispatch(
     return missingAgentResult({ cwd, agentScope });
   }
 
+  // One owner gates the rule for both fronts (ADR-0025 decision 7, issue #88 decision 9).
+  // The only previous acquire lived at the dispatcher's own call site, which `ptc_subagent`
+  // bypasses by calling `dispatch()` directly -- a foreground `ptc_subagent` therefore reached the
+  // spawn site with every slot held. Measured: it tried to spawn pi, and a saturated counter said
+  // nothing. Order matches `dispatchBackground`: depth, then missing agent, then acquire.
+  //
+  // Anonymous on purpose. A foreground dispatch has no task id to key a reservation by, and a
+  // keyed one would be actively wrong: `createPtcSubagentTool` hardcodes `callId: 0`, so two
+  // concurrent ptc_subagent calls would share a token and the second would refuse spuriously.
+  const slots = deps.slots ?? FALLBACK_DISPATCH_SLOTS;
+  if (!slots.tryAcquire()) {
+    return dispatchConcurrencyLimitReached();
+  }
+
   const agent = discoverAgent(input.agent, cwd, agentScope);
   if (!agent) {
+    slots.release();
     return unknownAgentResult(input.agent, agentScope, cwd, Date.now() - start);
   }
 
@@ -1310,6 +1325,9 @@ export async function dispatch(
     ): void => {
       if (resolved) return;
       resolved = true;
+      // The one terminal point of a foreground dispatch, so the one place that frees the slot.
+      // Guarded by `resolved`, so an abort racing an exit cannot double-release.
+      slots.release();
       cancelKillEscalation?.();
       if (ctx.signal) ctx.signal.removeEventListener("abort", onAbort);
       cleanupTmp(tmp);

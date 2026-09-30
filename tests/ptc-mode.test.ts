@@ -47,6 +47,19 @@ const PTC_TOOLS = ["ptc_run_code", "ptc_workflow"];
 const FULL = [...DEFAULT_SESSION_TOOLS, ...PTC_TOOLS];
 /** Every name that could be bound, for tests that need a session with all of them enabled. */
 const ALL_BINDABLE = [...BUILTIN_BINDING_NAMES, ...PTC_TOOLS];
+/**
+ * The two answers `readSurfaceModeConfig` has to give when the file cannot decide, keyed to the
+ * pi it is reasoning about (ADR-0026 decision 5).
+ *
+ * Stated as a pair rather than as one expectation so that neither a hardcoded `full` nor a
+ * hardcoded `subagents` can satisfy the malformed-file tests below. Every test that passes it
+ * names the presence it is reasoning about; the default argument would silently run the
+ * machine's real probe against vitest's argv instead.
+ */
+const DETECTED_SURFACE_CASES = [
+  [{ present: true, how: "found" }, "subagents"],
+  [{ present: false, how: "not-found" }, "full"],
+] as const;
 
 /**
  * Run `fn` with `~/.pi/agent` redirected to a temp dir. `getAgentDir()` re-reads the env var on
@@ -107,17 +120,30 @@ test("surface mode honours every value the record names, and reports the file as
   });
 });
 
-test("an unparseable surfaceMode file falls back to full and says so", async () => {
+test("an unparseable surfaceMode file falls back to the detected default and says so", async () => {
   await withAgentDir(async (dir) => {
     await writeFile(join(dir, PTC_MODE_CONFIG_FILE), "{ not json", "utf8");
-    const broken = readSurfaceModeConfig(dir);
-    expect(broken.surfaceMode, "a broken file must not half-apply").toBe("full");
-    expect(broken.source).toBe("invalid");
-    expect(broken.error, "the reason is reported, not swallowed").toContain("not valid JSON");
+    // ADR-0026 decision 5 replaced "falls back to full" with "falls back to the DETECTED
+    // default", so both directions are stated: a hardcoded `full` and a hardcoded `subagents`
+    // each turn one of these red, which is the whole point of the rename.
+    //
+    // The presence is passed explicitly because the default argument is the machine's real
+    // probe. Under vitest, argv[1] is `.../vitest/dist/workers/forks.js`, which resolves to a
+    // directory with no codemode beside it, so the default arg silently answers `not-found` and
+    // the `full` expectation held for a reason that had nothing to do with the code.
+    for (const [presence, expected] of DETECTED_SURFACE_CASES) {
+      const where = "codemode " + presence.how;
+      const broken = readSurfaceModeConfig(dir, presence);
+      expect(broken.surfaceMode, where + ": a broken file must not half-apply").toBe(expected);
+      expect(broken.source, where).toBe("invalid");
+      expect(broken.error, where + ": the reason is reported, not swallowed").toContain(
+        "not valid JSON",
+      );
+    }
   });
 });
 
-test("a surfaceMode of the wrong type or outside the set falls back to full and says so", async () => {
+test("a surfaceMode of the wrong type or outside the set falls back to the detected default and says so", async () => {
   await withAgentDir(async (dir) => {
     for (const bad of [7, true, null, "partial", "FULL", "sub-agent"]) {
       await writeFile(
@@ -125,26 +151,35 @@ test("a surfaceMode of the wrong type or outside the set falls back to full and 
         JSON.stringify({ surfaceMode: bad }),
         "utf8",
       );
-      const config = readSurfaceModeConfig(dir);
-      expect(config.surfaceMode, "value " + JSON.stringify(bad)).toBe("full");
-      expect(config.source, "value " + JSON.stringify(bad)).toBe("invalid");
-      expect(config.error, "value " + JSON.stringify(bad)).toContain("surfaceMode");
+      for (const [presence, expected] of DETECTED_SURFACE_CASES) {
+        const where = JSON.stringify(bad) + " with codemode " + presence.how;
+        const config = readSurfaceModeConfig(dir, presence);
+        expect(config.surfaceMode, where).toBe(expected);
+        expect(config.source, where).toBe("invalid");
+        expect(config.error, where).toContain("surfaceMode");
+      }
     }
   });
 });
 
-test("a config file that is valid JSON but not an object falls back to full", async () => {
+test("a config file that is valid JSON but not an object falls back to the detected default", async () => {
   await withAgentDir(async (dir) => {
     // A non-object is a broken file; an object carrying a valid key is simply a setting,
     // and is covered by the previous test rather than here.
     for (const bad of ["[]", "null", "3", "true"]) {
       await writeFile(join(dir, PTC_MODE_CONFIG_FILE), bad, "utf8");
-      const config = readSurfaceModeConfig(dir);
-      expect(config.surfaceMode, bad).toBe("full");
+      for (const [presence, expected] of DETECTED_SURFACE_CASES) {
+        const where = bad + " with codemode " + presence.how;
+        const config = readSurfaceModeConfig(dir, presence);
+        expect(config.surfaceMode, where).toBe(expected);
+        // The source is half of what makes this a fallback rather than a setting: a file the
+        // reader could not use has to be reported as such.
+        expect(config.source, where).toBe("invalid");
+        expect(config.error, where + ": and with a reason").toContain("JSON object");
+      }
     }
   });
 });
-
 test("an absent surfaceMode key is a default, not invalid", async () => {
   await withAgentDir(async (dir) => {
     await writeFile(

@@ -211,6 +211,13 @@ would take away the orchestration tool the session was relying on.
 No file, or a value outside that set, falls back to the detected default and says so at startup
 rather than half-applying: which tools exist is not something to change on a guess.
 
+**A detection you cannot see is the failure this design has**, so the result is reported. With no
+`surfaceMode` key, a TUI session says how the probe came out and which surface the default
+therefore is — but only when the probe could not answer. A pi that ships `codemode` and is
+detected as `subagents` is the expected case and says nothing. If pi ever restructures its `dist`,
+you will see the line instead of silently keeping `full`. (It is a `ui.notify`, so a `--print`
+session gets no line; ADR-0025 records that gap for the surface-mode warnings too.)
+
 **Where it does not run.** Print / JSON / RPC sessions are left exactly as launched, and so is a
 session started with an explicit tool restriction (`--tools`, `--exclude-tools`,
 `--no-builtin-tools`) — the extension does not override what you asked for. If another extension

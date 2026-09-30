@@ -21,9 +21,16 @@ Registration has to happen in the extension factory, because pi has no unregiste
 default therefore has to be knowable in the factory. pi's own tool listing is not:
 
 - `getAllTools()` and `getActiveTools()` are `notInitialized` stubs until `bindCore` runs
-  (`loader.js:106`), which is after every factory body has returned.
-- Calling one from a factory **throws**, and a throwing factory makes the extension fail to load
-  entirely (`loader.js:447-455`). It does not return an empty list.
+  (`loader.js:106-108`), which is after every factory body has returned.
+- Calling one from a factory **throws**. `initializeExtension` catches that throw and
+  `loadExtension` answers `{ extension: null, error }`, so the extension is dropped rather than
+  half-loaded (`loader.js:493-520`). It does not return an empty list.
+
+  Both line numbers are pi **0.99.1**'s `dist/core/extensions/loader.js`, read from a real
+  install. 0.86.1 -- the version this repo compiles against -- has the same two regions at
+  106-108 and 445-473, so the shape of the argument is version-independent even though the
+  offsets are not.
+
 - 0.86.1, which this repo compiles against, has no `getSettings`, and its `ToolInfo` has no
   `exposure` field, so a check has to be name-only against `getAllTools()` even when deferred.
 
@@ -38,14 +45,29 @@ API does work -- is recorded as rejected below. It is the only approach that see
 
 2. Detection is a filesystem probe over `process.argv[1]`, resolved with `realpathSync`
    first because a package-manager install makes `argv[1]` a shim. Three layouts are tried
-   (`../extensions/codemode`, `../../extensions/codemode`, `extensions/codemode`); the third
-   was added because a test caught a pi with no `dist/bundle` level being misread.
+   (`../extensions/codemode`, `../../extensions/codemode`, `extensions/codemode`).
 
-3. **Every failure of the probe resolves to `full`.** No argv, an unresolvable shim, a pi
-   packaged somewhere unguessable, a permission error: all of them are `full`. The direction
-   is the design. A probe that cannot answer must not be allowed to answer yes, because
-   `subagents` as a failure mode silently takes away the orchestration tool a session was
-   relying on.
+   Only the first is **measured**: on a real 0.99.1 install `extensions/` sits one level above
+   `dist/bundle/`, and that is the entry that answers. The other two are hypotheses about a pi
+   packaged differently, and their coverage is uneven. The third has a test, but that test builds
+   the layout by hand rather than observing an install, so "a test caught it" would be a claim
+   nobody can check. The second has no test at all. Both are here because a miss on either calls a
+   pi that does ship codemode a pi that does not, and the real-pi e2e probe test is where such a
+   miss would surface. The cost of guessing is one extra `statSync` on a path that is normally
+   absent; the cost of missing the layout is a silent fallback.
+
+3. **Every failure of the probe resolves to `full`** (`FALLBACK_SURFACE_MODE`, the false branch
+   of `detectedSurfaceMode`). No argv, an unresolvable shim, a pi packaged somewhere unguessable,
+   a permission error: all of them are `full`. The direction is the design. A probe that cannot
+   answer must not be allowed to answer yes, because `subagents` as a failure mode silently
+   takes away the orchestration tool a session was relying on.
+
+   Falling back silently is the other half of that failure, so the outcome is **reported**. At
+   `session_start`, when the surface was not read from the file, the probe result is named
+   through `ctx.ui.notify`: how it came out and what the default therefore is. The expected
+   case -- probe found codemode, default resolved to `subagents` -- says nothing, because a
+   notice on every healthy session is noise. What is left is a probe that could not answer,
+   which is exactly the pi-restructured-its-`dist` case this design is most exposed to.
 
 4. An explicit `surfaceMode` key always wins, whichever way the probe came out. Detection is a
    default, never an override.
@@ -61,9 +83,15 @@ API does work -- is recorded as rejected below. It is the only approach that see
    decision 4 and it now fires on a stock pi 0.99.1 session, which is a consequence of
    decision 1 and not a bug in it.
 
-7. `readSurfaceModeConfig` takes the probe result as a **parameter** with a real-probe default,
-   and the factory takes it as a test seam. Neither a test nor a caller can be surprised by the
-   machine it happens to run on.
+7. `readSurfaceModeConfig` takes the probe result as an **optional parameter**, and the factory
+   takes it as a test seam. Neither a test nor a caller can be surprised by the machine it
+   happens to run on.
+
+   Omitted, the parameter is resolved **inside the fallback branches** rather than in a default
+   parameter, because a default parameter is evaluated on every call -- including the ones an
+   explicit `surfaceMode` key short-circuits, where the user would pay a `realpathSync` plus up
+   to three `statSync` per factory construction to set one line of JSON and get a constant. That
+   was measured, not assumed: with an explicit key the probe's `argv[1]` read goes from 1 to 0.
 
 ## What this costs, stated plainly
 
@@ -98,8 +126,13 @@ record is the place to look up what was decided.
 ## Consequences
 
 - The filesystem layout becomes an input. If pi restructures its `dist`, the probe returns
-  `not-found` and the default quietly becomes `full` -- the safe direction, but silent. The
-  probe result is carried on `SurfaceModeConfig.codemode` so a session can report it.
+  `not-found` and the default becomes `full` -- the safe direction, but one the user cannot
+  otherwise see. The probe result is carried on `SurfaceModeConfig.codemode` and read exactly
+  once, by the `session_start` notice in `src/index.ts`; that reader is the reason the field
+  exists, and it is the only place the detection is visible to a human.
+- That notice is a `ui.notify`, so it is TUI-only: a `--print` session whose probe came back
+  false still gets no line. This is the same gap ADR-0025 records for the `subagents` warning,
+  and it is inherited rather than introduced here.
 - `scripts/verify-dist-render.mjs` must keep writing an explicit `surfaceMode`, and its reason
   is now stronger: a gate run under a pi that ships codemode would resolve to `subagents` and
   fail on a set difference unrelated to the build.

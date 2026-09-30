@@ -25,11 +25,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runs, and a throwing factory makes the extension fail to load rather than return an empty
   list.
 
+  A detection the user cannot see is the one failure this design has, so the outcome is
+  reported: a TUI session with no `surfaceMode` set is told how the probe came out whenever
+  it could not answer, and which surface the default therefore is. The expected case — a pi
+  that ships `codemode`, detected as `subagents` — stays silent. The notice is `ui.notify`,
+  so a `--print` session gets no line; that gap is the one ADR-0025 already records for the
+  surface-mode warnings.
+
 - **The model-facing surface is now a setting, and a subagent can be started
   without writing a program (ADR-0025).** A new `surfaceMode` key in
-  `~/.pi/agent/ptc.json` decides what this extension registers: `full` (the
-  default, and today's behaviour) registers `ptc_run_code`, `ptc_workflow` and
-  the `ptc_task_*` trio; `subagents` registers a new top-level `ptc_subagent`
+  `~/.pi/agent/ptc.json` decides what this extension registers: `full`
+  (today's behaviour, and the detected default on a pi without `codemode`)
+  registers `ptc_run_code`, `ptc_workflow` and the `ptc_task_*` trio;
+  `subagents` registers a new top-level `ptc_subagent`
   plus the `ptc_task_*` trio and leaves orchestration to pi's own `codemode`;
   `off` registers nothing at all, so the session is stock pi. The new tool takes
   the same arguments as the `pi.dispatch` binding and calls the same dispatcher,

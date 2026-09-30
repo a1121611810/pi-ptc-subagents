@@ -169,31 +169,43 @@ export const SURFACE_MODES = ["off", "subagents", "full"] as const;
 export type SurfaceMode = (typeof SURFACE_MODES)[number];
 
 /**
+ * Where a pi that could not be asked resolves to. Every way the probe can come back wrong -- no
+ * argv, a shim that will not resolve, a pi packaged somewhere unguessable, a permission error --
+ * lands here, and `full` is today's behaviour. `subagents` as a failure mode would silently take
+ * away the orchestration tool a session was relying on, so the direction is the design
+ * (ADR-0026 decision 3).
+ *
+ * Named rather than inlined at the one place that computes it, because `session_start` reports
+ * the resolved value and two spellings of "the fallback" would be two things to drift.
+ */
+export const FALLBACK_SURFACE_MODE: SurfaceMode = "full";
+
+/**
  * The surface to use when the user has expressed no preference. Not a constant: a pi that ships
  * `codemode` already offers the model a second way to orchestrate, and answering that by
  * handing our orchestration surface away is the whole point of `subagents` mode (ADR-0026).
  *
- * The fallback is `full` on purpose. Every way the probe can come back wrong -- no argv, a shim
- * that will not resolve, a pi packaged somewhere unguessable, a permission error -- lands there,
- * and `full` is today's behaviour. `subagents` as a failure mode would silently take away the
- * orchestration tool a session was relying on.
+ * A probe that found codemode gets `subagents`; every other outcome gets
+ * {@link FALLBACK_SURFACE_MODE}, for the reasons on that constant.
  */
 export function detectedSurfaceMode(presence: CodemodePresence): SurfaceMode {
-  return presence.present ? "subagents" : "full";
+  return presence.present ? "subagents" : FALLBACK_SURFACE_MODE;
 }
-
-/** Kept for callers and tests that need a name rather than a probe result. */
-export const FALLBACK_SURFACE_MODE: SurfaceMode = "full";
 
 /**
  * Whether the pi that launched us ships its own `codemode` orchestration tool.
  *
  * pi's own tool listing is NOT usable here, and that is why this probe exists at all.
  * `getAllTools()` and `getActiveTools()` are `notInitialized` stubs until `bindCore` runs
- * (`loader.js:106`), which happens after every factory body has returned. Calling one from a
- * factory throws, and a throwing factory makes the extension fail to load entirely
- * (`loader.js:447-455`). Registration has to happen in the factory, so the default has to be
- * knowable in the factory.
+ * (`loader.js:106-108`), which happens after every factory body has returned. Calling one from
+ * a factory throws, and `initializeExtension` catches that throw while `loadExtension` answers
+ * `{ extension: null, error }` (`loader.js:493-520`) -- a throwing factory makes the extension
+ * fail to load entirely, not degrade to an empty tool list. Registration has to happen in the
+ * factory, so the default has to be knowable there.
+ *
+ * Those line numbers are pi **0.99.1**'s `dist/core/extensions/loader.js`, read from a real
+ * install, and that is the version this reasoning is about rather than the one this repo compiles
+ * against: the 0.86.1 in `devDependencies` has the same two regions at 106-108 and 445-473.
  *
  * So this walks the filesystem from the entry script instead. `process.argv[1]` is whatever the
  * user typed, which for a package-manager install is a shim, so it is resolved first. The answer
@@ -228,10 +240,15 @@ export function probeCodemodePresence(argv: readonly string[] = process.argv): C
 /**
  * Where the codemode extension sits, relative to the directory holding pi's entry script.
  *
- * The third entry is the one a test caught: a pi run from a checkout, or packaged without a
- * `dist/bundle` level, puts `extensions/` beside the entry script rather than above it. Probing
- * only the two bundled layouts calls that pi a pi that does not ship codemode, and flips the
- * default to full.
+ * Measured: on a real 0.99.1 install the FIRST entry is the one that answers -- `extensions/`
+ * sits one level above `dist/bundle/` -- and it is the only one that has been seen on a real
+ * install. The other two are hypotheses about a pi packaged differently, and the honest state of
+ * their coverage is uneven: the third has a test, but that test builds the layout by hand rather
+ * than observing an install, so "a test caught it" would be a claim nobody can check; the second
+ * has no test at all. They are here because a miss on either calls a pi that does ship codemode a
+ * pi that does not and flips the default to full, and the real-pi e2e probe test is where such a
+ * miss would surface. The cost of guessing is one extra `statSync` on a path that is normally
+ * absent; the cost of missing the layout is a silent fallback.
  */
 const CODEMODE_PROBE_PATHS: readonly (readonly string[])[] = [
   ["..", "extensions", "codemode"],
@@ -252,8 +269,9 @@ export interface SurfaceModeConfig {
   source: "file" | "default" | "invalid";
   error?: string;
   /**
-   * What the probe found, when the surface was NOT read from the file. Absent when the user set
-   * the key, because then the probe never runs and there is nothing to report.
+   * What the probe found, on the paths where the surface was NOT decided by the file. Absent
+   * when the user set the key: that call never consults the probe (see
+   * {@link readSurfaceModeConfig}), so there is nothing to report.
    */
   codemode?: CodemodePresence;
 }
@@ -262,58 +280,65 @@ export interface SurfaceModeConfig {
  * Read `surfaceMode` from the agent-dir config file.
  *
  * A pure function over the filesystem, shaped like {@link readDefaultModeConfig} on purpose:
- * an absent file, an absent key, unparseable JSON and an out-of-set value all resolve to the
- * detected default rather than a hardcoded one, and the last two additionally report `invalid`
- * with a reason. A malformed setting must never half-apply - which tools exist is not something
- * to change on a guess.
+ * an absent file, an absent key, unparseable JSON, a non-object, a wrong-typed value and an
+ * out-of-set value all resolve to the detected default rather than a hardcoded one, and every
+ * malformed shape additionally reports `invalid` with a reason. A malformed setting must never
+ * half-apply - which tools exist is not something to change on a guess.
  *
  * The `presence` argument is a parameter rather than a hidden call, so a test can state the pi it
- * is reasoning about instead of depending on the machine it runs on. It is consulted only when
- * the file does not decide the answer.
+ * is reasoning about instead of depending on the machine it runs on. Omit it and the real probe
+ * answers, but only on a path that actually needs the answer: it is resolved inside the
+ * fallback branches rather than in a default parameter, because a default parameter is evaluated
+ * on EVERY call -- including the ones an explicit `surfaceMode` key short-circuits, where the
+ * user paid a `realpathSync` plus up to three `statSync` to set one line of JSON and get a
+ * constant.
  */
 export function readSurfaceModeConfig(
   agentDir: string,
-  presence: CodemodePresence = probeCodemodePresence(),
+  presence?: CodemodePresence,
 ): SurfaceModeConfig {
   const path = join(agentDir, PTC_MODE_CONFIG_FILE);
-  const fallback = detectedSurfaceMode(presence);
+  const detected = (): { surfaceMode: SurfaceMode; codemode: CodemodePresence } => {
+    const probed = presence ?? probeCodemodePresence();
+    return { surfaceMode: detectedSurfaceMode(probed), codemode: probed };
+  };
   let raw: string;
   try {
     raw = readFileSync(path, "utf8");
   } catch {
-    return { surfaceMode: fallback, source: "default", codemode: presence };
+    return { ...detected(), source: "default" };
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch (error) {
     return {
-      surfaceMode: fallback,
+      surfaceMode: detected().surfaceMode,
       source: "invalid",
       error: `${path} is not valid JSON (${error instanceof Error ? error.message : String(error)})`,
     };
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     return {
-      surfaceMode: fallback,
+      surfaceMode: detected().surfaceMode,
       source: "invalid",
       error: `${path} must contain a JSON object`,
     };
   }
   const value = (parsed as { surfaceMode?: unknown }).surfaceMode;
   if (value === undefined) {
-    return { surfaceMode: fallback, source: "default", codemode: presence };
+    return { ...detected(), source: "default" };
   }
   if (typeof value !== "string") {
     return {
-      surfaceMode: fallback,
+      surfaceMode: detected().surfaceMode,
       source: "invalid",
       error: `${path}: "surfaceMode" must be a string, received ${typeof value}`,
     };
   }
   if (!SURFACE_MODES.includes(value as SurfaceMode)) {
     return {
-      surfaceMode: fallback,
+      surfaceMode: detected().surfaceMode,
       source: "invalid",
       error: `${path}: "surfaceMode" must be one of ${SURFACE_MODES.join(" | ")}, received ${JSON.stringify(value)}`,
     };

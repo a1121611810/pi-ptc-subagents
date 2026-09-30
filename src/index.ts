@@ -48,7 +48,9 @@ import {
   decideModeEntry,
   DEFAULT_HIDE_STRATEGY,
   detectExternalLoadoutChange,
+  FALLBACK_SURFACE_MODE,
   initialModeState,
+  PTC_MODE_CONFIG_FILE,
   PTC_MODE_ENTRY_TYPE,
   PTC_MODE_STATUS_KEY,
   readDefaultModeConfig,
@@ -190,8 +192,13 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
    * ADR-0025: which model-facing tools this package registers, read ONCE here so the
    * `registerTool` calls below can act on it. Reading it later would mean the tools already
    * exist when the setting arrives, and the only way to honour the setting would be to
-   * unregister - which pi has no call for. A malformed value falls back to `full` and is
-   * reported at session start, not silently applied.
+   * unregister - which pi has no call for. A malformed value falls back to the DETECTED default,
+   * not to a constant (ADR-0026 decision 5) -- on a pi that ships codemode that means
+   * `subagents`, not `full` -- and is reported at session start, not silently applied.
+   *
+   * The seam branch pins the surface outright, so it carries no `codemode`: a caller that named
+   * a surface never asked the pi anything, so there is no probe result to report. That is what
+   * makes `surface.codemode !== undefined` the exact test for "the surface was detected" below.
    */
   const surface =
     options.surfaceMode === undefined
@@ -560,6 +567,75 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     // one. Report the surface error only when it says something the mode error did not.
     if (surface.error !== undefined && surface.error !== config.error) {
       ctx.ui.notify(`pi-ptc-subagents: ${surface.error}`, "warning");
+    }
+
+    /*
+     * ADR-0026: the surface was NOT read from the file, so it was DETECTED -- and a detection
+     * that silently came back false is the one failure mode that design has. A pi that
+     * restructures its `dist` makes the probe return `not-found`, the default quietly becomes
+     * `full`, and the user gets zero diagnostics. This is the only reader of
+     * `surface.codemode` in the package, and it is what makes the field carried there real
+     * rather than decorative.
+     *
+     * `!detected.present` is exactly "the probe could not answer". The healthy case -- probe
+     * found codemode, `detectedSurfaceMode` turned that into `subagents` -- is what a modern
+     * pi should resolve to, and a notice on every one of those sessions would be noise, so it
+     * never reaches here. What is left is a probe with a `how` to report, and naming it is the
+     * point: "pi restructured" is then distinguishable from "no pi next to argv[1]" from a shim
+     * that would not resolve.
+     *
+     * `info`, not `warning`: a pi that genuinely ships no codemode lands here too, and
+     * `full` is the right answer for it, so a warning on every one of those sessions would be
+     * crying wolf. The line states the two things that are actually true -- how the probe came
+     * out, and what the default therefore is -- and points at the one line of JSON that makes
+     * the answer deterministic whatever the pi does.
+     *
+     * TUI-only, like every other notice in this file: `ctx.ui.notify` emits nothing in
+     * `--print`, so a scripted session that detected `full` gets no line at all. ADR-0025
+     * records that as a known limitation of the surface-mode warnings.
+     */
+    const detected = surface.codemode;
+    if (detected !== undefined && !detected.present) {
+      ctx.ui.notify(
+        "pi-ptc-subagents: no surfaceMode is set, and the codemode probe reported " +
+          detected.how +
+          ", so the surface defaults to " +
+          FALLBACK_SURFACE_MODE +
+          ". That is the safe direction, not an error. If this pi really does ship pi's own " +
+          'codemode, set "surfaceMode" in ' +
+          PTC_MODE_CONFIG_FILE +
+          " -- an explicit key always wins over detection.",
+        "info",
+      );
+    }
+
+    /*
+     * The probe's other wrong answer. It walks the FILESYSTEM, so it cannot see the two ways pi
+     * offers to withhold a tool it has on disk: `--no-extensions`, and `--exclude-tools codemode`.
+     * Either way the probe answers `present`, `detectedSurfaceMode` hands the session to
+     * `codemode`, and pi registers no such tool -- leaving `ptc_subagent` with no orchestrator. The
+     * ADR-0025 decision-4 warning below cannot cover it: that one asks whether codemode is
+     * ACTIVE, and with the tool absent both questions are false for the same reason.
+     *
+     * So this asks the filesystem probe cannot: not "is the tool offered" but "does pi know this
+     * tool at all". `getAllTools` is available here and only here -- it is a `notInitialized` stub
+     * during loading (ADR-0026) -- so this is the first and only point where the two can be
+     * compared. `source === "file"` means the user decided, so their answer stands even if it is
+     * the wrong one for this session.
+     */
+    if (detected !== undefined && surface.source !== "file") {
+      const known = pi.getAllTools().some((tool) => tool.name === "codemode");
+      if (detected.present && !known) {
+        ctx.ui.notify(
+          "pi-ptc-subagents: the codemode probe found pi's codemode on disk, but this " +
+            "session does not register it (--no-extensions or --exclude-tools codemode), so " +
+            'the detected surface is "subagents" with no orchestrator. Set "surfaceMode" to ' +
+            '"full" in ' +
+            PTC_MODE_CONFIG_FILE +
+            " to use ptc_run_code instead.",
+          "warning",
+        );
+      }
     }
 
     /*

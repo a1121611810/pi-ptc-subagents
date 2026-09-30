@@ -251,23 +251,97 @@ test("an explicit surfaceMode wins over the probe, whichever way the probe came 
   }
 });
 
-test("a malformed file still gives the full surface, and the problem is reported", async () => {
+test("a malformed file still gives the detected surface, and the problem is reported", async () => {
   // Spec decision 3: warns and falls back. The fallback alone is pinned in ptc-mode.test.ts;
   // what is new here is that the FACTORY surfaces the problem rather than swallowing it.
+  //
+  // ADR-0026 decision 5: the fallback is the DETECTED default, not a constant, so both
+  // directions are stated and the presence is passed through the seam explicitly. Before, this
+  // named no `codemode` at all, the real probe ran against vitest's argv, and `not-found` was
+  // the only reason the full surface was expected -- the assertion would have passed just as
+  // happily on a pi that does ship codemode.
+  for (const [codemode, expected] of [
+    [{ present: true, how: "found" }, ["ptc_subagent", ...TASK_TOOLS]],
+    [{ present: false, how: "not-found" }, [...PTC_TOOLS, ...TASK_TOOLS]],
+  ] as const) {
+    const dir = await makeTempDir();
+    const previous = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = dir;
+    const where = "codemode " + codemode.how;
+    try {
+      await writeFile(join(dir, "ptc.json"), "{ not json", "utf8");
+      const stub = makeExtensionStub({ surfaceMode: "from-file", codemode });
+      await stub.emit("session_start", stubContext(stub, { mode: "tui" }));
+      expect([...stub.tools.keys()], "a broken file must not half-apply: " + where).toEqual([
+        ...expected,
+      ]);
+      // Scoped to this file's own warning on purpose. `subagents` on a session without an
+      // active `codemode` raises a second, unrelated warning (ADR-0025 decision 4), and counting
+      // every warning would make this test depend on that. The count still catches a duplicate:
+      // both readers parse the same file, so a second copy of this sentence carries the same
+      // "ptc.json" and lands in this filter.
+      const configWarnings = stub.notifications.filter(
+        (n) => n.type === "warning" && n.message.includes("ptc.json"),
+      );
+      expect(configWarnings.length, "the parse failure is visible, once: " + where).toBe(1);
+      expect(configWarnings[0]?.message).toContain("not valid JSON");
+    } finally {
+      if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previous;
+      await removeTempDir(dir);
+    }
+  }
+});
+test("a detected subagents surface on a pi that does not register codemode says so", async () => {
+  // The filesystem probe cannot see --no-extensions or --exclude-tools codemode, so it answers
+  // "present" for a pi that has codemode on disk and registers no such tool. The session is
+  // then handed to an orchestrator that is not there, and the decision-4 warning cannot catch
+  // it: that one asks whether codemode is ACTIVE, and with the tool absent both questions are
+  // false for the same reason. This is the only assertion standing between that hole and a
+  // silent session.
   const dir = await makeTempDir();
   const previous = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = dir;
   try {
-    await writeFile(join(dir, "ptc.json"), "{ not json", "utf8");
-    const stub = makeExtensionStub({ surfaceMode: "from-file" });
+    // no ptc.json at all: the surface is DETECTED, and the probe is told pi has codemode.
+    const stub = makeExtensionStub({
+      surfaceMode: "from-file",
+      codemode: { present: true, how: "found" },
+      active: ["read", "bash", "edit", "write"],
+    });
     await stub.emit("session_start", stubContext(stub, { mode: "tui" }));
-    expect([...stub.tools.keys()], "a broken file must not half-apply").toEqual([
-      ...PTC_TOOLS,
-      ...TASK_TOOLS,
-    ]);
-    const warnings = stub.notifications.filter((n) => n.type === "warning");
-    expect(warnings.length, "the parse failure is visible, once").toBe(1);
-    expect(warnings[0]?.message).toContain("ptc.json");
+    // Scoped to this notice: the decision-4 warning fires too, and it SHOULD -- a detected
+    // subagents surface with no active codemode is exactly the state it exists to report. Two
+    // warnings for one root cause is noisy, so the fix is in the message, not the count.
+    const notices = stub.notifications.filter((n) => n.message.includes("--no-extensions"));
+    expect(notices.length, "the over-estimate is reported").toBe(1);
+    expect(notices[0]?.type, "and it is a warning, not a note").toBe("warning");
+    expect(notices[0]?.message, "and it names the fix").toContain('"full"');
+  } finally {
+    if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previous;
+    await removeTempDir(dir);
+  }
+});
+
+test("a detected subagents surface on a pi that DOES register codemode stays quiet", async () => {
+  // The other half, and the one that would catch a warning that fires on every healthy session.
+  const dir = await makeTempDir();
+  const previous = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = dir;
+  try {
+    const stub = makeExtensionStub({
+      surfaceMode: "from-file",
+      codemode: { present: true, how: "found" },
+      active: ["read", "bash", "edit", "write", "codemode"],
+    });
+    await stub.emit("session_start", stubContext(stub, { mode: "tui" }));
+    // Scoped the same way: the PTC-mode announcement is this file's pre-existing noise and says
+    // nothing about detection.
+    expect(
+      stub.notifications.filter((n) => n.message.includes("--no-extensions")),
+      "healthy means silent",
+    ).toEqual([]);
   } finally {
     if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previous;

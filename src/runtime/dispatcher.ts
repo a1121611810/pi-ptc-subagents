@@ -31,12 +31,7 @@ import { randomUUID } from "node:crypto";
 import { MessageChannel, Worker } from "node:worker_threads";
 import type { MessagePort } from "node:worker_threads";
 import { BUILTIN_BINDING_NAMES, DISPATCH_BINDING_NAME, type BindingTable } from "./bindings.ts";
-import {
-  DISPATCH_CONCURRENCY_LIMIT_MESSAGE,
-  DispatchSlotCounter,
-  dispatchConcurrencyLimitReached,
-  type DispatchDeps,
-} from "./dispatch.ts";
+import { DispatchSlotCounter, type DispatchDeps } from "./dispatch.ts";
 import { createWorkerEnv, effectiveTimeoutMs, resolveConfig } from "./limits.ts";
 import type { PtcConfig, PtcSurface } from "./limits.ts";
 import type { ULID } from "./task-storage.ts";
@@ -213,21 +208,6 @@ function dispatchOutcome(
         ? "dispatch refused"
         : "dispatch failed";
   return { kind: candidate.started === false ? "refused" : "failed", message };
-}
-
-/**
- * True when a `pi.dispatch` call's raw args carry the ADR-0022 §1 background opt.
- *
- * The dispatcher only needs this to decide who owns the task slot: a background call owns
- * it inside `dispatchBackground` (spawn -> terminal), a foreground call in `dispatchCall`.
- * Shape-checked because the frame's args are untrusted worker input.
- */
-function isBackgroundDispatchArgs(args: unknown): boolean {
-  return (
-    typeof args === "object" &&
-    args !== null &&
-    (args as { background?: unknown }).background === true
-  );
 }
 
 function messageOf(error: unknown): string {
@@ -684,31 +664,16 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
         return;
       }
       const isDispatch = frame.tool === DISPATCH_BINDING_NAME;
-      // ADR-0022 §9: a background dispatch owns its own slot inside `dispatchBackground`
-      // (acquired at spawn, released at the terminal transition), so the dispatcher must not
-      // acquire or release it here. A foreground dispatch keeps the pre-BG-04 accounting:
-      // acquire before the call, release when its result resolves.
-      const isBackgroundDispatch = isDispatch && isBackgroundDispatchArgs(frame.args);
-      if (isDispatch) {
-        /* dispatch cap (ADR-0016 §2) */
-        // Hard cap: at `dispatchConcurrency` in-flight calls the next one is rejected
-        // immediately — never queued, never executed. The rejection is a settled
-        // DispatchResult (the binding never throws, §3), so a Promise.all /
-        // Promise.allSettled over pi.dispatch calls sees a settled record, not a throw.
-        if (!isBackgroundDispatch && !dispatchSlots.tryAcquire()) {
-          subCallTracker.recordEnd(frame.callId, "rejected", {
-            errorMessage: DISPATCH_CONCURRENCY_LIMIT_MESSAGE,
-          });
-          postCallResult({
-            kind: HOST_FRAME_KIND.callResult,
-            callId: frame.callId,
-            tool: frame.tool,
-            ok: true,
-            value: dispatchConcurrencyLimitReached(),
-          });
-          return;
-        }
-      } else {
+      // ADR-0026 / round-3 finding: the dispatch cap moved INTO `dispatch()`, which is now the
+      // single owner for both dispatch fronts. A background dispatch already owned its slot in
+      // `dispatchBackground`; a foreground one now owns it in the foreground branch, so acquiring
+      // here as well would charge every foreground dispatch TWO slots — `tryAcquire` has no
+      // dedup for the anonymous form — and halve effective concurrency.
+      //
+      // The observable refusal is unchanged: `dispatch()` returns the same settled
+      // `dispatchConcurrencyLimitReached()` DispatchResult the binding never throws (ADR-0016 §3),
+      // so a Promise.all over pi.dispatch calls still sees a settled record, not a throw.
+      if (!isDispatch) {
         // Builtin fan-out cap (ADR-0004 consequence): the overflow waits for a slot
         // instead of failing.
         await acquireBuiltinSlot();
@@ -839,12 +804,10 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
           message: messageOf(error),
         });
       } finally {
-        if (isDispatch) {
-          // Background slots are released by the pump's terminal transition, never here.
-          if (!isBackgroundDispatch) dispatchSlots.release();
-        } else {
-          releaseBuiltinSlot();
-        }
+        // Dispatch slots are no longer this layer's business: `dispatchBackground` releases on the
+        // pump's terminal transition and the foreground branch releases in its own `finalize`.
+        // Releasing here as well would free a reservation this call never made.
+        if (!isDispatch) releaseBuiltinSlot();
       }
     };
 

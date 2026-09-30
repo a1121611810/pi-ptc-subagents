@@ -232,3 +232,49 @@ describe("ptc_subagent", () => {
     expect(declared).toContain("background");
   });
 });
+
+describe("ptc_subagent and the dispatch cap", () => {
+  test("a saturated counter refuses a foreground call instead of spawning one", async () => {
+    // The defect this closes: the only slot acquire lived at the dispatcher's program call site,
+    // which ptc_subagent bypasses. Measured before the fix -- with every slot held the call
+    // reached lifecycle.spawn and reported a spawn failure, never a concurrency refusal.
+    await withAgent(async (dir) => {
+      const h = createHarness();
+      const slots = new DispatchSlotCounter(1);
+      slots.tryAcquire("someone-else");
+      const tool = createPtcSubagentTool({
+        ...baseOptions(dir, h.deps),
+        getDispatchDeps: () => ({ ...h.deps, slots }),
+      });
+      let message = "";
+      try {
+        await run(tool, { agent: AGENT, task: "no slot is free" });
+      } catch (error) {
+        message = error instanceof Error ? error.message : String(error);
+      }
+      expect(message, "the gate, not a spawn failure").toContain(
+        "dispatch concurrency limit reached",
+      );
+      expect(h.lifecycle.spawnCount, "and no child was launched").toBe(0);
+      expect(slots.active, "a refusal must not consume a slot").toBe(1);
+    });
+  });
+
+  test("a refused pre-spawn call gives its slot back", async () => {
+    // The unknown-agent return sits AFTER the acquire. If it did not release, one bad call would
+    // permanently shrink the pool, and the symptom would be a session that slowly stops being
+    // able to dispatch at all -- which no single-call test would notice.
+    await withAgent(async (dir) => {
+      const h = createHarness();
+      const slots = new DispatchSlotCounter(4);
+      const tool = createPtcSubagentTool({
+        ...baseOptions(dir, h.deps),
+        getDispatchDeps: () => ({ ...h.deps, slots }),
+      });
+      for (let i = 0; i < 6; i += 1) {
+        await run(tool, { agent: "no-such-agent", task: "attempt " + i }).catch(() => undefined);
+      }
+      expect(slots.active, "six refusals against a pool of four must not empty it").toBe(0);
+    });
+  });
+});
