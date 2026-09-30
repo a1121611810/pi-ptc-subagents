@@ -427,10 +427,13 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
      * waiter queue behind this counter: the N+1th concurrent call resolves as
      * rejected instead of waiting for a slot. Independent of `activeBuiltinCalls`.
      *
-     * ADR-0022 §9: this is the ONE per-run counter the `pi.dispatch` binding receives. A
-     * foreground call holds it for the call (released when the result resolves); a background
-     * call acquires it inside `dispatchBackground` and holds it until the task's terminal
-     * transition, so a long-lived child keeps counting after `dispatch()` already returned.
+     * ADR-0022 §9, as amended at review round 4: this is the FALLBACK counter, not the owner.
+     * Since the acquire moved into `dispatch()` there is one session counter (built at
+     * `background-runtime.ts:505`) and it serves every front; `dispatchDeps.slots` below prefers it,
+     * so in a real pi session THIS counter is never consulted. It is reached only by a caller
+     * that supplies no session counter -- a library caller, or `runPtcProgram` driven directly --
+     * and there it is the configured `dispatchConcurrency`. Measured: with no session counter,
+     * `dispatchConcurrency: 4` admits exactly 4.
      */
     const dispatchSlots = new DispatchSlotCounter(config.dispatchConcurrency);
     /**

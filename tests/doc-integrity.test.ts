@@ -1095,6 +1095,13 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       "docs/adr/0013-ptc-row-compact-summary.md:177 -> render.ts:930",
       "docs/adr/0013-ptc-row-compact-summary.md:178 -> render.ts:127",
       "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:925",
+      // Hand-confirmed line by line, 2026-09-30 (review round 5). The extractor resolves this
+      // one only because the path is qualified: bare `dispatcher.ts` is ambiguous in this repo, and
+      // the rule is to refuse rather than guess. Line 438 is
+      // `const dispatchSlots = new DispatchSlotCounter(config.dispatchConcurrency);` -- the FALLBACK
+      // counter, since :712 prefers `options.dispatchDeps?.slots ?? dispatchSlots`. ADR-0016 §2
+      // names it as where the knob is read when nothing is injected.
+      "docs/adr/0016-ptc-dispatch-binding.md:39 -> src/runtime/dispatcher.ts:438",
     ]);
   });
 

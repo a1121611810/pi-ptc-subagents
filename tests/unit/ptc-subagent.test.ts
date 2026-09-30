@@ -14,12 +14,13 @@ import type { DispatchDeps, DispatchInput } from "../../src/runtime/dispatch.ts"
 import type { Static } from "typebox";
 import { DISPATCH_PARAMETERS } from "../../src/runtime/bindings.ts";
 import { DEFAULT_CONFIG } from "../../src/runtime/limits.ts";
-import { DispatchSlotCounter } from "../../src/runtime/dispatch.ts";
+import { createBackgroundTaskRuntime } from "../../src/runtime/background-runtime.ts";
+import { DispatchSlotCounter, dispatch, setPromptFileWriter } from "../../src/runtime/dispatch.ts";
 import { createPtcSubagentTool } from "../../src/tools/subagent.ts";
 import { createTaskRegistry, type TaskRegistry } from "../../src/runtime/task-registry.ts";
 import { InMemoryTaskStorage } from "../../src/runtime/task-storage.ts";
 import type { ULID } from "../../src/runtime/task-storage.ts";
-import { installRecordingPi, makeTempDir, removeTempDir } from "../helpers/ptc.ts";
+import { installRecordingPi, makeTempDir, removeTempDir, waitFor } from "../helpers/ptc.ts";
 
 // A REAL registered agent, not one this file invents. The agent registry is read from the
 // host config and does not see a markdown file written into a temp dir, so a locally authored
@@ -66,6 +67,12 @@ class RecordingLifecycle extends MockChildProcessLifecycle {
   get spawnCount(): number {
     return this.requests.length;
   }
+}
+
+/** The extra surface the runtime's tracking adapter adds on top of the adapter contract. */
+interface ChildProcessLifecycleWithLive {
+  liveHandles(): readonly unknown[];
+  isLive(handle: unknown): boolean;
 }
 
 interface Harness {
@@ -132,16 +139,6 @@ const baseOptions = (dir: string, deps: DispatchDeps) => ({
   maxDispatchDepth: DEFAULT_CONFIG.maxDispatchDepth,
   getDispatchDeps: () => deps,
 });
-
-/** Poll a condition the mock makes asynchronous. Every "nothing happened" assertion here is
- * that race, so it gets a real wait rather than a sleep. */
-async function waitFor(condition: () => boolean, timeoutMs = 2000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!condition()) {
-    if (Date.now() > deadline) throw new Error("waitFor timed out");
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-}
 
 describe("ptc_subagent", () => {
   test("a background call spawns a child and hands back a task id the model can use", async () => {
@@ -321,6 +318,98 @@ describe("ptc_subagent and the dispatch cap", () => {
       h.lifecycle.resolveExit(h.lifecycle.handleAt(0), 0, null);
       await settled;
       expect(h.lifecycle.spawnCount, "a foreground call with a free slot really spawns").toBe(1);
+    });
+  });
+
+  test("a closed foreground child does not stay in the session's live set", async () => {
+    // Round 5 finding 1, and the reason this test uses a REAL session runtime.
+    //
+    // `MockChildProcessLifecycle` has no live set, so a mock-driven test is structurally incapable
+    // of seeing this class of bug: the leak lived in `TrackingLifecycle`, which only the runtime
+    // constructs. Measured before the fix: three foreground dispatches left three live handles,
+    // and `shutdown()` then arms a SIGTERM->SIGKILL ladder against every one of them with an
+    // `isDone` that is permanently true -- the A4 hazard the reap-cancel exists to prevent.
+    //
+    // So: the real runtime, with only the child-process adapter faked. Registry, slots and the
+    // tracking wrapper are all production.
+    await withAgent(async (dir) => {
+      const adapter = new RecordingLifecycle();
+      const runtime = createBackgroundTaskRuntime({ createLifecycle: () => adapter });
+      // `dispatchDeps.lifecycle` is typed as the adapter contract; the tracking wrapper the runtime
+      // installs is a superset, and the whole point is to observe the part the contract does not
+      // declare -- which is exactly why a mock could not have caught this.
+      const live = runtime.dispatchDeps.lifecycle as unknown as ChildProcessLifecycleWithLive;
+
+      for (let i = 0; i < 3; i += 1) {
+        const settled = dispatch(
+          { agent: AGENT, task: "live set probe " + i },
+          { callId: i, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          runtime.dispatchDeps,
+        ).catch(() => undefined);
+        await waitFor(() => adapter.spawnCount > i);
+        adapter.resolveExit(adapter.handleAt(i), 0, null);
+        await settled;
+      }
+
+      expect(adapter.spawnCount, "the three children really were launched").toBe(3);
+      // Polled, not sampled: `finalize` is synchronous and the prune is fire-and-forget, so the
+      // delete lands a turn or two after `dispatch()` resolves. Sampling once would be a race that
+      // passes by luck; polling is what makes this a claim about the steady state.
+      await waitFor(() => live.liveHandles().length === 0);
+      expect(
+        live.liveHandles(),
+        "every closed foreground child was retired from the session's live set",
+      ).toEqual([]);
+    });
+  });
+
+  test("a throw between the slot acquire and the spawn gives the slot back", async () => {
+    // Round 5 finding 2: the round-4 R4-1 row is marked FIXED and nothing held it. Removing the
+    // `slots.release()` in the catch left all 872 tests green.
+    //
+    // The two obvious ways to make the prompt writer throw both fail as tests. A TMPDIR pointed at
+    // a file breaks EVERY temp-dir-using test in tests/unit/ at once, so it cannot isolate this
+    // path; and the writer was module-level, so nothing could be aimed at one call. Hence the seam.
+    //
+    // The severity driver, which is why this is not a tidy-up: this counter is the SESSION one.
+    // Eight such failures and the session can never dispatch again, with no error anywhere.
+    await withAgent(async (dir) => {
+      const h = createHarness();
+      const slots = new DispatchSlotCounter(4);
+      let threw = false;
+      setPromptFileWriter(() => Promise.reject(new Error("injected: mkdtemp failed")));
+      try {
+        await dispatch(
+          { agent: AGENT, task: "never gets to spawn" },
+          { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          { ...h.deps, slots },
+        ).catch(() => {
+          threw = true;
+        });
+      } finally {
+        setPromptFileWriter(undefined);
+      }
+      expect(threw, "the injected failure really happened").toBe(true);
+      expect(slots.active, "the slot came back, so the next dispatch can still have one").toBe(0);
+    });
+  });
+
+  test("the same call succeeds once the writer is restored", async () => {
+    // The other half, and the one that catches a fix which releases by never acquiring: if the
+    // seam were left overridden, every later dispatch in this file would fail for a reason that has
+    // nothing to do with what these tests are about.
+    await withAgent(async (dir) => {
+      const h = createHarness();
+      const slots = new DispatchSlotCounter(1);
+      const settled = dispatch(
+        { agent: AGENT, task: "writer restored" },
+        { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+        { ...h.deps, slots },
+      ).catch(() => undefined);
+      await waitFor(() => h.lifecycle.spawnCount > 0);
+      h.lifecycle.resolveExit(h.lifecycle.handleAt(0), 0, null);
+      await settled;
+      expect(h.lifecycle.spawnCount, "the real writer ran and a child was launched").toBe(1);
     });
   });
 });

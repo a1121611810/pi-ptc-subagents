@@ -910,7 +910,29 @@ export function buildArgv(
  * Write the system prompt (with depth hint appended) to a tmpfile. The caller is
  * responsible for cleanup; we use mkdtemp + 0o600 to keep the prompt private, then
  * best-effort cleanup in the dispatch() Promise.
+ *
+ * Overridable so the region between the foreground slot acquire and the Promise that owns the
+ * release can be driven to throw on demand. Round 4 fixed a leak in that region and the ledger
+ * row was marked closed with no test holding it, because the only ways to make this function
+ * throw were a TMPDIR pointed at a file -- which breaks EVERY temp-dir-using test in
+ * tests/unit/ at once, so it cannot isolate this path -- and nothing injectable. A seam that can
+ * be aimed at one call is what makes the slot coming back a testable claim rather than a
+ * measured one.
  */
+let promptFileWriter: (
+  agentName: string,
+  prompt: string,
+) => Promise<{ dir: string; filePath: string }> = writePromptToTempFile;
+
+/** Point the prompt writer somewhere else, or pass `undefined` to restore the real one. */
+export function setPromptFileWriter(
+  override:
+    | ((agentName: string, prompt: string) => Promise<{ dir: string; filePath: string }>)
+    | undefined,
+): void {
+  promptFileWriter = override ?? writePromptToTempFile;
+}
+
 async function writePromptToTempFile(
   agentName: string,
   prompt: string,
@@ -1321,7 +1343,7 @@ export async function dispatch(
   const lifecycle = deps.lifecycle ?? DISPATCH_LIFECYCLE;
   let argv: readonly string[];
   try {
-    tmp = await writePromptToTempFile(agent.name, fullPrompt);
+    tmp = await promptFileWriter(agent.name, fullPrompt);
     argv = buildArgv(input, agent, tmp.filePath);
   } catch (error) {
     slots.release();
@@ -1345,9 +1367,41 @@ export async function dispatch(
     ): void => {
       if (resolved) return;
       resolved = true;
-      // The one terminal point of a foreground dispatch, so the one place that frees the slot.
-      // Guarded by `resolved`, so an abort racing an exit cannot double-release.
+      // The one terminal point of a foreground dispatch, so the one place that frees the slot AND
+      // the one place that retires the child. Guarded by `resolved`, so an abort racing an exit
+      // cannot double-release.
       slots.release();
+      // Round 5 finding, and it is the reason the seam below is not test-only. Resolving the
+      // session lifecycle here means the foreground child joins `TrackingLifecycle.#live`, and that
+      // set is pruned ONLY by `exit()`. Without this call every foreground dispatch leaks a handle
+      // for the life of the session -- measured, three dispatches left three live handles -- and
+      // `shutdown()` then walks them registering a SIGTERM->SIGKILL ladder whose `isDone` is
+      // permanently true, so the cancel fires against handles that closed long ago. That is the
+      // hazard the reap-cancel exists to prevent, and it is only cleared from inside `exit()`.
+      //
+      // Fire and forget, and the reason is the abort path: `onAbort` reaches finalize while
+      // `killWithEscalation` is still in flight, so awaiting `exit()` here would hold the abort's
+      // promise open for up to the escalation window. It is also harmless for the prune:
+      // `TrackingLifecycle.exit` deletes the handle in a `finally`, so a rejecting delegate still
+      // frees it.
+      //
+      // NOT swallowed silently. Constraint 3 is about exactly this shape -- a failure that leaves
+      // no trace -- and an injected lifecycle is free to treat `exit()` as the thing that releases
+      // an OS resource, in which case a silent reject is a silent leak with no signal at all. The
+      // background branch resolves the same logger at dispatch.ts:1026; this is that, on the other
+      // front.
+      //
+      // The cost of fire-and-forget: `await dispatch()` can return before the delete lands, so a
+      // caller that reads `liveHandles()` immediately may still see this handle. The test that
+      // holds the fix polls for the prune rather than sampling once.
+      if (handle !== undefined) {
+        void lifecycle.exit(handle).catch((error: unknown) => {
+          (deps.logger ?? DEFAULT_DISPATCH_LOGGER).warn(
+            "exit() failed for a foreground child; the session live set may retain it: " +
+              (error instanceof Error ? error.message : String(error)),
+          );
+        });
+      }
       cancelKillEscalation?.();
       if (ctx.signal) ctx.signal.removeEventListener("abort", onAbort);
       cleanupTmp(tmp);

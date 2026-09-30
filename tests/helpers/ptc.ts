@@ -316,6 +316,22 @@ export const ONE_PIXEL_PNG_UINT8: Uint8Array = Uint8Array.from(
   Buffer.from(ONE_PIXEL_PNG_BASE64, "base64"),
 );
 
+/**
+ * Poll a condition the child-process mock makes asynchronous.
+ *
+ * Every "nothing happened" assertion against a spawned child is this race: the spawn is
+ * fire-and-forget and the child records itself a moment later, so a fixed sleep either costs real
+ * time or loses occasionally. Lives here rather than being copied into each test file -- two
+ * identical copies shipped in the same commit before this existed.
+ */
+export async function waitFor(condition: () => boolean, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error("waitFor timed out");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 /** Build a binding table; keys become the `tools.<name>` namespace in the worker. */
 export function makeBindings(entries: Record<string, Binding["execute"]>): BindingTable {
   const table = new Map<string, Binding>();

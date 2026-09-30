@@ -32,24 +32,24 @@
 
 评审时以此为比对基线:任一键在生产路径上找不到读点, 就是发现。行号取自 `src/`。
 
-| 键                         | `DEFAULT_CONFIG` 值                     | 生产读点(file:line)                                                                            | 值如何流入承诺行为                                                  |
-| -------------------------- | --------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `timeoutMs`                | 120_000                                 | `limits.ts:166`(`effectiveTimeoutMs` 回退)→ `dispatcher.ts:355` → `dispatcher.ts:1056`         | run 截止定时器 `setTimeout(beginCancel("timeout"), timeoutMs)`      |
-| `maxTimeoutMs`             | 600_000                                 | `limits.ts:167`(`Math.min` 夹取)、`run-code.ts:87`                                             | 请求截止时间的上限, 夹取后才是生效值                                |
-| `maxOutputBytes`           | 67_108_864                              | `dispatcher.ts:610`、`dispatcher.ts:614`                                                       | `accountOutput` 累加 logs + completion, 超预算以 `outputLimit` fail |
-| `maxMessageBytes`          | 134_217_728                             | `dispatcher.ts:596`、`dispatcher.ts:768-783`                                                   | 单帧序列化字节上限, 双向生效                                        |
-| `maxPendingCalls`          | 128                                     | `dispatcher.ts:588`、`worker-main.ts:111,253`                                                  | worker→host binding 调用的准入控制                                  |
-| `maxParallelSubCalls`      | 10                                      | `dispatcher.ts:622`(`acquireBuiltinSlot`)                                                      | builtin 绑定扇出的并发槽, 溢出 FIFO 排队                            |
-| `dispatchConcurrency`      | 8                                       | `dispatcher.ts:455`(`new DispatchSlotCounter`)、`dispatch.ts:116`、`background-runtime.ts:505` | `pi.dispatch` 在飞调用的硬拒上限                                    |
-| `maxDispatchDepth`         | 3                                       | `dispatcher.ts:734`、`dispatch.ts:258,977`                                                     | 递归 dispatch 深度判定(childDepth <= maxDispatchDepth)              |
-| `maxItemsPerCall`          | 4_096                                   | `dispatcher.ts:587`、`worker-main.ts:584-594`                                                  | 单次 `parallel()`/`pipeline()` 接受的项目数                         |
-| `graceMs`                  | 3_000                                   | `dispatcher.ts:1001`(`armGraceTimer`)                                                          | 协作取消窗口, 到期强杀                                              |
-| `maxOldGenerationSizeMb`   | 512                                     | `worker-pool.ts:71`(→ `resourceLimits`)、`turn-pools.ts:56`                                    | V8 老生代上限, 仅在 spawn 时生效                                    |
-| `maxYoungGenerationSizeMb` | 64                                      | `worker-pool.ts:72`                                                                            | V8 新生代上限, 仅在 spawn 时生效                                    |
-| `poolSize`                 | 4                                       | `turn-pools.ts:45`、`worker-pool.ts:239`                                                       | 每 turn 池容量(常驻 worker 数)                                      |
-| `poolAcquireTimeoutMs`     | 30_000                                  | `turn-pools.ts:46`、`dispatcher.ts:371`                                                        | acquire 等待上限, 超时以 `kind: workerExit` 失败                    |
-| `drainGraceMs`             | 5_000                                   | `turn-pools.ts:50`、`worker-pool.ts:93`                                                        | 池退役 drain 的上限, 无论如何都 resolve                             |
-| `WORKER_ENV_ALLOW_LIST`    | PATH/PATHEXT/SYSTEMROOT/WINDIR/TEMP/TMP | `index.ts:143`(对外导出)、`limits.ts:129`(`createWorkerEnv`)                                   | worker 唯一可继承的环境变量集合                                     |
+| 键                         | `DEFAULT_CONFIG` 值                     | 生产读点(file:line)                                                                                                                                                    | 值如何流入承诺行为                                                                      |
+| -------------------------- | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `timeoutMs`                | 120_000                                 | `limits.ts:166`(`effectiveTimeoutMs` 回退)→ `dispatcher.ts:355` → `dispatcher.ts:1056`                                                                                 | run 截止定时器 `setTimeout(beginCancel("timeout"), timeoutMs)`                          |
+| `maxTimeoutMs`             | 600_000                                 | `limits.ts:167`(`Math.min` 夹取)、`run-code.ts:87`                                                                                                                     | 请求截止时间的上限, 夹取后才是生效值                                                    |
+| `maxOutputBytes`           | 67_108_864                              | `dispatcher.ts:610`、`dispatcher.ts:614`                                                                                                                               | `accountOutput` 累加 logs + completion, 超预算以 `outputLimit` fail                     |
+| `maxMessageBytes`          | 134_217_728                             | `dispatcher.ts:596`、`dispatcher.ts:768-783`                                                                                                                           | 单帧序列化字节上限, 双向生效                                                            |
+| `maxPendingCalls`          | 128                                     | `dispatcher.ts:588`、`worker-main.ts:111,253`                                                                                                                          | worker→host binding 调用的准入控制                                                      |
+| `maxParallelSubCalls`      | 10                                      | `dispatcher.ts:622`(`acquireBuiltinSlot`)                                                                                                                              | builtin 绑定扇出的并发槽, 溢出 FIFO 排队                                                |
+| `dispatchConcurrency`      | 8                                       | `background-runtime.ts:505`(会话计数器, 唯一 owner)、`dispatch.ts` 前景分支内的 acquire(执行点)、`src/runtime/dispatcher.ts:438`(`new DispatchSlotCounter`,**仅回退**) | `pi.dispatch` 在飞调用的硬拒上限(ADR-0022 §9 修订: 优先用 `options.dispatchDeps.slots`) |
+| `maxDispatchDepth`         | 3                                       | `dispatcher.ts:734`、`dispatch.ts:258,977`                                                                                                                             | 递归 dispatch 深度判定(childDepth <= maxDispatchDepth)                                  |
+| `maxItemsPerCall`          | 4_096                                   | `dispatcher.ts:587`、`worker-main.ts:584-594`                                                                                                                          | 单次 `parallel()`/`pipeline()` 接受的项目数                                             |
+| `graceMs`                  | 3_000                                   | `dispatcher.ts:1001`(`armGraceTimer`)                                                                                                                                  | 协作取消窗口, 到期强杀                                                                  |
+| `maxOldGenerationSizeMb`   | 512                                     | `worker-pool.ts:71`(→ `resourceLimits`)、`turn-pools.ts:56`                                                                                                            | V8 老生代上限, 仅在 spawn 时生效                                                        |
+| `maxYoungGenerationSizeMb` | 64                                      | `worker-pool.ts:72`                                                                                                                                                    | V8 新生代上限, 仅在 spawn 时生效                                                        |
+| `poolSize`                 | 4                                       | `turn-pools.ts:45`、`worker-pool.ts:239`                                                                                                                               | 每 turn 池容量(常驻 worker 数)                                                          |
+| `poolAcquireTimeoutMs`     | 30_000                                  | `turn-pools.ts:46`、`dispatcher.ts:371`                                                                                                                                | acquire 等待上限, 超时以 `kind: workerExit` 失败                                        |
+| `drainGraceMs`             | 5_000                                   | `turn-pools.ts:50`、`worker-pool.ts:93`                                                                                                                                | 池退役 drain 的上限, 无论如何都 resolve                                                 |
+| `WORKER_ENV_ALLOW_LIST`    | PATH/PATHEXT/SYSTEMROOT/WINDIR/TEMP/TMP | `index.ts:143`(对外导出)、`limits.ts:129`(`createWorkerEnv`)                                                                                                           | worker 唯一可继承的环境变量集合                                                         |
 
 并行旁注:`BUILTIN_BINDING_NAMES`(`bindings.ts:41`,消费点 `ptc-mode.ts:41`、`common.ts:124`、
 `dispatcher.ts:586`)与 `DEFAULT_BINDING_NAMES`(`bindings.ts:64`,消费点 `index.ts:121`、`bindings.ts:187`)
@@ -89,8 +89,12 @@
      只查键名会漏掉「键换了名字但仍被消费」的接线, 只查结构体名会漏掉「结构体还在但键被摘掉」。
 
 5. **双计数器不得混淆。** `maxParallelSubCalls`(builtin 绑定扇出, `dispatcher.ts:622`)与
-   `dispatchConcurrency`(`pi.dispatch` 在飞调用, `dispatcher.ts:455`)是两个**独立计数器**,
-   `limits.ts:35-36` 已明确写 “neither cap throttles the other”。评审要点:
+   `dispatchConcurrency`(`pi.dispatch` 在飞调用, owner 在 `background-runtime.ts:505` 的会话计数器)
+   是两个**独立计数器**, `limits.ts:35-36` 已明确写 “neither cap throttles the other”。评审要点:
+   - **`src/runtime/dispatcher.ts:438` 那个 per-run 计数器现在是回退,不是 owner**(ADR-0022 §9 修订, 第 4 轮):
+     `dispatcher.ts:709` 优先用 `options.dispatchDeps.slots`, 所以在一个真实 pi 会话里它**根本不被咨询**;
+     只有不提供会话计数器的调用(库调用方、`runPtcProgram` 直接跑)才会落到它。判读 read-point 时别把它当 owner;
+     判据是「这个计数器是谁构造并注入的」,不是「哪一行 new 了一个 counter」。
    - 两者数值不同(10 vs 8)是有意的, 不要在 diff 里「顺手对齐」;
    - 溢出语义不同:builtin 溢出 FIFO 排队, dispatch 溢出立即 `{ status: "rejected" }`;
    - 新增并发上限时, 必须说明它挂在哪个计数器上, 以及它与另一个计数器的关系;

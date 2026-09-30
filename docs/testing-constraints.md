@@ -151,3 +151,41 @@ OCR `.opencodereview/rules/test-discipline.md` 承载 F1/F2/F3 的细节 + 实�
 **F4 的同步已于本轮补齐**:OCR rule 文件、`AGENTS.md` 的两处 F 列表、以及夹具自身的文件头都写到了 F4。
 补齐之前「两者必须保持同步」这一句在 F4 上不成立。写下来是为了让下一个人看得见这个缺口,
 而不是让它看起来已经同步。
+
+## What the gate does not check, and why that is accepted rather than an oversight
+
+The gate verifies behaviour. It also verifies one narrow class of documentation claim:
+`tests/doc-integrity.test.ts` 断言四 pins the list of `file:line` citations in the normative docs
+that point into this repository, and adding one fails until a human re-confirms it line by line.
+That is the right design for the class it covers, and it is not theoretical: the first time this
+section was drafted, its own new citation pointed at `src/runtime/dispatcher.ts:435`, which the
+immediately preceding comment edit had turned into a comment rather than the
+`new DispatchSlotCounter(...)` line it claimed to name. The baseline caught it on its first
+outing, which is the whole argument for a pinned list over a heuristic.
+
+**What it cannot see is narrower than "documentation drift", and worth stating precisely.** Three
+review rounds over one feature each found the code correct and a record wrong -- five claims -- with
+every gate step green. Not one of the five was a citation that failed to resolve. Each was a
+correct citation carrying a wrong **verb**:
+
+- "this is the ONE per-run counter the binding receives" (it is the fallback; `dispatcher.ts:712`
+  prefers the session counter)
+- "falls back to `full`" (it falls back to the detected default)
+- "the cap is one counter per pi session" (unqualified; a deps-less caller gets its configured
+  per-run counter)
+
+A pinned citation list cannot catch those, because the line it pins is real and says what the
+sentence needs it to say. Catching them needs a reader, not a pattern.
+
+**So: claims are audited by review, citations are audited by the gate.** Both halves matter and
+the division is not a fudge. For the next round:
+
+- Do not file "the gate does not check claims". It is a decision, recorded here deliberately so it
+  is not rediscovered as news every round.
+- Do audit **claims**, and read the code a sentence points at for what it does when that sentence's
+  condition is _not_ met. A claim with no branch, in a codebase with a branch, is where this lives.
+- The three words every drifted claim turned on: **owns**, **per-run**, **always**.
+- When you add a `file:line` citation to a normative doc, expect 断言四 to fail and re-confirm the
+  line by hand. That is the intended workflow, not an obstacle.
+- Before filing a doc defect, check the previous round did not already fix it. Round 5 filed one
+  against README text that round 4 had corrected.

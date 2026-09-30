@@ -43,7 +43,7 @@ import {
   type ULID,
 } from "../../src/runtime/task-storage.ts";
 import { InMemoryOutputStorage, type OutputStorage } from "../../src/runtime/output-storage.ts";
-import { makeTempDir, removeTempDir } from "../helpers/ptc.ts";
+import { makeTempDir, removeTempDir, waitFor } from "../helpers/ptc.ts";
 
 // ---------------------------------------------------------------------------
 //  node:child_process mock — only the foreground "unchanged" test drives this path
@@ -186,15 +186,6 @@ async function waitForTerminal(storage: InMemoryTaskStorage, taskId: ULID): Prom
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
   throw new Error("task " + taskId + " did not reach a terminal state");
-}
-
-/** Wait until a synchronous predicate holds, flushing the pump's microtasks. */
-async function waitFor(predicate: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (predicate()) return;
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  }
-  throw new Error("condition was not met");
 }
 
 async function allTasks(storage: InMemoryTaskStorage): Promise<TaskRecord[]> {
