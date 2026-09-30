@@ -22,9 +22,11 @@ const PTC_SURFACES = ["ptc_run_code", "ptc_workflow"] as const;
 
 /**
  * The registered tool description, read through the same registration path pi
- * itself takes. This is the only model-facing observable, so it is what every
- * guard below is written against -- not the description constant, and not the
- * module that owns the text.
+ * itself takes. This is the model-facing observable, and the guards that assert
+ * on delivery -- presence, exactly-once, byte equality between the two surfaces,
+ * and every note reaching the model -- are written against it. The guards that
+ * assert on content read the module's text, because that is where the text
+ * lives; the two are not the same claim and the file does not pretend they are.
  */
 function descriptionOf(toolName: string): string {
   const tool = captureRegisteredTools().get(toolName);
@@ -41,6 +43,9 @@ function estimatedTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
+// Deliberately derived from the real binding table and not from anything the
+// contract module exports: an oracle living in the module under test would
+// satisfy the very guard that is supposed to be checking it.
 const BOUND_NAMES: readonly string[] = [...BUILTIN_BINDING_NAMES, DISPATCH_BINDING_NAME];
 
 /** The per-call context the binding table expects, as the existing binding tests pass it. */
@@ -87,11 +92,24 @@ const NON_BINDING_VOCABULARY: readonly string[] = [
  * A parameter declaration, which the contract must never contain: pi already
  * declares every tool's arguments natively in the same request.
  */
-const ARGUMENT_SHAPE = /\w+\?\s*:\s*(string|number|boolean|object|Array|Promise|Record|unknown)/;
+const ARGUMENT_SHAPE =
+  /[A-Za-z_$][A-Za-z0-9_$]*[ ]*[?]?[ ]*:[ ]*(string|number|boolean|object|Array|Promise|Record|unknown|[|{])/;
 
 // ------------------------------------------------------------------- predicates
 // Shared by each guard and its counterfactual, so a counterfactual exercises the
 // real guard rather than a restatement of it.
+
+/**
+ * The bindings that genuinely deviate, as a literal. The guard and its
+ * counterfactual both read this, so the counterfactual compares against the
+ * decision rather than against the thing under test.
+ */
+const EXPECTED_NOTED: readonly string[] = ["bash", "edit", "write", DISPATCH_BINDING_NAME].sort();
+
+/** The guard's own predicate, over any note map. */
+function notedBindingsDeviating(notes: ReadonlyMap<string, string>): string[] {
+  return [...notes.keys()].sort();
+}
 
 /** Names the contract asserts that are neither a binding nor known vocabulary. */
 function unboundNamesNamed(text: string): string[] {
@@ -196,7 +214,9 @@ describe("the contract states the facts that kill the measured crash classes", (
   });
 
   test("says details is an object or null, never undefined", () => {
-    expect(contract.BINDING_CONTRACT).toContain("object or `null`, never");
+    // The full phrase, across the line break: a rewording that dropped the
+    // "never undefined" half has to fail this.
+    expect(contract.BINDING_CONTRACT).toContain("object or `null`, never\n`undefined`");
   });
 
   test("says the four absent fields do not exist", () => {
@@ -230,10 +250,10 @@ describe("the contract states the facts that kill the measured crash classes", (
 
 describe("a note exists only where behaviour genuinely differs", () => {
   test("the noted bindings are exactly the four that deviate", () => {
-    const noted = [...contract.BINDING_NOTES.keys()].sort();
-    expect(noted, "only deviating bindings carry a note").toEqual(
-      ["bash", "edit", "write", DISPATCH_BINDING_NAME].sort(),
-    );
+    expect(
+      notedBindingsDeviating(contract.BINDING_NOTES),
+      "only deviating bindings carry a note",
+    ).toEqual([...EXPECTED_NOTED]);
   });
 
   test("a binding matching the shared shape carries no note", () => {
@@ -320,17 +340,27 @@ describe("the contract stays inside its budget", () => {
 describe("the contract is true of the runtime it describes", () => {
   // The notes are third-party facts about the installed pi, so the text can reach
   // the model while being false. These run the real binding table.
-  test("write really does resolve with details null", async () => {
+  test("write really does resolve with details null, new file and overwrite alike", async () => {
+    // The note says "always", so the suite pins both paths of the IO boundary: a
+    // new file and an overwrite. One happy path would be n=1 for a claim about a
+    // third-party tool.
     const dir = await makeTempDir();
     try {
       await writeFile(join(dir, "fixture.txt"), "hello\n");
       const bindings = createBuiltinBindings({ cwd: dir });
-      const result = (await bindings
+      const first = (await bindings
         ?.get("write")
         ?.execute({ path: "fixture.txt", content: "written\n" }, CALL)) as {
         details: unknown;
       };
-      expect(result.details, "the write note matches the installed pi").toBe(null);
+      expect(first.details, "write over an existing file reports null details").toBe(null);
+
+      const second = (await bindings
+        ?.get("write")
+        ?.execute({ path: "fresh.txt", content: "new\n" }, CALL)) as {
+        details: unknown;
+      };
+      expect(second.details, "write to a new file reports null details").toBe(null);
     } finally {
       await removeTempDir(dir);
     }
@@ -358,6 +388,16 @@ describe("the contract is true of the runtime it describes", () => {
   });
 });
 
+describe("the guards are themselves checked", () => {
+  test("the non-binding vocabulary declares no parameter shape", () => {
+    // If a parameter declaration ever ended up whitelisted, the argument guard
+    // would stop seeing it. This asserts the whitelist is clean of its own blind spot.
+    expect(
+      NON_BINDING_VOCABULARY.filter((token) => ARGUMENT_SHAPE.test(token)),
+      "the vocabulary must not contain anything the argument guard would catch",
+    ).toEqual([]);
+  });
+});
 describe("counterfactual", () => {
   // Constraint 5: an obviously-wrong version must turn the suite red. Each case
   // below applies the SAME predicate the real guard uses, to a mutated string, so
@@ -380,15 +420,22 @@ describe("counterfactual", () => {
   });
 
   test("a re-declared parameter is caught by the argument guard", () => {
-    const wrong =
-      contract.BINDING_CONTRACT + "\n``read(path: string, offset?: number, limit?: number)``";
-    expect(argumentShapedTokens(wrong), "the guard fires on the original").not.toEqual([]);
+    // Both forms, because the guard has to catch the canonical one. The required
+    // form is the case a trimmed re-declaration actually ships in.
+    const required = contract.BINDING_CONTRACT + "\n`read(path: string)`;";
+    expect(argumentShapedTokens(required), "a required-only signature is caught").not.toEqual([]);
+    const optional = contract.BINDING_CONTRACT + "\n`read(path: string, offset?: number)`;";
+    expect(argumentShapedTokens(optional), "an optional signature is caught").not.toEqual([]);
   });
 
   test("a note for a binding that does not deviate is caught by the key-set guard", () => {
-    const withStrayNote = new Map(contract.BINDING_NOTES);
-    withStrayNote.set("read" as never, "`read` always reports `details: null`.");
-    expect([...withStrayNote.keys()].sort()).not.toEqual([...contract.BINDING_NOTES.keys()].sort());
+    // The real guard's predicate, applied to a mutated map -- not a comparison of
+    // the mutation against the untouched original, which is true either way.
+    const withStrayNote = new Map<string, string>(contract.BINDING_NOTES);
+    withStrayNote.set("read", "`read` always reports `details: null`.");
+    expect(notedBindingsDeviating(withStrayNote), "the guard rejects a stray note").not.toEqual([
+      ...EXPECTED_NOTED,
+    ]);
   });
 
   test("an emptied block is caught by the floor, not just the ceiling", () => {

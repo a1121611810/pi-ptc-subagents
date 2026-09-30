@@ -109,10 +109,12 @@ them).
 `ptc_workflow` tool descriptions that states the _binding result_ shape, so the
 model never has to guess it. One module owns the text and renders it into both
 descriptions, so the two surfaces cannot drift. The per-binding notes are typed
-against the bound-name set, and coverage is checked in **both** directions: a
-name the contract mentions must be bindable, and a bound binding must be either
-named or knowingly covered by the shared shape (`read` is the one binding
-covered without being named, and the test states that as a literal). It declares
+against the bound-name set, and coverage is checked in **both** directions: every
+name the contract puts in backticks is either a bindable binding or listed
+non-binding vocabulary, and every bound binding is either named or knowingly
+covered by the shared shape (`read` is the one binding covered without being
+named, and the test states that as a literal). A name written in bare prose is
+outside what that first check sees. It declares
 return types only -- pi already declares every tool's
 arguments natively in the same request, so restating them is pure token cost.
 ADR-0024. _Avoid_: "TypeScript SDK section" (DSH's name for its system-prompt

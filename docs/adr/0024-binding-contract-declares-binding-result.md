@@ -22,8 +22,8 @@ before it crosses to the worker, and the worker resolves the call with that valu
 verbatim. So the shape a program actually sees is a two-field object whose
 `content` is an array of content blocks, never a string. The text of a
 text-file result is `result.content[0].text`. `details` is the tool's own
-detail object or `null`. There is no `files`, `output` or `matches` field
-on any binding result: `bash`, `grep`, `find` and `ls` hand back a single
+detail object or `null`. There is no `files`, `output`, `matches` or
+`entries` field on any binding result: `bash`, `grep`, `find` and `ls` hand back a single
 text block of newline-separated rows, and the program splits it itself. A
 _builtin binding_ that fails -- a `bash` non-zero exit, a missing path, a name
 not bound this run -- rejects with `ToolCallError`. The `pi.dispatch`
@@ -56,8 +56,11 @@ natively by pi in the same request.
    descriptions, stating the binding result shape.
 2. **Binding notes** -- a per-binding clause inside that block, written only for
    the bindings whose behaviour genuinely departs from the shared shape.
-3. **A drift guard** -- a test proving the contract's documented names are
-   exactly the bound names, so a binding added later cannot ship undocumented.
+3. **Two coverage guards** -- one proving that every name the contract
+   mentions in backticks is either a bindable binding or a listed piece of
+   non-binding vocabulary, and one proving that every bound binding is either
+   named or knowingly covered by the shared shape, so a binding added later
+   cannot ship undocumented.
 
 ## What we deliberately don't add
 
@@ -118,24 +121,44 @@ check then runs both ways against the set the extension actually binds:
   the shared shape, so it needs no note, and the test states that as a literal so
   a new builtin turns the guard red until somebody decides.
 
-A hand-maintained list beside the real one is the failure mode both upstream
-designs avoid -- DSH by requiring an output schema unconditionally, pi by
-deriving the declaration from the same predicate the resolver uses.
+Two limits of that first check are worth stating rather than leaving to be
+discovered. It reads **backticked tokens inside the contract block**, not the
+surrounding description, and it does not read bare prose. A name written in
+either of those places is outside what the check sees. That is deliberate scope,
+not an oversight: the block is the text this record owns, and the rest of the
+description is prose this record did not add.
+
+The hand-maintained literals here are test expectations, not a second copy of
+the binding table. Nothing the resolver reads is written by hand on this side:
+the notes are typed against the real binding-name set, so a rename is a type
+error. The failure mode both upstream designs avoid -- a list beside the real one
+that drifts from it -- is avoided here by keeping those literals on the test
+side, where a drift is a red test rather than a wrong answer.
 
 ### 5. Budget: a 300-token ceiling with a 200-token floor
 
-The block stays at or under 300 estimated tokens and at or above 200, using the
-same characters-per-token estimate upstream uses. The ceiling is a decision; the
-floor exists because a ceiling-only check passes on an empty block, and it is
-recorded here rather than left in a code comment so the record and the constants
-have one place that says both numbers.
+The block stays at or under 300 estimated tokens, using the same
+characters-per-token estimate upstream uses. The ceiling is a decision, not a
+target.
 
-Measured on the shipped text: 282 estimated tokens. For scale, the registered
-`ptc_run_code` description was 382 estimated tokens before this change and is
-654 after, so the block is roughly 71% of the pre-existing description. Measured
-against the whole PTC request prefix the addition is single-digit, but that
-denominator is not a thing the model sees on its own, so the per-surface figure
-is the one to reason from.
+A 200-token floor sits under it. That is a deliberate widening beyond the
+original ceiling-only scope: a ceiling-only check passes on an empty block, and
+the floor is what makes a stubbed-out contract red. Both numbers are recorded
+here so the record and the constants have one place that says them, and both are
+pinned by a test that names this record.
+
+Measured on the shipped text: **290** estimated tokens, leaving 10 under the
+ceiling. The shortest note in the block is 41 characters, so that headroom no
+longer covers a future genuine deviation -- the first cut of this record had 28
+tokens free and claimed otherwise, and the catchability clause and the narrowed
+`edit` note ate the difference. Treat the ceiling as close, and raise it here
+with a reason rather than in a code comment.
+
+For scale, the registered `ptc_run_code` description was 382 estimated tokens
+before this change and is 672 after, so the block is roughly 76% of the
+pre-existing description. Measured against the whole PTC request prefix the
+addition is single-digit, but that denominator is not a thing the model sees on
+its own, so the per-surface figure is the one to reason from.
 
 ## Consequences
 

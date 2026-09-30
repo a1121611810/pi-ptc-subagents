@@ -330,6 +330,18 @@ const SYMBOL_SHAPES: readonly RegExp[] = [
 /** 7–40 位且含至少一个十六进制字母：commit 短 SHA，不是符号。 */
 const HEX_SHA_LIKE = /^(?=.*[a-f])[0-9a-f]{7,40}$/;
 
+/**
+ * Every declaration-shaped token named anywhere in the documentation, built once,
+ * after the extractor that produces it. Two assertions filter this same set, so
+ * building it per-assertion meant scanning the whole corpus twice; with the corpus
+ * growing that alone was enough to push a test past vitest's default timeout under
+ * a parallel run, and widening the budget by orders of magnitude would have hidden
+ * a real regression instead.
+ */
+const ALL_SCANNED_NAMES: ReadonlySet<string> = new Set(
+  ALL_DOCS.flatMap((doc) => extractDeclaredSymbols(doc)).map((ref) => ref.name),
+);
+
 interface SymbolRef {
   readonly doc: string;
   readonly line: number;
@@ -849,10 +861,10 @@ describe("断言二：规范文档点名的具名符号在 src/ 有读点（doc-
 
   test("排除清单不会无声膨胀：没有一项已经是死条目", () => {
     // 文档里没人再提的名字，继续留在清单里只会让清单越攒越长、越攒越掏空守卫。
-    const allScannedNames = new Set(
-      ALL_DOCS.flatMap((doc) => extractDeclaredSymbols(doc)).map((ref) => ref.name),
-    );
-    const dead = [...EXTERNAL_VOCABULARY.keys()].filter((name) => !allScannedNames.has(name));
+    // ALL_SCANNED_NAMES 在模块作用域构建一次（语料只在 import 时读一遍），本用例只做
+    // O(清单大小) 的过滤 —— 否则每个用例各扫一遍全量文档，语料一大就会顶穿默认超时，
+    // 而把预算放宽到几百倍又会让真正的回归测不出来。
+    const dead = [...EXTERNAL_VOCABULARY.keys()].filter((name) => !ALL_SCANNED_NAMES.has(name));
     expect(dead, `这些排除项在全量文档里已经没人再提了，请删掉：${dead.join(" / ")}`).toEqual([]);
     // 清单条目必须各自带理由，否则「显式清单」退化成「一串名字」。
     const missingReason = [...EXTERNAL_VOCABULARY].filter(([, reason]) => reason.trim().length < 4);
@@ -860,11 +872,7 @@ describe("断言二：规范文档点名的具名符号在 src/ 有读点（doc-
       missingReason.map(([name]) => name),
       "每条排除都必须写明为什么",
     ).toEqual([]);
-    // This one rescans every document in the repository, so its cost grows with
-    // the corpus: ADR-0024 and its notes pushed it past vitest's 5s default when
-    // the suite runs in parallel. The assertion is unchanged; only the wall-clock
-    // budget is stated, the same way the pty-driven suites state theirs.
-  }, 30_000);
+  });
 
   test("反事实：伪造一个不存在的符号名必须被报出", () => {
     // 样本形态照抄 ADR-0023 的真实写法（ownerPid 是 doc-sync 必查 2 点名的符号）。

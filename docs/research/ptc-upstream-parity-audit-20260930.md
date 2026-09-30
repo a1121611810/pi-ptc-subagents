@@ -302,4 +302,10 @@ DSH `v0.1.6-alpha.2` vs `v0.2.0-rc.2`；pi `0.86.1` vs DSH 用的 `0.87.1`。`li
 
 DSH 源提取副本：`/tmp/dsh-src`（667 文件 / 6.8 MB，源自 `app.asar/dsh/node_modules/@deepseek-ai/*`）。
 
+> **可复现性说明**：上表六份子代理报告与 `/tmp/dsh-src` 提取副本是**当次会话的临时产物，未进版本库**
+> ——新 clone 无法从它们重新推导任何 `path:line`。本报告的公开引用仍可独立复核：pi 侧指向
+> v0.99.0 的 release notes 与 `docs/cli.md`，DSH 侧指向 tag `dsh-v0.2.0-rc.2` 的 `app.asar` 内
+> `node_modules/@deepseek-ai/*`；两者都随对应版本固定。本仓的 `path:line` 则直接对着本仓 `src/`
+> 可验。
+
 **方法学声明**：本报告所有"本项目缺 X"的结论，都由 `grep` 在 `src/` 上做过零命中验证，不是从文档推断的。唯一一处差点误判的地方：`run-code.ts:48` 声称"默认会话有 read/bash/edit/write"——一度想报为"陈旧清单"，核对 `pi-coding-agent/docs/quickstart.md:84`（"Additional built-in read-only tools (`grep`, `find`, `ls`) are available through tool options"）后确认**该说法正确**，不作缺陷。

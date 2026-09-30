@@ -23,11 +23,7 @@
  *    is typed against the binding-name set, so a typo in a key is a type error
  *    rather than a silently orphaned note.
  */
-import {
-  BUILTIN_BINDING_NAMES,
-  DISPATCH_BINDING_NAME,
-  type BuiltinBindingName,
-} from "../runtime/bindings.ts";
+import { DISPATCH_BINDING_NAME, type BuiltinBindingName } from "../runtime/bindings.ts";
 
 /** The ceiling is a decision (ADR-0024 section 5), never a baseline to re-fit. */
 export const BINDING_CONTRACT_TOKEN_CEILING = 300;
@@ -95,13 +91,3 @@ export const BINDING_CONTRACT: string = [
   SHAPE_LINES.join("\n"),
   "Exceptions: " + [...BINDING_NOTES.values()].join(" "),
 ].join("\n");
-
-/**
- * Every binding a program may reach under the default surface. A binding outside
- * this set is one the model is told nothing about beyond the generic call form,
- * which is what the description-coverage test in the suite asserts.
- */
-export const REACHABLE_BINDING_NAMES: readonly string[] = [
-  ...BUILTIN_BINDING_NAMES,
-  DISPATCH_BINDING_NAME,
-];
