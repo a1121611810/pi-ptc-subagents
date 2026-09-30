@@ -1,6 +1,6 @@
 # PTC Worker Lifecycle Contract (audit 3b, 阻塞级)
 
-适用文件:src/runtime/worker-main.ts / worker-pool.ts / worker-state.ts(模式 src/runtime/worker-*.ts)。
+适用文件:src/runtime/worker-main.ts / worker-pool.ts / worker-entry.ts / worker-source.ts(模式 src/runtime/worker-*.ts)。仓库里没有 src/runtime/worker-state.ts(该路径从未存在):状态机行为由 tests/worker-state.test.ts 覆盖,实现落在 worker-main.ts / worker-pool.ts。
 
 ## 状态机(ADR-0017 §5)
 

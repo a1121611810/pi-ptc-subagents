@@ -129,6 +129,42 @@
       "path": "tests/**/*.test.ts",
       "rule": ".opencodereview/rules/test-discipline.md",
       "merge_system_rule": false
+    },
+    {
+      "path": "src/tools/text.ts",
+      "rule": ".opencodereview/rules/ptc-render-bounds.md",
+      "merge_system_rule": true
+    },
+
+    {
+      "path": "src/runtime/turn-pools.ts",
+      "rule": ".opencodereview/rules/ptc-worker-lifecycle.md",
+      "merge_system_rule": true
+    },
+    {
+      "path": "src/runtime/sub-call-tracker.ts",
+      "rule": ".opencodereview/rules/ptc-bgdispatch-contract.md",
+      "merge_system_rule": true
+    },
+    {
+      "path": "src/mode/skills-section.ts",
+      "rule": ".opencodereview/rules/ptc-bgdispatch-contract.md",
+      "merge_system_rule": true
+    },
+    {
+      "path": "src/runtime/limits.ts",
+      "rule": ".opencodereview/rules/ptc-config-wiring.md",
+      "merge_system_rule": true
+    },
+    {
+      "path": "docs/**",
+      "rule": ".opencodereview/rules/doc-sync.md",
+      "merge_system_rule": true
+    },
+    {
+      "path": "**",
+      "rule": ".opencodereview/rules/general.md",
+      "merge_system_rule": true
     }
   ]
 }
