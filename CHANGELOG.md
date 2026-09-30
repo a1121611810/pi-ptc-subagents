@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-09-30
+
+### Fixed
+
+- **The `ptc_subagent` tests no longer depend on a pi agent being registered.**
+  Five tests reached for pi's `__smoke_echo` agent, which does not resolve on every pi build,
+  so the suite was green on one platform and red on the release runner. The fixture is now
+  written by the test into `<cwd>/.pi/agents`, the path the agent resolver actually reads at
+  project scope, and every dispatch asks for project scope explicitly rather than inheriting
+  the `user` default, which points at the real `~/.pi`. Verified with an empty `HOME`: the whole
+  suite is green with no ambient agent state at all.
+
+  No product code changed in this release.
+
 ## [1.2.0] - 2026-09-30
 
 ### Added

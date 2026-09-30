@@ -1,6 +1,6 @@
 {
   "name": "pi-ptc-subagents",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "DSH PTC mode (ptc_run_code + ptc_workflow) for pi",
   "keywords": [
     "pi",
