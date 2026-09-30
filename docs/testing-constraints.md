@@ -316,3 +316,27 @@ argue about the meta-question again.
   line by hand. That is the intended workflow, not an obstacle.
 - Before filing a doc defect, check the previous round did not already fix it. Round 5 filed one
   against README text that round 4 had corrected.
+
+## The gate runs on ONE platform, and a green run is only that platform
+
+A local whole-tree release gate that is green is evidence about **the machine it ran on**, and
+nothing else. v1.2.0 passed `typecheck && lint && fmt:check && build && test && verify:dist` five
+times on macOS and the publish job still failed: `tests/unit/ptc-subagent.test.ts` resolved an agent
+named `__smoke_echo`, which pi ships on a developer's machine and does not ship on the ubuntu
+runner. Five tests, one root cause, nothing bad published.
+
+The gate was not wrong. **The wrong gate was run.** Two rules follow, and they are about
+preconditions rather than about platforms:
+
+- **A test may not depend on machine state it did not create** — home directory, `~/.pi`, PATH,
+  installed CLIs, ambient agents. If a fixture has to exist, the test provisions it and says where.
+  See `provisionAgent` in `tests/unit/ptc-subagent.test.ts`, which writes
+  `<tempdir>/.pi/agents/<name>.md`, the exact path `resolveAgentDirs` reads at project scope.
+- **Verify the precondition, not the test.** The suite now runs green with `HOME` pointed at an
+  empty directory (884 passed / 4 skipped), which is the cheapest available simulation of a runner
+  that has none of a developer's setup. A suite that only passes on your machine is a release
+  risk, and the check costs one command.
+
+Corollary for reviews: a per-file or per-round test run inherits this. Running the five new tests
+locally said nothing about whether they would run on Linux; the fix surfaced only because a release
+pipeline disagreed.

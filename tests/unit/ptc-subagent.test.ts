@@ -7,6 +7,8 @@
  * storage stand in, the same seam `tests/unit/dispatch-background.test.ts` uses, so the
  * lifecycle assertions are about OUR wiring rather than about a child's timing.
  */
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { describe, expect, test } from "vitest";
 import { MockChildProcessLifecycle } from "../../src/runtime/child-process-lifecycle.ts";
 import type {
@@ -26,12 +28,19 @@ import { InMemoryTaskStorage } from "../../src/runtime/task-storage.ts";
 import type { ULID } from "../../src/runtime/task-storage.ts";
 import { installRecordingPi, makeTempDir, removeTempDir, waitFor } from "../helpers/ptc.ts";
 
-// A REAL registered agent, not one this file invents. The agent registry is read from the
-// host config and does not see a markdown file written into a temp dir, so a locally authored
-// fixture takes the unknown-agent path and proves nothing about the spawn path. pi ships a
-// smoke-test agent; named explicitly so a future pi that drops it turns this red rather than
-// quietly skipping the assertion (testing constraint 2: fixtures come from a real sample).
-const AGENT = "__smoke_echo";
+// The agent these tests dispatch, named so nothing here can silently start depending on what a
+// given pi build happens to ship.
+//
+// HISTORY, and the reason this comment is longer than the code: this used to be pi's own
+// `__smoke_echo`, on the claim that "the agent registry is read from the host config and does not
+// see a markdown file written into a temp dir". That claim was FALSE and it cost a release: the
+// suite was green on macOS and three assertions went red on the ubuntu runner, because pi does not
+// ship `__smoke_echo` there. `discoverAgent` resolves `projectDir` as `<cwd>/.pi/agents`
+// (dispatch.ts `resolveAgentDirs`), and every test already runs with `cwd` = its own temp dir --
+// so the registry does see a temp-dir markdown, as long as the call is made at PROJECT scope.
+// The default scope is `"user"` (dispatch.ts:1044), which is the real `~/.pi/agent/agents`:
+// machine state this suite has no business reading. See `provisionAgent` in `withAgent`.
+const AGENT = "ptc-self-test-agent";
 /** A canonical ULID: this process is itself a background task in the spawn test below. */
 const PARENT_TASK = "01ARZ3NDEKTSV4RRFFQ69G5FAV" as ULID;
 
@@ -120,10 +129,33 @@ function createHarness(): Harness {
 async function withAgent<T>(body: (dir: string) => Promise<T>): Promise<T> {
   const dir = await makeTempDir();
   try {
+    await provisionAgent(dir);
     return await body(dir);
   } finally {
     await removeTempDir(dir);
   }
+}
+
+/**
+ * Write the agent fixture into `<dir>/.pi/agents`, the exact path `discoverAgent` reads at
+ * project scope (`resolveAgentDirs`: `projectDir = <cwd>/.pi/agents`).
+ *
+ * Controlled, not ambient. Every precondition these tests depend on is now either provisioned
+ * here or passed in: the agent, the cwd, and the lifecycle. The one that was not is what broke the
+ * release.
+ */
+async function provisionAgent(dir: string): Promise<void> {
+  const agentsDir = path.join(dir, ".pi", "agents");
+  await mkdir(agentsDir, { recursive: true });
+  await writeFile(
+    path.join(agentsDir, AGENT + ".md"),
+    `---
+name: ${AGENT}
+---
+You are a self-test fixture.
+`,
+    "utf-8",
+  );
 }
 
 /**
@@ -184,6 +216,7 @@ describe("ptc_subagent", () => {
       });
       const result = (await run(tool, {
         agent: AGENT,
+        agentScope: "project",
         task: "look at the tests",
         background: true,
       })) as {
@@ -225,7 +258,7 @@ describe("ptc_subagent", () => {
       const tool = createPtcSubagentTool(baseOptions(dir, h.deps));
       let message = "";
       try {
-        await run(tool, { agent: "no-such-agent", task: "anything" });
+        await run(tool, { agent: "no-such-agent", agentScope: "project", task: "anything" });
       } catch (error) {
         message = error instanceof Error ? error.message : String(error);
       }
@@ -245,7 +278,7 @@ describe("ptc_subagent", () => {
       });
       let message = "";
       try {
-        await run(tool, { agent: AGENT, task: "one level too deep" });
+        await run(tool, { agent: AGENT, agentScope: "project", task: "one level too deep" });
       } catch (error) {
         message = error instanceof Error ? error.message : String(error);
       }
@@ -304,7 +337,7 @@ describe("ptc_subagent and the dispatch cap", () => {
         });
         let message = "";
         try {
-          await run(tool, { agent: AGENT, task: "no slot is free" });
+          await run(tool, { agent: AGENT, agentScope: "project", task: "no slot is free" });
         } catch (error) {
           message = error instanceof Error ? error.message : String(error);
         }
@@ -335,7 +368,9 @@ describe("ptc_subagent and the dispatch cap", () => {
     await withAgent(async (dir) => {
       const h = createHarness();
       const tool = createPtcSubagentTool(baseOptions(dir, h.deps));
-      const settled = run(tool, { agent: AGENT, task: "a free slot" }).catch(() => undefined);
+      const settled = run(tool, { agent: AGENT, agentScope: "project", task: "a free slot" }).catch(
+        () => undefined,
+      );
       await waitFor(() => h.lifecycle.spawnCount > 0);
       // Exit 0 with no assistant text, so the dispatch REJECTS ("no final text") and the tool
       // throws. That is irrelevant here and deliberately not asserted: this test is about whether a
@@ -368,7 +403,7 @@ describe("ptc_subagent and the dispatch cap", () => {
 
       for (let i = 0; i < 3; i += 1) {
         const settled = dispatch(
-          { agent: AGENT, task: "live set probe " + i },
+          { agent: AGENT, agentScope: "project", task: "live set probe " + i },
           { callId: i, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           runtime.dispatchDeps,
         ).catch(() => undefined);
@@ -406,7 +441,7 @@ describe("ptc_subagent and the dispatch cap", () => {
       setPromptFileWriter(() => Promise.reject(new Error("injected: mkdtemp failed")));
       try {
         await dispatch(
-          { agent: AGENT, task: "never gets to spawn" },
+          { agent: AGENT, agentScope: "project", task: "never gets to spawn" },
           { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           { ...h.deps, slots },
         ).catch(() => {
@@ -428,7 +463,7 @@ describe("ptc_subagent and the dispatch cap", () => {
       const h = createHarness();
       const slots = new DispatchSlotCounter(1);
       const settled = dispatch(
-        { agent: AGENT, task: "writer restored" },
+        { agent: AGENT, agentScope: "project", task: "writer restored" },
         { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
         { ...h.deps, slots },
       ).catch(() => undefined);
@@ -455,7 +490,7 @@ describe("ptc_subagent and the dispatch cap", () => {
       let outcome: unknown;
       try {
         outcome = await dispatch(
-          { agent: AGENT, task: "never gets to spawn", background: true },
+          { agent: AGENT, agentScope: "project", task: "never gets to spawn", background: true },
           { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           { ...h.deps, slots },
         );
@@ -485,7 +520,7 @@ describe("ptc_subagent and the dispatch cap", () => {
       h.lifecycle.failNextExit(new Error("injected: exit blew up"));
       const warnings: string[] = [];
       const settled = dispatch(
-        { agent: AGENT, task: "exit will reject" },
+        { agent: AGENT, agentScope: "project", task: "exit will reject" },
         { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
         {
           ...h.deps,
