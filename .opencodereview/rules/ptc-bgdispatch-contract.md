@@ -49,7 +49,7 @@ Subscription / DispatchHandle / `ptc_task_*` / `<bg-task-notification>`)。
 8. **持久化**:`TaskStorage` 的每个 IO 边界成功/失败双路径都要有明确结果——损坏记录必须抛显式错误,
    不得当作 `null`(absent)返回。写入用临时文件 + rename 之类的原子手法。启动 reconcile 必须被生产调用,
    否则"重启后如实 lost"不成立。
-9. **常开注册**:三个 `ptc_task_*` 工具必须通过 `pi.registerTool` 注册,且在 `/ptc` 模式 loadout 之外
+9. **常开注册**:三个 `ptc_task_*` 工具必须通过 `pi.registerTool` 注册,且在 `/ptc` 模式 loadout 之外(`surfaceMode: off` 是唯一例外,见 ADR-0025 决策 5)
    ——`/ptc off` 只挡新 spawn,不得让在途任务失管。生产代码里搜不到注册点 = 阻塞项。
 10. **投递与唤醒**:终态必须经同一管线投递给模型;idle 唤醒通道要符合 R2 实测(`agent_settled` 边界,
     扩展工厂体内禁调 `pi.*`)。一个唤醒 handler 抛异常不得中断其余 handler。

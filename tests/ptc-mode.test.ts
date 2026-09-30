@@ -132,7 +132,7 @@ test("a config file that is valid JSON but not an object falls back to full", as
   });
 });
 
-test("a surfaceMode key of null is absent, not invalid", async () => {
+test("an absent surfaceMode key is a default, not invalid", async () => {
   await withAgentDir(async (dir) => {
     await writeFile(
       join(dir, PTC_MODE_CONFIG_FILE),

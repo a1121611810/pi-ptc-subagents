@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import type { ExtensionStub } from "./helpers/ptc.ts";
 import ptcSubagents, {
   createBuiltinBindings,
   createWorkerEnv,
@@ -8,7 +9,15 @@ import ptcSubagents, {
   runPtcProgram,
   WORKER_FRAME_KIND,
 } from "../src/index.ts";
-import { captureRegisteredTools, makeExtensionStub, stubContext } from "./helpers/ptc.ts";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import {
+  captureRegisteredTools,
+  makeExtensionStub,
+  makeTempDir,
+  removeTempDir,
+  stubContext,
+} from "./helpers/ptc.ts";
 
 /**
  * The factory's contract with pi is "register the PTC tools and the mode hooks against the
@@ -149,4 +158,67 @@ test("off mode registers nothing, so it has nothing to warn about", async () => 
   const stub = makeExtensionStub({ surfaceMode: "off" });
   expect(stub.handlers.size, "no session_start handler exists to warn from").toBe(0);
   expect(stub.notifications).toEqual([]);
+});
+
+/** Build a stub whose factory call really reads the agent dir, for a given file body. */
+async function stubFromAgentDir(contents: unknown): Promise<ExtensionStub> {
+  const dir = await makeTempDir();
+  const previous = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = dir;
+  try {
+    if (contents !== null) {
+      await writeFile(join(dir, "ptc.json"), JSON.stringify(contents), "utf8");
+    }
+    return makeExtensionStub({ surfaceMode: "from-file" });
+  } finally {
+    if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previous;
+  }
+}
+
+test("the factory's own config read is what decides the surface, not the test seam", async () => {
+  // Standards round 1 finding 1, and the reason the stub has a from-file escape hatch. The
+  // per-mode tests all go through options.surfaceMode, so without this one the production
+  // line readSurfaceModeConfig(getAgentDir()) had no test at all -- mutating it to a hardcoded
+  // "full" left the entire suite green.
+  for (const [contents, expected] of [
+    [{ surfaceMode: "off" }, []],
+    [{ surfaceMode: "subagents" }, ["ptc_subagent", ...TASK_TOOLS]],
+    [{ surfaceMode: "full" }, [...PTC_TOOLS, ...TASK_TOOLS]],
+  ] as const) {
+    const stub = await stubFromAgentDir(contents);
+    expect([...stub.tools.keys()], JSON.stringify(contents)).toEqual([...expected]);
+  }
+});
+
+test("a missing file and a file with no key both give the full surface", async () => {
+  // Story 3: an upgrade must change nobody's behaviour, so both shapes have to land on full.
+  for (const contents of [null, { defaultMode: false }]) {
+    const stub = await stubFromAgentDir(contents);
+    expect([...stub.tools.keys()], JSON.stringify(contents)).toEqual([...PTC_TOOLS, ...TASK_TOOLS]);
+  }
+});
+
+test("a malformed file still gives the full surface, and the problem is reported", async () => {
+  // Spec decision 3: warns and falls back. The fallback alone is pinned in ptc-mode.test.ts;
+  // what is new here is that the FACTORY surfaces the problem rather than swallowing it.
+  const dir = await makeTempDir();
+  const previous = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = dir;
+  try {
+    await writeFile(join(dir, "ptc.json"), "{ not json", "utf8");
+    const stub = makeExtensionStub({ surfaceMode: "from-file" });
+    await stub.emit("session_start", stubContext(stub, { mode: "tui" }));
+    expect([...stub.tools.keys()], "a broken file must not half-apply").toEqual([
+      ...PTC_TOOLS,
+      ...TASK_TOOLS,
+    ]);
+    const warnings = stub.notifications.filter((n) => n.type === "warning");
+    expect(warnings.length, "the parse failure is visible, once").toBe(1);
+    expect(warnings[0]?.message).toContain("ptc.json");
+  } finally {
+    if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previous;
+    await removeTempDir(dir);
+  }
 });

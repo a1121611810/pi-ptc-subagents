@@ -164,7 +164,7 @@ export interface PtcSubagentsOptions {
   backgroundRuntime?: BackgroundTaskRuntime;
   /**
    * Test seam for ADR-0025's surface mode. When set it wins over the agent-dir `ptc.json`,
-   * so a test never reads the developer's real settings -- and the eight test files that all
+   * so a test never reads the developer's real settings -- and the four test files that all
    * build this factory through one stub would otherwise inherit whatever the machine happens
    * to have. Undefined in production, where the file is the only source.
    */
@@ -542,9 +542,11 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     if (config.error !== undefined) {
       ctx.ui.notify(`pi-ptc-subagents: ${config.error}`, "warning");
     }
-    // The factory read happens before there is a ctx to notify through, so a broken
-    // surfaceMode is reported here rather than dropped. Same message shape as above.
-    if (surface.error !== undefined) {
+    // The surface mode is read in the factory body, before there is a ctx to notify through, so
+    // its problem is reported here rather than dropped. Both readers parse the SAME file, so an
+    // unparseable one produces the same sentence twice -- which reads as two problems when it is
+    // one. Report the surface error only when it says something the mode error did not.
+    if (surface.error !== undefined && surface.error !== config.error) {
       ctx.ui.notify(`pi-ptc-subagents: ${surface.error}`, "warning");
     }
 

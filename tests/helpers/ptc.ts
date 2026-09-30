@@ -82,8 +82,17 @@ export function makeExtensionStub(
     sessionDir?: string;
     /** BG-14 test seam: use a pre-built background runtime instead of constructing one. */
     backgroundRuntime?: BackgroundTaskRuntime;
-    /** ADR-0025: the surface mode to pin. Defaults to `full`; never read from disk. */
-    surfaceMode?: SurfaceMode;
+    /**
+     * ADR-0025: the surface mode to pin. Defaults to `full`, and `full` is a PIN rather than a
+     * read -- the four test files that build this factory would otherwise inherit the
+     * developer's real `~/.pi/agent/ptc.json`.
+     *
+     * `"from-file"` is the escape hatch that keeps the production path observable: it passes no
+     * override at all, so the factory really does call `readSurfaceModeConfig(getAgentDir())`.
+     * Without it, that call had no test anywhere -- a review round mutated it to a hardcoded
+     * `"full"` and the whole suite stayed green.
+     */
+    surfaceMode?: SurfaceMode | "from-file";
   } = {},
 ): ExtensionStub {
   const tools = new Map<string, ToolDefinition>();
@@ -165,11 +174,13 @@ export function makeExtensionStub(
     ...(options.backgroundRuntime === undefined
       ? {}
       : { backgroundRuntime: options.backgroundRuntime }),
-    // ADR-0025: pinned, not read. Without this every factory-driven test would inherit the
-    // developer's real ~/.pi/agent/ptc.json, so a machine with surfaceMode off set would
-    // fail eight test files for no reason connected to the code under test. A test that
-    // wants a different surface asks for it through options.surfaceMode.
-    surfaceMode: options.surfaceMode ?? "full",
+    // ADR-0025: pinned, not read, EXCEPT for the explicit escape hatch. The four test files
+    // that build this factory would otherwise inherit the developer's real
+    // `~/.pi/agent/ptc.json`; `"from-file"` is how the one test that needs the production read
+    // path gets at it.
+    ...(options.surfaceMode === "from-file" || options.surfaceMode === undefined
+      ? {}
+      : { surfaceMode: options.surfaceMode }),
   });
   return stub;
 }

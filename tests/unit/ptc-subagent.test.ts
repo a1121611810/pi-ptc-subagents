@@ -9,7 +9,10 @@
  */
 import { describe, expect, test } from "vitest";
 import { MockChildProcessLifecycle } from "../../src/runtime/child-process-lifecycle.ts";
-import type { DispatchDeps } from "../../src/runtime/dispatch.ts";
+import type { ChildHandle, ChildSpawnOptions } from "../../src/runtime/child-process-lifecycle.ts";
+import type { DispatchDeps, DispatchInput } from "../../src/runtime/dispatch.ts";
+import type { Static } from "typebox";
+import { DISPATCH_PARAMETERS } from "../../src/runtime/bindings.ts";
 import { DEFAULT_CONFIG } from "../../src/runtime/limits.ts";
 import { DispatchSlotCounter } from "../../src/runtime/dispatch.ts";
 import { createPtcSubagentTool } from "../../src/tools/subagent.ts";
@@ -24,17 +27,32 @@ import { makeTempDir, removeTempDir } from "../helpers/ptc.ts";
 // quietly skipping the assertion (testing constraint 2: fixtures come from a real sample).
 const AGENT = "__smoke_echo";
 
+/**
+ * The mock lifecycle plus a record of what it was asked to launch. A spawn the test cannot see
+ * is a spawn the test cannot assert on, and the spawn direction of the IO boundary is the one
+ * the accept-both version of this file was quietly not checking.
+ */
+class RecordingLifecycle extends MockChildProcessLifecycle {
+  readonly spawned: ChildHandle[] = [];
+
+  override spawn(argv: readonly string[], opts: ChildSpawnOptions): ChildHandle {
+    const handle = super.spawn(argv, opts);
+    this.spawned.push(handle);
+    return handle;
+  }
+}
+
 interface Harness {
   registry: TaskRegistry;
   deps: DispatchDeps;
-  lifecycle: MockChildProcessLifecycle;
+  lifecycle: RecordingLifecycle;
 }
 
 function createHarness(): Harness {
   const storage = new InMemoryTaskStorage();
   const clock = (): number => 1000;
   const registry = createTaskRegistry(storage, { clock });
-  const lifecycle = new MockChildProcessLifecycle();
+  const lifecycle = new RecordingLifecycle();
   const slots = new DispatchSlotCounter(8);
   return { registry, lifecycle, deps: { taskRegistry: registry, lifecycle, slots, clock } };
 }
@@ -53,6 +71,22 @@ async function withAgent<T>(body: (dir: string) => Promise<T>): Promise<T> {
  * pi's Tool.execute takes five arguments; a two-argument call type-checks against a stub and
  * fails against the real signature, so every call in this file goes through one helper.
  */
+/**
+ * Compile-time: the binding's schema and its `DispatchInput` type describe the SAME shape.
+ * A runtime comparison of the two schema objects cannot see drift -- the tool is handed the same
+ * object, so it is an identity check -- but this one cannot: adding a field to the type without
+ * adding it to the schema, or the reverse, fails the build rather than the suite.
+ */
+type SchemaKeys = keyof Static<typeof DISPATCH_PARAMETERS>;
+type TypeKeys = keyof DispatchInput;
+export type _SchemaMatchesType = [SchemaKeys] extends [TypeKeys]
+  ? [TypeKeys] extends [SchemaKeys]
+    ? true
+    : never
+  : never;
+const _schemaMatchesType: _SchemaMatchesType = true;
+void _schemaMatchesType;
+
 async function run<T>(
   tool: { execute: (...args: never[]) => Promise<T> },
   params: unknown,
@@ -74,39 +108,34 @@ const baseOptions = (dir: string, deps: DispatchDeps) => ({
 });
 
 describe("ptc_subagent", () => {
-  test("a background call reaches the dispatcher and never resolves success-shaped on a refusal", async () => {
-    // Story 6's contract, minus the part a unit test cannot reach. A live spawn needs an agent
-    // the HOST registry knows about, and that registry does not see a markdown file written into
-    // a temp dir -- so the success branch is not exercisable here without a real pi install and
-    // a real agent. What IS deterministic, and what this tool actually introduces, is that the
-    // dispatcher's outcome reaches the model faithfully: a handle becomes a task id, a refusal
-    // becomes a thrown error. Asserting the success path here would be asserting on the host's
-    // agent registry, which is not what this change modifies.
+  test("a background call spawns a child and hands back a task id the model can use", async () => {
+    // Spec testing decision: the IO boundary has BOTH directions, and the spawn direction is
+    // the one that matters here. The earlier version wrapped the call in try/catch and
+    // branched on the outcome -- an accept-both that stayed green when execute was made to
+    // refuse unconditionally, i.e. when the tool could never spawn anything.
+    //
+    // The agent is a real registered one rather than a file this test writes, because the host
+    // registry does not see a markdown in a temp dir. The CHILD is the mock lifecycle, so no
+    // real pi is launched and the spawn is recorded rather than inferred.
     await withAgent(async (dir) => {
       const h = createHarness();
       const tool = createPtcSubagentTool(baseOptions(dir, h.deps));
-      let message = "";
-      try {
-        const result = (await run(tool, {
-          agent: AGENT,
-          task: "look at the tests",
-          background: true,
-        })) as { details: { taskId?: string } };
-        // If this install DOES know the agent, the success shape is the one we promised.
-        expect(
-          result.details.taskId,
-          "a resolved background call carries a task id, never a bare result",
-        ).toBeDefined();
-      } catch (error) {
-        message = error instanceof Error ? error.message : String(error);
-      }
-      if (message !== "") {
-        // The refusal path: visible, and carrying the dispatcher's own wording rather than a
-        // success-shaped result the model would have to learn to read.
-        expect(message).toContain("ptc_subagent refused the call");
-      }
-      // Either way the registry is the dispatcher's, not a second one: nothing here bypassed it.
-      expect(h.deps.taskRegistry, "the session registry is the one handed in").toBe(h.registry);
+      const result = (await run(tool, {
+        agent: AGENT,
+        task: "look at the tests",
+        background: true,
+      })) as {
+        content: { type: string; text: string }[];
+        details: { taskId?: string; status?: string };
+      };
+      const taskId = result.details.taskId;
+      expect(taskId, "a background call resolves with a task id").toBeDefined();
+      expect(
+        result.content[0]?.text ?? "",
+        "the model is told the id, not left to find it in a details object",
+      ).toContain(taskId as string);
+      expect(result.details.status, "and told this is a background task").toBe("background");
+      expect(h.lifecycle.spawned.length, "exactly one child was launched").toBe(1);
     });
   });
 
@@ -158,7 +187,15 @@ describe("ptc_subagent", () => {
     const tool = createPtcSubagentTool(baseOptions(".", {}));
     const declared = Object.keys((tool.parameters as { properties?: object }).properties ?? {});
     const real = Object.keys((DISPATCH_PARAMETERS as { properties?: object }).properties ?? {});
-    expect(declared, "one schema, two call sites").toEqual(real);
+    // Identity, on purpose: the tool IS handed the binding's schema object, so a comparison of
+    // the two key LISTS can only ever agree. That is the point -- the tool cannot drift from the
+    // binding. The check with teeth is the compile-time one above, which compares the schema to
+    // the `DispatchInput` TYPE rather than the schema to itself.
+    expect(
+      (tool.parameters as unknown) === (DISPATCH_PARAMETERS as unknown),
+      "the tool is handed the binding schema, not a copy of it",
+    ).toBe(true);
+    expect(declared).toEqual(real);
     expect(declared, "and it is not empty").toContain("agent");
     expect(declared).toContain("task");
     expect(declared).toContain("background");

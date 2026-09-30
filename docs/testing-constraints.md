@@ -148,6 +148,6 @@ emptied | F4 red」)。
 本文件被 `.agents/skills/code-review/SKILL.md` 的 spec 轴 audit 2 引用为 Oracle check 的判定依据。
 OCR `.opencodereview/rules/test-discipline.md` 承载 F1/F2/F3 的细节 + 实例,本文件承载 6 条约束的完整描述。
 两者必须保持同步;改一处必须改另一处。
-**F4 目前只有这一处**:该 OCR rule 文件(以及 `AGENTS.md` 的两处 F 列表)还只写到 F3。
+**F4 的同步已于本轮补齐**:OCR rule 文件、`AGENTS.md` 的两处 F 列表、以及夹具自身的文件头都写到了 F4。
 补齐之前「两者必须保持同步」这一句在 F4 上不成立。写下来是为了让下一个人看得见这个缺口,
 而不是让它看起来已经同步。

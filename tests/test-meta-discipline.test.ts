@@ -1,6 +1,6 @@
 /**
  * Meta-discipline fixture: scans every .test.ts in this repo for false-pass patterns
- * (F1 / F2 / F3 in docs/testing-constraints.md) and fails the build if any are found.
+ * (F1 / F2 / F3 / F4 in docs/testing-constraints.md) and fails the build if any are found.
  *
  * This fixture exists because the project once shipped a false-pass test (dispatch-e2e.test.ts)
  * that accepted `status: 'fulfilled' | 'rejected'` — a characterization test, not a

@@ -37,7 +37,6 @@ export interface CreatePtcSubagentToolOptions {
   /** This pi process's own task id, when it was itself spawned (ADR-0022 section 3). */
   parentTaskId?: ULID;
   /** Dedicated session directory for background children; absent keeps the foreground shape. */
-  sessionDir?: string;
   /** Session-scoped deps, so a background spawn lands in the session registry. */
   getDispatchDeps?: () => DispatchDeps;
 }
@@ -84,7 +83,6 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
           depth: options.depth,
           maxDispatchDepth: options.maxDispatchDepth,
           ...(options.parentTaskId === undefined ? {} : { parentTaskId: options.parentTaskId }),
-          ...(options.sessionDir === undefined ? {} : { sessionDir: options.sessionDir }),
         },
         options.getDispatchDeps?.() ?? {},
       );

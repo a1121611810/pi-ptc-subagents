@@ -13,7 +13,7 @@
  * logic is covered by `tests/ptc-mode.test.ts`.
  */
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "vitest";
@@ -64,6 +64,8 @@ function runPi(args: string[], env: NodeJS.ProcessEnv): Promise<void> {
 async function capturePayload(options: {
   withDist?: boolean;
   narrow?: string;
+  /** ADR-0025: which surface the built extension registers. Defaults to `full`. */
+  surfaceMode?: "off" | "subagents" | "full";
 }): Promise<ProbeRecord> {
   const dir = await makeTempDir("pi-ptc-probe-");
   const out = join(dir, "payload.json");
@@ -80,8 +82,18 @@ async function capturePayload(options: {
     "-p",
     "hello",
   ];
+  // ADR-0025: the built extension reads the agent-dir ptc.json at construction time, so this
+  // probe pins PI_CODING_AGENT_DIR. Without the pin a developer with {"surfaceMode":"off"}
+  // configured gets three failures here for a reason unrelated to the code under test -- the
+  // same invisible class as the verify-dist-render gate the first round had to fix separately.
+  await writeFile(
+    join(dir, "ptc.json"),
+    JSON.stringify({ surfaceMode: options.surfaceMode ?? "full" }),
+    "utf8",
+  );
   await runPi(args, {
     ...process.env,
+    PI_CODING_AGENT_DIR: dir,
     PTC_PROBE_OUT: out,
     ...(options.narrow === undefined ? {} : { PTC_PROBE_NARROW: options.narrow }),
   });
