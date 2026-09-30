@@ -29,5 +29,6 @@ ADRs for pi-ptc-subagents, per `docs/agents/domain.md` (single-context repo).
 | [0023](./0023-background-task-ownership.md)                | Background task ownership: owner-tagged records, owner-scoped reaping            | accepted |
 | [0024](./0024-binding-contract-declares-binding-result.md) | Binding contract: tool descriptions declare what a binding call resolves to      | accepted |
 | [0025](./0025-extension-surface-is-a-setting.md)           | Extension surface is a setting: `off` / `subagents` / `full`                     | accepted |
+| [0026](./0026-surface-default-is-detected.md)              | The surface default is detected from the pi that loaded us                       | accepted |
 
 Numbering gaps are deliberate: 0001/0006 were reserved while wayfinder map #7 was charting and dropped when G1 resolved; keeping their slots means every cross-reference in the map and its tickets stays valid.

@@ -65,7 +65,7 @@ async function capturePayload(options: {
   withDist?: boolean;
   narrow?: string;
   /** ADR-0025: which surface the built extension registers. Defaults to `full`. */
-  surfaceMode?: "off" | "subagents" | "full";
+  surfaceMode?: "off" | "subagents" | "full" | "detected";
 }): Promise<ProbeRecord> {
   const dir = await makeTempDir("pi-ptc-probe-");
   const out = join(dir, "payload.json");
@@ -86,11 +86,17 @@ async function capturePayload(options: {
   // probe pins PI_CODING_AGENT_DIR. Without the pin a developer with {"surfaceMode":"off"}
   // configured gets three failures here for a reason unrelated to the code under test -- the
   // same invisible class as the verify-dist-render gate the first round had to fix separately.
-  await writeFile(
-    join(dir, "ptc.json"),
-    JSON.stringify({ surfaceMode: options.surfaceMode ?? "full" }),
-    "utf8",
-  );
+  // ADR-0026: "detected" writes NO key, so the built extension runs its real codemode probe
+  // against the pi that is actually launching it. That is the only place the probe meets a real
+  // pi rather than a fixture, and the filesystem layout it depends on is exactly the kind of
+  // thing a unit test with a hand-built tree gets wrong.
+  if (options.surfaceMode !== "detected") {
+    await writeFile(
+      join(dir, "ptc.json"),
+      JSON.stringify({ surfaceMode: options.surfaceMode ?? "full" }),
+      "utf8",
+    );
+  }
   await runPi(args, {
     ...process.env,
     PI_CODING_AGENT_DIR: dir,
@@ -155,3 +161,41 @@ test("narrowing the loadout really does change what the provider is offered (the
   // the live loadout, so a binding table derived from it would be empty.
   expect(narrowed.tools).not.toContain("read");
 }, 120_000);
+test("with no key, the surface follows the pi -- measured against a real pi, not a fixture", async () => {
+  // ADR-0026, end to end. Every other test in this file pins a mode; this one pins nothing and
+  // lets the built extension run its real codemode probe against the pi actually launching it.
+  // The probe walks a filesystem layout, and a hand-built tree in a unit test is exactly the kind
+  // of fixture that gets a real install's layout wrong.
+  //
+  // Written as a comparison rather than a literal set on purpose. The expected set differs
+  // between pi versions, and a test that hardcodes one has to be edited for every release instead
+  // of failing loudly. If the probe stops working, the two runs agree and this goes red; if the pi
+  // genuinely has no codemode, both runs agree for a legitimate reason and the test says so.
+  const detected = await capturePayload({ withDist: true, surfaceMode: "detected" });
+  const explicit = await capturePayload({ withDist: true, surfaceMode: "full" });
+  const detectedPtc = detected.tools.filter((name) => name.startsWith("ptc_")).sort();
+  const explicitPtc = explicit.tools.filter((name) => name.startsWith("ptc_")).sort();
+  if (detectedPtc.join() === explicitPtc.join()) {
+    // Nothing to assert: on a pi with no codemode the detected default IS full, and both runs
+    // agreeing is the correct outcome rather than a silent pass over a broken probe.
+    expect(
+      explicitPtc,
+      "this pi resolves the detected default to full, which is the documented fallback",
+    ).toEqual([
+      "ptc_run_code",
+      "ptc_task_list",
+      "ptc_task_output",
+      "ptc_task_stop",
+      "ptc_workflow",
+    ]);
+    return;
+  }
+  expect(
+    detectedPtc,
+    "a pi that ships codemode hands over the orchestrator and keeps the front",
+  ).toEqual(["ptc_subagent", "ptc_task_list", "ptc_task_output", "ptc_task_stop"]);
+  expect(
+    detectedPtc.includes("ptc_run_code"),
+    "and never both: two orchestrators is the thing this whole setting exists to prevent",
+  ).toBe(false);
+});

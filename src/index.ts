@@ -55,7 +55,12 @@ import {
   readSurfaceModeConfig,
   resolveBaseOnStart,
 } from "./mode/ptc-mode.ts";
-import type { ModeHideStrategy, PersistedModeState, SurfaceMode } from "./mode/ptc-mode.ts";
+import type {
+  CodemodePresence,
+  ModeHideStrategy,
+  PersistedModeState,
+  SurfaceMode,
+} from "./mode/ptc-mode.ts";
 import { buildPtcSkillsSection, skillsSectionDropped } from "./mode/skills-section.ts";
 import { createPtcSubagentTool } from "./tools/subagent.ts";
 
@@ -169,6 +174,13 @@ export interface PtcSubagentsOptions {
    * to have. Undefined in production, where the file is the only source.
    */
   surfaceMode?: SurfaceMode;
+  /**
+   * ADR-0026 test seam: what the codemode probe found. Undefined in production, where the
+   * probe really runs. A test that exercises the DETECTED default states the pi it
+   * assumes rather than inheriting whatever process.argv the test runner happens to have,
+   * which is how the previous version of that test passed for the wrong reason.
+   */
+  codemode?: CodemodePresence;
 }
 
 export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOptions = {}): void {
@@ -183,7 +195,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
    */
   const surface =
     options.surfaceMode === undefined
-      ? readSurfaceModeConfig(getAgentDir())
+      ? readSurfaceModeConfig(getAgentDir(), options.codemode)
       : { surfaceMode: options.surfaceMode, source: "file" as const };
   // Set on entry, cleared after the briefing has been injected, so the instruction lands once
   // per mode entry instead of on every turn.

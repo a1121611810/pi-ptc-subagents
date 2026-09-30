@@ -36,8 +36,8 @@
  * scripts buys nothing and breaks them. A session that was *launched* with an explicit tool
  * restriction is left alone too — see `decideModeEntry`.
  */
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, realpathSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { BUILTIN_BINDING_NAMES } from "../runtime/bindings.ts";
 
 /** The two surfaces this package exposes. `/ptc on` needs at least one of them active. */
@@ -168,64 +168,152 @@ export function readDefaultModeConfig(agentDir: string): DefaultModeConfig {
 export const SURFACE_MODES = ["off", "subagents", "full"] as const;
 export type SurfaceMode = (typeof SURFACE_MODES)[number];
 
-/** Today's behaviour. An upgrade must be invisible, so this is the default. */
-export const DEFAULT_SURFACE_MODE: SurfaceMode = "full";
+/**
+ * The surface to use when the user has expressed no preference. Not a constant: a pi that ships
+ * `codemode` already offers the model a second way to orchestrate, and answering that by
+ * handing our orchestration surface away is the whole point of `subagents` mode (ADR-0026).
+ *
+ * The fallback is `full` on purpose. Every way the probe can come back wrong -- no argv, a shim
+ * that will not resolve, a pi packaged somewhere unguessable, a permission error -- lands there,
+ * and `full` is today's behaviour. `subagents` as a failure mode would silently take away the
+ * orchestration tool a session was relying on.
+ */
+export function detectedSurfaceMode(presence: CodemodePresence): SurfaceMode {
+  return presence.present ? "subagents" : "full";
+}
+
+/** Kept for callers and tests that need a name rather than a probe result. */
+export const FALLBACK_SURFACE_MODE: SurfaceMode = "full";
+
+/**
+ * Whether the pi that launched us ships its own `codemode` orchestration tool.
+ *
+ * pi's own tool listing is NOT usable here, and that is why this probe exists at all.
+ * `getAllTools()` and `getActiveTools()` are `notInitialized` stubs until `bindCore` runs
+ * (`loader.js:106`), which happens after every factory body has returned. Calling one from a
+ * factory throws, and a throwing factory makes the extension fail to load entirely
+ * (`loader.js:447-455`). Registration has to happen in the factory, so the default has to be
+ * knowable in the factory.
+ *
+ * So this walks the filesystem from the entry script instead. `process.argv[1]` is whatever the
+ * user typed, which for a package-manager install is a shim, so it is resolved first. The answer
+ * is "does this pi ship codemode", NOT "can this session call it": codemode registers with
+ * `defaultActive: false`, so it is absent from `getActiveTools()` even when fully present.
+ * `session_start` is where the second question gets asked, and where a session handed to an
+ * orchestrator that is not there gets told.
+ */
+export function probeCodemodePresence(argv: readonly string[] = process.argv): CodemodePresence {
+  const entry = argv[1];
+  if (entry === undefined || entry === "") return { present: false, how: "no-entry" };
+  let resolved: string;
+  try {
+    resolved = realpathSync(entry);
+  } catch {
+    return { present: false, how: "unresolvable-entry" };
+  }
+  const bundleDir = dirname(resolved);
+  for (const relative of CODEMODE_PROBE_PATHS) {
+    const candidate = join(bundleDir, ...relative);
+    try {
+      if (statSync(candidate).isDirectory()) {
+        return { present: true, how: "found" };
+      }
+    } catch {
+      // Not there, or not readable. Try the next layout; the caller sees a false at the end.
+    }
+  }
+  return { present: false, how: "not-found" };
+}
+
+/**
+ * Where the codemode extension sits, relative to the directory holding pi's entry script.
+ *
+ * The third entry is the one a test caught: a pi run from a checkout, or packaged without a
+ * `dist/bundle` level, puts `extensions/` beside the entry script rather than above it. Probing
+ * only the two bundled layouts calls that pi a pi that does not ship codemode, and flips the
+ * default to full.
+ */
+const CODEMODE_PROBE_PATHS: readonly (readonly string[])[] = [
+  ["..", "extensions", "codemode"],
+  ["..", "..", "extensions", "codemode"],
+  ["extensions", "codemode"],
+];
+
+export interface CodemodePresence {
+  /** Whether the directory was found. */
+  present: boolean;
+  /** How the answer was reached, so a test can tell a measured yes from a failed probe. */
+  how: "found" | "not-found" | "no-entry" | "unresolvable-entry";
+}
 
 /** Result of reading the surface mode, with enough detail to warn about a broken file. */
 export interface SurfaceModeConfig {
   surfaceMode: SurfaceMode;
   source: "file" | "default" | "invalid";
   error?: string;
+  /**
+   * What the probe found, when the surface was NOT read from the file. Absent when the user set
+   * the key, because then the probe never runs and there is nothing to report.
+   */
+  codemode?: CodemodePresence;
 }
 
 /**
  * Read `surfaceMode` from the agent-dir config file.
  *
  * A pure function over the filesystem, shaped like {@link readDefaultModeConfig} on purpose:
- * an absent file, an absent key, unparseable JSON and an out-of-set value all resolve to
- * {@link DEFAULT_SURFACE_MODE}, and the last two additionally report `invalid` with a reason.
- * A malformed setting must never half-apply - which tools exist is not something to change
- * on a guess.
+ * an absent file, an absent key, unparseable JSON and an out-of-set value all resolve to the
+ * detected default rather than a hardcoded one, and the last two additionally report `invalid`
+ * with a reason. A malformed setting must never half-apply - which tools exist is not something
+ * to change on a guess.
+ *
+ * The `presence` argument is a parameter rather than a hidden call, so a test can state the pi it
+ * is reasoning about instead of depending on the machine it runs on. It is consulted only when
+ * the file does not decide the answer.
  */
-export function readSurfaceModeConfig(agentDir: string): SurfaceModeConfig {
+export function readSurfaceModeConfig(
+  agentDir: string,
+  presence: CodemodePresence = probeCodemodePresence(),
+): SurfaceModeConfig {
   const path = join(agentDir, PTC_MODE_CONFIG_FILE);
+  const fallback = detectedSurfaceMode(presence);
   let raw: string;
   try {
     raw = readFileSync(path, "utf8");
   } catch {
-    return { surfaceMode: DEFAULT_SURFACE_MODE, source: "default" };
+    return { surfaceMode: fallback, source: "default", codemode: presence };
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch (error) {
     return {
-      surfaceMode: DEFAULT_SURFACE_MODE,
+      surfaceMode: fallback,
       source: "invalid",
       error: `${path} is not valid JSON (${error instanceof Error ? error.message : String(error)})`,
     };
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     return {
-      surfaceMode: DEFAULT_SURFACE_MODE,
+      surfaceMode: fallback,
       source: "invalid",
       error: `${path} must contain a JSON object`,
     };
   }
   const value = (parsed as { surfaceMode?: unknown }).surfaceMode;
   if (value === undefined) {
-    return { surfaceMode: DEFAULT_SURFACE_MODE, source: "default" };
+    return { surfaceMode: fallback, source: "default", codemode: presence };
   }
   if (typeof value !== "string") {
     return {
-      surfaceMode: DEFAULT_SURFACE_MODE,
+      surfaceMode: fallback,
       source: "invalid",
       error: `${path}: "surfaceMode" must be a string, received ${typeof value}`,
     };
   }
   if (!SURFACE_MODES.includes(value as SurfaceMode)) {
     return {
-      surfaceMode: DEFAULT_SURFACE_MODE,
+      surfaceMode: fallback,
       source: "invalid",
       error: `${path}: "surfaceMode" must be one of ${SURFACE_MODES.join(" | ")}, received ${JSON.stringify(value)}`,
     };

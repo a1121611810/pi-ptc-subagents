@@ -391,6 +391,11 @@ const EXTERNAL_VOCABULARY: ReadonlyMap<string, string> = new Map([
   // A2. pi 0.99.1 内建 codemode 扩展的沙箱全局函数，本仓只是文档层面提及，
   // 从不声明也从不调用（QuickJS 侧无 fs / 无网络，无法实现等价物）。
   ["describeTool", "pi 内建 codemode 沙箱的全局函数，本仓不声明（ADR-0025）"],
+  ["ToolInfo", "pi ExtensionAPI.getAllTools 的返回类型，本仓只在 ADR-0026 里引用（ADR-0026）"],
+  [
+    "getSettings",
+    "pi 0.99.1 的 ExtensionAPI 方法，工厂时点为 notInitialized 桩；本仓明确不依赖它（ADR-0026）",
+  ],
   ["searchTools", "pi 内建 codemode 沙箱的全局函数，本仓不声明（ADR-0025）"],
   ["max_output_tokens", "pi 内建 codemode 的脚本级输出预算选项，本仓不声明（ADR-0025）"],
   ["timeout_ms", "pi 内建 codemode 的脚本级死线选项；本仓同名概念是 maxTimeoutMs（ADR-0025）"],

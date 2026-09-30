@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The surface default is detected from the pi that loaded us (ADR-0026).** With no
+  `surfaceMode` set, a pi that ships its own `codemode` resolves to `subagents` and a pi that
+  does not resolves to `full`. Setting the key always wins, and a probe that cannot answer
+  falls back to `full` rather than guessing.
+
+  This is the one behaviour change that is not invisible on upgrade: on pi 0.99.1 or newer, a
+  user who has never set `surfaceMode` moves from `full` to `subagents`. `codemode` ships
+  inactive (`defaultActive: false`), so such a session has a subagent front and no active
+  orchestrator until codemode is added to the tool list -- the startup warning says so. Set
+  `{ "surfaceMode": "full" }` to keep today's tools.
+
+  Detection is a filesystem probe over `process.argv[1]`, because pi's own tool listing is
+  unavailable at factory time: `getAllTools()` is a `notInitialized` stub until `bindCore`
+  runs, and a throwing factory makes the extension fail to load rather than return an empty
+  list.
+
 - **The model-facing surface is now a setting, and a subagent can be started
   without writing a program (ADR-0025).** A new `surfaceMode` key in
   `~/.pi/agent/ptc.json` decides what this extension registers: `full` (the

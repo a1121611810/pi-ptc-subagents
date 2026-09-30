@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import type { ExtensionStub } from "./helpers/ptc.ts";
+import type { CodemodePresence } from "../src/mode/ptc-mode.ts";
 import ptcSubagents, {
   createBuiltinBindings,
   createWorkerEnv,
@@ -160,8 +161,15 @@ test("off mode registers nothing, so it has nothing to warn about", async () => 
   expect(stub.notifications).toEqual([]);
 });
 
-/** Build a stub whose factory call really reads the agent dir, for a given file body. */
-async function stubFromAgentDir(contents: unknown): Promise<{ stub: ExtensionStub; dir: string }> {
+/**
+ * Build a stub whose factory call really reads the agent dir, for a given file body. The
+ * `codemode` argument is the probe result the factory is told to believe (ADR-0026); without it the
+ * real probe runs against the test runner's argv, which is not a pi.
+ */
+async function stubFromAgentDir(
+  contents: unknown,
+  codemode?: CodemodePresence,
+): Promise<{ stub: ExtensionStub; dir: string }> {
   const dir = await makeTempDir();
   const previous = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = dir;
@@ -169,7 +177,13 @@ async function stubFromAgentDir(contents: unknown): Promise<{ stub: ExtensionStu
     if (contents !== null) {
       await writeFile(join(dir, "ptc.json"), JSON.stringify(contents), "utf8");
     }
-    return { stub: makeExtensionStub({ surfaceMode: "from-file" }), dir };
+    return {
+      stub: makeExtensionStub({
+        surfaceMode: "from-file",
+        ...(codemode === undefined ? {} : { codemode }),
+      }),
+      dir,
+    };
   } finally {
     if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previous;
@@ -195,12 +209,39 @@ test("the factory's own config read is what decides the surface, not the test se
   }
 });
 
-test("a missing file and a file with no key both give the full surface", async () => {
-  // Story 3: an upgrade must change nobody's behaviour, so both shapes have to land on full.
+test("with no preference from the user, the surface is decided by the pi (ADR-0026)", async () => {
+  // This is the new default, and it is the one behaviour that changes for an existing install. The
+  // previous version of this test asserted `full` and passed for the wrong reason: the factory ran
+  // the real probe, the real probe looked at vitest's argv, and vitest has no pi next to it. Both
+  // branches are stated here instead of inherited from the machine.
+  const cases = [
+    { codemode: { present: true, how: "found" }, expected: ["ptc_subagent", ...TASK_TOOLS] },
+    { codemode: { present: false, how: "not-found" }, expected: [...PTC_TOOLS, ...TASK_TOOLS] },
+  ] as const;
   for (const contents of [null, { defaultMode: false }]) {
-    const { stub, dir } = await stubFromAgentDir(contents);
+    for (const { codemode, expected } of cases) {
+      const { stub, dir } = await stubFromAgentDir(contents, codemode);
+      try {
+        expect(
+          [...stub.tools.keys()],
+          `${JSON.stringify(contents)} with codemode ${codemode.how}`,
+        ).toEqual([...expected]);
+      } finally {
+        await removeTempDir(dir);
+      }
+    }
+  }
+});
+
+test("an explicit surfaceMode wins over the probe, whichever way the probe came out", async () => {
+  // The user's setting is the whole point: detection is a default, not an override.
+  for (const codemode of [
+    { present: true, how: "found" },
+    { present: false, how: "not-found" },
+  ] as const) {
+    const { stub, dir } = await stubFromAgentDir({ surfaceMode: "full" }, codemode);
     try {
-      expect([...stub.tools.keys()], JSON.stringify(contents)).toEqual([
+      expect([...stub.tools.keys()], `explicit full, codemode ${codemode.how}`).toEqual([
         ...PTC_TOOLS,
         ...TASK_TOOLS,
       ]);

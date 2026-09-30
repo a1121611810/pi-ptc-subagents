@@ -29,8 +29,10 @@ const dist = await import(fileURLToPath(distUrl));
 // of tools it then registers is the set below. Pointing PI_CODING_AGENT_DIR at a directory this
 // script owns makes the expected set a property of the built artifact instead of a property of
 // whoever is running the gate. The explicit { "surfaceMode": "full" } (rather than an empty dir
-// relying on the default) keeps the gate pinned to the mode the tool list below names even if
-// DEFAULT_SURFACE_MODE ever moves.
+// relying on the default) keeps the gate pinned to the mode the tool list below names. That
+// matters MORE since ADR-0026: with no key at all the surface is detected from the pi that
+// loaded this dist, so a gate run under a pi shipping codemode would resolve to subagents and
+// then fail on a set difference that has nothing to do with the build.
 const agentDir = mkdtempSync(join(tmpdir(), "pi-ptc-verify-dist-"));
 process.on("exit", () => {
   rmSync(agentDir, { recursive: true, force: true });

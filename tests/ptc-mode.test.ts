@@ -8,9 +8,9 @@
  *  - config: `~/.pi/agent/ptc.json` semantics (absent / off / malformed)
  *  - wiring: driven through the extension stub, i.e. the same entry points pi calls
  */
-import { writeFile } from "node:fs/promises";
+import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { expect, test } from "vitest";
+import { describe, expect, test } from "vitest";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import {
   bindingSource,
@@ -25,6 +25,8 @@ import {
   PTC_MODE_ENTRY_TYPE,
   readDefaultModeConfig,
   readSurfaceModeConfig,
+  detectedSurfaceMode,
+  probeCodemodePresence,
   resolveBaseOnStart,
   sameToolSet,
 } from "../src/mode/ptc-mode.ts";
@@ -73,9 +75,20 @@ async function withAgentDir(fn: (dir: string) => Promise<void>): Promise<void> {
 // Surface mode config (ADR-0025)
 // --------------------------------------------------------------------------------------
 
-test("surface mode defaults to full when no file exists", async () => {
+test("with no file, the surface follows the pi that loaded us (ADR-0026)", async () => {
+  // Not a constant any more. Both branches are stated here rather than inherited from the machine
+  // the suite happens to run on, so a change to the detection rule has to be made here on purpose.
   await withAgentDir(async (dir) => {
-    expect(readSurfaceModeConfig(dir)).toEqual({ surfaceMode: "full", source: "default" });
+    expect(readSurfaceModeConfig(dir, { present: false, how: "not-found" })).toEqual({
+      surfaceMode: "full",
+      source: "default",
+      codemode: { present: false, how: "not-found" },
+    });
+    expect(readSurfaceModeConfig(dir, { present: true, how: "found" })).toEqual({
+      surfaceMode: "subagents",
+      source: "default",
+      codemode: { present: true, how: "found" },
+    });
   });
 });
 
@@ -139,8 +152,12 @@ test("an absent surfaceMode key is a default, not invalid", async () => {
       JSON.stringify({ defaultMode: false }),
       "utf8",
     );
-    const config = readSurfaceModeConfig(dir);
-    expect(config).toEqual({ surfaceMode: "full", source: "default" });
+    const config = readSurfaceModeConfig(dir, { present: true, how: "found" });
+    // An absent key is a DEFAULT, so it is detected -- the same as an absent file. What this test
+    // is about is `source`, not the surface: a key that is not there must not read as invalid.
+    expect(config.surfaceMode).toBe("subagents");
+    expect(config.source).toBe("default");
+    expect(config.error).toBeUndefined();
   });
 });
 
@@ -563,5 +580,77 @@ test("a session with nothing advertisable gets no section at all", async () => {
     const options = promptOptions([fakeSkill("grill-with-docs", { disableModelInvocation: true })]);
     await emitBeforeAgentStart(stub, ctx, options);
     expect(options.sections.skills).toBeUndefined();
+  });
+});
+
+describe("probeCodemodePresence", () => {
+  test("finds codemode next to a real pi entry script, through a symlink", async () => {
+    // The shape a package-manager install actually has: argv[1] is a shim, the real file is a
+    // symlink target, and the extension sits one level above the bundle directory. A probe that
+    // skipped realpath would report every one of these as absent and flip the default to full.
+    const root = await makeTempDir();
+    try {
+      const bundle = join(root, "dist", "bundle");
+      await mkdir(join(root, "dist", "extensions", "codemode"), { recursive: true });
+      await mkdir(bundle, { recursive: true });
+      const real = join(bundle, "cli.js");
+      await writeFile(real, "", "utf8");
+      const shim = join(root, "pi");
+      await symlink(real, shim);
+      expect(probeCodemodePresence(["node", shim])).toEqual({ present: true, how: "found" });
+    } finally {
+      await removeTempDir(root);
+    }
+  });
+
+  test("finds codemode in a pi with no dist/bundle level", async () => {
+    const root = await makeTempDir();
+    try {
+      await mkdir(join(root, "extensions", "codemode"), { recursive: true });
+      const entry = join(root, "cli.js");
+      await writeFile(entry, "", "utf8");
+      expect(probeCodemodePresence(["node", entry])).toEqual({ present: true, how: "found" });
+    } finally {
+      await removeTempDir(root);
+    }
+  });
+
+  test("a pi without codemode reports absent, not an error", async () => {
+    const root = await makeTempDir();
+    try {
+      const entry = join(root, "cli.js");
+      await writeFile(entry, "", "utf8");
+      expect(probeCodemodePresence(["node", entry])).toEqual({ present: false, how: "not-found" });
+    } finally {
+      await removeTempDir(root);
+    }
+  });
+
+  test("a FILE named codemode is not a pi that ships codemode", async () => {
+    // isDirectory, not exists: a stray file at that path would otherwise flip the default.
+    const root = await makeTempDir();
+    try {
+      await mkdir(join(root, "extensions"), { recursive: true });
+      await writeFile(join(root, "extensions", "codemode"), "not a directory", "utf8");
+      const entry = join(root, "cli.js");
+      await writeFile(entry, "", "utf8");
+      expect(probeCodemodePresence(["node", entry]).present).toBe(false);
+    } finally {
+      await removeTempDir(root);
+    }
+  });
+
+  test("every unusable argv falls back to full rather than to a guess", async () => {
+    // The fallback direction is the whole design: a probe that cannot answer must not be allowed
+    // to answer yes. subagents as a failure mode takes away the session's orchestrator.
+    for (const [argv, how] of [
+      [["node"], "no-entry"],
+      [["node", ""], "no-entry"],
+      [["node", "/nonexistent/pi-shim"], "unresolvable-entry"],
+    ] as const) {
+      const presence = probeCodemodePresence(argv as readonly string[]);
+      expect(presence, JSON.stringify(argv)).toEqual({ present: false, how });
+      expect(detectedSurfaceMode(presence), JSON.stringify(argv)).toBe("full");
+    }
   });
 });

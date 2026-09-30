@@ -195,11 +195,21 @@ surface change needs a new session ([ADR-0025](./docs/adr/0025-extension-surface
 - `off` — a stock pi session: no tool, no `/ptc` command, no briefing.
 - `subagents` — `ptc_subagent` plus the three `ptc_task_*` tools, with pi's own `codemode`
   doing the orchestration; warns at startup when `codemode` is not in the active tool set.
-- `full` (the default) — today's set: `ptc_run_code` / `ptc_workflow` plus the three
-  `ptc_task_*` tools.
+- `full` — today's set: `ptc_run_code` / `ptc_workflow` plus the three `ptc_task_*` tools.
 
-No file, no key, or a value outside that set falls back to `full` and says so at startup rather
-than half-applying: which tools exist is not something to change on a guess.
+**The default is detected, and it is not `full` everywhere.** With no `surfaceMode` key, a pi that
+ships its own `codemode` resolves to `subagents` and a pi that does not resolves to `full`
+([ADR-0026](./docs/adr/0026-surface-default-is-detected.md)). Setting the key always wins. A probe
+that cannot answer falls back to `full` — the safe direction, since `subagents` as a failure mode
+would take away the orchestration tool the session was relying on.
+
+> Upgrading onto pi 0.99.1 or newer without setting the key moves you to `subagents`. `codemode`
+> ships **inactive** (`defaultActive: false`), so until you add it to your tool list you get a
+> subagent front with no orchestrator, and the startup warning says so. If you would rather keep
+> today's tools, set `{ "surfaceMode": "full" }`.
+
+No file, or a value outside that set, falls back to the detected default and says so at startup
+rather than half-applying: which tools exist is not something to change on a guess.
 
 **Where it does not run.** Print / JSON / RPC sessions are left exactly as launched, and so is a
 session started with an explicit tool restriction (`--tools`, `--exclude-tools`,

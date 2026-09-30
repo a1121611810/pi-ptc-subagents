@@ -12,7 +12,7 @@ import type {
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import ptcSubagents from "../../src/index.ts";
-import type { SurfaceMode } from "../../src/mode/ptc-mode.ts";
+import type { CodemodePresence, SurfaceMode } from "../../src/mode/ptc-mode.ts";
 import type { Binding, BindingTable } from "../../src/runtime/bindings.ts";
 import type { BackgroundTaskRuntime } from "../../src/runtime/background-runtime.ts";
 
@@ -93,6 +93,11 @@ export function makeExtensionStub(
      * `"full"` and the whole suite stayed green.
      */
     surfaceMode?: SurfaceMode | "from-file";
+    /**
+     * ADR-0026: the codemode probe result the factory is told to believe. Only meaningful with
+     * `surfaceMode: "from-file"`, because an explicit surface never consults the probe.
+     */
+    codemode?: CodemodePresence;
   } = {},
 ): ExtensionStub {
   const tools = new Map<string, ToolDefinition>();
@@ -180,7 +185,11 @@ export function makeExtensionStub(
     // override when the caller said nothing, which let seven test files inherit the developer's
     // real `~/.pi/agent/ptc.json` -- 31 failures with a `surfaceMode: off` dir set, against 4
     // before. An unspecified surface is a pin, never a read.
-    ...(options.surfaceMode === "from-file" ? {} : { surfaceMode: options.surfaceMode ?? "full" }),
+    ...(options.surfaceMode === "from-file"
+      ? options.codemode === undefined
+        ? {}
+        : { codemode: options.codemode }
+      : { surfaceMode: options.surfaceMode ?? "full" }),
   });
   return stub;
 }

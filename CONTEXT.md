@@ -152,10 +152,14 @@ tools this package registers, independent of _PTC mode_ (which decides
 which of the registered tools are _active_). Read from the agent-dir
 `ptc.json` beside `defaultMode`. Three values, in increasing order of what
 this package takes responsibility for: `off`, `subagents`, `full`.
-ADR-0025. _Avoid_: "PTC mode" (that is the hide-the-built-ins toggle; the
+With no key set it is **detected**: a pi that ships its own `codemode`
+resolves to `subagents`, a pi that does not resolves to `full`, and a probe
+that cannot answer resolves to `full` in the safe direction. ADR-0025,
+ADR-0026. _Avoid_: "PTC mode" (that is the hide-the-built-ins toggle; the
 two are separate and both exist), "mode" unqualified (ambiguous in this
 repository), "enable" (a surface mode of `off` leaves the package
-installed and doing nothing, which "disabled" would hide).
+installed and doing nothing, which "disabled" would hide), "default"
+(the default is a function of the pi, so call it the detected default).
 
 **orchestration surface** — the tool a model uses to compose many tool
 calls into one program. Two exist and they are alternatives, never both:
