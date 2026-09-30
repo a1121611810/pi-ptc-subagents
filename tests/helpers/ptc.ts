@@ -83,9 +83,9 @@ export function makeExtensionStub(
     /** BG-14 test seam: use a pre-built background runtime instead of constructing one. */
     backgroundRuntime?: BackgroundTaskRuntime;
     /**
-     * ADR-0025: the surface mode to pin. Defaults to `full`, and `full` is a PIN rather than a
-     * read -- the four test files that build this factory would otherwise inherit the
-     * developer's real `~/.pi/agent/ptc.json`.
+     * ADR-0025: which surface the factory should build. An unspecified value is PINNED to
+     * `full`, not read from disk -- seven test files build this factory, and without the pin they
+     * would inherit the developer's real `~/.pi/agent/ptc.json`.
      *
      * `"from-file"` is the escape hatch that keeps the production path observable: it passes no
      * override at all, so the factory really does call `readSurfaceModeConfig(getAgentDir())`.
@@ -174,13 +174,13 @@ export function makeExtensionStub(
     ...(options.backgroundRuntime === undefined
       ? {}
       : { backgroundRuntime: options.backgroundRuntime }),
-    // ADR-0025: pinned, not read, EXCEPT for the explicit escape hatch. The four test files
-    // that build this factory would otherwise inherit the developer's real
-    // `~/.pi/agent/ptc.json`; `"from-file"` is how the one test that needs the production read
-    // path gets at it.
-    ...(options.surfaceMode === "from-file" || options.surfaceMode === undefined
-      ? {}
-      : { surfaceMode: options.surfaceMode }),
+    // ADR-0025: the surface is PINNED to `full` unless the caller asks for something else,
+    // and `"from-file"` is the only way to reach the production read. Both halves are load-bearing
+    // and the second was learned the hard way in review round 2: an earlier version passed NO
+    // override when the caller said nothing, which let seven test files inherit the developer's
+    // real `~/.pi/agent/ptc.json` -- 31 failures with a `surfaceMode: off` dir set, against 4
+    // before. An unspecified surface is a pin, never a read.
+    ...(options.surfaceMode === "from-file" ? {} : { surfaceMode: options.surfaceMode ?? "full" }),
   });
   return stub;
 }

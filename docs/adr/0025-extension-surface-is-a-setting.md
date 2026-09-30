@@ -26,8 +26,7 @@ So the honest position is: pi's `codemode` can take over the orchestration this 
 does today, and cannot take over the subagents. Which makes "install both" a real choice
 rather than a redundancy -- and right now the package makes it badly. Measured with both
 loaded, the session carries **two** model-facing orchestration tools and two system-prompt
-sections , and the model has to
-pick a programming model per request. The package also has no off switch: `ptc.json`'s
+sections, and the model has to pick a programming model per request. The package also has no off switch: `ptc.json`'s
 `{"defaultMode": false}` gates _entering PTC mode_, not _registering tools_, so five
 tools and a briefing section are present no matter what the user asked for.
 

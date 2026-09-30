@@ -161,7 +161,7 @@ test("off mode registers nothing, so it has nothing to warn about", async () => 
 });
 
 /** Build a stub whose factory call really reads the agent dir, for a given file body. */
-async function stubFromAgentDir(contents: unknown): Promise<ExtensionStub> {
+async function stubFromAgentDir(contents: unknown): Promise<{ stub: ExtensionStub; dir: string }> {
   const dir = await makeTempDir();
   const previous = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = dir;
@@ -169,7 +169,7 @@ async function stubFromAgentDir(contents: unknown): Promise<ExtensionStub> {
     if (contents !== null) {
       await writeFile(join(dir, "ptc.json"), JSON.stringify(contents), "utf8");
     }
-    return makeExtensionStub({ surfaceMode: "from-file" });
+    return { stub: makeExtensionStub({ surfaceMode: "from-file" }), dir };
   } finally {
     if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previous;
@@ -186,16 +186,27 @@ test("the factory's own config read is what decides the surface, not the test se
     [{ surfaceMode: "subagents" }, ["ptc_subagent", ...TASK_TOOLS]],
     [{ surfaceMode: "full" }, [...PTC_TOOLS, ...TASK_TOOLS]],
   ] as const) {
-    const stub = await stubFromAgentDir(contents);
-    expect([...stub.tools.keys()], JSON.stringify(contents)).toEqual([...expected]);
+    const { stub, dir } = await stubFromAgentDir(contents);
+    try {
+      expect([...stub.tools.keys()], JSON.stringify(contents)).toEqual([...expected]);
+    } finally {
+      await removeTempDir(dir);
+    }
   }
 });
 
 test("a missing file and a file with no key both give the full surface", async () => {
   // Story 3: an upgrade must change nobody's behaviour, so both shapes have to land on full.
   for (const contents of [null, { defaultMode: false }]) {
-    const stub = await stubFromAgentDir(contents);
-    expect([...stub.tools.keys()], JSON.stringify(contents)).toEqual([...PTC_TOOLS, ...TASK_TOOLS]);
+    const { stub, dir } = await stubFromAgentDir(contents);
+    try {
+      expect([...stub.tools.keys()], JSON.stringify(contents)).toEqual([
+        ...PTC_TOOLS,
+        ...TASK_TOOLS,
+      ]);
+    } finally {
+      await removeTempDir(dir);
+    }
   }
 });
 

@@ -59,3 +59,89 @@ still open at the time it was measured.
 - **P7**: ADR-0025 decision 6 describes a brief the code does not write. Either implement it or
   amend the record; a record that describes a mechanism the code does not have is worse than one
   that never claimed it.
+
+## Round 2 (delta `429f98c...d1c2824`, then the fix commit below)
+
+Both axes re-ran the round-1 counterfactuals rather than reading the rows. Round 1's three
+blocking closures **VERIFIED**: S1 (hardcoded surface -> red), P1 (always-refusing tool -> 2
+red), P2 (a type-only field -> build error). P5 and S2 verified at the seam the reviewer could
+reach, with the note that `ctx.ui.notify` emits nothing in `--print`, so the real-pi variant
+of that check does not exist.
+
+### R2-1 [HIGH, FIXED] the S1 fix introduced a regression
+
+Making the stub's pin conditional turned an unspecified surface into a real read. With
+`PI_CODING_AGENT_DIR` holding `surfaceMode: off`, the full suite went from **4 failures at
+`429f98c` to 31** across seven files. The pin is unconditional again, except for the explicit
+`from-file` escape hatch, and `tests/unit/extension-background.test.ts` -- which calls
+`ptcSubagents(api)` directly rather than through the stub -- now pins too. Re-measured: **856
+passed** with the hostile dir, same as with a clean environment.
+
+Lesson worth keeping: a seam added to make one path observable must not become the default for
+every other path. The pin is the default; the escape hatch is the exception.
+
+### R2-2 [HIGH, OPEN] foreground `ptc_subagent` has no concurrency gate
+
+`src/runtime/dispatch.ts:1020` is the only `tryAcquire` in the dispatch path and it is inside
+the **background** branch. The one foreground gate is `src/runtime/dispatcher.ts:698`, which
+belongs to the program call site; `ptc_subagent` calls `dispatch()` directly and bypasses it.
+Measured: a foreground call with every slot held proceeds instead of being refused.
+
+This violates issue #88's testing decision (a refusal that does not -- depth exceeded,
+**concurrency saturated**, unknown agent) and ADR-0025's Consequences (the depth and
+concurrency rules are enforced in one place, which is the point of decision 7). It is a
+defect in the pre-existing `dispatch()` contract that a new call site exposed, not something
+this change introduced -- but this change is what made it reachable.
+
+**Not fixed here, and that is a judgment call worth reviewing.** The fix is to move the
+foreground acquire into `dispatch()` and drop the dispatcher's duplicate, so one owner gates
+the rule. That is a hot-path refactor of the slot accounting for both call sites at once, and
+doing it at the end of this change without the ability to run the benchmark again would trade
+a recorded defect for an unmeasured one. The diagnosis and the recommended fix are both
+specific enough to act on.
+
+### R2-3 [MEDIUM, FIXED] the F4 sync claim was itself wrong
+
+`docs/testing-constraints.md:151` said the sync was complete while the line above it still
+said the OCR rule carries F1/F2/F3, and three more sites (`test-discipline.md`'s missing F4
+section, `test-discipline-oracle.md:45,51`, `general.md:169`) still list F1/F2/F3 only. The
+paragraph now names each site and says which are done and which are deliberately not: the F4
+section in `test-discipline.md` would have to cite an instance, and the only real one so far
+is this ledger.
+
+### R2-4 [MEDIUM, FIXED] deleting `sessionDir` orphaned its JSDoc and erased a real divergence
+
+The comment then stacked on `getDispatchDeps`, still claiming "absent keeps the foreground
+shape", which is not what absence does. Removing it also removed the only written trace of a
+real behavioural difference: the binding forwards `context.sessionDir` into the DispatchContext
+(`bindings.ts:303` to `dispatcher.ts:739`), so `pi.dispatch` background children get
+ADR-0022's R1 session triple and `ptc_subagent` background children do not. The extension
+does hold the dir at session start (`src/index.ts:522`), and a value-typed option could never
+have carried it -- only a getter could. Recorded here rather than wired, because wiring it is
+a behaviour change to background children that belongs in its own commit.
+
+### R2-5 [LOW/MED, FIXED] the recording kept the handle and dropped the request
+
+`RecordingLifecycle` stored only the `ChildHandle`, so two plausible-wrong implementations
+stayed green on the full 860-test suite: dropping the `parentTaskId` spread, and running the
+child in `process.cwd()` instead of the call's cwd. The same shape S5 flagged, in new
+clothing. It now records `(argv, opts)`, and the spawn test asserts the child's cwd and that
+the registry record's `parentTaskId` is the process's own task. Both mutations are red; the
+parent one was re-measured after the fix at **1 failed**.
+
+### R2-6 to R2-10 [LOW, FIXED]
+
+`CONTEXT.md` still carried the derived `340 extra prompt bytes` after P4 removed the absolutes,
+so P4 was half-closed on its own criterion. The ADR sentence P4 edited was left ungrammatical
+-- `fmt:check` does not cover `.md`, which is why it took two review rounds to die. A dead
+dynamic import shadowed a static one. `stubFromAgentDir` leaked its temp dir. The
+`surfaceMode` option added to `capturePayload` had no caller and is left in place, unused,
+because deleting it would remove the seam a future probe test needs.
+
+### The meta-discipline fixture and the compile-time assertion
+
+`_SchemaMatchesType` sits at module scope, so `findF4` never sees it and the fixture agrees
+(5 passed, 49 files). It has **no runtime witness**: neither vitest nor the meta fixture can
+observe it, so it exists only inside `tsc --noEmit`. That is sound here because typecheck is
+the first step of the release gate, and the mutation proves it bites, but it should not be
+described as a test.

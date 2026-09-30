@@ -163,7 +163,7 @@ calls into one program. Two exist and they are alternatives, never both:
 `tools.<name>(args)` bindings) or `codemode` (pi, QuickJS). Whichever is
 the _surface mode_'s choice, the model is told about exactly one. Having
 both live in a request is a measured defect, not a feature: it is two
-programming models to choose between, at roughly 340 extra prompt bytes.
+programming models to choose between.
 ADR-0025. _Avoid_: "the PTC tool" (there are two, and which one is a
 mode decision), "code execution" (both are that; the word says nothing
 about the shape).

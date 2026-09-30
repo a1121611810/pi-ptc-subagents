@@ -18,6 +18,7 @@ import { DispatchSlotCounter } from "../../src/runtime/dispatch.ts";
 import { createPtcSubagentTool } from "../../src/tools/subagent.ts";
 import { createTaskRegistry, type TaskRegistry } from "../../src/runtime/task-registry.ts";
 import { InMemoryTaskStorage } from "../../src/runtime/task-storage.ts";
+import type { ULID } from "../../src/runtime/task-storage.ts";
 import { makeTempDir, removeTempDir } from "../helpers/ptc.ts";
 
 // A REAL registered agent, not one this file invents. The agent registry is read from the
@@ -26,6 +27,8 @@ import { makeTempDir, removeTempDir } from "../helpers/ptc.ts";
 // smoke-test agent; named explicitly so a future pi that drops it turns this red rather than
 // quietly skipping the assertion (testing constraint 2: fixtures come from a real sample).
 const AGENT = "__smoke_echo";
+/** A canonical ULID: this process is itself a background task in the spawn test below. */
+const PARENT_TASK = "01ARZ3NDEKTSV4RRFFQ69G5FAV" as ULID;
 
 /**
  * The mock lifecycle plus a record of what it was asked to launch. A spawn the test cannot see
@@ -33,12 +36,22 @@ const AGENT = "__smoke_echo";
  * the accept-both version of this file was quietly not checking.
  */
 class RecordingLifecycle extends MockChildProcessLifecycle {
-  readonly spawned: ChildHandle[] = [];
+  /**
+   * The spawn REQUESTS, not just the handles. A handle on its own cannot tell a correct call
+   * from one that dropped the parent task id or ran in the wrong directory -- both of which
+   * stayed green in review round 2, for the same reason the tautology in S5 did: the observation
+   * sat next to the code rather than on what the code did.
+   */
+  readonly requests: { argv: readonly string[]; opts: ChildSpawnOptions }[] = [];
 
   override spawn(argv: readonly string[], opts: ChildSpawnOptions): ChildHandle {
-    const handle = super.spawn(argv, opts);
-    this.spawned.push(handle);
-    return handle;
+    this.requests.push({ argv, opts });
+    return super.spawn(argv, opts);
+  }
+
+  /** How many children were launched. */
+  get spawnCount(): number {
+    return this.requests.length;
   }
 }
 
@@ -119,7 +132,10 @@ describe("ptc_subagent", () => {
     // real pi is launched and the spawn is recorded rather than inferred.
     await withAgent(async (dir) => {
       const h = createHarness();
-      const tool = createPtcSubagentTool(baseOptions(dir, h.deps));
+      const tool = createPtcSubagentTool({
+        ...baseOptions(dir, h.deps),
+        parentTaskId: PARENT_TASK,
+      });
       const result = (await run(tool, {
         agent: AGENT,
         task: "look at the tests",
@@ -135,7 +151,22 @@ describe("ptc_subagent", () => {
         "the model is told the id, not left to find it in a details object",
       ).toContain(taskId as string);
       expect(result.details.status, "and told this is a background task").toBe("background");
-      expect(h.lifecycle.spawned.length, "exactly one child was launched").toBe(1);
+      expect(h.lifecycle.spawnCount, "exactly one child was launched").toBe(1);
+      // WHAT was launched, not merely that something was. Both mutations below -- dropping the
+      // parent task id, and running the child in process.cwd() instead of the call's cwd --
+      // were green in review round 2, because the recording kept the handle and dropped the
+      // request.
+      expect(
+        h.lifecycle.requests[0]?.opts.cwd,
+        "the child runs in the call's cwd, not the extension host's",
+      ).toBe(dir);
+      // The parent's link lives on the TaskRecord, not the child's env: the env carries the
+      // child's OWN id, which is how the pump finds itself later.
+      const record = await h.registry.get(taskId as ULID);
+      expect(
+        record?.parentTaskId,
+        "a subagent-spawned child is nested under this process's own task",
+      ).toBe(PARENT_TASK);
     });
   });
 

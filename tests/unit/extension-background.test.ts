@@ -249,7 +249,11 @@ describe("always-on registration", () => {
       getActiveTools: () => [...ACTIVE],
     } as unknown as ExtensionAPI;
 
-    ptcSubagents(api);
+    // Pinned for the same reason every other factory-driven test is: this one builds the
+    // factory directly, so without an explicit surface it reads the developer's real agent-dir
+    // ptc.json. Found in review round 2 -- a surfaceMode of off in a temp agent dir made this
+    // test fail for a reason unrelated to what it checks.
+    ptcSubagents(api, { surfaceMode: "full" });
 
     expect(calls).toEqual([]);
     expect(registered).toEqual(REGISTERED);
