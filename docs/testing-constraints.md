@@ -201,6 +201,12 @@ defect class: a record asserting what a gate covers, written once, never re-chec
 This guidance once listed the three words every drifted claim turned on -- **owns**, **per-run**,
 **always**. Round 6 deleted that list, on a measurement rather than a preference:
 
+**Measured as of `02def5c`.** A number printed inside the corpus it measures is
+**self-invalidating by construction** -- round 7 re-measured this exact table and got 833 / 183 / 677,
+because round 6 added four strong-verb sentences _to the corpus the table counts_. So if you find these
+digits stale, you are not finding an error, you are finding the table doing the thing this section is about.
+The claim that survives a shift of four claims is not the number: it is that no cheap predicate exists.
+
 |                                                                                                                                                            | count         |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
 | sentences in the 29 normative files carrying a strong universal verb (owns / always / never / guarantees / enforces / keeps / must / exactly / ONE / only) | **829**       |

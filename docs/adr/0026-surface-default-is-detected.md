@@ -197,8 +197,12 @@ accept this for now", which is a decision and should not live only in a review l
    `ui.notify` is this package's only session-scoped human channel and every `console.warn` site is a
    runtime-failure path that would be wrong to overload here; writing to stdout from a library that is
    silent by design is a worse trade than an under-documented notice. **Retired when** pi offers a
-   session-scoped non-TUI notification path, or when a test observes a notice end to end through a real
-   pi and the rendering question stops being theoretical.
+   session-scoped non-TUI notification path, or when the rendering question becomes a measurement. It
+   can be, and round 7 says how: hold a real pi TUI stdin **open** (the round-4 attempt fed it EOF,
+   which quits the TUI before a toast can paint, and is why that attempt was inconclusive rather
+   than negative) and read the terminal bytes for the notice string. A positive there closes this
+   item; a negative with a held-open TUI turns it from "unverified" into "the notice does not render",
+   which is a different and more serious finding.
 2. **A `ptc_subagent` background child gets no ADR-0022 session triple.** The binding forwards
    `context.sessionDir` into the DispatchContext; the tool reads a value at session start and cannot,
    so its children are spawned `--no-session` while the identical spawn from inside a program gets the
