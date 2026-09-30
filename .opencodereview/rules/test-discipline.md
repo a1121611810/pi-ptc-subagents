@@ -58,4 +58,4 @@
 
 ## 严重性升级(Q9-D)
 
-任何 F1/F2/F3 命中 → delegate 复核(OCR precision 不够,需要反事实判据)。
+任何 F1/F2/F3/F4 命中 → delegate 复核(OCR precision 不够,需要反事实判据)。

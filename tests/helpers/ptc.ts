@@ -12,6 +12,7 @@ import type {
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import ptcSubagents from "../../src/index.ts";
+import type { SurfaceMode } from "../../src/mode/ptc-mode.ts";
 import type { Binding, BindingTable } from "../../src/runtime/bindings.ts";
 import type { BackgroundTaskRuntime } from "../../src/runtime/background-runtime.ts";
 
@@ -81,6 +82,8 @@ export function makeExtensionStub(
     sessionDir?: string;
     /** BG-14 test seam: use a pre-built background runtime instead of constructing one. */
     backgroundRuntime?: BackgroundTaskRuntime;
+    /** ADR-0025: the surface mode to pin. Defaults to `full`; never read from disk. */
+    surfaceMode?: SurfaceMode;
   } = {},
 ): ExtensionStub {
   const tools = new Map<string, ToolDefinition>();
@@ -158,10 +161,16 @@ export function makeExtensionStub(
   } as unknown as ExtensionAPI;
 
   stub.api = api;
-  ptcSubagents(
-    api,
-    options.backgroundRuntime === undefined ? {} : { backgroundRuntime: options.backgroundRuntime },
-  );
+  ptcSubagents(api, {
+    ...(options.backgroundRuntime === undefined
+      ? {}
+      : { backgroundRuntime: options.backgroundRuntime }),
+    // ADR-0025: pinned, not read. Without this every factory-driven test would inherit the
+    // developer's real ~/.pi/agent/ptc.json, so a machine with surfaceMode off set would
+    // fail eight test files for no reason connected to the code under test. A test that
+    // wants a different surface asks for it through options.surfaceMode.
+    surfaceMode: options.surfaceMode ?? "full",
+  });
   return stub;
 }
 

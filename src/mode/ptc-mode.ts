@@ -156,6 +156,83 @@ export function readDefaultModeConfig(agentDir: string): DefaultModeConfig {
   return { defaultMode: value, source: "file" };
 }
 
+/**
+ * Which model-facing tools this package registers, independent of PTC mode (which decides
+ * which registered tools are *active*). Read from the same agent-dir file as
+ * {@link readDefaultModeConfig}, beside the `defaultMode` key. ADR-0025.
+ *
+ * The order below is the order of increasing responsibility: `off` hands the whole
+ * orchestration question back to pi, `subagents` keeps only the subagent face and lets pi's
+ * `codemode` orchestrate, `full` keeps today's set.
+ */
+export const SURFACE_MODES = ["off", "subagents", "full"] as const;
+export type SurfaceMode = (typeof SURFACE_MODES)[number];
+
+/** Today's behaviour. An upgrade must be invisible, so this is the default. */
+export const DEFAULT_SURFACE_MODE: SurfaceMode = "full";
+
+/** Result of reading the surface mode, with enough detail to warn about a broken file. */
+export interface SurfaceModeConfig {
+  surfaceMode: SurfaceMode;
+  source: "file" | "default" | "invalid";
+  error?: string;
+}
+
+/**
+ * Read `surfaceMode` from the agent-dir config file.
+ *
+ * A pure function over the filesystem, shaped like {@link readDefaultModeConfig} on purpose:
+ * an absent file, an absent key, unparseable JSON and an out-of-set value all resolve to
+ * {@link DEFAULT_SURFACE_MODE}, and the last two additionally report `invalid` with a reason.
+ * A malformed setting must never half-apply - which tools exist is not something to change
+ * on a guess.
+ */
+export function readSurfaceModeConfig(agentDir: string): SurfaceModeConfig {
+  const path = join(agentDir, PTC_MODE_CONFIG_FILE);
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch {
+    return { surfaceMode: DEFAULT_SURFACE_MODE, source: "default" };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    return {
+      surfaceMode: DEFAULT_SURFACE_MODE,
+      source: "invalid",
+      error: `${path} is not valid JSON (${error instanceof Error ? error.message : String(error)})`,
+    };
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return {
+      surfaceMode: DEFAULT_SURFACE_MODE,
+      source: "invalid",
+      error: `${path} must contain a JSON object`,
+    };
+  }
+  const value = (parsed as { surfaceMode?: unknown }).surfaceMode;
+  if (value === undefined) {
+    return { surfaceMode: DEFAULT_SURFACE_MODE, source: "default" };
+  }
+  if (typeof value !== "string") {
+    return {
+      surfaceMode: DEFAULT_SURFACE_MODE,
+      source: "invalid",
+      error: `${path}: "surfaceMode" must be a string, received ${typeof value}`,
+    };
+  }
+  if (!SURFACE_MODES.includes(value as SurfaceMode)) {
+    return {
+      surfaceMode: DEFAULT_SURFACE_MODE,
+      source: "invalid",
+      error: `${path}: "surfaceMode" must be one of ${SURFACE_MODES.join(" | ")}, received ${JSON.stringify(value)}`,
+    };
+  }
+  return { surfaceMode: value as SurfaceMode, source: "file" };
+}
+
 // --------------------------------------------------------------------------------------
 // Entry decision
 // --------------------------------------------------------------------------------------

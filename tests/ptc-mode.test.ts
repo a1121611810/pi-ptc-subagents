@@ -24,6 +24,7 @@ import {
   PTC_MODE_CONFIG_FILE,
   PTC_MODE_ENTRY_TYPE,
   readDefaultModeConfig,
+  readSurfaceModeConfig,
   resolveBaseOnStart,
   sameToolSet,
 } from "../src/mode/ptc-mode.ts";
@@ -67,6 +68,93 @@ async function withAgentDir(fn: (dir: string) => Promise<void>): Promise<void> {
 // --------------------------------------------------------------------------------------
 // Config
 // --------------------------------------------------------------------------------------
+
+// --------------------------------------------------------------------------------------
+// Surface mode config (ADR-0025)
+// --------------------------------------------------------------------------------------
+
+test("surface mode defaults to full when no file exists", async () => {
+  await withAgentDir(async (dir) => {
+    expect(readSurfaceModeConfig(dir)).toEqual({ surfaceMode: "full", source: "default" });
+  });
+});
+
+test("surface mode honours every value the record names, and reports the file as the source", async () => {
+  await withAgentDir(async (dir) => {
+    // The literal, not the constant: a value dropped from SURFACE_MODES has to turn this red.
+    const expected = ["off", "subagents", "full"] as const;
+    for (const value of expected) {
+      await writeFile(
+        join(dir, PTC_MODE_CONFIG_FILE),
+        JSON.stringify({ surfaceMode: value }),
+        "utf8",
+      );
+      expect(readSurfaceModeConfig(dir), value).toEqual({ surfaceMode: value, source: "file" });
+    }
+  });
+});
+
+test("an unparseable surfaceMode file falls back to full and says so", async () => {
+  await withAgentDir(async (dir) => {
+    await writeFile(join(dir, PTC_MODE_CONFIG_FILE), "{ not json", "utf8");
+    const broken = readSurfaceModeConfig(dir);
+    expect(broken.surfaceMode, "a broken file must not half-apply").toBe("full");
+    expect(broken.source).toBe("invalid");
+    expect(broken.error, "the reason is reported, not swallowed").toContain("not valid JSON");
+  });
+});
+
+test("a surfaceMode of the wrong type or outside the set falls back to full and says so", async () => {
+  await withAgentDir(async (dir) => {
+    for (const bad of [7, true, null, "partial", "FULL", "sub-agent"]) {
+      await writeFile(
+        join(dir, PTC_MODE_CONFIG_FILE),
+        JSON.stringify({ surfaceMode: bad }),
+        "utf8",
+      );
+      const config = readSurfaceModeConfig(dir);
+      expect(config.surfaceMode, "value " + JSON.stringify(bad)).toBe("full");
+      expect(config.source, "value " + JSON.stringify(bad)).toBe("invalid");
+      expect(config.error, "value " + JSON.stringify(bad)).toContain("surfaceMode");
+    }
+  });
+});
+
+test("a config file that is valid JSON but not an object falls back to full", async () => {
+  await withAgentDir(async (dir) => {
+    // A non-object is a broken file; an object carrying a valid key is simply a setting,
+    // and is covered by the previous test rather than here.
+    for (const bad of ["[]", "null", "3", "true"]) {
+      await writeFile(join(dir, PTC_MODE_CONFIG_FILE), bad, "utf8");
+      const config = readSurfaceModeConfig(dir);
+      expect(config.surfaceMode, bad).toBe("full");
+    }
+  });
+});
+
+test("a surfaceMode key of null is absent, not invalid", async () => {
+  await withAgentDir(async (dir) => {
+    await writeFile(
+      join(dir, PTC_MODE_CONFIG_FILE),
+      JSON.stringify({ defaultMode: false }),
+      "utf8",
+    );
+    const config = readSurfaceModeConfig(dir);
+    expect(config).toEqual({ surfaceMode: "full", source: "default" });
+  });
+});
+
+test("the two config keys are read from one file without shadowing each other", async () => {
+  await withAgentDir(async (dir) => {
+    await writeFile(
+      join(dir, PTC_MODE_CONFIG_FILE),
+      JSON.stringify({ defaultMode: false, surfaceMode: "subagents" }),
+      "utf8",
+    );
+    expect(readDefaultModeConfig(dir).defaultMode).toBe(false);
+    expect(readSurfaceModeConfig(dir).surfaceMode).toBe("subagents");
+  });
+});
 
 test("config defaults to on when no file exists, and reports where the value came from", async () => {
   await withAgentDir(async (dir) => {

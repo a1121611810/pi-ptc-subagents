@@ -183,6 +183,24 @@ the session. The mode's rationale and rejected alternatives are in [ADR-0010](./
 { "defaultMode": false }
 ```
 
+**Choosing the surface.** `defaultMode` decides whether the session _enters_ PTC mode; `surfaceMode`
+decides which model-facing tools this package registers at all. It is read once, at startup, so a
+surface change needs a new session ([ADR-0025](./docs/adr/0025-extension-surface-is-a-setting.md)):
+
+```jsonc
+// ~/.pi/agent/ptc.json
+{ "surfaceMode": "subagents" }
+```
+
+- `off` — a stock pi session: no tool, no `/ptc` command, no briefing.
+- `subagents` — `ptc_subagent` plus the three `ptc_task_*` tools, with pi's own `codemode`
+  doing the orchestration; warns at startup when `codemode` is not in the active tool set.
+- `full` (the default) — today's set: `ptc_run_code` / `ptc_workflow` plus the three
+  `ptc_task_*` tools.
+
+No file, no key, or a value outside that set falls back to `full` and says so at startup rather
+than half-applying: which tools exist is not something to change on a guess.
+
 **Where it does not run.** Print / JSON / RPC sessions are left exactly as launched, and so is a
 session started with an explicit tool restriction (`--tools`, `--exclude-tools`,
 `--no-builtin-tools`) — the extension does not override what you asked for. If another extension

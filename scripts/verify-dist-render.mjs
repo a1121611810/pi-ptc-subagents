@@ -2,15 +2,41 @@
  * Smoke-verify the built `dist/index.js` renderers without a TUI.
  *
  * Imports the real built artifact, calls the extension factory with a fake `pi` to capture the
- * two registered tool definitions, then exercises `renderCall` / `renderResult` (collapsed and
- * expanded) with a stub theme, printing the visible text exactly as the TUI would lay it out.
+ * tool definitions it registers in `full` surface mode, then exercises `renderCall` /
+ * `renderResult` (collapsed and expanded) with a stub theme, printing the visible text exactly as
+ * the TUI would lay it out.
  *
  * Exits non-zero on any failure so it can gate a release check.
+ *
+ * The agent dir is pinned to a throwaway directory holding `{"surfaceMode": "full"}` before the
+ * factory runs. Since ADR-0025 the factory reads that file at construction time to decide which
+ * tools to register, so without the pin this gate would report a build defect on any machine
+ * whose `~/.pi/agent/ptc.json` says `off` or `subagents` -- the artifact would be fine and the
+ * assertion red for a reason that has nothing to do with the build. The pin is unconditional: a
+ * caller's own `PI_CODING_AGENT_DIR` is shadowed for the duration of the run, because a release
+ * gate that reads the machine's settings is not a release gate.
  */
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const distUrl = new URL("../dist/index.js", import.meta.url);
 const dist = await import(fileURLToPath(distUrl));
+
+// --- pinned agent dir: the surface mode this gate asserts, not the machine's ------------
+// ADR-0025: the factory reads <agentDir>/ptc.json once, before registering anything, and the set
+// of tools it then registers is the set below. Pointing PI_CODING_AGENT_DIR at a directory this
+// script owns makes the expected set a property of the built artifact instead of a property of
+// whoever is running the gate. The explicit { "surfaceMode": "full" } (rather than an empty dir
+// relying on the default) keeps the gate pinned to the mode the tool list below names even if
+// DEFAULT_SURFACE_MODE ever moves.
+const agentDir = mkdtempSync(join(tmpdir(), "pi-ptc-verify-dist-"));
+process.on("exit", () => {
+  rmSync(agentDir, { recursive: true, force: true });
+});
+writeFileSync(join(agentDir, "ptc.json"), '{ "surfaceMode": "full" }\n');
+process.env.PI_CODING_AGENT_DIR = agentDir;
 
 // --- fake pi that records tool registrations -------------------------------------------
 const registered = new Map();
@@ -31,8 +57,9 @@ const fakePi = {
 dist.default(fakePi);
 
 // The extension registers the two PTC tools plus the three always-on background-task tools
-// (ADR-0022). An exact-set assertion is deliberate: a tool silently disappearing from the built
-// dist is exactly the regression this gate exists to catch.
+// (ADR-0022) -- that is the `full` surface, pinned above. An exact-set assertion is deliberate: a
+// tool silently disappearing from the built dist is exactly the regression this gate exists to
+// catch, and a set that grows without this line moving is a surface change nobody reviewed.
 const EXPECTED_TOOLS = [
   "ptc_run_code",
   "ptc_workflow",

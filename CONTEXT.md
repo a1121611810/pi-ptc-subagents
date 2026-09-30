@@ -130,6 +130,61 @@ behaviour genuinely differs, so the common case stays one sentence. ADR-0024.
 _Avoid_: "per-binding documentation" (the contract is the block; a note is one
 exception inside it).
 
+### What this extension exposes
+
+Pi 0.99.1 ships its own PTC, a built-in extension registering one tool,
+`codemode`. The two mechanisms are **not** in a superset relation: pi's side
+wins on sandbox isolation and on tool discovery, this package's side wins on
+spawning a fresh pi process. Terms below name the split, so "turn PTC on"
+never has to mean two different things in one sentence.
+
+**pi codemode** — pi's built-in programmable tool calling, the single tool
+`codemode`, evaluated in a fresh QuickJS sandbox with no Node, no file
+system, no network and no timers. Orchestration, batching and output
+filtering; `searchTools` / `describeTool` (BM25) reach nested tools, and
+`store` / `load` persist across calls. It cannot spawn a process, which is
+the whole reason _parallel binding_ is not replaceable by it. ADR-0025.
+_Avoid_: "pi's PTC" (it is one implementation of PTC, and "PTC mode"
+below already names ours), "code mode" (the pre-August-2026 DSH name).
+
+**surface mode** — the installed setting that decides which model-facing
+tools this package registers, independent of _PTC mode_ (which decides
+which of the registered tools are _active_). Read from the agent-dir
+`ptc.json` beside `defaultMode`. Three values, in increasing order of what
+this package takes responsibility for: `off`, `subagents`, `full`.
+ADR-0025. _Avoid_: "PTC mode" (that is the hide-the-built-ins toggle; the
+two are separate and both exist), "mode" unqualified (ambiguous in this
+repository), "enable" (a surface mode of `off` leaves the package
+installed and doing nothing, which "disabled" would hide).
+
+**orchestration surface** — the tool a model uses to compose many tool
+calls into one program. Two exist and they are alternatives, never both:
+`ptc_run_code` / `ptc_workflow` (this package, Node worker, real
+`tools.<name>(args)` bindings) or `codemode` (pi, QuickJS). Whichever is
+the _surface mode_'s choice, the model is told about exactly one. Having
+both live in a request is a measured defect, not a feature: it is two
+programming models to choose between, at roughly 340 extra prompt bytes.
+ADR-0025. _Avoid_: "the PTC tool" (there are two, and which one is a
+mode decision), "code execution" (both are that; the word says nothing
+about the shape).
+
+**subagent surface** — the top-level tool the model calls directly to
+start a fresh pi subprocess, without writing a program. This is what
+`surface mode: subagents` keeps, and it is the reason that mode exists: the
+_parallel binding_ `pi.dispatch` can only be reached from inside a program,
+so hiding `ptc_run_code` without adding a top-level entry point would
+delete the subagent capability rather than hand it to `codemode`.
+ADR-0025. _Avoid_: "dispatch tool" (that is the _parallel binding_ inside
+a program), "subagent" (see Out-of-glossary: DSH's subagent is a
+different thing), "background task" (that is the `ptc_task_*` lifecycle
+face, which can inspect and stop tasks but cannot start one).
+
+**lifecycle face** — the `ptc_task_list` / `ptc_task_output` /
+`ptc_task_stop` trio. Registered in every surface mode except `off`,
+including `subagents`, and outside the _PTC mode_ loadout on purpose:
+turning _PTC mode_ off must never hide the lifecycle of a task that is
+still in flight. ADR-0022, ADR-0025. _Avoid_: "task tools", "subagent
+tools" (they manage tasks other things started).
 **helper** — a global function injected into a worker's runtime. **Not all
 DSH helpers appear in plain PTC mode** — per R1 (`research/dsh-ptc-behaviour-inventory.md`,
 dsh-v0.1.6-alpha.2), `log / phase / parallel / pipeline / agent` are

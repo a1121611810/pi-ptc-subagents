@@ -50,4 +50,4 @@ All new / modified tests must satisfy the 6 hard constraints in `docs/testing-co
 5. 反事实判据:把实现改成显然错误但符合该断言的版本,测试必须红。
 6. characterization vs specification 区分:防回归 ≠ 防错误。
 
-F1/F2/F3 (accept-both regex, conditional assertion, opt-in gate early-return) are mechanically scanned by the meta-discipline fixture.
+F1/F2/F3/F4 (accept-both regex, conditional assertion, opt-in gate early-return, assertion-free test body) are mechanically scanned by the meta-discipline fixture. F4 exists because three guards in this repo's review ledger kept their test name and their comments while asserting nothing, and vitest reports that as passed.

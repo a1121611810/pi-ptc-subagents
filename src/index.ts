@@ -30,6 +30,7 @@ import {
   resolveParentTaskIdFromEnv,
 } from "./tools/common.ts";
 import { TurnPools } from "./runtime/turn-pools.ts";
+import { DEFAULT_CONFIG } from "./runtime/limits.ts";
 import {
   createBackgroundTaskRuntime,
   type BackgroundTaskRuntime,
@@ -51,10 +52,12 @@ import {
   PTC_MODE_ENTRY_TYPE,
   PTC_MODE_STATUS_KEY,
   readDefaultModeConfig,
+  readSurfaceModeConfig,
   resolveBaseOnStart,
 } from "./mode/ptc-mode.ts";
-import type { ModeHideStrategy, PersistedModeState } from "./mode/ptc-mode.ts";
+import type { ModeHideStrategy, PersistedModeState, SurfaceMode } from "./mode/ptc-mode.ts";
 import { buildPtcSkillsSection, skillsSectionDropped } from "./mode/skills-section.ts";
+import { createPtcSubagentTool } from "./tools/subagent.ts";
 
 export {
   bindingSource,
@@ -70,6 +73,7 @@ export {
   PTC_MODE_STATUS_KEY,
   PTC_MODE_TOOL_NAMES,
   readDefaultModeConfig,
+  readSurfaceModeConfig,
   resolveBaseOnStart,
   sameToolSet,
 } from "./mode/ptc-mode.ts";
@@ -158,10 +162,29 @@ export type { PtcErrorKind, PtcErrorShape, PtcJsonValue } from "./runtime/protoc
 export interface PtcSubagentsOptions {
   /** Use this session-scoped background runtime instead of constructing one. */
   backgroundRuntime?: BackgroundTaskRuntime;
+  /**
+   * Test seam for ADR-0025's surface mode. When set it wins over the agent-dir `ptc.json`,
+   * so a test never reads the developer's real settings -- and the eight test files that all
+   * build this factory through one stub would otherwise inherit whatever the machine happens
+   * to have. Undefined in production, where the file is the only source.
+   */
+  surfaceMode?: SurfaceMode;
 }
 
 export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOptions = {}): void {
   const mode = initialModeState();
+
+  /**
+   * ADR-0025: which model-facing tools this package registers, read ONCE here so the
+   * `registerTool` calls below can act on it. Reading it later would mean the tools already
+   * exist when the setting arrives, and the only way to honour the setting would be to
+   * unregister - which pi has no call for. A malformed value falls back to `full` and is
+   * reported at session start, not silently applied.
+   */
+  const surface =
+    options.surfaceMode === undefined
+      ? readSurfaceModeConfig(getAgentDir())
+      : { surfaceMode: options.surfaceMode, source: "file" as const };
   // Set on entry, cleared after the briefing has been injected, so the instruction lands once
   // per mode entry instead of on every turn.
   let briefingPending = false;
@@ -195,6 +218,15 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
    * travels with each PTC run so a nested `pi.dispatch({ background: true })` records its parent.
    */
   const parentTaskId = resolveParentTaskIdFromEnv();
+
+  /**
+   * ADR-0025 `off`: the user asked for a stock pi session, so this package does nothing at
+   * all. Returning HERE, before the background runtime is built, is the whole point -- an
+   * "off" that still registered handlers and merely injected an empty section would be off in
+   * name only. Everything below this line is unreachable in that mode, and the test asserts it
+   * by looking for the absence of every handler rather than at any output.
+   */
+  if (surface.surfaceMode === "off") return;
 
   /* ------------------------ BG-14: session-scoped background runtime ------------------------ */
 
@@ -288,30 +320,60 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     });
   });
 
-  pi.registerTool(
-    createPtcRunCodeTool({
-      getBindingSourceNames,
-      getPool: () => turnPools.get("run_code"),
-      depth: ptcDepth,
-      ...(parentTaskId === undefined ? {} : { parentTaskId }),
-      getDispatchDeps: () => background.dispatchDeps,
-    }),
-  );
-  pi.registerTool(
-    createPtcWorkflowTool({
-      getBindingSourceNames,
-      getPool: () => turnPools.get("workflow"),
-      depth: ptcDepth,
-      ...(parentTaskId === undefined ? {} : { parentTaskId }),
-      getDispatchDeps: () => background.dispatchDeps,
-    }),
-  );
+  /*
+   * ADR-0025: the orchestration surface. In `off` and `subagents` these two do not exist,
+   * so the model is told about exactly one way to compose tool calls -- ours, or pi's
+   * `codemode`. Registering both and letting the model choose per request is the duplicate
+   * surface this setting exists to remove.
+   */
+  if (surface.surfaceMode === "full") {
+    pi.registerTool(
+      createPtcRunCodeTool({
+        getBindingSourceNames,
+        getPool: () => turnPools.get("run_code"),
+        depth: ptcDepth,
+        ...(parentTaskId === undefined ? {} : { parentTaskId }),
+        getDispatchDeps: () => background.dispatchDeps,
+      }),
+    );
+    pi.registerTool(
+      createPtcWorkflowTool({
+        getBindingSourceNames,
+        getPool: () => turnPools.get("workflow"),
+        depth: ptcDepth,
+        ...(parentTaskId === undefined ? {} : { parentTaskId }),
+        getDispatchDeps: () => background.dispatchDeps,
+      }),
+    );
+  }
+
+  /*
+   * ADR-0025 `subagents`: the top-level subagent face, registered only here. It is the reason
+   * this mode exists -- `pi.dispatch` lives inside a program, so without it a session that
+   * hands orchestration to `codemode` would have no way to start a subagent at all.
+   */
+  if (surface.surfaceMode === "subagents") {
+    pi.registerTool(
+      createPtcSubagentTool({
+        cwd: process.cwd(),
+        depth: ptcDepth,
+        maxDispatchDepth: DEFAULT_CONFIG.maxDispatchDepth,
+        ...(parentTaskId === undefined ? {} : { parentTaskId }),
+        getDispatchDeps: () => background.dispatchDeps,
+      }),
+    );
+  }
 
   /*
    * Always-on management tools (ADR-0022 "What we add" #6): registered at factory time, OUTSIDE
    * the PTC mode loadout. `/ptc off` only gates new spawns; it must never hide the lifecycle face
    * of in-flight tasks. The mode's `modeLoadout` keeps non-built-in names, so these survive both
    * entry and exit (proved in tests/unit/extension-background.test.ts).
+   *
+   * ADR-0025: unconditional from here on. The one mode that would not keep this face, `off`,
+   * has already returned at the top of the factory, so "always-on" stays literally true for
+   * every mode that reaches this line -- including `subagents`, where a task spawned through
+   * the top-level subagent tool is inspectable exactly the same way.
    */
   pi.registerTool(createPtcTaskListTool(background.registry));
   pi.registerTool(createPtcTaskOutputTool(background.registry, background.outputStorage));
@@ -479,6 +541,32 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     const config = readDefaultModeConfig(getAgentDir());
     if (config.error !== undefined) {
       ctx.ui.notify(`pi-ptc-subagents: ${config.error}`, "warning");
+    }
+    // The factory read happens before there is a ctx to notify through, so a broken
+    // surfaceMode is reported here rather than dropped. Same message shape as above.
+    if (surface.error !== undefined) {
+      ctx.ui.notify(`pi-ptc-subagents: ${surface.error}`, "warning");
+    }
+
+    /*
+     * ADR-0025 decision 4: `subagents` hands orchestration to pi's `codemode`, so a session
+     * without it is left holding a subagent tool and no way to compose anything. Warn once, at
+     * entry, and still register: taking the user's subagents away is a worse answer than a
+     * message. `getActiveTools`, not `getAllTools` -- pi registers `codemode` as a built-in
+     * extension that is present-but-inactive until a loadout or the default tool list names
+     * it, so a registry query would report a tool the model cannot actually call.
+     *
+     * Gap, stated rather than hidden: `ctx.ui.notify` is TUI-only, so a `--print` session in
+     * this state gets no warning. ADR-0025 lists it as a known limitation.
+     */
+    if (surface.surfaceMode === "subagents" && !pi.getActiveTools().includes("codemode")) {
+      ctx.ui.notify(
+        "pi-ptc-subagents: surfaceMode is subagents, but codemode is not active in this " +
+          "session, so there is no orchestration tool. Add codemode to your pi tool list " +
+          '(the --tools flag or the default tools setting), or set surfaceMode to "full" to ' +
+          "use ptc_run_code instead.",
+        "warning",
+      );
     }
 
     const persisted = readPersistedMode(ctx);

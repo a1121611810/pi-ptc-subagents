@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The model-facing surface is now a setting, and a subagent can be started
+  without writing a program (ADR-0025).** A new `surfaceMode` key in
+  `~/.pi/agent/ptc.json` decides what this extension registers: `full` (the
+  default, and today's behaviour) registers `ptc_run_code`, `ptc_workflow` and
+  the `ptc_task_*` trio; `subagents` registers a new top-level `ptc_subagent`
+  plus the `ptc_task_*` trio and leaves orchestration to pi's own `codemode`;
+  `off` registers nothing at all, so the session is stock pi. The new tool takes
+  the same arguments as the `pi.dispatch` binding and calls the same dispatcher,
+  so depth, concurrency and the background task lifecycle behave identically and
+  a task spawned through it is listable with `ptc_task_list`.
+
+  Motivation, measured rather than assumed: pi 0.99.1 ships its own programmable
+  tool calling as the built-in `codemode`, which is stronger than `ptc_run_code` at
+  isolation and tool discovery but cannot spawn a process at all. With both
+  installed the model is taught two programming models per request
+  (`docs/research/codemode-vs-ptc-capability-20260930.md`).
+
 - **The PTC tool descriptions now declare what a binding call resolves to
   (ADR-0024).** `ptc_run_code` and `ptc_workflow` carry one shared binding
   contract: a binding result is `{ content, details }`, `content` is an array of

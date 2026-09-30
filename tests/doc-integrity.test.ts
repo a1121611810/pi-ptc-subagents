@@ -388,6 +388,12 @@ const ALL_SCANNED_NAMES: ReadonlySet<string> = new Set(
  */
 const EXTERNAL_VOCABULARY: ReadonlyMap<string, string> = new Map([
   // A. DSH / pi 宿主 API
+  // A2. pi 0.99.1 内建 codemode 扩展的沙箱全局函数，本仓只是文档层面提及，
+  // 从不声明也从不调用（QuickJS 侧无 fs / 无网络，无法实现等价物）。
+  ["describeTool", "pi 内建 codemode 沙箱的全局函数，本仓不声明（ADR-0025）"],
+  ["searchTools", "pi 内建 codemode 沙箱的全局函数，本仓不声明（ADR-0025）"],
+  ["max_output_tokens", "pi 内建 codemode 的脚本级输出预算选项，本仓不声明（ADR-0025）"],
+  ["timeout_ms", "pi 内建 codemode 的脚本级死线选项；本仓同名概念是 maxTimeoutMs（ADR-0025）"],
   ["SessionShutdownEvent", "pi 宿主生命周期事件，本仓只消费不声明"],
   ["ShimmerDecorator", "DSH 渲染层的装饰器类"],
   ["TextShimmer", "DSH 渲染层的 shimmer 组件类"],

@@ -92,9 +92,11 @@ characterization 测试**只能**作为 '实现行为未意外变化' 的证据;
 
 **正例**:用 spec 中的 'spawn pi subprocess with agent X, expect text to contain PONG' 作为断言,字符级对比 spec 原文。
 
-## F1/F2/F3(自动扫描模式)
+## F1/F2/F3/F4(自动扫描模式)
 
-`tests/test-meta-discipline.test.ts` fixture 扫这 3 类 false-pass 模式:
+`tests/test-meta-discipline.test.ts` fixture 扫这 4 类 false-pass 模式:
+
+**编号不是全局唯一的。** [ADR-0005](./adr/0005-ptc-execution-boundary.md) 的 F1–F4 是 worker 边界的加固项,与这里的 false-pass F1–F4 是两套编号;全仓 grep `F4` 会同时命中两者,读 ledger 或 ADR 时先确认说的是哪一套。
 
 ### F1: accept-both 断言
 
@@ -117,8 +119,35 @@ characterization 测试**只能**作为 '实现行为未意外变化' 的证据;
 
 改为 `test.skipIf(...)` 让 CI 看到 SKIPPED,或去掉 gate 默认必跑。
 
+### F4: assertion-free test body(函数体无断言)
+
+    test("budget guard", () => {
+      // 这里应该断言 headroom <= 320
+    });                       // X 名字在、注释在、一条断言都没有,vitest 记 passed
+
+**为什么有这一条。** 本仓评审账本里这类 false-pass 守卫出现过三次(同一个文件
+`docs/reviews/2026-09-30-binding-contract-code-review.md` 的 R4-1 / R4-7):测试名还在,
+函数体里还留着一句说明它该断言什么的注释、而**一条断言都没有**,而 vitest 把这种用例报成
+passed。F1/F2/F3 各自只认自己的形态(接受两者的正则 / 条件断言 / gate 提前 return),空
+函数体不是其中任何一种,三条一起全绿 —— 断言被删掉这件事,没有一条守卫看得见。
+反事实实测:把预算守卫的函数体清空,F4 变红(账本 Round 4 闭环表「budget guard body
+emptied | F4 red」)。
+
+**判据。** 从声明行往下读到**下一条同缩进的 test / it 声明**(或文件末尾);窗口里出现任何
+名字里带 `expect` / `assert` 的调用就算有断言,所以把断言委托给助手的用例
+(`assertSitesAgree(x)`)也算数。窗口按缩进切,不按大括号配对 —— 先试过大括号匹配,本仓
+当场 24 处误报(`test` 也出现在正则和助手名里),一个在 24 个真实文件上乱叫的检查器比没
+有更糟,所以上线的是更笨的那条。
+
+**已知盲点**(写下来而不是藏起来):`test.skipIf(...)` / `test.todo(...)` /
+`test.concurrent(...)` 不匹配声明形态,整条用例对 F4 不可见;判定是行级的,注释或字符串
+里出现 `expect(` 会被算成断言;顶格(缩进 0)的 `test(` 不扫。
+
 ## 与 code-review skill 的关系
 
 本文件被 `.agents/skills/code-review/SKILL.md` 的 spec 轴 audit 2 引用为 Oracle check 的判定依据。
 OCR `.opencodereview/rules/test-discipline.md` 承载 F1/F2/F3 的细节 + 实例,本文件承载 6 条约束的完整描述。
 两者必须保持同步;改一处必须改另一处。
+**F4 目前只有这一处**:该 OCR rule 文件(以及 `AGENTS.md` 的两处 F 列表)还只写到 F3。
+补齐之前「两者必须保持同步」这一句在 F4 上不成立。写下来是为了让下一个人看得见这个缺口,
+而不是让它看起来已经同步。

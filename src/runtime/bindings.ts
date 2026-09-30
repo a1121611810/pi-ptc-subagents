@@ -154,7 +154,12 @@ type DispatchParameters = TObject<{
   label: TOptional<TString>;
 }>;
 
-const DISPATCH_PARAMETERS: DispatchParameters = Type.Object({
+/**
+ * The parallel binding's argument schema. Exported so ADR-0025's top-level `ptc_subagent`
+ * can declare the SAME arguments rather than a second hand-written copy that could drift: the
+ * two are different call sites for one dispatcher, and a test pins their key sets equal.
+ */
+export const DISPATCH_PARAMETERS: DispatchParameters = Type.Object({
   agent: Type.String({ minLength: 1 }),
   task: Type.String({ minLength: 1 }),
   cwd: Type.Optional(Type.String()),
