@@ -203,14 +203,38 @@ accept this for now", which is a decision and should not live only in a review l
    than negative) and read the terminal bytes for the notice string. A positive there closes this
    item; a negative with a held-open TUI turns it from "unverified" into "the notice does not render",
    which is a different and more serious finding.
-2. **A `ptc_subagent` background child gets no ADR-0022 session triple.** The binding forwards
-   `context.sessionDir` into the DispatchContext; the tool reads a value at session start and cannot,
-   so its children are spawned `--no-session` while the identical spawn from inside a program gets the
-   session dir. **Accepted** for now, and named here rather than left as a live gap: wiring it changes
-   what every `ptc_subagent` background child receives, and that is not a change to make inside a round
-   already repairing two regressions of its own. **Retired when** someone measures what the session
-   triple changes for a child -- output location, notification routing, or resume -- at which point it
-   is a small commit with a test rather than an unexamined side effect.
+2. **A `ptc_subagent` background child gets no ADR-0022 session triple — ANSWERED, not accepted.**
+   The binding forwards `context.sessionDir` into the DispatchContext; the tool reads a value at
+   session start and cannot, so its children are spawned `--no-session` while the identical spawn
+   from inside a program gets the session dir.
+
+   This was **accepted** in round 6, **split** in round 8, and **closed by measurement** in round 9.
+   The evidence is `scripts/measure-session-triple.mjs` and its recorded output, both checked in; the
+   script is idempotent and re-runnable, and either can be verified rather than trusted. Measured
+   against pi 0.99.1 with three real spawns into a temp session directory:
+
+   - **Where a child writes.** With the triple, exactly one file appears in `<sessionDir>`, named
+     `<ISO8601-timestamp>_<sessionId>.jsonl`. With `--no-session` and no session dir, nothing is
+     written there. That is the whole of the output-location effect, and it is per-child.
+   - **`--session-id` really does make a retry idempotent** — the claim most likely to be false, and it
+     holds. A second spawn carrying the _same_ id produced **no second file**, and it **appends**
+     rather than truncating: the retried session held **10** JSONL entries where a fresh one held
+     **7**, so the first attempt's transcript survives the retry. ADR-0022's parenthetical
+     ("retry idempotence") is accurate, and it is now measured rather than asserted.
+   - **No collision.** Two children with different task ids in one directory get two distinctly named
+     files. Same id is the idempotence case above, and is unreachable from the normal path:
+     `sessionId` is the freshly minted `taskId` (`dispatch.ts:1096`) and one task id is one TaskRecord.
+   - **Not established by that measurement, and closed by a different argument:** where the child's
+     output is _routed_ on our side. That is a different sink — `OutputStorage` and the subscription
+     pipeline, ours — from the child's session file. The two do not interact, and the round-8
+     pre-session seam covers our side, so the child session file cannot displace what
+     `ptc_task_output` returns.
+
+   Recorded as a process note, because it is the shape of this whole record: this took a temp
+   directory, three real spawns and `ls`. The price was never high. The retirement condition had
+   been written at the wrong altitude, asking for one measurement when there were two of different
+   cost — and, the first time, the answer was left in a chat message rather than in a file the next
+   round could open.
 
 ## Reopen triggers
 

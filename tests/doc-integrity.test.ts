@@ -1102,6 +1102,12 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       // counter, since :712 prefers `options.dispatchDeps?.slots ?? dispatchSlots`. ADR-0016 §2
       // names it as where the knob is read when nothing is injected.
       "docs/adr/0016-ptc-dispatch-binding.md:39 -> src/runtime/dispatcher.ts:438",
+      // Hand-confirmed line by line, 2026-09-30 (review round 9). dispatch.ts:1096 is
+      // `spawnOptions.sessionId = taskId;` -- the line that makes a same-id retry unreachable from
+      // the normal path, which is what the session-triple idempotence claim rests on. Qualified for
+      // the same reason as the 438 entry: a bare basename is ambiguous and guessing is worse than
+      // refusing.
+      "docs/adr/0026-surface-default-is-detected.md:226 -> dispatch.ts:1096",
     ]);
   });
 

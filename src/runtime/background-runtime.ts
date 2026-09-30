@@ -157,11 +157,16 @@ export interface BackgroundRuntimeOptions {
   /**
    * Factory for the PRE-SESSION storage root; defaults to `new InMemoryTaskStorage()`.
    *
-   * The pre-session registry, notification pipeline and output storage are all built from ONE
-   * storage, and it used to be constructed in place, so a caller could not substitute it. That is
-   * the seam behind round 7's finding: five `logger.warn` calls in cleanup paths (526 / 594 / 616 /
-   * 663 / 683) could not be driven by any test -- not because the tests were missing, but because
-   * the failure they report cannot be produced at all.
+   * The pre-session registry and notification pipeline are both built from ONE storage, and it
+   * used to be constructed in place, so a caller could not substitute it. That is the seam
+   * behind round 7's finding: five `logger.warn` calls in cleanup paths (526 / 594 / 616 / 663 /
+   * 683) could not be driven by any test -- not because the tests were missing, but because the
+   * failure they report cannot be produced at all.
+   *
+   * TWO of the three pre-session collaborators, not three. The pre-session output storage is built
+   * separately -- `new InMemoryOutputStorage()`, a different interface with no shared root -- so it
+   * is NOT reachable through here. Round 9 review measured that and corrected an earlier comment in
+   * this file which claimed otherwise. No site is lost to it: all five are registry or pipeline paths.
    *
    * An optional field on THIS options object, defaulting to today's behaviour, is the whole change;
    * a deps-less caller is unaffected. Deliberately a field and not a module-level global with an

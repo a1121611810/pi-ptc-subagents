@@ -1047,6 +1047,18 @@ describe("pre-session cleanup-path failure logs (round 8)", () => {
     expect(warnings.length, "one report per unreadable record").toBe(2);
     expect(warnings[0]).toContain("injected: drainPending read failed");
     expect(warnings[1]).toContain("injected: drainPending read failed");
+    // The COUNT alone does not show the sweep continued. Two warns can equally mean one record
+    // warned twice while the other was starved -- the exact regression this test exists to catch
+    // -- so assert the two reports name the two DIFFERENT tasks. Added in round 9: the count-only
+    // version of this assertion passed with the `continue` deleted.
+    expect(
+      warnings.filter((w) => w.includes(TASK_RUNNING)),
+      "the first record was reported",
+    ).toHaveLength(1);
+    expect(
+      warnings.filter((w) => w.includes(TASK_SECOND)),
+      "and so was the second -- this is the does-not-starve-the-rest claim",
+    ).toHaveLength(1);
     // The sweep continued past the first failure rather than bailing: BOTH records were reported.
     // No items and no acks is the correct outcome here, not a shortfall -- an unreadable record is
     // skipped without an ack, because acknowledging a cursor for events that were never delivered is
