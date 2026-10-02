@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { expect, test, vi } from "vitest";
 import type {
   AgentToolResult,
-  ExtensionContext,
+  ExtensionToolContext,
   Theme,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
@@ -50,7 +50,7 @@ function call(
   params: { code: string; description?: string; timeoutMs?: number },
   extra: { signal?: AbortSignal; cwd?: string } = {},
 ): Promise<AgentToolResult<PtcToolDetails>> {
-  const ctx: ExtensionContext = toolContext(extra.cwd ?? process.cwd());
+  const ctx: ExtensionToolContext = toolContext(extra.cwd ?? process.cwd());
   return tool.execute(
     "call-1",
     { description: "integration test program", ...params },

@@ -365,6 +365,8 @@ The map's `Not yet specified` list contains four items that this ADR explicitly 
 - **复活 / resume 工具** -- deferred to v2 + steering (this ADR section 8, last bullet).
 - **每任务超时** -- deferred; current PRD silently lacks per-task timeout. Will be addressed in a future ADR if/when stalled-task failure mode becomes a real problem.
 - **`pi.dispatch` outputSchema** -- orthogonal (subagent extension's own concern); not part of this ADR.
+  Still true: the binding resolves to `{ text, status, ... }` and declares no `outputSchema`. The
+  `ptc_task_*` tools later declared one for a different consumer — see ADR-0028.
 - **前台任务中途转后台** (kimicode Ctrl+B) -- deferred; v1 spawn-or-reject only, no in-flight promotion.
 
 The map's `Out of scope` items remain out of scope (this ADR does not change them).

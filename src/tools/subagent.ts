@@ -14,10 +14,18 @@
  *
  * The argument schema is the binding's own, imported -- not a second copy that could drift.
  * A test pins the two key sets equal.
+ *
+ * The RESULT is declared twice, on purpose: `content` is what a model reads, `structuredContent`
+ * is what a codemode script reads. This tool is the only way a session that has handed
+ * orchestration to pi's `codemode` can start a subagent at all, and without the second channel a
+ * script has to regex the ULID out of `"Started background task 01JABC..."`. See
+ * {@link SUBAGENT_OUTPUT_SCHEMA} for why that projection is not a mirror of `details`.
  */
 
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
+import type { TNumber, TObject, TOptional, TString } from "typebox";
 import { DISPATCH_PARAMETERS } from "../runtime/bindings.ts";
 import type { DispatchDeps, DispatchInput, DispatchResult } from "../runtime/dispatch.ts";
 import { dispatch } from "../runtime/dispatch.ts";
@@ -53,6 +61,68 @@ export interface SubagentDetails {
 }
 export type AnyTool = ToolDefinition<any, any, any>;
 
+/** Written out explicitly for `isolatedDeclarations`, as `DISPATCH_PARAMETERS` is. */
+type SubagentOutputSchema = TObject<{
+  task_id: TOptional<TString>;
+  status: TString;
+  exit_code: TOptional<TNumber>;
+}>;
+
+/**
+ * What `structuredContent` may be: one branch per dispatch outcome, and NO key is optional.
+ *
+ * The branches are written out rather than declared as `{ task_id?: string; ... }` for a concrete
+ * reason, not a stylistic one. An optional property has type `string | undefined`, which is not a
+ * `JsonValue`, so `AgentToolResult.structuredContent?: JsonValue` rejects it -- and so does an
+ * optional-shaped union, because TypeScript normalises the union of two object literals by adding
+ * `?: undefined` to whichever key the other branch lacks. Naming the branches keeps every property
+ * present, which is also what makes "this key is absent" a property of the VALUE rather than of a
+ * type.
+ *
+ * The status-only branch is defensive: `DispatchResult.exitCode` is a required `number`, so a
+ * foreground outcome always carries one. `SubagentDetails.exitCode` is not required, and this
+ * projection reads the details rather than the outcome, so the no-exit-code case is spelled out
+ * rather than assumed away.
+ */
+type SubagentStructuredContent =
+  | { task_id: string; status: string }
+  | { status: string; exit_code: number }
+  | { status: string };
+
+/**
+ * The machine-readable result, declared as the tool's `outputSchema` so pi hands a codemode script
+ * this object *instead of* the text block (`ToolDefinition.outputSchema`: "codemode scripts then
+ * receive it instead of the text content"). It never reaches the model: `structuredContent` is
+ * documented as not sent to the model, so declaring it changes nothing for a direct tool call.
+ *
+ * NOT a mirror of {@link SubagentDetails}. `details` is the TUI's structure and can hold `undefined`;
+ * `structuredContent` is JSON, and `JsonValue` has no `undefined` -- so the half of each outcome
+ * that does not apply is OMITTED rather than set. That omission IS the contract: `task_id` present
+ * means "here is a handle, poll it", `exit_code` present means "this one already ran to completion",
+ * and a script can tell the two apart without parsing a word of the text.
+ *
+ * snake_case, like pi's own builtin tools, so a script reading our declared schema does not have to
+ * learn a second spelling for the same concept. `details` keeps its camelCase: it is a different
+ * channel with its own consumers.
+ */
+export const SUBAGENT_OUTPUT_SCHEMA: SubagentOutputSchema = Type.Object({
+  task_id: Type.Optional(
+    Type.String({
+      description:
+        "Id of the background task to poll with ptc_task_output. Present ONLY for a background call; absent once the call has already finished.",
+    }),
+  ),
+  status: Type.String({
+    description:
+      '"background" when this call returned a handle to poll, otherwise the dispatcher\'s own outcome status ("fulfilled").',
+  }),
+  exit_code: Type.Optional(
+    Type.Number({
+      description: "The child's exit code. Present ONLY for a call that already finished.",
+    }),
+  ),
+});
+
 // `DispatchResult` and `DispatchHandle` both carry `status` with different literal types, so a
 // type predicate on their union produces a never intersection in the negative branch. The
 // dispatcher only returns a handle for `background: true`, and a handle always has a `taskId`,
@@ -73,6 +143,7 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
       "Prefer one subagent over many tool calls when the work is a question with an answer rather than a fact you can look up, or when the raw output would be larger than the answer.",
     ],
     parameters: DISPATCH_PARAMETERS,
+    outputSchema: SUBAGENT_OUTPUT_SCHEMA,
     async execute(_toolCallId, params) {
       const outcome = await dispatch(
         params as DispatchInput,
@@ -93,13 +164,32 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
         taskId === undefined
           ? { taskId: undefined, status: outcome.status, exitCode: outcome.exitCode }
           : { taskId, status: "background", exitCode: undefined };
+      // `structuredContent` is projected from the SAME three values `details` was built from, not
+      // re-derived from `outcome`: one outcome, one reading. Each literal carries only the keys
+      // that apply to it, because JsonValue has no `undefined` -- see SUBAGENT_OUTPUT_SCHEMA.
       if (taskId !== undefined) {
-        return { content: [{ type: "text" as const, text: HANDLE_TEXT + taskId }], details };
+        const structured: SubagentStructuredContent = {
+          task_id: taskId,
+          status: details.status,
+        };
+        return {
+          content: [{ type: "text" as const, text: HANDLE_TEXT + taskId }],
+          details,
+          structuredContent: structured,
+        };
       }
       if (outcome.status === "rejected") {
         throw new Error("ptc_subagent refused the call: " + outcome.errorMessage);
       }
-      return { content: [{ type: "text" as const, text: outcome.text }], details };
+      const structured: SubagentStructuredContent =
+        details.exitCode === undefined
+          ? { status: details.status }
+          : { status: details.status, exit_code: details.exitCode };
+      return {
+        content: [{ type: "text" as const, text: outcome.text }],
+        details,
+        structuredContent: structured,
+      };
     },
   });
 }

@@ -9,10 +9,15 @@ import { delimiter, join } from "node:path";
 import type {
   ExtensionAPI,
   ExtensionContext,
+  ExtensionToolContext,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import ptcSubagents from "../../src/index.ts";
-import type { CodemodePresence, SurfaceMode } from "../../src/mode/ptc-mode.ts";
+import type {
+  CodemodePresence,
+  CodemodeSwitchResolution,
+  SurfaceMode,
+} from "../../src/mode/ptc-mode.ts";
 import type { Binding, BindingTable } from "../../src/runtime/bindings.ts";
 import type { BackgroundTaskRuntime } from "../../src/runtime/background-runtime.ts";
 
@@ -98,6 +103,12 @@ export function makeExtensionStub(
      * `surfaceMode: "from-file"`, because an explicit surface never consults the probe.
      */
     codemode?: CodemodePresence;
+    /**
+     * ADR-0027: whether pi will actually LOAD its own codemode. Distinct from `codemode` on
+     * purpose — a pi can ship the directory and be told not to load it, and that is the case
+     * the four-case table turns on. Only meaningful with `surfaceMode: "from-file"`.
+     */
+    codemodeSwitch?: CodemodeSwitchResolution;
     /**
      * Tools pi's registry knows about that are NOT in the active loadout.
      *
@@ -208,9 +219,12 @@ export function makeExtensionStub(
     // real `~/.pi/agent/ptc.json` -- 31 failures with a `surfaceMode: off` dir set, against 4
     // before. An unspecified surface is a pin, never a read. (The count is deliberately not written here: round 2 put "eight" in a comment and round 3 found "seven" in another, and both were wrong. grep it.)
     ...(options.surfaceMode === "from-file"
-      ? options.codemode === undefined
-        ? {}
-        : { codemode: options.codemode }
+      ? {
+          ...(options.codemode === undefined ? {} : { codemode: options.codemode }),
+          ...(options.codemodeSwitch === undefined
+            ? {}
+            : { codemodeSwitch: options.codemodeSwitch }),
+        }
       : { surfaceMode: options.surfaceMode ?? "full" }),
   });
   return stub;
@@ -280,11 +294,27 @@ export function stubContext(
  * Minimal execution context for tool tests.
  *
  * The tool layer reads exactly one field — `cwd` (see `src/tools/common.ts`) — but the real
- * parameter type is pi's `ExtensionContext`, so tests pass this narrowed object through a cast
- * rather than fabricating a whole session.
+ * parameter type is pi's `ExtensionToolContext`, so tests pass this narrowed object through a
+ * cast rather than fabricating a whole session.
+ *
+ * pi 1.0.0 narrowed that fifth `execute` parameter from `ExtensionContext` to
+ * `ExtensionToolContext`, which `extends ExtensionContext` with `tools` and `executeTool` — the
+ * pair codemode scripts use to reach nested tools. The stub answers both honestly rather than
+ * leaving them undefined: an empty tool list, and an `executeTool` that refuses loudly. A test
+ * that reaches for it is asking for behaviour no unit test wires up, and a thrown Error names
+ * that, where a `TypeError: not a function` three frames later would not.
  */
-export function toolContext(cwd: string): ExtensionContext {
-  return { cwd } as unknown as ExtensionContext;
+export function toolContext(cwd: string): ExtensionToolContext {
+  return {
+    cwd,
+    tools: [],
+    executeTool() {
+      throw new Error(
+        "toolContext().executeTool is not wired in unit tests: a nested tool call needs the " +
+          "real agent loop, so that path is only covered by the e2e suites",
+      );
+    },
+  } as unknown as ExtensionToolContext;
 }
 
 /**

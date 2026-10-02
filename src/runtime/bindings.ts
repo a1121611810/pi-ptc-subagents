@@ -120,7 +120,15 @@ interface AnyBuiltinTool {
     params: never,
     signal?: AbortSignal,
     onUpdate?: unknown,
-  ): Promise<{ content?: unknown; details?: unknown }>;
+  ): Promise<{
+    content?: ReadonlyArray<{ readonly type: string; readonly text?: string }>;
+    details?: unknown;
+    /**
+     * pi 1.0.0's non-throwing failure channel. Absent means success, so this is compared
+     * against `true` rather than tested for truthiness — see `bindingFailureMessage`.
+     */
+    isError?: boolean;
+  }>;
 }
 
 const BUILTIN_TOOL_FACTORIES: Record<BuiltinBindingName, (cwd: string) => AnyBuiltinTool> = {
@@ -198,6 +206,50 @@ export interface CreateBuiltinBindingsOptions {
 }
 
 /**
+ * How much of a failed tool's own message is carried into the rejection the program sees.
+ *
+ * The rejection is a diagnostic, not a transport: the worker's `ToolCallError` wraps it, and a
+ * 50 KB stdout dump inside an Error message would crowd out the failure that matters. pi already
+ * appended "Command exited with code N" to the text, so the tail is kept -- that is the sentence
+ * worth reading.
+ */
+const FAILURE_MESSAGE_MAX_CHARS = 2000;
+
+/**
+ * The message a rejected binding call carries, taken from the tool's own model-facing text.
+ *
+ * pi 1.0.0 added a non-throwing failure channel: `AgentToolResult.isError` — "Report a failure
+ * without throwing. The model sees `content` as an error result, like a thrown error, but
+ * `details` and `structuredContent` are kept" (`pi-agent-core/dist/types.d.ts`). `bash` moved
+ * its non-zero exit onto it, so on 1.0.0 `tools.bash({ command: "exit 3" })` resolves where on
+ * 0.86.1 it threw.
+ *
+ * ADR-0024's contract promises the model that "a failing call REJECTS with `ToolCallError`
+ * instead of resolving", and the binding result shape is `{ content, details }` — it has no
+ * `isError` field to forward. Left alone, a 1.0.0 non-zero exit would cross the boundary as a
+ * **successful** resolution whose only tell is a sentence at the end of its stdout, which is the
+ * silent failure the testing constraints forbid. So the signal is translated back into the
+ * channel the contract already describes, at the boundary, where the tool is called directly and
+ * no agent loop exists to interpret `isError` for us.
+ */
+function bindingFailureMessage(toolName: string, text: string): string {
+  const trimmed = text.trim();
+  // The empty branch is unreachable through the seven builtins today, and deliberately left
+  // untested rather than tested through a fabricated tool result: `bash` is the only one of them
+  // that sets `isError` (core/tools/bash.js:300) and it appends its status sentence
+  // unconditionally, so an `isError` result always carries text. A test for this branch would
+  // have to mock the thing it exists to constrain. The tail slice IS pinned —
+  // `binding-contract.test.ts` drives a >5000-char non-zero exit and asserts the leading marker is
+  // gone and the trailing one survives.
+  if (trimmed.length === 0) return `${toolName} reported a failure with no message`;
+  const body =
+    trimmed.length <= FAILURE_MESSAGE_MAX_CHARS
+      ? trimmed
+      : `…${trimmed.slice(-FAILURE_MESSAGE_MAX_CHARS)}`;
+  return `${toolName} failed: ${body}`;
+}
+
+/**
  * Build the binding table for one run.
  *
  * Tools are created once per table and reused across calls, matching pi's own extension
@@ -234,6 +286,19 @@ export function createBuiltinBindings(options: CreateBuiltinBindingsOptions): Bi
           context.signal,
           undefined,
         );
+        // ADR-0024's contract, kept true across the 1.0.0 `isError` channel: see
+        // `bindingFailureMessage` for why the translation happens here rather than downstream.
+        if (result.isError === true) {
+          throw new Error(
+            bindingFailureMessage(
+              tool.name,
+              (result.content ?? [])
+                .filter((block) => block.type === "text" && typeof block.text === "string")
+                .map((block) => block.text ?? "")
+                .join("\n"),
+            ),
+          );
+        }
         // What crosses the wire is the tool's model-facing payload: `usage` and
         // `terminate` are agent-loop plumbing with no meaning inside a PTC program.
         return {

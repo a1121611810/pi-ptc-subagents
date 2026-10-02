@@ -43,6 +43,15 @@ import {
 } from "./helpers/ptc.ts";
 
 const PTC_TOOLS = ["ptc_run_code", "ptc_workflow"];
+
+/**
+ * ADR-0027: the two probe answers, pinned as constants so a test states the pi it is reasoning
+ * about instead of inheriting the machine's. `ABSENT` is what pi's own default implies — the
+ * built-in extensions "load by default" — so it is the switch a settings file that says nothing
+ * resolves to.
+ */
+const PRESENT_CODEMODE = { present: true, how: "found" } as const;
+const ABSENT_SWITCH = { switch: "absent", source: "default" } as const;
 /** What a default session offers: pi's four defaults plus this package's two tools. */
 const FULL = [...DEFAULT_SESSION_TOOLS, ...PTC_TOOLS];
 /** Every name that could be bound, for tests that need a session with all of them enabled. */
@@ -92,15 +101,19 @@ test("with no file, the surface follows the pi that loaded us (ADR-0026)", async
   // Not a constant any more. Both branches are stated here rather than inherited from the machine
   // the suite happens to run on, so a change to the detection rule has to be made here on purpose.
   await withAgentDir(async (dir) => {
-    expect(readSurfaceModeConfig(dir, { present: false, how: "not-found" })).toEqual({
-      surfaceMode: "full",
-      source: "default",
-      codemode: { present: false, how: "not-found" },
-    });
-    expect(readSurfaceModeConfig(dir, { present: true, how: "found" })).toEqual({
+    expect(readSurfaceModeConfig(dir, { present: false, how: "not-found" }, ABSENT_SWITCH)).toEqual(
+      {
+        surfaceMode: "full",
+        source: "default",
+        codemode: { present: false, how: "not-found" },
+        codemodeSwitch: ABSENT_SWITCH,
+      },
+    );
+    expect(readSurfaceModeConfig(dir, { present: true, how: "found" }, ABSENT_SWITCH)).toEqual({
       surfaceMode: "subagents",
       source: "default",
       codemode: { present: true, how: "found" },
+      codemodeSwitch: ABSENT_SWITCH,
     });
   });
 });
@@ -115,7 +128,17 @@ test("surface mode honours every value the record names, and reports the file as
         JSON.stringify({ surfaceMode: value }),
         "utf8",
       );
-      expect(readSurfaceModeConfig(dir), value).toEqual({ surfaceMode: value, source: "file" });
+      // ADR-0027: the explicit key wins, and the four-case table still runs so the caller can
+      // report a disagreement. `detected` is therefore present on this path, and it is the
+      // field `session_start` warns from -- dropping the second probe here would silently
+      // disable that warning while this test stayed green.
+      expect(readSurfaceModeConfig(dir, PRESENT_CODEMODE, ABSENT_SWITCH), value).toEqual({
+        surfaceMode: value,
+        source: "file",
+        detected: "subagents",
+        codemode: PRESENT_CODEMODE,
+        codemodeSwitch: ABSENT_SWITCH,
+      });
     }
   });
 });
@@ -133,7 +156,7 @@ test("an unparseable surfaceMode file falls back to the detected default and say
     // the `full` expectation held for a reason that had nothing to do with the code.
     for (const [presence, expected] of DETECTED_SURFACE_CASES) {
       const where = "codemode " + presence.how;
-      const broken = readSurfaceModeConfig(dir, presence);
+      const broken = readSurfaceModeConfig(dir, presence, ABSENT_SWITCH);
       expect(broken.surfaceMode, where + ": a broken file must not half-apply").toBe(expected);
       expect(broken.source, where).toBe("invalid");
       expect(broken.error, where + ": the reason is reported, not swallowed").toContain(
@@ -153,7 +176,7 @@ test("a surfaceMode of the wrong type or outside the set falls back to the detec
       );
       for (const [presence, expected] of DETECTED_SURFACE_CASES) {
         const where = JSON.stringify(bad) + " with codemode " + presence.how;
-        const config = readSurfaceModeConfig(dir, presence);
+        const config = readSurfaceModeConfig(dir, presence, ABSENT_SWITCH);
         expect(config.surfaceMode, where).toBe(expected);
         expect(config.source, where).toBe("invalid");
         expect(config.error, where).toContain("surfaceMode");
@@ -170,7 +193,7 @@ test("a config file that is valid JSON but not an object falls back to the detec
       await writeFile(join(dir, PTC_MODE_CONFIG_FILE), bad, "utf8");
       for (const [presence, expected] of DETECTED_SURFACE_CASES) {
         const where = bad + " with codemode " + presence.how;
-        const config = readSurfaceModeConfig(dir, presence);
+        const config = readSurfaceModeConfig(dir, presence, ABSENT_SWITCH);
         expect(config.surfaceMode, where).toBe(expected);
         // The source is half of what makes this a fallback rather than a setting: a file the
         // reader could not use has to be reported as such.
@@ -187,7 +210,7 @@ test("an absent surfaceMode key is a default, not invalid", async () => {
       JSON.stringify({ defaultMode: false }),
       "utf8",
     );
-    const config = readSurfaceModeConfig(dir, { present: true, how: "found" });
+    const config = readSurfaceModeConfig(dir, { present: true, how: "found" }, ABSENT_SWITCH);
     // An absent key is a DEFAULT, so it is detected -- the same as an absent file. What this test
     // is about is `source`, not the surface: a key that is not there must not read as invalid.
     expect(config.surfaceMode).toBe("subagents");
@@ -204,7 +227,9 @@ test("the two config keys are read from one file without shadowing each other", 
       "utf8",
     );
     expect(readDefaultModeConfig(dir).defaultMode).toBe(false);
-    expect(readSurfaceModeConfig(dir).surfaceMode).toBe("subagents");
+    expect(readSurfaceModeConfig(dir, PRESENT_CODEMODE, ABSENT_SWITCH).surfaceMode).toBe(
+      "subagents",
+    );
   });
 });
 
@@ -685,7 +710,10 @@ describe("probeCodemodePresence", () => {
     ] as const) {
       const presence = probeCodemodePresence(argv as readonly string[]);
       expect(presence, JSON.stringify(argv)).toEqual({ present: false, how });
-      expect(detectedSurfaceMode(presence), JSON.stringify(argv)).toBe("full");
+      // ADR-0027: the switch is the second question now. An absent switch means pi's default,
+      // which is to load codemode -- and with nothing on disk to load, the answer is `full`
+      // either way. Passing it explicitly keeps the test honest about which input decided.
+      expect(detectedSurfaceMode(presence, "absent"), JSON.stringify(argv)).toBe("full");
     }
   });
 });

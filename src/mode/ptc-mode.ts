@@ -37,7 +37,8 @@
  * restriction is left alone too — see `decideModeEntry`.
  */
 import { readFileSync, realpathSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join, relative, sep } from "node:path";
+import { minimatch } from "minimatch";
 import { BUILTIN_BINDING_NAMES } from "../runtime/bindings.ts";
 
 /** The two surfaces this package exposes. `/ptc on` needs at least one of them active. */
@@ -181,15 +182,306 @@ export type SurfaceMode = (typeof SURFACE_MODES)[number];
 export const FALLBACK_SURFACE_MODE: SurfaceMode = "full";
 
 /**
+ * Whether the pi that launched us will actually LOAD its `codemode` extension.
+ *
+ * - `"absent"` — nothing in any settings file names it, so pi's own default applies, which is to
+ *   load it (`settings.md`: "They load by default").
+ * - `"enabled"` — an explicit `+builtin:codemode`, or `-e builtin:codemode` on the command line.
+ * - `"disabled"` — `-builtin:codemode` or `!builtin:codemode` in a settings file, or `--no-extensions`.
+ *
+ * This is a different question from {@link CodemodePresence}, which asks whether the directory is
+ * on disk. Both are needed, and conflating them is what ADR-0027 fixes: pi 0.99.0 added
+ * `-builtin:<name>`, so "the directory exists" and "codemode will run" stopped being the same
+ * answer, and a probe that only asks the first one hands orchestration to a tool that is not there.
+ */
+export type CodemodeSwitch = "absent" | "enabled" | "disabled";
+
+/** How the switch was decided, so a test can tell a measured answer from a failed read. */
+export type CodemodeSwitchSource = "cli" | "project" | "user" | "default" | "invalid";
+
+/** The switch plus enough provenance to explain it in a notice. */
+export interface CodemodeSwitchResolution {
+  switch: CodemodeSwitch;
+  source: CodemodeSwitchSource;
+  /** Set when a settings file could not be read as a JSON object; the switch still resolves. */
+  error?: string;
+}
+
+/**
+ * The two directories pi resolves the `!` bucket's globs against.
+ *
+ * `matchesAnyPattern` also tests `relative(baseDir, path)` and the basename, so a glob whose
+ * answer depends on where pi's directories sit is only correct for the directories pi actually
+ * used. These are the two it uses: `join(cwd, CONFIG_DIR_NAME)` for project scope -- pi 1.0.0's
+ * `CONFIG_DIR_NAME` is `".pi"`, `package-manager.js:720` -- and `agentDir` for user scope (`:719`).
+ */
+export interface CodemodeBaseDirs {
+  project: string;
+  user: string;
+}
+
+/** The exact entry pi's own resolver matches a built-in extension on (`source-info.js`). */
+const CODEMODE_BUILTIN_ENTRY = "builtin:codemode";
+
+/**
+ * pi's own matchers, reproduced against the installed `minimatch` rather than approximated.
+ *
+ * An earlier version compared a pattern's LITERAL PREFIX against the target and documented the
+ * over-match as an accepted cost. That was the wrong shape of fix: the `!` bucket is a continuum
+ * (globs, character classes, extglobs, nested negations, backslash escapes, multi-segment paths),
+ * so every round of review found one more member, and each fix was a new case in a list that could
+ * never be finished. Four rounds produced four costful defects that way -- R1-01, R3-01, R4-01 and
+ * R4-02 -- and the reviewer's own read was that the approximation, not the case list, was the
+ * defect.
+ *
+ * pi matches this bucket with `minimatch` and depends on it to do so, so mirroring the call is both
+ * shorter and exact. What remains is not an approximation of pi's behaviour but a copy of it, and
+ * `tests/unit/codemode-switch-differential.test.ts` re-measures the copy against pi's resolver so
+ * a future pi release turns that file red rather than letting the copy drift.
+ *
+ * Sources, pi 1.0.0: `matchesAnyPattern` at `dist/core/package-manager.js:473-493`,
+ * `normalizeExactPattern` / `matchesAnyExactPattern` at `:496-517`. The `SKILL.md` branch of both is
+ * omitted because a built-in path never has that basename.
+ */
+
+/** pi's `toPosixPath` (`package-manager.js:79-81`). */
+function toPosixPath(p: string): string {
+  return p.split(sep).join("/");
+}
+
+/** pi's `normalizeExactPattern` (`:496-499`) — strips a leading `./` or `.\`, then posixises. */
+function normalizeExactPattern(pattern: string): string {
+  const stripped =
+    pattern.startsWith("./") || pattern.startsWith(".\\") ? pattern.slice(2) : pattern;
+  return toPosixPath(stripped);
+}
+
+/** pi's `matchesAnyPattern` (`:473-493`), minus the `SKILL.md` branch. */
+function matchesAnyPattern(
+  filePath: string,
+  patterns: readonly string[],
+  baseDir: string,
+): boolean {
+  const rel = toPosixPath(relative(baseDir, filePath));
+  const name = basename(filePath);
+  const filePathPosix = toPosixPath(filePath);
+  return patterns.some((pattern) => {
+    const normalized = toPosixPath(pattern);
+    return (
+      minimatch(rel, normalized) ||
+      minimatch(name, normalized) ||
+      minimatch(filePathPosix, normalized)
+    );
+  });
+}
+
+/** pi's `matchesAnyExactPattern` (`:500-517`), minus the `SKILL.md` branch. */
+function matchesAnyExactPattern(
+  filePath: string,
+  patterns: readonly string[],
+  baseDir: string,
+): boolean {
+  if (patterns.length === 0) return false;
+  const rel = toPosixPath(relative(baseDir, filePath));
+  const filePathPosix = toPosixPath(filePath);
+  return patterns.some((pattern) => {
+    const normalized = normalizeExactPattern(pattern);
+    return normalized === rel || normalized === filePathPosix;
+  });
+}
+
+/**
+ * pi's `getOverridePatterns` (`:520-522`): the entries that carry a sign at all.
+ *
+ * One deliberate divergence. pi's filter calls `.startsWith` on every entry, so a NON-STRING in a
+ * hand-edited `extensions` array makes it throw a `TypeError` and pi never starts. This skips such
+ * entries instead — measured, not assumed: `extensions: [42]` throws in pi and resolves here.
+ *
+ * It diverges in the safe direction and is not worth copying. When pi throws there is no session
+ * for a more faithful answer to matter in, and throwing here would turn a malformed settings file
+ * into a package that cannot load at all. Recorded rather than papered over, because the rest of
+ * this section is a copy, and a silent difference inside a copy is what costs a review round.
+ */
+function signedTargets(
+  entries: readonly unknown[],
+): ReadonlyArray<{ sign: string; target: string }> {
+  const out: { sign: string; target: string }[] = [];
+  for (const entry of entries) {
+    if (typeof entry !== "string") continue;
+    const sign = entry[0];
+    if (sign !== "+" && sign !== "-" && sign !== "!") continue;
+    out.push({ sign, target: entry.slice(1) });
+  }
+  return out;
+}
+
+/**
+ * The switch the PROJECT `extensions` array implies, from pi's
+ * `applyAutoloadDisabledPatterns` (`:593-606`): iterate in order, and let each MATCHING entry
+ * overwrite the last — so a `!` after a `+` wins, and position is meaningful. `+` / `-` are matched
+ * exactly, `!` by glob.
+ */
+function switchFromProjectExtensions(value: unknown, baseDir: string): CodemodeSwitch | undefined {
+  if (!Array.isArray(value)) return undefined;
+  let result: CodemodeSwitch | undefined;
+  for (const { sign, target } of signedTargets(value)) {
+    const enabled = sign !== "-" && sign !== "!";
+    const matched =
+      sign === "+" || sign === "-"
+        ? matchesAnyExactPattern(CODEMODE_BUILTIN_ENTRY, [target], baseDir)
+        : matchesAnyPattern(CODEMODE_BUILTIN_ENTRY, [target], baseDir);
+    if (matched) result = enabled ? "enabled" : "disabled";
+  }
+  return result;
+}
+
+/**
+ * The switch the USER `extensions` array implies, from pi's `isEnabledByOverrides` (`:523-539`):
+ * the array is split into `!` / `+` / `-` buckets and pi ASSIGNS through them in that fixed order,
+ * so position is irrelevant and `-` outranks `+`. Written as three assignments rather than a chain
+ * of early returns, because pi has no early return either.
+ */
+function switchFromUserExtensions(value: unknown, baseDir: string): CodemodeSwitch | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const signed = signedTargets(value);
+  const of = (sign: string): string[] => signed.filter((e) => e.sign === sign).map((e) => e.target);
+  const excludes = of("!");
+  const forceIncludes = of("+");
+  const forceExcludes = of("-");
+  let enabled: CodemodeSwitch | undefined;
+  if (matchesAnyPattern(CODEMODE_BUILTIN_ENTRY, excludes, baseDir)) enabled = "disabled";
+  if (matchesAnyExactPattern(CODEMODE_BUILTIN_ENTRY, forceIncludes, baseDir)) enabled = "enabled";
+  if (matchesAnyExactPattern(CODEMODE_BUILTIN_ENTRY, forceExcludes, baseDir)) enabled = "disabled";
+  return enabled;
+}
+
+/**
+ * Whether the command line explicitly loads `builtin:codemode`.
+ *
+ * Only the two spellings pi's own parser accepts: `-e builtin:codemode` and
+ * `--extension builtin:codemode`, both taking the NEXT argument (`dist/cli/args.js`:
+ * `arg === "--extension" || arg === "-e"` then `args[++i]`). The attached short form
+ * `-ebuiltin:codemode` is deliberately NOT recognised here, because pi rejects it outright
+ * with "Unknown option" -- mirroring that is what keeps this from inventing a behaviour the
+ * host does not have.
+ *
+ * `-ne` is handled by the caller, after this, because pi resolves the pair in that order: an
+ * explicit `-e` re-enables what `--no-extensions` turned off.
+ */
+function cliLoadsCodemode(args: readonly string[]): boolean {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "-e" || arg === "--extension") {
+      if (args[index + 1] === CODEMODE_BUILTIN_ENTRY) return true;
+    }
+  }
+  return false;
+}
+
+/** Read a settings file that may be absent, unreadable, or not a JSON object. */
+function readSettingsObject(path: string): { value: unknown; error?: string } {
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch {
+    // Absent is the normal case for the project-scope file and must not be an error.
+    return { value: undefined };
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { value: undefined, error: `${path} must contain a JSON object` };
+    }
+    return { value: parsed };
+  } catch (error) {
+    return {
+      value: undefined,
+      error: `${path} is not valid JSON (${error instanceof Error ? error.message : String(error)})`,
+    };
+  }
+}
+
+export function resolveCodemodeSwitch(
+  argv: readonly string[],
+  projectSettings: unknown,
+  userSettings: unknown,
+  baseDirs: CodemodeBaseDirs = { project: process.cwd(), user: process.cwd() },
+): CodemodeSwitchResolution {
+  const args = argv.slice(1);
+  if (cliLoadsCodemode(args)) return { switch: "enabled", source: "cli" };
+  if (args.some((arg) => arg === "-ne" || arg === "--no-extensions")) {
+    return { switch: "disabled", source: "cli" };
+  }
+
+  const projectExtensions = (projectSettings as { extensions?: unknown } | undefined)?.extensions;
+  const fromProject = switchFromProjectExtensions(projectExtensions, baseDirs.project);
+  if (fromProject !== undefined) return { switch: fromProject, source: "project" };
+
+  const userExtensions = (userSettings as { extensions?: unknown } | undefined)?.extensions;
+  const fromUser = switchFromUserExtensions(userExtensions, baseDirs.user);
+  if (fromUser !== undefined) return { switch: fromUser, source: "user" };
+
+  return { switch: "absent", source: "default" };
+}
+
+/**
+ * Read pi's own settings files and resolve the switch.
+ *
+ * Project settings live at `<cwd>/.pi/settings.json` and user settings at
+ * `<agentDir>/settings.json` — the two `DefaultPackageManager` reads, via
+ * `join(this.cwd, CONFIG_DIR_NAME)` and `this.agentDir`.
+ */
+export function readCodemodeSwitch(
+  agentDir: string,
+  cwd: string,
+  argv: readonly string[] = process.argv,
+): CodemodeSwitchResolution {
+  const project = readSettingsObject(join(cwd, ".pi", "settings.json"));
+  const user = readSettingsObject(join(agentDir, "settings.json"));
+  const resolved = resolveCodemodeSwitch(argv, project.value, user.value, {
+    project: join(cwd, ".pi"),
+    user: agentDir,
+  });
+  const error = project.error ?? user.error;
+  return error === undefined ? resolved : { ...resolved, source: "invalid", error };
+}
+
+/**
  * The surface to use when the user has expressed no preference. Not a constant: a pi that ships
  * `codemode` already offers the model a second way to orchestrate, and answering that by
- * handing our orchestration surface away is the whole point of `subagents` mode (ADR-0026).
+ * handing our orchestration surface away is the whole point of `subagents` mode (ADR-0026) —
+ * but only while that `codemode` is actually going to run (ADR-0027).
  *
- * A probe that found codemode gets `subagents`; every other outcome gets
- * {@link FALLBACK_SURFACE_MODE}, for the reasons on that constant.
+ * The four cases, as a table:
+ *
+ * | codemode on disk | switch         | surface     | why                                        |
+ * | ---------------- | -------------- | ----------- | ------------------------------------------ |
+ * | yes              | absent         | `subagents` | pi loads it by default, so it can orchestrate |
+ * | yes              | enabled        | `subagents` | ditto, and the user said so explicitly      |
+ * | yes              | disabled       | `full`      | the orchestrator we would hand away to is not there |
+ * | no               | any            | `full`      | nothing to hand it to                       |
  */
-export function detectedSurfaceMode(presence: CodemodePresence): SurfaceMode {
-  return presence.present ? "subagents" : FALLBACK_SURFACE_MODE;
+export function detectedSurfaceMode(
+  presence: CodemodePresence,
+  codemodeSwitch: CodemodeSwitch,
+): SurfaceMode {
+  if (!presence.present) return FALLBACK_SURFACE_MODE;
+  return codemodeSwitch === "disabled" ? "full" : "subagents";
+}
+
+/**
+ * Whether an explicit `surfaceMode` disagrees with what the table above decided.
+ *
+ * The explicit key always WINS — that is what an override is for — so this exists only to be
+ * reported. `off` is exempt: it means "I do not want this package's surface at all", which is a
+ * statement about the package rather than a claim about who orchestrates, and warning about it on
+ * every session would be crying wolf.
+ */
+export function surfaceModeConflict(
+  explicit: SurfaceMode | undefined,
+  detected: SurfaceMode,
+): boolean {
+  return explicit !== undefined && explicit !== "off" && explicit !== detected;
 }
 
 /**
@@ -274,6 +566,16 @@ export interface SurfaceModeConfig {
    * {@link readSurfaceModeConfig}), so there is nothing to report.
    */
   codemode?: CodemodePresence;
+  /**
+   * Whether pi will actually load its own codemode (ADR-0027). Absent for the same reason as
+   * {@link codemode}: an explicit key short-circuits the probe, so there is nothing to report.
+   */
+  codemodeSwitch?: CodemodeSwitchResolution;
+  /**
+   * What the four-case table decided, carried even when an explicit key overrode it — that
+   * difference is exactly what {@link surfaceModeConflict} reports on.
+   */
+  detected?: SurfaceMode;
 }
 
 /**
@@ -285,22 +587,33 @@ export interface SurfaceModeConfig {
  * malformed shape additionally reports `invalid` with a reason. A malformed setting must never
  * half-apply - which tools exist is not something to change on a guess.
  *
- * The `presence` argument is a parameter rather than a hidden call, so a test can state the pi it
- * is reasoning about instead of depending on the machine it runs on. Omit it and the real probe
- * answers, but only on a path that actually needs the answer: it is resolved inside the
- * fallback branches rather than in a default parameter, because a default parameter is evaluated
- * on EVERY call -- including the ones an explicit `surfaceMode` key short-circuits, where the
- * user paid a `realpathSync` plus up to three `statSync` to set one line of JSON and get a
- * constant.
+ * The `presence` and `codemodeSwitch` arguments are parameters rather than hidden calls, so a test
+ * can state the pi it is reasoning about instead of depending on the machine it runs on. Omit
+ * them and the real probes answer, but only on a path that actually needs the answer: they are
+ * resolved inside the fallback branches rather than in a default parameter, because a default
+ * parameter is evaluated on EVERY call -- including the ones an explicit `surfaceMode` key
+ * short-circuits, where the user paid a `realpathSync` plus up to three `statSync` and two
+ * settings reads to set one line of JSON and get a constant.
  */
 export function readSurfaceModeConfig(
   agentDir: string,
   presence?: CodemodePresence,
+  codemodeSwitch?: CodemodeSwitchResolution,
+  cwd: string = process.cwd(),
 ): SurfaceModeConfig {
   const path = join(agentDir, PTC_MODE_CONFIG_FILE);
-  const detected = (): { surfaceMode: SurfaceMode; codemode: CodemodePresence } => {
+  const detected = (): {
+    surfaceMode: SurfaceMode;
+    codemode: CodemodePresence;
+    codemodeSwitch: CodemodeSwitchResolution;
+  } => {
     const probed = presence ?? probeCodemodePresence();
-    return { surfaceMode: detectedSurfaceMode(probed), codemode: probed };
+    const sw = codemodeSwitch ?? readCodemodeSwitch(agentDir, cwd);
+    return {
+      surfaceMode: detectedSurfaceMode(probed, sw.switch),
+      codemode: probed,
+      codemodeSwitch: sw,
+    };
   };
   let raw: string;
   try {
@@ -343,7 +656,16 @@ export function readSurfaceModeConfig(
       error: `${path}: "surfaceMode" must be one of ${SURFACE_MODES.join(" | ")}, received ${JSON.stringify(value)}`,
     };
   }
-  return { surfaceMode: value as SurfaceMode, source: "file" };
+  // An explicit key wins, but the table still runs so the caller can report a disagreement
+  // (ADR-0027). Both probes are paid for on this one path, and only this one.
+  const table = detected();
+  return {
+    surfaceMode: value as SurfaceMode,
+    source: "file",
+    detected: table.surfaceMode,
+    codemode: table.codemode,
+    codemodeSwitch: table.codemodeSwitch,
+  };
 }
 
 // --------------------------------------------------------------------------------------

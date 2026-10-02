@@ -11,6 +11,12 @@
  * fake clock, an InMemoryOutputStorage, and a MockChildProcessLifecycle — no real timers and no
  * spawned process. Each tool has an explicit failure-path test (unknown taskId / invalid limit /
  * illegal stop), never a silent empty value.
+ *
+ * The "codemode projection" describe adds the third result surface: `outputSchema` /
+ * `structuredContent` (pi 1.0.0). Its key names come from the same authority as the `details`
+ * assertions — the text `formatTaskLine` prints plus ADR-0022 §3 — and the omit-an-optional-key
+ * cases are asserted with `Object.hasOwn`, because `toBeUndefined` passes just as happily for
+ * `{k: undefined}` as for `{}` and only the first one is not a `JsonValue`.
  */
 
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
@@ -40,6 +46,7 @@ import {
   createPtcTaskListTool,
   createPtcTaskOutputTool,
   createPtcTaskStopTool,
+  DEFAULT_STOP_REASON,
   type AnyTool,
   type PtcTaskListDetails,
   type PtcTaskOutputDetails,
@@ -172,13 +179,31 @@ async function spawnTask(
   return result.record;
 }
 
-/** Drive one tool the way pi's agent loop does; the task tools read no context fields. */
+/**
+ * Drive one tool the way pi's agent loop does; the task tools read no context fields.
+ * The result carries `structuredContent` (pi 1.0.0's codemode projection) next to `content` and
+ * `details` — pi types it `JsonValue | undefined` and documents it as "Not sent to the model", so
+ * widening this cast observes it without changing what any existing assertion sees.
+ */
 async function callTool<TDetails>(
   tool: AnyTool,
   params: unknown,
-): Promise<{ content: Array<{ type: string; text?: string }>; details: TDetails }> {
+): Promise<{
+  content: Array<{ type: string; text?: string }>;
+  details: TDetails;
+  structuredContent?: unknown;
+}> {
   const result = await tool.execute("call-1", params, undefined, undefined, undefined as never);
-  return result as { content: Array<{ type: string; text?: string }>; details: TDetails };
+  return result as {
+    content: Array<{ type: string; text?: string }>;
+    details: TDetails;
+    structuredContent?: unknown;
+  };
+}
+
+/** The `structuredContent` of one successful call — the value pi hands a codemode script. */
+async function callStructured<T>(tool: AnyTool, params: unknown): Promise<T> {
+  return (await callTool(tool, params)).structuredContent as T;
 }
 
 function textOf(result: { content: Array<{ type: string; text?: string }> }): string {
@@ -528,6 +553,242 @@ describe("ptc_task_stop", () => {
     expect(log.filter((event) => event.type.endsWith(":stopping"))).toHaveLength(1);
     // The tool still never signals; the dispatcher pump owns the ladder.
     expect(killSpy).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+//  codemode projection: `outputSchema` + `structuredContent` (pi 1.0.0)
+// ---------------------------------------------------------------------------
+
+/**
+ * The three declared output shapes, written out as literals rather than imported: the source of
+ * truth for the key names is the text `formatTaskLine` prints for the model (`id`, `status`,
+ * agent, `depth=`, label, `<bytes>B`, `error=<message>`) and ADR-0022 §3's field list — the same
+ * authority the `details` assertions above use, so a shape change has to be argued for here.
+ */
+interface ListRowShape {
+  id: string;
+  status: string;
+  agent: string;
+  depth: number;
+  label: string;
+  output_bytes?: number;
+  error_message?: string;
+}
+interface ListShape {
+  tasks: ListRowShape[];
+  count: number;
+}
+interface OutputShape {
+  task_id: string;
+  status: string;
+  output: string;
+  output_bytes: number;
+  output_preview?: string;
+  output_truncated: boolean;
+  output_full_path?: string;
+}
+interface StopShape {
+  task_id: string;
+  status: string;
+  from_status: string;
+  stop_reason?: string;
+}
+
+/** What a naive mirror of `details` would carry that the projection must not (ADR-0022 §3). */
+const MIRROR_ONLY_KEYS = ["outputRef", "outputPreview", "ownerPid", "ownerBootMs"];
+
+describe("codemode projection (outputSchema / structuredContent)", () => {
+  test("ptc_task_list projects the filterable fields and leaves the record's fat behind", async () => {
+    const h = createHarness(1000);
+    // A record carrying the two optional fields plus everything a mirror of `details` would drag
+    // in: a 12-byte preview, its storage ref, and the ADR-0023 owner identity.
+    h.clock.set(1000);
+    await spawnTask(h, TASK_1, {
+      label: "research X",
+      outputBytes: 12,
+      errorMessage: "spawn failed",
+      outputPreview: SMALL_OUTPUT,
+      outputRef: "memory:tasks/x/output.log",
+      ownerPid: 4242,
+      ownerBootMs: 1_700_000_000_001,
+    });
+    h.clock.set(2000);
+    await spawnTask(h, TASK_2, { label: "research Y" });
+    const tool = createPtcTaskListTool(h.registry);
+
+    const structured = await callStructured<ListShape>(tool, {});
+
+    // toStrictEqual, not toEqual: toEqual treats `{a: undefined}` and `{}` as equal, which is
+    // exactly the mistake this projection exists to avoid (see the Object.hasOwn cases below).
+    expect(structured).toStrictEqual({
+      count: 2,
+      tasks: [
+        { id: TASK_2, status: "running", agent: "researcher", depth: 0, label: "research Y" },
+        {
+          id: TASK_1,
+          status: "running",
+          agent: "researcher",
+          depth: 0,
+          label: "research X",
+          output_bytes: 12,
+          error_message: "spawn failed",
+        },
+      ],
+    });
+    // The lean-projection rule, checked on the row that DOES carry those four fields: `details`
+    // keeps them, the projection must not. Mirroring `details` makes this loop fail on key one.
+    const fat = structured.tasks[1] as ListRowShape;
+    for (const key of MIRROR_ONLY_KEYS) {
+      expect(Object.hasOwn(fat, key)).toBe(false);
+    }
+    // `content` and `details` are untouched by all of this.
+    const full = await callTool<PtcTaskListDetails>(tool, {});
+    const record = full.details.tasks.find((entry) => entry.id === TASK_1);
+    expect(record?.outputPreview).toBe(SMALL_OUTPUT);
+    expect(record?.outputRef).toBe("memory:tasks/x/output.log");
+    expect(record?.ownerPid).toBe(4242);
+    expect(textOf(full)).toContain("error=spawn failed");
+  });
+
+  test("a running task's row omits output_bytes and error_message as keys, not as undefined", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    const tool = createPtcTaskListTool(h.registry);
+
+    const row = (await callStructured<ListShape>(tool, {})).tasks[0] as ListRowShape;
+
+    // `JsonObject` is `{ [key: string]: JsonValue }` and `undefined` is not a `JsonValue`, so a key
+    // set to undefined is a type error and a key serialized into the sandbox is a lie. Object.hasOwn
+    // is the only assertion that tells the two apart — `toBeUndefined` passes for both.
+    expect(Object.hasOwn(row, "output_bytes")).toBe(false);
+    expect(Object.hasOwn(row, "error_message")).toBe(false);
+    expect(Object.keys(row).sort()).toEqual(["agent", "depth", "id", "label", "status"]);
+  });
+
+  test("ptc_task_output projects the truncation facts plus the record's status", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    await h.outputs.writeOutput(TASK_1, SMALL_OUTPUT);
+    const tool = createPtcTaskOutputTool(h.registry, h.outputs);
+
+    const structured = await callStructured<OutputShape>(tool, { taskId: TASK_1 });
+
+    expect(structured).toStrictEqual({
+      task_id: TASK_1,
+      status: "running",
+      output: SMALL_OUTPUT,
+      output_bytes: 12,
+      output_preview: SMALL_OUTPUT,
+      output_truncated: false,
+    });
+    // 12 <= 2048, so ADR-0022 §7's inline preview is present; nothing was cut, so there is no
+    // full-output file to point at.
+    expect(Object.hasOwn(structured, "output_full_path")).toBe(false);
+  });
+
+  test("a truncated read carries output_full_path and drops output_preview as a key", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    await h.outputs.writeOutput(TASK_1, LARGE_OUTPUT);
+    const tool = createPtcTaskOutputTool(h.registry, h.outputs);
+
+    const structured = await callStructured<OutputShape>(tool, { taskId: TASK_1 });
+    const fullPath = structured.output_full_path as string;
+    tempFullPaths.push(fullPath);
+
+    expect(structured.task_id).toBe(TASK_1);
+    expect(structured.status).toBe("running");
+    expect(structured.output_bytes).toBe(Buffer.byteLength(LARGE_OUTPUT, "utf8"));
+    expect(structured.output_truncated).toBe(true);
+    expect(structured.output_full_path).toBe(fullPath);
+    // ~24 KB is over the 2048-byte preview ceiling, so the key is absent rather than empty.
+    expect(Object.hasOwn(structured, "output_preview")).toBe(false);
+    expect(structured.output).toContain("line-2499");
+  });
+
+  test("ptc_task_stop projects task_id, status, from_status and stop_reason", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    h.clock.set(1500);
+    const tool = createPtcTaskStopTool(h.registry, h.lifecycle, { clock: h.clock.clock });
+
+    const structured = await callStructured<StopShape>(tool, { taskId: TASK_1 });
+
+    expect(structured).toStrictEqual({
+      task_id: TASK_1,
+      status: "stopping",
+      from_status: "running",
+      stop_reason: "model stop",
+    });
+    // The default reason is a real ADR-0022 §8 string, not an empty stand-in.
+    expect(structured.stop_reason).toBe(DEFAULT_STOP_REASON);
+  });
+
+  test("a late stop on a reasonless record omits stop_reason as a key", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    // Reach `stopping` without a reason through the generic transition edge (the registry's
+    // `reason` -> stopReason rule only fires when a reason is supplied), so the late-arrival stop
+    // below returns a record that genuinely has no stopReason. The reachable half of the omit rule.
+    await h.registry.transition(
+      { kind: "transition", taskId: TASK_1, to: "stopping" },
+      { clock: h.clock.clock, callerId: CALLER },
+    );
+    const tool = createPtcTaskStopTool(h.registry, h.lifecycle, { clock: h.clock.clock });
+
+    const structured = await callStructured<StopShape>(tool, { taskId: TASK_1, reason: "second" });
+
+    expect(structured.status).toBe("stopping");
+    expect(structured.from_status).toBe("stopping");
+    expect(Object.hasOwn(structured, "stop_reason")).toBe(false);
+    expect(Object.keys(structured).sort()).toEqual(["from_status", "status", "task_id"]);
+  });
+
+  test("every projection survives a JSON round trip — the sandbox receives JSON, not objects", async () => {
+    const h = createHarness(1000);
+    h.clock.set(1000);
+    await spawnTask(h, TASK_1, { outputBytes: 12, errorMessage: "spawn failed" });
+    h.clock.set(2000);
+    await spawnTask(h, TASK_2);
+    await h.outputs.writeOutput(TASK_1, SMALL_OUTPUT);
+    const list = createPtcTaskListTool(h.registry);
+    const output = createPtcTaskOutputTool(h.registry, h.outputs);
+    const stop = createPtcTaskStopTool(h.registry, h.lifecycle, { clock: h.clock.clock });
+
+    const listValue = await callStructured<ListShape>(list, {});
+    const outputValue = await callStructured<OutputShape>(output, { taskId: TASK_1 });
+    const stopValue = await callStructured<StopShape>(stop, { taskId: TASK_1, reason: "done" });
+
+    // A key whose value is `undefined` survives `toStrictEqual` above and VANISHES here, so this
+    // round trip is what actually proves the projections are real JSON.
+    expect(JSON.parse(JSON.stringify(listValue))).toStrictEqual(listValue);
+    expect(JSON.parse(JSON.stringify(outputValue))).toStrictEqual(outputValue);
+    expect(JSON.parse(JSON.stringify(stopValue))).toStrictEqual(stopValue);
+    // The bare row keeps its five keys across the trip — nothing was silently dropped. It is
+    // `tasks[0]` because the projection is newest-first and TASK_2 spawned last.
+    const bare = (JSON.parse(JSON.stringify(listValue)) as ListShape).tasks[0] as ListRowShape;
+    expect(Object.keys(bare).sort()).toEqual(["agent", "depth", "id", "label", "status"]);
+  });
+
+  test("a failing call has no result and so no structuredContent to project (constraint #1)", async () => {
+    const h = createHarness(1000);
+    const output = createPtcTaskOutputTool(h.registry, h.outputs);
+    const stop = createPtcTaskStopTool(h.registry, h.lifecycle, { clock: h.clock.clock });
+    await spawnTask(h, TASK_1);
+
+    // The declared schemas describe successful results only; pi's `toScriptValue` falls back to
+    // the text content (and then throws it) when there is no `structuredContent`, so a failure
+    // must reject rather than resolve with a half-filled projection.
+    await expect(callTool(output, { taskId: TASK_404 })).rejects.toThrow(
+      `ptc_task_output: unknown taskId ${TASK_404}`,
+    );
+    await expect(callTool(stop, { taskId: TASK_404 })).rejects.toThrow(
+      `ptc_task_stop: unknown taskId ${TASK_404}`,
+    );
+    await expect(callTool(output, { taskId: TASK_1, sinceBytes: 1.5 })).rejects.toThrow(
+      /sinceBytes must be a non-negative integer/,
+    );
   });
 });
 

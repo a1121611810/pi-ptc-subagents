@@ -22,7 +22,7 @@ import { DISPATCH_PARAMETERS } from "../../src/runtime/bindings.ts";
 import { DEFAULT_CONFIG } from "../../src/runtime/limits.ts";
 import { createBackgroundTaskRuntime } from "../../src/runtime/background-runtime.ts";
 import { DispatchSlotCounter, dispatch, setPromptFileWriter } from "../../src/runtime/dispatch.ts";
-import { createPtcSubagentTool } from "../../src/tools/subagent.ts";
+import { createPtcSubagentTool, SUBAGENT_OUTPUT_SCHEMA } from "../../src/tools/subagent.ts";
 import { createTaskRegistry, type TaskRegistry } from "../../src/runtime/task-registry.ts";
 import { InMemoryTaskStorage } from "../../src/runtime/task-storage.ts";
 import type { ULID } from "../../src/runtime/task-storage.ts";
@@ -197,6 +197,68 @@ const baseOptions = (dir: string, deps: DispatchDeps) => ({
   maxDispatchDepth: DEFAULT_CONFIG.maxDispatchDepth,
   getDispatchDeps: () => deps,
 });
+
+/**
+ * The tool result as the codemode-facing tests read it. `run` is generic over the tool's own return
+ * type and pi types `structuredContent` as an opaque `JsonValue`, so the channel under test is
+ * spelled out here rather than cast at each use site.
+ */
+interface ObservedResult {
+  content: { type: string; text: string }[];
+  details: { taskId?: string; status?: string; exitCode?: number };
+  structuredContent?: Record<string, unknown>;
+}
+
+const observed = (result: unknown): ObservedResult => result as ObservedResult;
+
+/** The projection, or a loud failure -- a missing channel must not read as an empty one. */
+function structuredOf(result: ObservedResult): Record<string, unknown> {
+  const structured = result.structuredContent;
+  if (structured === undefined) {
+    throw new Error("ptc_subagent returned no structuredContent");
+  }
+  return structured;
+}
+
+/** The assistant text the mock child "produced". `PONG` is the repo's own child-answer literal. */
+const FOREGROUND_ANSWER = "PONG";
+/** The code the mock foreground child closes with, handed in by this file, not read back. */
+const FOREGROUND_EXIT_CODE = 0;
+
+/** One background call through the real front, with its harness so a test can reach the registry. */
+async function dispatchBackground(dir: string): Promise<{ result: ObservedResult; h: Harness }> {
+  const h = createHarness();
+  const tool = createPtcSubagentTool(baseOptions(dir, h.deps));
+  const result = await run(tool, {
+    agent: AGENT,
+    agentScope: "project",
+    task: "look at the tests",
+    background: true,
+  });
+  // Asserted here rather than in each test: without a child there is no background outcome at all,
+  // and "structuredContent is absent because nothing was dispatched" is a false pass.
+  expect(h.lifecycle.spawnCount, "the background fixture really launched a child").toBe(1);
+  return { result: observed(result), h };
+}
+
+/**
+ * One FOREGROUND call driven to a clean, answering close: push the assistant text, then close with
+ * `FOREGROUND_EXIT_CODE`. Both halves are required -- `decideCloseOutcome` only returns `fulfilled`
+ * for exit 0 WITH final text, and a `rejected` outcome never reaches either success return.
+ */
+async function dispatchForeground(dir: string): Promise<ObservedResult> {
+  const h = createHarness();
+  const tool = createPtcSubagentTool(baseOptions(dir, h.deps));
+  const settled = run(tool, { agent: AGENT, agentScope: "project", task: "answer, then stop" });
+  await waitFor(() => h.lifecycle.spawnCount > 0);
+  const child = h.lifecycle.handleAt(0);
+  h.lifecycle.pushEvent(child, {
+    type: "message_end",
+    message: { role: "assistant", content: [{ type: "text", text: FOREGROUND_ANSWER }] },
+  });
+  h.lifecycle.resolveExit(child, FOREGROUND_EXIT_CODE, null);
+  return observed(await settled);
+}
 
 describe("ptc_subagent", () => {
   test("a background call spawns a child and hands back a task id the model can use", async () => {
@@ -533,6 +595,155 @@ describe("ptc_subagent and the dispatch cap", () => {
       await waitFor(() => warnings.length > 0);
       expect(warnings.join("\n")).toContain("exit() failed for a foreground child");
       expect(warnings.join("\n")).toContain("injected: exit blew up");
+    });
+  });
+});
+
+/**
+ * The `structuredContent` channel: what a codemode script receives INSTEAD of the text block once
+ * the tool declares an `outputSchema` (`ToolDefinition.outputSchema`). This tool is the only way a
+ * session that has handed orchestration to pi's `codemode` can start a subagent at all, so before
+ * this channel existed the script had to regex the ULID out of `"Started background task 01JABC..."`.
+ *
+ * Every absence claim below is asserted with `Object.hasOwn`, never with `=== undefined`. That is
+ * the defect this suite exists to catch: `JsonValue` has no `undefined`, so a key set to
+ * `undefined` compiles fine in spirit, reads identically to "absent" through the obvious check,
+ * and then vanishes at `JSON.stringify` -- on the far side of the very boundary being tested.
+ */
+describe("ptc_subagent structuredContent", () => {
+  test("a background call hands the script a pollable id and no exit code", async () => {
+    await withAgent(async (dir) => {
+      const { result, h } = await dispatchBackground(dir);
+      const structured = structuredOf(result);
+      expect(structured.task_id, "the id is a value, not prose the script has to parse").toBe(
+        result.details.taskId,
+      );
+      expect(structured.status, "and the script is told this is a handle").toBe("background");
+      expect(
+        Object.hasOwn(structured, "exit_code"),
+        "a handle has nothing to report yet, so the key is ABSENT rather than undefined",
+      ).toBe(false);
+      // Independent sources for the id itself, not "whatever the tool wrote". `PARENT_TASK` is this
+      // file's canonical 26-char Crockford-base32 ULID literal, so the shape is a stated invariant
+      // rather than a copy of the implementation; and the registry proves the id names a task that
+      // really exists in this session, which no locally-invented string could.
+      const record = await h.registry.get(structured.task_id as ULID);
+      expect(record?.agentName, "the id names a task the session registry really holds").toBe(
+        AGENT,
+      );
+      expect(String(structured.task_id), "and it is a ULID, like PARENT_TASK above").toMatch(
+        /^[0-9A-HJKMNP-TV-Z]{26}$/,
+      );
+    });
+  });
+
+  test("a call that already finished hands the script the exit code and no task id", async () => {
+    await withAgent(async (dir) => {
+      const structured = structuredOf(await dispatchForeground(dir));
+      expect(structured.status, "the dispatcher's own status, not the word 'background'").toBe(
+        "fulfilled",
+      );
+      // Presence and value are separate assertions on purpose: `0` is falsy, so a script cannot
+      // tell "exited 0" from "nothing to report" by truthiness -- which is exactly why the
+      // background test above pins absence with `hasOwn`.
+      expect(
+        Object.hasOwn(structured, "exit_code"),
+        "a finished call has something to report, so the key is present",
+      ).toBe(true);
+      expect(structured.exit_code, "and it is the code this file closed the child with").toBe(
+        FOREGROUND_EXIT_CODE,
+      );
+      expect(Object.hasOwn(structured, "task_id"), "and there is nothing to poll").toBe(false);
+    });
+  });
+
+  test("the two outcomes are told apart from the projection alone, with no text in reach", async () => {
+    await withAgent(async (dir) => {
+      const handle = structuredOf((await dispatchBackground(dir)).result);
+      const finished = structuredOf(await dispatchForeground(dir));
+      // The property the change exists for. A codemode script gets this object INSTEAD of the text
+      // block, so its routing decision has to be readable from here -- with key sets, because
+      // `exit_code: 0` and "no exit_code" are the same observation to any truthiness test.
+      expect(Object.keys(handle).sort(), "a handle is {task_id, status}").toEqual([
+        "status",
+        "task_id",
+      ]);
+      expect(Object.keys(finished).sort(), "a finished call is {status, exit_code}").toEqual([
+        "exit_code",
+        "status",
+      ]);
+      expect("task_id" in handle, "so a script branches on task_id for 'poll me'").toBe(true);
+      expect("task_id" in finished, "and on its absence for 'already done'").toBe(false);
+      // Not on `status`, which would also discriminate. The two branches differ in WHICH key they
+      // carry, and that is the claim: the id is the thing a script acts on next.
+      expect(Object.keys(handle).sort().join(",")).not.toBe(Object.keys(finished).sort().join(","));
+    });
+  });
+
+  test("every key the tool emits is declared in its outputSchema", async () => {
+    // Nothing in pi enforces this. `structuredContent` is never validated against `outputSchema`
+    // -- there is no warning and no error -- so a key added to the projection without a schema
+    // entry reaches a script undeclared and no gate in this repo complains. This is the only place
+    // the two can be held together.
+    await withAgent(async (dir) => {
+      // A Set, because the two outcomes legitimately share `status` -- comparing two concatenated
+      // lists would make this test fail on the shared key alone and hide a real drift.
+      const emitted = [
+        ...new Set([
+          ...Object.keys(structuredOf((await dispatchBackground(dir)).result)),
+          ...Object.keys(structuredOf(await dispatchForeground(dir))),
+        ]),
+      ].sort();
+      const declared = Object.keys(SUBAGENT_OUTPUT_SCHEMA.properties ?? {}).sort();
+      expect(emitted, "every emitted key is a declared one").toEqual(declared);
+      // And the projection stays LEAN -- three keys, none of them the `details` spelling, and no
+      // field that exists only to say "this does not apply".
+      expect(declared).toEqual(["exit_code", "status", "task_id"]);
+      expect(declared, "snake_case, like pi's own builtins").not.toContain("taskId");
+      expect(declared).not.toContain("exitCode");
+    });
+  });
+
+  test("the projection survives the JSON round trip the sandbox makes", async () => {
+    await withAgent(async (dir) => {
+      const handle = structuredOf((await dispatchBackground(dir)).result);
+      const finished = structuredOf(await dispatchForeground(dir));
+      // The sandbox receives what `JSON.stringify` produced. `toEqual` would not notice an
+      // `undefined`-valued key -- it ignores undefined properties -- so this uses `toStrictEqual`,
+      // which does: an explicit `exit_code: undefined` on the handle is exactly what would vanish
+      // here and leave the script with a projection its schema does not describe.
+      expect(JSON.parse(JSON.stringify(handle))).toStrictEqual(handle);
+      expect(JSON.parse(JSON.stringify(finished))).toStrictEqual(finished);
+      // The key sets, again by length and by hasOwn: the round trip above compares VALUES, and a
+      // dropped key is a shape change a value comparison can report as equal.
+      expect(Object.keys(JSON.parse(JSON.stringify(handle)))).toHaveLength(2);
+      expect(Object.keys(JSON.parse(JSON.stringify(finished)))).toHaveLength(2);
+    });
+  });
+
+  test("a refusal still throws, and hands a script no result to mistake for a handle", async () => {
+    await withAgent(async (dir) => {
+      const h = createHarness();
+      const tool = createPtcSubagentTool(baseOptions(dir, h.deps));
+      let result: unknown = undefined;
+      let message = "";
+      try {
+        result = await run(tool, {
+          agent: "no-such-agent",
+          agentScope: "project",
+          task: "anything",
+        });
+      } catch (error) {
+        message = error instanceof Error ? error.message : String(error);
+      }
+      expect(message, "the refusal is still an error rather than a result").toContain(
+        "ptc_subagent",
+      );
+      // Its own test because a `rejected` DispatchResult is the one outcome neither success
+      // projection covers, and resolving it as `{ structuredContent: { status: "rejected" } }`
+      // would look like an improvement. A script would then see a THIRD shape -- a status with
+      // neither task_id nor exit_code -- that the two-branch discrimination above never sees.
+      expect(result, "no result object escaped the throw").toBeUndefined();
     });
   });
 });

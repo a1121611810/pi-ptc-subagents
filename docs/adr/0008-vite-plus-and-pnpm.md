@@ -121,6 +121,16 @@ Shipping our own inlined copy means the extension renders with a _different_ pi-
 that calls it, pinned to whatever this repo's devDependency happened to be, and diverging silently as
 pi moves.
 
+**Addendum (2026-10-02) — a package that must NOT be on `neverBundle`.** ADR-0027's mirror of
+pi's `matchesAnyPattern` added `minimatch ^10.2.6` — the version pi itself pins — as a regular
+**dependency**. Every entry on `deps.neverBundle` is there because pi _provides_ the package and an
+inline copy would be a second, wrong one; `minimatch` is the opposite case, because it is ours to
+ship. tsdown externalises `dependencies` by default, so it stays an `import` in `dist/index.js` and
+npm installs it beside the extension, which is the required outcome. Listing it on `neverBundle`
+would break the install rather than protect it. The build's `Detected dependencies in bundle` hint
+is the signal that it had moved to `devDependencies` by accident; `vite.config.ts` carries the note
+so the next person adding a dependency knows which list it belongs in.
+
 Fix: `@earendil-works/pi-tui` joined `deps.neverBundle`, and the package declares it as an optional
 **peerDependency** (kept as a devDependency for types/build). Result:
 
