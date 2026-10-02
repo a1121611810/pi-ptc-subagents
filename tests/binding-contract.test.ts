@@ -459,12 +459,87 @@ describe("the contract is true of the runtime it describes", () => {
       await bindings.get("bash")?.execute({ command: "exit 3" }, CALL);
     } catch (error) {
       rejected = true;
-      // The binding re-throws whatever the tool threw; the worker is what wraps
-      // it as a ToolCallError, so the name is asserted at the worker layer, not
-      // here. What this layer owes the model is simply that it rejects.
+      // On pi 1.0.0 `bash` no longer throws: a non-zero exit resolves with
+      // `isError: true`, so `src/runtime/bindings.ts` synthesises the message from
+      // the tool's own text ("bash failed: ...Command exited with code 3") and throws
+      // that. The claim is unchanged, it just moved one layer: what this layer owes
+      // the model is that a non-zero exit REJECTS rather than resolving, and the exit
+      // code is still in the rejection because it is pi's own trailing status
+      // sentence rather than something the binding invents. The name is still
+      // asserted at the worker layer, which is what wraps this as a ToolCallError.
       expect(String((error as Error).message), "the failure names the exit code").toContain("3");
     }
     expect(rejected, "a non-zero exit rejects rather than resolving").toBe(true);
+  });
+
+  test("a failure message past the cap keeps the tail, which is where pi puts the exit code", async () => {
+    // Markers this test chooses, so the assertion is not read back out of the
+    // implementation. The ~5 KB of filler between them is what crosses the cap; pi's
+    // own limits are far above it (50 KB / 2000 lines, `core/tools/truncate.js`), so
+    // the whole payload really does reach the binding.
+    const HEAD_MARKER = "PTCHEAD0000";
+    const TAIL_MARKER = "PTCTAIL9999";
+    const payload = HEAD_MARKER + "x".repeat(5000) + TAIL_MARKER;
+
+    const bindings = createBuiltinBindings({ cwd: process.cwd() });
+    let message = "";
+    try {
+      await bindings
+        ?.get("bash")
+        ?.execute({ command: `printf '%s\\n' '${payload}'; exit 3` }, CALL);
+    } catch (error) {
+      message = String((error as Error).message);
+    }
+
+    // Pi's own literal, not ours: the reason the tail is the half worth keeping.
+    expect(message, "a non-zero exit rejects, and pi named the code").toContain(
+      "Command exited with code 3",
+    );
+    expect(message, "the tail survives truncation").toContain(TAIL_MARKER);
+    // …and the head does not, which is what makes this a statement about direction
+    // rather than about truncation happening at all: a binding that kept the head
+    // would keep the 5 KB dump and drop the sentence that says what failed.
+    expect(message, "the leading 5 KB is dropped, not the diagnostic").not.toContain(HEAD_MARKER);
+
+    // The MAGNITUDE, not just the direction. Direction alone is satisfied by any cap from ~200 to
+    // 5000, so this asserts the retained length as a literal: the contract is "at most 2000
+    // characters of the tool's own text, behind the tool name and an ellipsis". Mutating the cap to
+    // 200 turns this red, where the three assertions above stay green.
+    expect(message.length, "the retained body is exactly the documented 2000 characters").toBe(
+      "bash failed: ".length + "…".length + 2000,
+    );
+
+    // The empty-text branch of `bindingFailureMessage` is deliberately NOT covered
+    // here, and the reason is measured rather than assumed: of the seven builtins on
+    // pi 1.0.0 only `bash` ever sets `isError` (`core/tools/bash.js`, the non-zero
+    // exit), and its text is `appendStatus(output, "Command exited with code N")`,
+    // which appends the sentence unconditionally -- the neighbouring test shows it
+    // arriving even from a command that prints nothing. The other six throw or
+    // resolve, never reaching the helper. So the branch is unreachable through the
+    // public seam, and a test for it would have to stand in a fake tool result, i.e.
+    // assert the helper against itself. Left unpinned on purpose.
+  });
+
+  test("a failure message under the cap is not truncated at all", async () => {
+    // The other half of the boundary pair, and the reason the cap is not merely "small": without
+    // it, a binding that dropped the head at 1000 characters would satisfy the test above too.
+    const HEAD_MARKER = "SHORTHEAD";
+    const TAIL_MARKER = "SHORTTAIL";
+    const payload = HEAD_MARKER + "y".repeat(1000) + TAIL_MARKER;
+
+    const bindings = createBuiltinBindings({ cwd: process.cwd() });
+    let message = "";
+    try {
+      await bindings?.get("bash")?.execute({ command: `printf '%s' '${payload}'; exit 3` }, CALL);
+    } catch (error) {
+      message = String((error as Error).message);
+    }
+
+    expect(message, "a short failure is not truncated and keeps no ellipsis").not.toContain("…");
+    expect(message, "and its head survives").toContain(HEAD_MARKER);
+    expect(message, "and pi's own status sentence is there too").toContain(
+      "Command exited with code 3",
+    );
   });
 });
 
