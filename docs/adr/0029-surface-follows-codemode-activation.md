@@ -1,0 +1,178 @@
+---
+
+status: accepted (2026-10-03)
+
+# The detected surface follows whether codemode will be ACTIVE, not only whether it ships or loads
+
+## Context
+
+ADR-0026 made the surface default DETECTED, ADR-0027 made that detection follow whether pi will
+**load** `codemode`, and both are correct as far as they go. The table ADR-0027 settled on has two
+axes — is the directory on disk, and will the extension load — and four cells. A real 1.0.0 install
+sits in one of them, and the session it produces has **no orchestration tool at all**:
+
+```
+surfaceMode is subagents, but codemode is not active in this session, so there is no
+orchestration tool. Add codemode to your pi tool list (the --tools flag or the default
+tools setting), or set surfaceMode to "full" to use ptc_run_code instead.
+```
+
+That warning is not a misconfiguration, and it is not rare. On the machine this was found on,
+nothing was misconfigured at all: `~/.pi/agent/ptc.json` absent, no `extensions` entry naming
+`builtin:codemode` in the user settings, no `defaultTools`, no `--tools` on the command line. The
+chain runs:
+
+| step       | fact                                                           | source                                        |
+| ---------- | -------------------------------------------------------------- | --------------------------------------------- |
+| presence   | `dist/extensions/codemode` exists                              | `probeCodemodePresence`                       |
+| switch     | no entry anywhere ⇒ `"absent"` ⇒ pi loads built-ins by default | `resolveCodemodeSwitch`                       |
+| ⇒ surface  | `subagents`                                                    | `detectedSurfaceMode` (`ptc-mode.ts:628-637`) |
+| activation | `codemode` registers with **`defaultActive: false`**           | `dist/extensions/codemode/index.js:26`        |
+| ⇒ loadout  | pi's default active names are `["read","bash","edit","write"]` | `settings-manager.js:35`                      |
+| ⇒ warning  | `getActiveTools()` has no `codemode`                           | `src/index.ts:771`                            |
+
+So `subagents` hands orchestration to a tool that is loaded, registered, and not callable — and
+because `subagents` deliberately does not register `ptc_run_code`, the session is left with
+nothing to orchestrate with. **Every default session on a 1.0.0 install hits this.** It is the
+default cell, and the table does not have it.
+
+pi's own documentation is unambiguous that this is intended behaviour, not a bug on the user's
+side (`dist/extensions/codemode/index.d.ts`):
+
+> `codemode` is registered inactive. Activate it with `--tools`, the `defaultTools` setting, or
+> `setActiveTools()`.
+
+ADR-0026's `probeCodemodePresence` docstring already said its answer is "does this pi ship
+codemode", NOT "can this session call it", and ADR-0027 pushed the second question to
+`session_start` — where a `pi` finally exists. **The second question was used to emit a warning and
+nothing else.** That is the whole defect: a measurement was taken at the one moment it became
+possible, and then not used in the decision that had to be made earlier.
+
+## What we add
+
+A third probe, kept as separate from the other two as the questions are, and a five-cell table
+over all three.
+
+| codemode on disk | switch   | activation | surface     | why                                                             |
+| ---------------- | -------- | ---------- | ----------- | --------------------------------------------------------------- |
+| no               | any      | any        | `full`      | nothing to hand it to                                           |
+| yes              | disabled | any        | `full`      | the extension we would hand away to is not loading              |
+| yes              | enabled  | `active`   | `subagents` | it is loaded AND the model can call it                          |
+| yes              | absent   | `active`   | `subagents` | ditto                                                           |
+| yes              | enabled  | `inactive` | `full`      | **it is loaded but the model cannot call it — do not delegate** |
+
+The last row is the one this ADR adds, and it is the default.
+
+### Absence of evidence is `inactive`
+
+The activation probe resolves in the same order pi does, reading the same three places:
+
+1. `--tools` / `-t <list>` on the command line (`dist/cli/args.js:110`) — an allowlist that
+   **replaces** the default loadout, so codemode is active iff the comma-split list names it
+2. `defaultTools` in `<cwd>/.pi/settings.json` merged over the same key in
+   `<agentDir>/settings.json`, then resolved
+3. otherwise pi's default — `["read","bash","edit","write"]`, none of them `codemode` — so
+   **`inactive`**
+
+Step 3 is the load-bearing one, and it is the whole design: `subagents` is chosen only on
+**positive** evidence that codemode is callable. "Nobody said anything" resolves to `full`.
+
+### The mirror, and why it does not have to be perfect
+
+Both settings functions are reproduced against pi 1.0.0's source rather than approximated, and
+both are short enough to copy whole:
+
+- `isToolModifier` (`settings-manager.js:36`) — a string starting with `+` or `-`
+- `mergeDefaultTools` (`:43`) — a project list of only modifiers **concatenates** onto the user
+  list; a project list containing any plain name **replaces** it wholesale
+- `resolveDefaultTools` (`:55`) — plain names form the base list, or `DEFAULT_TOOL_NAMES` when
+  every entry is a modifier; then `+name` adds and `-name` removes, in list order
+
+`deepMergeSettings(this.globalSettings, this.projectSettings)` (`:196`) fixes the direction: the
+user file is the base, the project file the override. That is the same read order
+`readCodemodeSwitch` already uses, which is why both probes walk the same two files.
+
+None of this is exported from pi, so unlike ADR-0027's `minimatch` copy there is **no differential
+oracle** for it. `tests/unit/codemode-activation.test.ts` therefore pins the rules as literals
+against the cited line numbers, and that is a weaker guarantee than a differential and is labelled
+as one.
+
+**The bound that makes the weaker guarantee sufficient.** The two ways this mirror can be wrong
+are not symmetric:
+
+- **Over-reporting activation** — we say `active`, pi does not activate it. The surface is
+  `subagents` with no orchestrator, which is the bug this ADR exists to remove. It is caught, and
+  caught by measurement rather than by this probe: the decision-4 warning at `src/index.ts:771`
+  asks `pi.getActiveTools()` at `session_start`, where the answer is the real one. The failure
+  degrades to exactly the behaviour that exists today, loudly.
+- **Under-reporting activation** — we say `inactive`, pi would have activated it. The surface is
+  `full` when `subagents` was available. Nothing breaks: the session has `ptc_run_code`, and it
+  simply was not delegated. The user loses the delegation, not the capability.
+
+So the cost of a miss is bounded on both sides, and the safe direction is the default. This is the
+same reasoning ADR-0026 decision 3 used to pick `full` as the probe-failure fallback, applied one
+axis further out.
+
+## What we deliberately do not do
+
+**We do not read `--exclude-tools` or `--no-tools`.** Both can only _remove_ tools, so both can
+only make the truth `inactive`; accounting for them could only move the probe toward
+under-reporting, which the table above already handles. Adding them would grow the mirror for a
+direction that is already safe and self-correcting.
+
+**We do not make the `session_start` measurement authoritative.** It is the better answer — it is
+the real loadout — and it arrives too late. Registration happens in the factory and pi has no
+`unregisterTool` (only `unregisterProvider`), so a surface chosen
+wrong cannot be corrected in place. Deciding later would mean registering both surfaces and
+narrowing with `setActiveTools` at `session_start`, which changes which tools this package
+_registers_ — a much larger change to the contract this package publishes, and one that would also
+put a second writer on the loadout that `ptc-mode.ts:27-31` already documents as contested.
+
+**We do not add a notice for the new default.** The default path now resolves to `full` and says
+nothing, on the reasoning ADR-0026 already recorded: a notice on every ordinary session is crying
+wolf. The pinned-disagreement notice is untouched — a user who pins `surfaceMode: "subagents"`
+without an active codemode still gets the decision-4 warning, and that is now the only way to
+reach it, which is the correct shape.
+
+**We do not make `activation` a third seam on the extension options.** `options.codemode` and
+`options.codemodeSwitch` exist so a test can state the pi it is reasoning about; the activation
+probe is reached through `readSurfaceModeConfig` in the same way, and adding a third seam for it
+would be a third place for the three to drift apart.
+
+## Consequences
+
+- **The false warning stops on a default install**, and the default session gains `ptc_run_code`
+  instead of holding `ptc_subagent` with nothing to compose it.
+- `detectedSurfaceMode` takes a third argument, and it is **required**: a default parameter would
+  be evaluated on every call, including the ones an explicit `surfaceMode` short-circuits, and it
+  would let every existing two-argument test keep passing without ever stating whether codemode
+  was active — which is the mistake this file's parameter list was written to prevent.
+- The switch adds up to two more settings reads on the path where no `surfaceMode` is pinned. They
+  are paid on the explicit-key path too, for the same reason ADR-0027 pays its two: the
+  disagreement notice needs the table's own answer.
+- **A message that could now lie.** The `detected.present && !known` notice at
+  `src/index.ts:729` hard-codes the string `"subagents"` as the detected surface. With a fifth
+  cell, `detected` can be `full` while `present && !known` still holds (activation predicted
+  `active` from a project `defaultTools`, and the project turned out to be untrusted —
+  `settings-manager.js:327` drops project settings in that case, which this probe cannot observe).
+  The message now reports `surface.detected` instead of a literal, for the same reason it is
+  worth a line: a correct notice carrying a wrong value is the failure mode gates cannot see.
+
+## Verification
+
+The four reachable cells, each on a real 1.0.0 install, each confirmed by the tool set a model
+would actually see rather than by the probe's own answer:
+
+| scenario                                       | activation | surface     | this package registers                       |
+| ---------------------------------------------- | ---------- | ----------- | -------------------------------------------- |
+| no config at all (the default)                 | `inactive` | `full`      | `ptc_run_code`, `ptc_workflow`, `ptc_task_*` |
+| user settings `defaultTools: ["+codemode"]`    | `active`   | `subagents` | `ptc_subagent`, `ptc_task_*`                 |
+| `pi --tools read,write,codemode`               | `active`   | `subagents` | `ptc_subagent`, `ptc_task_*`                 |
+| user settings `defaultTools: ["read","write"]` | `inactive` | `full`      | `ptc_run_code`, `ptc_workflow`, `ptc_task_*` |
+
+The regression test asserts on the **registered tool set**, not on `detectedSurfaceMode`: the
+latter would stay green if the factory stopped consulting the activation probe at all, which is
+the same trap ADR-0027 recorded for its own test.
+
+The fifth cell of the table — no codemode on disk — is not reachable on a machine that has 1.0
+installed, and is covered by unit tests only. That asymmetry is stated rather than papered over.

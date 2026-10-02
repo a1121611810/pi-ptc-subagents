@@ -13,11 +13,13 @@ import ptcSubagents, {
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  ACTIVE_CODEMODE_SETTINGS,
   captureRegisteredTools,
   makeExtensionStub,
   makeTempDir,
   removeTempDir,
   stubContext,
+  writeAgentSettings,
 } from "./helpers/ptc.ts";
 
 /**
@@ -165,10 +167,15 @@ test("off mode registers nothing, so it has nothing to warn about", async () => 
  * Build a stub whose factory call really reads the agent dir, for a given file body. The
  * `codemode` argument is the probe result the factory is told to believe (ADR-0026); without it the
  * real probe runs against the test runner's argv, which is not a pi.
+ *
+ * `settings` is the user-scope `settings.json` body, which is what the activation probe reads
+ * (ADR-0029). Omitted means the default session: no `defaultTools`, so codemode is not active and
+ * the surface is `full`.
  */
 async function stubFromAgentDir(
   contents: unknown,
   codemode?: CodemodePresence,
+  settings?: unknown,
 ): Promise<{ stub: ExtensionStub; dir: string }> {
   const dir = await makeTempDir();
   const previous = process.env.PI_CODING_AGENT_DIR;
@@ -176,6 +183,9 @@ async function stubFromAgentDir(
   try {
     if (contents !== null) {
       await writeFile(join(dir, "ptc.json"), JSON.stringify(contents), "utf8");
+    }
+    if (settings !== undefined) {
+      await writeAgentSettings(dir, settings);
     }
     return {
       stub: makeExtensionStub({
@@ -209,23 +219,50 @@ test("the factory's own config read is what decides the surface, not the test se
   }
 });
 
-test("with no preference from the user, the surface is decided by the pi (ADR-0026)", async () => {
+test("with no preference from the user, the surface is decided by the pi (ADR-0026, ADR-0029)", async () => {
   // This is the new default, and it is the one behaviour that changes for an existing install. The
   // previous version of this test asserted `full` and passed for the wrong reason: the factory ran
   // the real probe, the real probe looked at vitest's argv, and vitest has no pi next to it. Both
   // branches are stated here instead of inherited from the machine.
+  //
+  // ADR-0029 adds a column, and it is the column that decides the DEFAULT. pi ships codemode and
+  // loads it by default while registering it `defaultActive: false`, so with no `defaultTools`
+  // anywhere the answer is `full` -- the model cannot call the tool we would have handed
+  // orchestration to. The `subagents` cell is now reachable only when a user configures codemode
+  // into the loadout, and the last row pins that this cannot resurrect a pi without the tool.
   const cases = [
-    { codemode: { present: true, how: "found" }, expected: ["ptc_subagent", ...TASK_TOOLS] },
-    { codemode: { present: false, how: "not-found" }, expected: [...PTC_TOOLS, ...TASK_TOOLS] },
+    {
+      where: "codemode present, nothing configured",
+      codemode: { present: true, how: "found" },
+      settings: undefined,
+      expected: [...PTC_TOOLS, ...TASK_TOOLS],
+    },
+    {
+      where: "codemode present and configured active",
+      codemode: { present: true, how: "found" },
+      settings: ACTIVE_CODEMODE_SETTINGS,
+      expected: ["ptc_subagent", ...TASK_TOOLS],
+    },
+    {
+      where: "codemode absent, nothing configured",
+      codemode: { present: false, how: "not-found" },
+      settings: undefined,
+      expected: [...PTC_TOOLS, ...TASK_TOOLS],
+    },
+    {
+      where: "codemode absent even though a loadout names it",
+      codemode: { present: false, how: "not-found" },
+      settings: ACTIVE_CODEMODE_SETTINGS,
+      expected: [...PTC_TOOLS, ...TASK_TOOLS],
+    },
   ] as const;
   for (const contents of [null, { defaultMode: false }]) {
-    for (const { codemode, expected } of cases) {
-      const { stub, dir } = await stubFromAgentDir(contents, codemode);
+    for (const { where, codemode, settings, expected } of cases) {
+      const { stub, dir } = await stubFromAgentDir(contents, codemode, settings);
       try {
-        expect(
-          [...stub.tools.keys()],
-          `${JSON.stringify(contents)} with codemode ${codemode.how}`,
-        ).toEqual([...expected]);
+        expect([...stub.tools.keys()], `${JSON.stringify(contents)} with ${where}`).toEqual([
+          ...expected,
+        ]);
       } finally {
         await removeTempDir(dir);
       }
@@ -270,6 +307,9 @@ test("a malformed file still gives the detected surface, and the problem is repo
     const where = "codemode " + codemode.how;
     try {
       await writeFile(join(dir, "ptc.json"), "{ not json", "utf8");
+      // ADR-0029: the `subagents` expectation above needs codemode in the loadout, or the
+      // factory resolves `full` and the assertion would hold for the wrong reason.
+      await writeAgentSettings(dir, ACTIVE_CODEMODE_SETTINGS);
       const stub = makeExtensionStub({ surfaceMode: "from-file", codemode });
       await stub.emit("session_start", stubContext(stub, { mode: "tui" }));
       expect([...stub.tools.keys()], "a broken file must not half-apply: " + where).toEqual([
@@ -303,7 +343,10 @@ test("a detected subagents surface on a pi that does not register codemode says 
   const previous = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = dir;
   try {
-    // no ptc.json at all: the surface is DETECTED, and the probe is told pi has codemode.
+    // No ptc.json at all: the surface is DETECTED, and the probe is told pi has codemode. The
+    // `defaultTools` are what make it a `subagents` surface at all (ADR-0029) -- without them the
+    // factory answers `full` and neither warning under test is reachable.
+    await writeAgentSettings(dir, ACTIVE_CODEMODE_SETTINGS);
     const stub = makeExtensionStub({
       surfaceMode: "from-file",
       codemode: { present: true, how: "found" },
@@ -317,6 +360,12 @@ test("a detected subagents surface on a pi that does not register codemode says 
     expect(notices.length, "the over-estimate is reported").toBe(1);
     expect(notices[0]?.type, "and it is a warning, not a note").toBe("warning");
     expect(notices[0]?.message, "and it names the fix").toContain('"full"');
+    // The surface this warning is about. Without it the test also passes on a `full` session,
+    // where the cross-check cannot fire at all -- the notice is then vacuously absent.
+    expect([...stub.tools.keys()], "and the session really is holding a subagent face").toEqual([
+      "ptc_subagent",
+      ...TASK_TOOLS,
+    ]);
   } finally {
     if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previous;
@@ -330,12 +379,20 @@ test("a detected subagents surface on a pi that DOES register codemode stays qui
   const previous = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = dir;
   try {
+    await writeAgentSettings(dir, ACTIVE_CODEMODE_SETTINGS);
     const stub = makeExtensionStub({
       surfaceMode: "from-file",
       codemode: { present: true, how: "found" },
       active: ["read", "bash", "edit", "write", "codemode"],
     });
     await stub.emit("session_start", stubContext(stub, { mode: "tui" }));
+    // The surface, before the silence. Without this the test also passes on a `full` session --
+    // where neither warning is reachable -- so "healthy" would be asserted about a session that
+    // never had the problem. ADR-0029 made that reachable by default, which is why it is pinned.
+    expect(
+      [...stub.tools.keys()],
+      "a healthy session is the subagents face beside an active codemode",
+    ).toEqual(["ptc_subagent", ...TASK_TOOLS]);
     // Scoped the same way: the PTC-mode announcement is this file's pre-existing noise and says
     // nothing about detection.
     expect(

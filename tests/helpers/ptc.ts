@@ -29,6 +29,81 @@ export async function makeTempDir(prefix = "pi-ptc-test-"): Promise<string> {
   return await realpath(await mkdtemp(join(tmpdir(), prefix)));
 }
 
+/**
+ * ADR-0029: the user settings that put `codemode` in the model's tool list.
+ *
+ * pi registers codemode with `defaultActive: false`, so a test that wants the `subagents` cell has
+ * to configure it the way a user would, rather than reaching for a seam. `["+codemode"]` resolves
+ * to pi's four default tools PLUS codemode: a `defaultTools` list made only of modifiers starts
+ * from `DEFAULT_TOOL_NAMES` instead of replacing them, which is the one detail of pi's resolution
+ * most likely to be got wrong and the reason this is a named constant rather than an inline array.
+ */
+export const ACTIVE_CODEMODE_SETTINGS: unknown = { defaultTools: ["+codemode"] };
+
+/**
+ * Write the user-scope `settings.json` the activation probe reads, for a test whose factory
+ * really resolves the surface off disk (`surfaceMode: "from-file"`).
+ */
+export async function writeAgentSettings(agentDir: string, body: unknown): Promise<void> {
+  await writeFile(join(agentDir, "settings.json"), JSON.stringify(body), "utf8");
+}
+
+/**
+ * A stub whose factory really reads an agent dir, with `PI_CODING_AGENT_DIR` pointed at a temp
+ * one for the duration of the call.
+ *
+ * Every test that resolves the surface off disk needs this, and the reason is ADR-0029: the
+ * activation probe reads `settings.json` out of the agent dir, so a test that leaves
+ * `PI_CODING_AGENT_DIR` alone resolves against the DEVELOPER'S OWN `~/.pi/agent` and passes or
+ * fails depending on how that machine is configured. `ptc.json` had always been read from there,
+ * which is why the per-surface tests pin `surfaceMode` and bypass the file entirely; the
+ * `from-file` tests are the ones that cannot.
+ *
+ * `ptc` is the `ptc.json` body, or `null` for no file. `agentSettings` is the `settings.json`
+ * body; omitted means the default session, where codemode is not active and the surface is
+ * `full`.
+ */
+export async function makeStubInAgentDir(
+  options: {
+    ptc?: unknown;
+    agentSettings?: unknown;
+    codemode?: CodemodePresence;
+    codemodeSwitch?: CodemodeSwitchResolution;
+    active?: readonly string[];
+    registeredInactive?: readonly string[];
+  } = {},
+): Promise<{ stub: ReturnType<typeof makeExtensionStub>; dir: string }> {
+  const dir = await makeTempDir();
+  const previous = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = dir;
+  try {
+    if (options.ptc !== undefined && options.ptc !== null) {
+      await writeFile(join(dir, "ptc.json"), JSON.stringify(options.ptc), "utf8");
+    }
+    if (options.agentSettings !== undefined) {
+      await writeAgentSettings(dir, options.agentSettings);
+    }
+    return {
+      stub: makeExtensionStub({
+        surfaceMode: "from-file",
+        ...(options.codemode === undefined ? {} : { codemode: options.codemode }),
+        ...(options.codemodeSwitch === undefined ? {} : { codemodeSwitch: options.codemodeSwitch }),
+        ...(options.active === undefined ? {} : { active: options.active }),
+        ...(options.registeredInactive === undefined
+          ? {}
+          : { registeredInactive: options.registeredInactive }),
+      }),
+      dir,
+    };
+  } catch (error) {
+    await removeTempDir(dir);
+    throw error;
+  } finally {
+    if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previous;
+  }
+}
+
 export async function removeTempDir(dir: string): Promise<void> {
   await rm(dir, { recursive: true, force: true });
 }

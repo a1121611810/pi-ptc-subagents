@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A default pi session no longer starts with no orchestration tool at all.** The detected surface
+  followed two questions — does this pi ship a `codemode` directory, and will pi load it — and on a
+  stock pi 1.0.0 install the answer to both is yes, so the surface resolved to `subagents`. But pi
+  registers `codemode` with `defaultActive: false`: it joins the model's tool list only when a
+  loadout names it, and a session that configured nothing has no such loadout. Since the
+  `subagents` surface deliberately does not register `ptc_run_code`, the result was a session
+  holding `ptc_subagent` and three `ptc_task_*` tools with no way to compose any of them, plus a
+  startup warning on **every** session. The detection now asks a third question — whether `codemode`
+  will actually be in the tool list, read from `--tools` and from `defaultTools` in the project and
+  user settings the way pi resolves them — and `subagents` is chosen only on positive evidence that
+  the model can call the tool. The default on an unconfigured install is now `full`, with no
+  warning. To opt into `subagents`, add `codemode` to `defaultTools` or `--tools`
+  ([ADR-0029](./docs/adr/0029-surface-follows-codemode-activation.md)).
+- **The "pi does not register codemode" startup notice no longer hard-codes the wrong surface.** With
+  a fifth cell in the table, the detected surface is not always `subagents` in that branch, and the
+  message named `SurfaceModeConfig.detected` — a field populated only when an explicit `surfaceMode`
+  overrode detection, so on the very path the notice fires from it would have printed `undefined`.
+  It reports the surface the session actually built.
+
 ## [1.3.0] - 2026-10-02
 
 ### Fixed

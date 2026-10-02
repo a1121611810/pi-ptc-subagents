@@ -727,13 +727,31 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
         );
       }
       if (detected.present && !known) {
+        /*
+         * ADR-0029: the surface is REPORTED, not spelled out, and the value reported is
+         * `surface.surfaceMode` rather than `surface.detected`.
+         *
+         * Two reasons, both of which the previous hard-coded `"subagents"` got wrong. With the
+         * activation axis added, the detected surface is not always `subagents` in this branch --
+         * activation can be predicted `active` from a project `defaultTools` that pi then ignored
+         * because the project is untrusted (`settings-manager.js:327`), and the table answers
+         * `full` there. And `SurfaceModeConfig.detected` is populated only on the `source: "file"`
+         * path, which this branch is explicitly not, so reading it would print `undefined`.
+         */
         ctx.ui.notify(
           "pi-ptc-subagents: the codemode probe found pi's codemode on disk, but this " +
             "session does not register it (--no-extensions or --exclude-tools codemode), so " +
-            'the detected surface is "subagents" with no orchestrator. Set "surfaceMode" to ' +
-            '"full" in ' +
-            PTC_MODE_CONFIG_FILE +
-            " to use ptc_run_code instead.",
+            "the surface is " +
+            JSON.stringify(surface.surfaceMode) +
+            (surface.surfaceMode === "subagents"
+              ? " with no orchestrator. Set " +
+                JSON.stringify("surfaceMode") +
+                " to " +
+                JSON.stringify(FALLBACK_SURFACE_MODE) +
+                " in " +
+                PTC_MODE_CONFIG_FILE +
+                " to use ptc_run_code instead."
+              : "."),
           "warning",
         );
       }

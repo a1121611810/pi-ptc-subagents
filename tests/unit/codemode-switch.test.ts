@@ -21,14 +21,26 @@ import {
   surfaceModeConflict,
 } from "../../src/mode/ptc-mode.ts";
 import type { CodemodePresence, CodemodeSwitch } from "../../src/mode/ptc-mode.ts";
-import { makeExtensionStub, makeTempDir, removeTempDir } from "../helpers/ptc.ts";
+import {
+  ACTIVE_CODEMODE_SETTINGS,
+  makeStubInAgentDir,
+  makeTempDir,
+  removeTempDir,
+} from "../helpers/ptc.ts";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const PRESENT: CodemodePresence = { present: true, how: "found" };
 const ABSENT: CodemodePresence = { present: false, how: "not-found" };
 
-/** The four cells of the table, asserted as a table rather than case by case. */
+/**
+ * The SWITCH axis of the table, asserted as a table rather than case by case.
+ *
+ * ADR-0029 added a third axis, so every cell here states the activation too. It is `active`
+ * throughout because this file is about the switch: the cell where a loaded codemode is not
+ * callable belongs to the activation table, and pinning it here would make these assertions about
+ * a column they do not vary.
+ */
 const TABLE: ReadonlyArray<readonly [CodemodePresence, CodemodeSwitch, string]> = [
   [PRESENT, "absent", "subagents"],
   [PRESENT, "enabled", "subagents"],
@@ -39,10 +51,10 @@ const TABLE: ReadonlyArray<readonly [CodemodePresence, CodemodeSwitch, string]> 
 ];
 
 describe("ADR-0027 codemode switch", () => {
-  test("the four-case table, each cell asserted on its own", () => {
+  test("the switch axis of the table, each cell asserted on its own", () => {
     const actual = TABLE.map(
       ([presence, sw]) =>
-        `${presence.present ? "on-disk" : "absent"}/${sw}=>${detectedSurfaceMode(presence, sw)}`,
+        `${presence.present ? "on-disk" : "absent"}/${sw}=>${detectedSurfaceMode(presence, sw, "active")}`,
     );
     expect(actual).toEqual([
       "on-disk/absent=>subagents",
@@ -54,14 +66,18 @@ describe("ADR-0027 codemode switch", () => {
     ]);
   });
 
-  test("disabling codemode is the ONLY cell that turns a present codemode into full", () => {
+  test("disabling codemode is the only SWITCH value that turns a present codemode into full", () => {
     // The counterfactual this whole feature exists for: with `disabled` dropped, a user who
     // turned codemode off would silently keep losing ptc_run_code.
+    //
+    // "only switch value", not "only value": ADR-0029 added a second way to reach `full` for a
+    // present codemode -- an inactive one -- and claiming otherwise here would be a title that
+    // has quietly stopped being true.
     const withoutDisabled = TABLE.filter(([, sw]) => sw !== "disabled").map(([presence, sw]) =>
-      detectedSurfaceMode(presence, sw),
+      detectedSurfaceMode(presence, sw, "active"),
     );
     expect(new Set(withoutDisabled)).toEqual(new Set(["subagents", "full"]));
-    expect(detectedSurfaceMode(PRESENT, "disabled")).toBe("full");
+    expect(detectedSurfaceMode(PRESENT, "disabled", "active")).toBe("full");
   });
 });
 
@@ -362,41 +378,83 @@ describe("readSurfaceModeConfig carries the table even when the key is pinned", 
 });
 
 describe("the registration the switch actually produces", () => {
-  test("codemode on disk but disabled registers the PTC surfaces", () => {
+  test("codemode on disk but disabled registers the PTC surfaces", async () => {
     // The regression this file exists for, asserted at the level the user sees it: the set of
     // tools a model can call. Asserting only on `detectedSurfaceMode` would pass even if the
     // factory stopped consulting the switch.
-    const stub = makeExtensionStub({
-      surfaceMode: "from-file",
+    //
+    // `ACTIVE_CODEMODE_SETTINGS` on purpose: with the switch disabled the answer is `full`
+    // whatever the loadout says, so this cell stays `full` even when codemode IS callable. That
+    // makes it the one case where the switch overrides a working activation.
+    const { stub, dir } = await makeStubInAgentDir({
       codemode: PRESENT,
       codemodeSwitch: { switch: "disabled", source: "user" },
+      agentSettings: ACTIVE_CODEMODE_SETTINGS,
     });
-    const names = [...stub.tools.keys()];
-    expect(names).toContain("ptc_run_code");
-    expect(names).toContain("ptc_workflow");
-    expect(names).not.toContain("ptc_subagent");
-  });
-
-  test("codemode on disk and loaded registers only the subagent face", () => {
-    for (const sw of ["absent", "enabled"] as const) {
-      const stub = makeExtensionStub({
-        surfaceMode: "from-file",
-        codemode: PRESENT,
-        codemodeSwitch: { switch: sw, source: "default" },
-      });
+    try {
       const names = [...stub.tools.keys()];
-      expect(names, sw).toContain("ptc_subagent");
-      expect(names, sw).not.toContain("ptc_run_code");
+      expect(names).toContain("ptc_run_code");
+      expect(names).toContain("ptc_workflow");
+      expect(names).not.toContain("ptc_subagent");
+    } finally {
+      await removeTempDir(dir);
     }
   });
 
-  test("no codemode at all registers the PTC surfaces", () => {
-    const stub = makeExtensionStub({
-      surfaceMode: "from-file",
-      codemode: ABSENT,
+  test("codemode on disk and loaded registers only the subagent face", async () => {
+    // ADR-0029: "loaded" is no longer enough. These cells also need codemode in the LOADOUT, so
+    // each one writes the `defaultTools` a user would -- and does so in a temp agent dir, because
+    // the activation probe reads `settings.json` and a test that left `PI_CODING_AGENT_DIR` alone
+    // would be resolving against the developer's own `~/.pi/agent`.
+    for (const sw of ["absent", "enabled"] as const) {
+      const { stub, dir } = await makeStubInAgentDir({
+        codemode: PRESENT,
+        codemodeSwitch: { switch: sw, source: "default" },
+        agentSettings: ACTIVE_CODEMODE_SETTINGS,
+      });
+      try {
+        const names = [...stub.tools.keys()];
+        expect(names, sw).toContain("ptc_subagent");
+        expect(names, sw).not.toContain("ptc_run_code");
+      } finally {
+        await removeTempDir(dir);
+      }
+    }
+  });
+
+  test("loaded but not activated registers the PTC surfaces instead (ADR-0029)", async () => {
+    // The cell that is the DEFAULT on a real 1.0.0 install, and the one that used to produce a
+    // session holding `ptc_subagent` with no orchestrator. Asserted here at the registration
+    // rather than only on the resolved surface: a factory that stopped consulting the activation
+    // probe would keep `detectedSurfaceMode` correct and still register the wrong tool set.
+    const { stub, dir } = await makeStubInAgentDir({
+      codemode: PRESENT,
       codemodeSwitch: { switch: "absent", source: "default" },
     });
-    expect([...stub.tools.keys()]).toContain("ptc_run_code");
+    try {
+      const names = [...stub.tools.keys()];
+      expect(names).toContain("ptc_run_code");
+      expect(names).toContain("ptc_workflow");
+      expect(names).not.toContain("ptc_subagent");
+    } finally {
+      await removeTempDir(dir);
+    }
+  });
+
+  test("no codemode at all registers the PTC surfaces", async () => {
+    const { stub, dir } = await makeStubInAgentDir({
+      codemode: ABSENT,
+      codemodeSwitch: { switch: "absent", source: "default" },
+      agentSettings: ACTIVE_CODEMODE_SETTINGS,
+    });
+    try {
+      // Naming a tool pi does not have cannot conjure it: a loadout that says `+codemode` on a pi
+      // without one is a configuration with nothing to point at, not a surface change.
+      expect([...stub.tools.keys()]).toContain("ptc_run_code");
+      expect([...stub.tools.keys()]).not.toContain("ptc_subagent");
+    } finally {
+      await removeTempDir(dir);
+    }
   });
 });
 

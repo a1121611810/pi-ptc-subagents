@@ -128,7 +128,8 @@ const NO_CODEMODE_PI_REASON =
  * prints the title. A skip that says only "skipped" is indistinguishable from a broken machine.
  */
 const SUBAGENTS_HALF_TITLE =
-  "with no key, a pi that ships codemode is handed the subagent surface, never the run-code front" +
+  "on a real pi that ships codemode: a plain launch gets the PTC surfaces, and a launch whose " +
+  "loadout names codemode gets the subagent face" +
   (CODEMODE_PI.bin === undefined ? " -- SKIPPED: " + NO_CODEMODE_PI_REASON : "");
 
 interface ProbeRecord {
@@ -196,6 +197,12 @@ async function capturePayload(options: {
   surfaceMode?: "off" | "subagents" | "full" | "detected";
   /** Which pi binary to spawn. Defaults to the bare name; see {@link CODEMODE_PI}. */
   bin?: string;
+  /**
+   * ADR-0029: a `--tools` allowlist for the spawned pi, which is how a real session puts
+   * `codemode` into the model's tool list. Passed through verbatim, so the value here is the
+   * value pi parses.
+   */
+  tools?: string;
 }): Promise<ProbeRecord> {
   const dir = await makeTempDir("pi-ptc-probe-");
   const out = join(dir, "payload.json");
@@ -209,6 +216,7 @@ async function capturePayload(options: {
     // `-ne` for this one spawn costs no isolation and puts pi back in its default state --
     // built-ins loaded, which is the "ships codemode AND loads it" cell.
     ...(options.surfaceMode === "detected" ? [] : ["-ne"]),
+    ...(options.tools === undefined ? [] : ["--tools", options.tools]),
     "-e",
     PROBE,
     ...(options.withDist === true ? ["-e", DIST] : []),
@@ -315,6 +323,75 @@ async function codemodeSupport(bin: string): Promise<boolean> {
   return record.stage === "session_start" && record.hasCodemode;
 }
 
+/**
+ * The `ptc_*` names pi's REGISTRY holds after loading the built extension, on a real pi, with
+ * `codemode` both registered and active.
+ *
+ * Two things this needs that {@link capturePayload} cannot give it, and both are loadout facts:
+ *
+ *   - `-e builtin:codemode` puts codemode in the registry, which a plain launch cannot do. It is
+ *     fatal on a pi that does not ship the built-in, so the caller has already established that
+ *     this pi does (see `codemodeSupport`).
+ *   - `--tools …,codemode` puts it in the ACTIVE set. The activation probe reads the command line,
+ *     so this is the half of ADR-0029 that only a real launch can exercise.
+ *
+ * The registry rather than the model-facing tool list, and that choice is the whole reason this is
+ * a separate function. `--tools` narrows BOTH: `getCurrentTools()` obviously, and `getAllTools()`
+ * too, because pi builds the registry with `includeAllExtensionTools` unset on the initial load. So
+ * an allowlist naming only some of this package's tools hides the rest, and "absent" stops meaning
+ * "never registered".
+ *
+ * That is why the caller passes a SUPERSET of both surfaces — every name either one could register,
+ * plus `codemode`. With all of them allowed, a name missing from the registry is missing because the
+ * factory did not register it, which is the only thing this test is trying to read. An allowlist
+ * naming just the subagent face would also pass for a `full` session, which is the measurement this
+ * exists to avoid making.
+ */
+async function captureRegisteredPtcTools(options: {
+  bin: string;
+  tools: string;
+}): Promise<string[]> {
+  const dir = await makeTempDir("pi-ptc-registry-");
+  const out = join(dir, "registry.json");
+  await runPi(
+    [
+      "--no-session",
+      "-e",
+      PROBE,
+      "-e",
+      REGISTRY_PROBE,
+      "-e",
+      BUILTIN_CODEMODE,
+      "-e",
+      DIST,
+      "--tools",
+      options.tools,
+      "--provider",
+      "ptc-probe",
+      "--model",
+      "ptc-probe-model",
+      "-p",
+      "hello",
+    ],
+    {
+      ...process.env,
+      PI_CODING_AGENT_DIR: dir,
+      PTC_PROBE_OUT: join(dir, "payload.json"),
+      PTC_REGISTRY_OUT: out,
+    },
+    options.bin,
+  );
+  const record = await readRegistry(out);
+  await removeTempDir(dir);
+  if (record === undefined || record.stage !== "session_start") {
+    throw new Error(
+      "the registry probe never reached session_start, so the measurement below would be empty " +
+        "rather than wrong — and an empty tool list is what a filtered loadout also looks like",
+    );
+  }
+  return record.tools.filter((name) => name.startsWith("ptc_")).sort();
+}
+
 async function readRegistry(path: string): Promise<RegistryRecord | undefined> {
   try {
     return JSON.parse(await readFile(path, "utf8")) as RegistryRecord;
@@ -395,50 +472,80 @@ test.skipIf(CODEMODE_PI.bin === undefined)(
         "the subagents half was reached with no codemode pi: " + NO_CODEMODE_PI_REASON,
       );
     }
-    const [registryHasCodemode, detected] = await Promise.all([
+    const [registryHasCodemode, plain, delegatedPtc] = await Promise.all([
       codemodeSupport(bin),
       capturePayload({ withDist: true, surfaceMode: "detected", bin }),
+      captureRegisteredPtcTools({
+        bin,
+        // ADR-0029: the one thing a plain launch does not do is put `codemode` in the loadout.
+        // Naming it on the command line is the half of the probe only a real launch can exercise.
+        // Every ptc_* name either surface could register is allowed too, so what the registry
+        // reports is the factory's decision rather than this list — see the function's note.
+        tools: [
+          ...new Set([
+            "read",
+            "bash",
+            "edit",
+            "write",
+            "codemode",
+            ...SUBAGENTS_SURFACE,
+            ...FULL_SURFACE,
+          ]),
+        ].join(","),
+      }),
     ]);
     expect(
       registryHasCodemode,
       "the pi this half measures really does ship codemode (" + bin + ")",
     ).toBe(true);
-    const detectedPtc = detected.tools.filter((name) => name.startsWith("ptc_")).sort();
 
-    // The whole surface, not just the orchestrator name: a probe that reached `subagents` while
-    // still registering a `ptc_run_code` beside it, or that dropped a task tool, fails here.
-    // One binary for both measurements, or the two are talking about different pis.
+    // The default cell: a real pi that ships codemode, launched with nothing configured. Before
+    // ADR-0029 this was `subagents`, which meant `ptc_subagent` with no orchestrator and a
+    // warning on every session. It is now `full`, silently, which is the fix stated as a fact
+    // about the built artifact rather than about the probe.
+    const plainPtc = plain.tools.filter((name) => name.startsWith("ptc_")).sort();
     expect(
-      detectedPtc,
-      "a pi that ships codemode is handed the subagent face and nothing else (ADR-0026 decision 1)",
+      plainPtc,
+      "a plain launch on a pi that ships codemode gets the PTC surfaces, because codemode is " +
+        "registered inactive and the model cannot call it (ADR-0029)",
+    ).toEqual(FULL_SURFACE);
+
+    // The delegated cell, same binary, same everything but the loadout. Asked of the REGISTRY, so
+    // the absence of the run-code front is "never registered" rather than "filtered out of the
+    // allowlist" — which is the distinction `--tools` would otherwise erase.
+    expect(
+      delegatedPtc,
+      "and with codemode in the tool list the same pi registers the subagent face and nothing else",
     ).toEqual(SUBAGENTS_SURFACE);
 
     // The two orchestrators, named one at a time so a failure says which half moved. This pair is
     // what the neutered-probe mutation breaks: with CODEMODE_PROBE_PATHS emptied this pi still
     // ships codemode, so the expectation above turns red.
     expect(
-      detectedPtc.includes("ptc_subagent"),
-      "a pi that ships codemode is handed the subagent face",
+      delegatedPtc.includes("ptc_subagent"),
+      "a pi whose loadout names codemode is handed the subagent face",
     ).toBe(true);
     expect(
-      detectedPtc.includes("ptc_run_code"),
+      delegatedPtc.includes("ptc_run_code"),
       "and never both orchestrators at once — the thing this setting exists to prevent",
     ).toBe(false);
   },
   120_000,
 );
 
-test("on the pi this repo pins as a devDependency -- which ships no codemode -- the detected default is full", async () => {
-  // The other half of the pair above, and the one that can be measured on EVERY machine: it
-  // runs unconditionally, including on a machine where nothing installed ships codemode.
+test("a plain launch never delegates, whichever pi is on PATH (ADR-0029)", async () => {
+  // The half that runs on EVERY machine, including one where nothing installed ships codemode.
   //
-  // The detection test above needs a pi that actually ships codemode, or there is nothing to
-  // detect and the "pi has codemode" half is untestable. This half is the mirror image: the pi
-  // that `spawn("pi")` finds under vitest is the repo's own pinned devDependency, which has no
-  // codemode at all, so its correct answer is `full` and a probe that wrongly answers "present"
-  // turns this red. Written the same way as its sibling -- the expected value is pi's own
-  // registry, not a branch on what we produced -- so if a dependency bump ever gives this pi a
-  // codemode the expectation follows it instead of going stale.
+  // It is the same launch as its sibling — no `surfaceMode` key, no `--tools` — and the point is
+  // that the answer no longer depends on whether the pi happens to ship codemode. It used to:
+  // the previous version branched the expectation on `registryHasCodemode`, which on a developer
+  // machine with pi 1.0 on PATH made this test assert `subagents` and a CI machine with the
+  // pinned devDependency assert `full`, so it was measuring the PATH rather than the code.
+  //
+  // ADR-0029 makes the expectation a constant, which is the honest form: with no loadout naming
+  // it, `codemode` is registered inactive on every pi, so `full` is the only correct answer
+  // whichever binary is under test. `registryHasCodemode` is still reported in the failure
+  // message, because "this pi does not even ship codemode" is worth knowing when it goes red.
   const [registryHasCodemode, detected] = await Promise.all([
     codemodeSupport("pi"),
     capturePayload({ withDist: true, surfaceMode: "detected" }),
@@ -449,15 +556,12 @@ test("on the pi this repo pins as a devDependency -- which ships no codemode -- 
     detectedPtc,
     "this pi " +
       (registryHasCodemode ? "ships" : "does not ship") +
-      " codemode, so the detected default must be " +
-      (registryHasCodemode ? "subagents" : "full") +
-      " (ADR-0026 decision 1)",
-  ).toEqual(registryHasCodemode ? SUBAGENTS_SURFACE : FULL_SURFACE);
+      " codemode, and this launch does not put it in the tool list, so the detected default " +
+      "must be full (ADR-0029)",
+  ).toEqual(FULL_SURFACE);
   expect(
     detectedPtc.includes("ptc_run_code"),
-    "a pi with no codemode keeps the front, or ADR-0026 decision 3's fallback is not the fallback",
-  ).toBe(!registryHasCodemode);
-  expect(detectedPtc.includes("ptc_subagent"), "and hands over nothing in its place").toBe(
-    registryHasCodemode,
-  );
+    "a session that cannot call codemode keeps the front, or the delegation hands over to nothing",
+  ).toBe(true);
+  expect(detectedPtc.includes("ptc_subagent"), "and hands over nothing in its place").toBe(false);
 }, 120_000);

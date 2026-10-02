@@ -414,7 +414,6 @@ const EXTERNAL_VOCABULARY: ReadonlyMap<string, string> = new Map([
   ["UserConfig", "pi 宿主配置文件里的用户配置类型"],
   ["_baseSystemPromptOptions", "pi 宿主内部字段（下划线前缀即私有）"],
   ["additionalContexts", "pi 宿主的上下文数组字段"],
-  ["defaultTools", "pi 宿主的工具名数组字段"],
   ["deferContext", "pi 宿主的上下文延迟注入接口"],
   ["maxSubCalls", "DSH 侧 sub-call 深度上限字段"],
   ["notificationCadenceMs", "宿主任务通知的节流字段"],
@@ -1109,6 +1108,15 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       // 2026-09-29 第一次复核：ADR-0013 §6 插入 85 行后，这条引用从 135 行位移到 140 行，已核对属实。
       // 2026-09-29 第二次复核（补第三条解析基准之后）：7 处 `render.ts:N` 简写第一次进入校验面，
       // 逐条核对记录见上方注释。**这七条此前是盲区**——现在才真的在被检查。
+      // 2026-10-03 第三次复核：ADR-0029 引入 5 条。**其中两条初稿写的是插入代码之前的行号，
+      // 本次复核当场发现并改正**——`ptc-mode.ts:464` 指向的已是 activation 探针的注释而非
+      // `detectedSurfaceMode`（插入约 190 行后移到 628），`src/index.ts:753` 指向的已是交叉核对
+      // 块而非 decision-4 警告（下方那段重写后移到 771）。这正是这道断言存在的理由：
+      // 「引用能解析」与「引用指对了东西」是两件事，而只有后者要靠人看。
+      // 逐条：29→ptc-mode.ts:628 = `export function detectedSurfaceMode(`；
+      // 32/105→index.ts:771 = decision-4 的 `if (... && !pi.getActiveTools().includes("codemode"))`；
+      // 129→ptc-mode.ts:27 = 「## Fail-safe on external loadout changes」段首，27-31 覆盖 setActiveTools 那段；
+      // 154→index.ts:729 = `if (detected.present && !known) {`。
     ).toEqual([
       "docs/adr/0013-ptc-row-compact-summary.md:140 -> src/tools/render.ts:78",
       "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:145",
@@ -1131,6 +1139,11 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       // the same reason as the 438 entry: a bare basename is ambiguous and guessing is worse than
       // refusing.
       "docs/adr/0026-surface-default-is-detected.md:226 -> dispatch.ts:1096",
+      "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:628",
+      "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:771",
+      "docs/adr/0029-surface-follows-codemode-activation.md:105 -> src/index.ts:771",
+      "docs/adr/0029-surface-follows-codemode-activation.md:129 -> ptc-mode.ts:27",
+      "docs/adr/0029-surface-follows-codemode-activation.md:154 -> src/index.ts:729",
     ]);
   });
 

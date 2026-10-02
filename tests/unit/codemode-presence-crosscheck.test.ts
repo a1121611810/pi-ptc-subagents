@@ -18,6 +18,12 @@
  * knows codemode and a pi that has never heard of it both answered "no codemode" to
  * `getAllTools()`.
  *
+ * ADR-0029 moved `known && !active` out of the surface decision entirely: it is now the default
+ * cell and resolves to `full`, so the factory does not build the `subagents` surface these tests
+ * are about. Every case below therefore configures `defaultTools: ["+codemode"]` to reach
+ * `subagents` on purpose, which leaves the prediction and the real loadout free to disagree --
+ * which is the remaining job of the two warnings.
+ *
  * These two cases are the pair that fixes that, and each one is red against the other:
  *   - codemode KNOWN and active     -> neither warning; the healthy session
  *   - codemode KNOWN and inactive   -> not the `--no-extensions` warning (pi does register
@@ -26,7 +32,14 @@
  *   - codemode ABSENT entirely       -> the `--no-extensions` warning
  */
 import { expect, test } from "vitest";
-import { makeExtensionStub, makeTempDir, removeTempDir, stubContext } from "../helpers/ptc.ts";
+import {
+  ACTIVE_CODEMODE_SETTINGS,
+  makeExtensionStub,
+  makeTempDir,
+  removeTempDir,
+  stubContext,
+  writeAgentSettings,
+} from "../helpers/ptc.ts";
 
 /** BG-14: the three always-on background-task tools, in registration order. */
 const TASK_TOOLS = ["ptc_task_list", "ptc_task_output", "ptc_task_stop"] as const;
@@ -48,6 +61,11 @@ async function sessionStartNotices(options: {
   try {
     // No ptc.json at all: the surface is DETECTED, and the probe is told pi has codemode on
     // disk. Both warnings under test are reachable only on that path.
+    //
+    // ADR-0029: `defaultTools: ["+codemode"]` is what puts codemode in the loadout at all. pi
+    // registers it inactive, so without this the factory resolves `full` and none of these
+    // warnings is reachable -- the `subagents` surface they are about would not be built.
+    await writeAgentSettings(dir, ACTIVE_CODEMODE_SETTINGS);
     const stub = makeExtensionStub({
       surfaceMode: "from-file",
       codemode: { present: true, how: "found" },
@@ -66,10 +84,21 @@ async function sessionStartNotices(options: {
 }
 
 test("a detected subagents surface on a pi that KNOWS codemode but did not activate it is not told the tool is missing", async () => {
-  // The shipped state (ADR-0026 decision 6), and the case the old stub could not express.
+  // ADR-0029 renamed what this case IS. It used to be the shipped state: pi registers codemode
+  // with `defaultActive: false`, so the probe said present, the registry agreed, and the model
+  // still could not call it. That is now the DEFAULT cell of the detected table, and the factory
+  // answers `full` for it without building a `subagents` surface at all -- the session this file
+  // exists to reason about no longer happens by accident.
+  //
+  // What remains here is the case the activation probe gets WRONG in the recoverable direction:
+  // `defaultTools` names codemode, the probe therefore predicts `active`, and pi's real loadout
+  // disagrees. The factory cannot correct that (registration is irreversible), so this is exactly
+  // what the decision-4 warning is for -- and it is the evidence for the bound ADR-0029 rests on,
+  // that an over-report is caught by measurement rather than shipped silently.
+  //
   // The probe found codemode and pi's registry agrees, so the two answers are consistent and
   // there is nothing to reconcile: the "--no-extensions" warning would be a lie here, and it
-  // would fire on every single healthy session of every user who has codemode installed.
+  // would fire on every session whose prediction was wrong.
   const { notices, tools } = await sessionStartNotices({
     active: ["read", "bash", "edit", "write"],
     registeredInactive: ["codemode"],

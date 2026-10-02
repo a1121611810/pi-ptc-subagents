@@ -446,27 +446,196 @@ export function readCodemodeSwitch(
   return error === undefined ? resolved : { ...resolved, source: "invalid", error };
 }
 
+// --------------------------------------------------------------------------------------
+// Activation: will `codemode` be in the model's tool list? (ADR-0029)
+// --------------------------------------------------------------------------------------
+
+/**
+ * The name pi registers its orchestrator under. The probe below asks whether this exact name is
+ * in the loadout; the decision-4 warning at `session_start` asks the same question of the real
+ * one, which is what bounds how exact this probe has to be.
+ */
+export const CODEMODE_TOOL_NAME = "codemode";
+
+/**
+ * Whether `codemode` will be CALLABLE, as a third question distinct from whether pi ships the
+ * directory (ADR-0026) and whether it will load the extension (ADR-0027).
+ *
+ * - `"active"` — a loadout names it, so the model can call it.
+ * - `"inactive"` — nothing names it, which on a real install is the DEFAULT: pi registers
+ *   `codemode` with `defaultActive: false` and activates it only when a loadout says so.
+ *
+ * `"inactive"` is what every failure of this probe on the positive side resolves to, and that is
+ * the design rather than a fallback: `subagents` is chosen only on positive evidence that the tool
+ * is callable. See ADR-0029, "The bound that makes the weaker guarantee sufficient".
+ */
+export type CodemodeActivation = "active" | "inactive";
+
+/** How the answer was decided, so a test can tell a configured answer from pi's default. */
+export type CodemodeActivationSource = "cli" | "project" | "user" | "default" | "invalid";
+
+/** The answer plus enough provenance to explain it in a notice. */
+export interface CodemodeActivationResolution {
+  activation: CodemodeActivation;
+  source: CodemodeActivationSource;
+  /** Set when a settings file could not be read as a JSON object; the answer still resolves. */
+  error?: string;
+}
+
+/** pi's default active tool names (`settings-manager.js:35`). None of them is `codemode`. */
+const PI_DEFAULT_TOOL_NAMES: readonly string[] = ["read", "bash", "edit", "write"];
+
+/** pi's `isToolModifier` (`settings-manager.js:36`) — a string opening with `+` or `-`. */
+function isToolModifier(entry: unknown): entry is string {
+  return typeof entry === "string" && (entry.startsWith("+") || entry.startsWith("-"));
+}
+
+/** pi's own `getDefaultTools` filter: a non-string in the array is dropped, not rejected. */
+function stringEntries(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : [];
+}
+
+/**
+ * pi's `mergeDefaultTools` (`settings-manager.js:43`), with the direction fixed by
+ * `deepMergeSettings(this.globalSettings, this.projectSettings)` (`:196`): the USER list is the
+ * base and the PROJECT list the override.
+ *
+ * A project list made only of modifiers concatenates onto the base, so a project can add
+ * `+codemode` without restating the user list. A project list containing any plain name replaces
+ * the base outright, because plain names are what decide a list rather than edit one.
+ */
+function mergeDefaultTools(base: unknown, overrides: unknown): unknown {
+  if (overrides === undefined) return base;
+  if (!Array.isArray(base) || !Array.isArray(overrides) || !overrides.every(isToolModifier)) {
+    return overrides;
+  }
+  return [...base, ...overrides];
+}
+
+/**
+ * pi's `resolveDefaultTools` (`settings-manager.js:55`).
+ *
+ * Plain names ARE the list. When every entry is a modifier there is nothing to start from, so the
+ * list starts as pi's four defaults instead — which is what makes `defaultTools: ["+codemode"]`
+ * mean "the usual four, plus codemode" rather than "a list containing only codemode".
+ */
+function resolveDefaultTools(entries: readonly string[]): string[] {
+  const plain = entries.filter((entry) => !isToolModifier(entry));
+  const tools = plain.length > 0 || entries.length === 0 ? plain : [...PI_DEFAULT_TOOL_NAMES];
+  for (const entry of entries) {
+    if (!isToolModifier(entry)) continue;
+    const name = entry.slice(1);
+    const index = tools.indexOf(name);
+    if (entry.startsWith("+") && index === -1 && name) tools.push(name);
+    else if (entry.startsWith("-") && index !== -1) tools.splice(index, 1);
+  }
+  return tools;
+}
+
+/**
+ * The `--tools` / `-t` allowlist, or `undefined` when the flag is absent or dangling.
+ *
+ * pi's own parser requires a following argument (`dist/cli/args.js:110`,
+ * `(arg === "--tools" || arg === "-t") && i + 1 < args.length`), so a trailing `--tools` is
+ * ignored, and the value is split on commas, trimmed, and emptied of blanks.
+ *
+ * Known limit, in the recoverable direction: pi consumes some other flags' values (`-e NAME`),
+ * so an argv in which such a value is the literal string `-t` would be read here as a tool flag
+ * and not there. That over-reports activation, which the `session_start` measurement catches.
+ */
+function cliToolAllowlist(args: readonly string[]): string[] | undefined {
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] !== "--tools" && args[index] !== "-t") continue;
+    const value = args[index + 1];
+    if (value === undefined) return undefined;
+    return value
+      .split(",")
+      .map((name) => name.trim())
+      .filter((name) => name.length > 0);
+  }
+  return undefined;
+}
+
+/**
+ * Resolve whether `codemode` will be in the model's tool list, in the order pi resolves the
+ * loadout: the command-line allowlist, then the merged `defaultTools`, then pi's own default.
+ *
+ * The last of those is the load-bearing one and is what makes absence of evidence mean
+ * `inactive`: pi registers `codemode` inactive, so a session that configured nothing does not get
+ * it, and delegating orchestration to a tool the model cannot call is the failure this exists to
+ * prevent.
+ */
+export function resolveCodemodeActivation(
+  argv: readonly string[],
+  projectSettings: unknown,
+  userSettings: unknown,
+): CodemodeActivationResolution {
+  const allowlist = cliToolAllowlist(argv.slice(1));
+  if (allowlist !== undefined) {
+    return {
+      activation: allowlist.includes(CODEMODE_TOOL_NAME) ? "active" : "inactive",
+      source: "cli",
+    };
+  }
+
+  const projectRaw = (projectSettings as { defaultTools?: unknown } | undefined)?.defaultTools;
+  const userRaw = (userSettings as { defaultTools?: unknown } | undefined)?.defaultTools;
+  const merged = mergeDefaultTools(userRaw, projectRaw);
+  if (merged === undefined) return { activation: "inactive", source: "default" };
+
+  const answer = resolveDefaultTools(stringEntries(merged)).includes(CODEMODE_TOOL_NAME)
+    ? "active"
+    : "inactive";
+  return { activation: answer, source: projectRaw !== undefined ? "project" : "user" };
+}
+
+/**
+ * Read pi's own settings files and resolve the activation, from the same two files and in the
+ * same order as {@link readCodemodeSwitch}.
+ */
+export function readCodemodeActivation(
+  agentDir: string,
+  cwd: string,
+  argv: readonly string[] = process.argv,
+): CodemodeActivationResolution {
+  const project = readSettingsObject(join(cwd, ".pi", "settings.json"));
+  const user = readSettingsObject(join(agentDir, "settings.json"));
+  const resolved = resolveCodemodeActivation(argv, project.value, user.value);
+  const error = project.error ?? user.error;
+  return error === undefined ? resolved : { ...resolved, source: "invalid", error };
+}
+
 /**
  * The surface to use when the user has expressed no preference. Not a constant: a pi that ships
  * `codemode` already offers the model a second way to orchestrate, and answering that by
  * handing our orchestration surface away is the whole point of `subagents` mode (ADR-0026) —
  * but only while that `codemode` is actually going to run (ADR-0027).
  *
- * The four cases, as a table:
+ * The five cases, as a table (ADR-0029 adds the last row):
  *
- * | codemode on disk | switch         | surface     | why                                        |
- * | ---------------- | -------------- | ----------- | ------------------------------------------ |
- * | yes              | absent         | `subagents` | pi loads it by default, so it can orchestrate |
- * | yes              | enabled        | `subagents` | ditto, and the user said so explicitly      |
- * | yes              | disabled       | `full`      | the orchestrator we would hand away to is not there |
- * | no               | any            | `full`      | nothing to hand it to                       |
+ * | codemode on disk | switch         | activation | surface     | why                                        |
+ * | ---------------- | -------------- | ---------- | ----------- | ------------------------------------------ |
+ * | no               | any            | any        | `full`      | nothing to hand it to                      |
+ * | yes              | disabled       | any        | `full`      | the extension we would hand away is not loading |
+ * | yes              | enabled/absent | active     | `subagents` | loaded, and the model can call it           |
+ * | yes              | enabled/absent | inactive   | `full`      | loaded but not callable — do not delegate  |
+ *
+ * The fourth row is the default on a real install, and it is the reason this takes three
+ * arguments: pi registers `codemode` with `defaultActive: false`, so "pi ships it" and "pi loads
+ * it" are both true on an ordinary session that configured nothing, and neither means the model
+ * can call it.
  */
 export function detectedSurfaceMode(
   presence: CodemodePresence,
   codemodeSwitch: CodemodeSwitch,
+  codemodeActivation: CodemodeActivation,
 ): SurfaceMode {
   if (!presence.present) return FALLBACK_SURFACE_MODE;
-  return codemodeSwitch === "disabled" ? "full" : "subagents";
+  if (codemodeSwitch === "disabled") return FALLBACK_SURFACE_MODE;
+  if (codemodeActivation !== "active") return FALLBACK_SURFACE_MODE;
+  return "subagents";
 }
 
 /**
@@ -572,6 +741,11 @@ export interface SurfaceModeConfig {
    */
   codemodeSwitch?: CodemodeSwitchResolution;
   /**
+   * Whether `codemode` will be in the model's tool list (ADR-0029), the third axis of the
+   * detected table. Absent for the same reason as {@link codemodeSwitch}.
+   */
+  codemodeActivation?: CodemodeActivationResolution;
+  /**
    * What the four-case table decided, carried even when an explicit key overrode it — that
    * difference is exactly what {@link surfaceModeConflict} reports on.
    */
@@ -599,6 +773,7 @@ export function readSurfaceModeConfig(
   agentDir: string,
   presence?: CodemodePresence,
   codemodeSwitch?: CodemodeSwitchResolution,
+  codemodeActivation?: CodemodeActivationResolution,
   cwd: string = process.cwd(),
 ): SurfaceModeConfig {
   const path = join(agentDir, PTC_MODE_CONFIG_FILE);
@@ -606,13 +781,16 @@ export function readSurfaceModeConfig(
     surfaceMode: SurfaceMode;
     codemode: CodemodePresence;
     codemodeSwitch: CodemodeSwitchResolution;
+    codemodeActivation: CodemodeActivationResolution;
   } => {
     const probed = presence ?? probeCodemodePresence();
     const sw = codemodeSwitch ?? readCodemodeSwitch(agentDir, cwd);
+    const act = codemodeActivation ?? readCodemodeActivation(agentDir, cwd);
     return {
-      surfaceMode: detectedSurfaceMode(probed, sw.switch),
+      surfaceMode: detectedSurfaceMode(probed, sw.switch, act.activation),
       codemode: probed,
       codemodeSwitch: sw,
+      codemodeActivation: act,
     };
   };
   let raw: string;
@@ -657,7 +835,7 @@ export function readSurfaceModeConfig(
     };
   }
   // An explicit key wins, but the table still runs so the caller can report a disagreement
-  // (ADR-0027). Both probes are paid for on this one path, and only this one.
+  // (ADR-0027). All three probes are paid for on this one path, and only this one.
   const table = detected();
   return {
     surfaceMode: value as SurfaceMode,
@@ -665,6 +843,7 @@ export function readSurfaceModeConfig(
     detected: table.surfaceMode,
     codemode: table.codemode,
     codemodeSwitch: table.codemodeSwitch,
+    codemodeActivation: table.codemodeActivation,
   };
 }
 
