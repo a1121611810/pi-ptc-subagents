@@ -7,7 +7,7 @@
 import { expect, test } from "vitest";
 import type {
   AgentToolResult,
-  ExtensionContext,
+  ExtensionToolContext,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import type { PtcToolDetails } from "../src/tools/common.ts";
@@ -28,7 +28,7 @@ function call(
   params: { meta?: unknown; script: string; args?: unknown },
   extra: { signal?: AbortSignal; cwd?: string } = {},
 ): Promise<AgentToolResult<PtcToolDetails>> {
-  const ctx: ExtensionContext = toolContext(extra.cwd ?? process.cwd());
+  const ctx: ExtensionToolContext = toolContext(extra.cwd ?? process.cwd());
   const meta = params.meta ?? { name: "test workflow", description: "integration test workflow" };
   return tool.execute(
     "call-1",
