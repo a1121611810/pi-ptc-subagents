@@ -394,7 +394,15 @@ const EXTERNAL_VOCABULARY: ReadonlyMap<string, string> = new Map([
   ["ToolInfo", "pi ExtensionAPI.getAllTools 的返回类型，本仓只在 ADR-0026 里引用（ADR-0026）"],
   [
     "getSettings",
-    "pi 0.99.1 的 ExtensionAPI 方法，工厂时点为 notInitialized 桩；本仓明确不依赖它（ADR-0026）",
+    "pi 的 ExtensionAPI 方法，工厂时点为 notInitialized 桩；ADR-0026 不依赖它，ADR-0027 说明它也救不了工厂时点的判定（要等 bindCore，而那时已无法撤销注册）",
+  ],
+  [
+    "unregisterTool",
+    "pi 1.0.0 并不提供该方法（只有 unregisterProvider）；ADR-0027 引用它是为了记录「没有撤销注册这条路」这个约束本身",
+  ],
+  [
+    "unregisterProvider",
+    "pi 的 ExtensionAPI 方法，本仓不调用；与 unregisterTool 并列出现在 ADR-0027 的同一处论证里",
   ],
   ["searchTools", "pi 内建 codemode 沙箱的全局函数，本仓不声明（ADR-0025）"],
   ["max_output_tokens", "pi 内建 codemode 的脚本级输出预算选项，本仓不声明（ADR-0025）"],
@@ -411,7 +419,22 @@ const EXTERNAL_VOCABULARY: ReadonlyMap<string, string> = new Map([
   ["maxSubCalls", "DSH 侧 sub-call 深度上限字段"],
   ["notificationCadenceMs", "宿主任务通知的节流字段"],
   ["notificationRateLimit", "宿主任务通知的限流字段"],
-  ["outputSchema", "宿主对 model-facing 结果的 schema 字段"],
+  [
+    "ToolResultMessage",
+    "pi-agent-core 的模型侧 tool 结果消息类型；ADR-0028 引用它是为了证明 structuredContent 不进模型（该类型连该字段都没有）",
+  ],
+  [
+    "neverBundle",
+    "tsdown 的构建配置键（vite.config.ts 的 deps.neverBundle），不是 src/ 里的符号；ADR-0008 附录说明为何 minimatch 故意不列入",
+  ],
+  [
+    "DefaultResourceLoader",
+    "pi 的资源加载器，DefaultPackageManager 的 cwd 由它传入；ADR-0027 引用它是为了说明 process.cwd() 与宿主 cwd 何时一致",
+  ],
+  [
+    "full_output_path",
+    "pi 内建 bash 工具 structuredContent 的字段名；本仓同类字段是 output_full_path（ADR-0028 引用 pi 的拼写作对照）",
+  ],
   ["rendererState", "DSH 渲染层的内部状态字段"],
   ["requestRender", "DSH 渲染层的重绘触发接口"],
   ["sourceInfo", "pi 宿主的消息来源信息字段"],

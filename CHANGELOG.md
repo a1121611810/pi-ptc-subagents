@@ -7,6 +7,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A failing `bash` binding no longer resolves as a success on pi 1.0.0.** pi 1.0.0 added a
+  non-throwing failure channel — `AgentToolResult.isError`: "Report a failure without throwing. The
+  model sees `content` as an error result, like a thrown error" — and `bash` moved its non-zero exit
+  onto it, so `tools.bash({ command: "exit 3" })` inside a PTC program **resolved** where on 0.86.1
+  it threw. The binding wrapper forwarded only `{ content, details }`, so `isError` was dropped at
+  the boundary and the failure crossed into the program as a successful resolution whose only tell
+  was a sentence at the end of its stdout. The binding layer now translates `isError` back into the
+  rejection ADR-0024's contract already promises, which is what keeps a failing call from being
+  silent.
+- **Disabling pi's `codemode` now brings the PTC surfaces back.** The detected surface asked one
+  question — does this pi ship a `codemode` extension directory — and since pi 0.99.0 that is no
+  longer the same as the one that matters. A user who put `"extensions": ["-builtin:codemode"]` in
+  their settings, or launched with `--no-extensions`, turned the orchestrator off and this package
+  kept handing the orchestration to it: `ptc_run_code` and `ptc_workflow` stayed unregistered and
+  the session was left with `ptc_subagent` and nothing to compose with. Nothing errored; two tools
+  were simply missing.
+
+  A second probe now reads the **switch** — whether pi will actually load the extension — from the
+  same three places pi reads it and in the same order (command line, `<cwd>/.pi/settings.json`,
+  `<agentDir>/settings.json`), and the detected default follows both questions:
+
+  | ships `codemode`? | will load it?                               | surface     |
+  | ----------------- | ------------------------------------------- | ----------- |
+  | yes               | yes (default, or `+builtin:codemode`)       | `subagents` |
+  | yes               | no (`-builtin:codemode`, `--no-extensions`) | `full`      |
+  | no                | —                                           | `full`      |
+
+  An explicit `surfaceMode` still wins; a settings file that cannot be read as a JSON object still
+  falls back to the next source rather than half-applying. Two notices are added at session start:
+  one naming an unreadable settings file, one reporting that a pinned `surfaceMode` disagrees with
+  the table. [ADR-0027](./docs/adr/0027-codemode-switch-decides-surface.md)
+
+  Verified on a real 1.0.0 install for the three reachable cells, asserting on the registered tool
+  set rather than on the resolver: `-builtin:codemode` → `ptc_run_code` + `ptc_workflow`; no switch
+  entry → `ptc_subagent`; `+builtin:codemode` → `ptc_subagent`. The fourth cell (no `codemode` on
+  disk at all) is not reachable on a machine with 1.0 installed and is covered by unit tests only.
+
+### Added
+
+- **The four model-facing tools declare a structured result, so pi's `codemode` can consume them.**
+  A script calling a tool used to get back prose: `ptc_subagent` returned
+  `"Started background task 01J…"` with the id embedded, and the `ptc_task_*` tools returned
+  newline-joined lines to re-parse. `ptc_subagent` is the acute case — it is the only way a
+  `subagents`-surface session can start a subagent at all, because pi's QuickJS sandbox has no file
+  system, no network and no `child_process`.
+
+  All four now declare an `outputSchema` and return a matching `structuredContent`, which codemode
+  scripts receive instead of the text. The shape is a lean projection rather than a mirror of
+  `details`: `ptc_task_list` mirroring `TaskRecord[]` would push ~200 KB of per-record
+  `outputPreview` into a sandbox whose purpose is to keep intermediate data away from the model.
+  `content` and `details` are byte-identical to before on every path, and the model still sees
+  exactly the same text — `structuredContent` is documented as "not sent to the model".
+  [ADR-0028](./docs/adr/0028-structured-results-for-codemode.md); usage in
+  [Structured results for codemode](./docs/usage/structured-results.md).
+
+### Changed
+
+- **The codemode switch now mirrors pi's own matchers instead of approximating them.** Reading the
+  `!` bucket by comparing a pattern's literal prefix was the wrong SHAPE of fix: the bucket is a
+  continuum (globs, character classes, extglobs, nested negations, backslash escapes, multi-segment
+  paths), so every review round found one more member — four costful defects in four rounds, and a
+  412-case sweep of the prefix version still had 24 divergences. A case list cannot be finished.
+  `resolveCodemodeSwitch` now calls the same `minimatch` pi does, through the same
+  `matchesAnyPattern` / `normalizeExactPattern` helpers and with pi's own `baseDir` per scope, which
+  adds one small runtime dependency (`minimatch ^10.2.6`, the version pi itself pins) and **shortens**
+  the code. A 192-case sweep of the mirror has zero divergences in either direction, and all eight
+  reachable cells agree with a real pi 1.0.0 end to end.
+- **The dev toolchain now compiles against pi 1.0.0** rather than 0.86.1 / 0.87.0, so the type check
+  and the whole suite run against the pi this package is actually used with. `peerDependencies`
+  already declared `>=0.86.0`; that claim had no evidence behind it until now. Two consequences of
+  the bump are fixed in the same change: pi narrowed a tool's fifth `execute` parameter from
+  `ExtensionContext` to `ExtensionToolContext` (which adds `tools` and `executeTool`), and the
+  `isError` channel above.
+
 ## [1.2.1] - 2026-09-30
 
 ### Fixed

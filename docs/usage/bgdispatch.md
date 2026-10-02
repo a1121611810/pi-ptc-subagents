@@ -404,7 +404,10 @@ Deferred deliberately; the map items and reasons are in ADR-0022 §8/§10.
 - **Handoff** (`ptc_task_handoff`) — redirect a task mid-flight by spawning a successor.
 - **Reverse query** (`ptc_parent_query` / `ptc_query_response`) — a child asking its parent a question.
 - **Per-task timeout** — no individual deadline on a task beyond the run's own limits.
-- **`outputSchema`** — structured output validation on `pi.dispatch` is out of scope here.
+- **`outputSchema`** — `pi.dispatch` itself declares none: the binding resolves to `{ text, status, ... }`
+  and has no structured form (see the exception in the binding contract). The `ptc_task_*` tools and
+  `ptc_subagent` DO declare one, for a different consumer — see
+  [Structured results for codemode](./structured-results.md).
 - **Foreground → background promotion** — spawn-or-reject only; a running foreground call cannot be
   moved to the background.
 - **`queued`** — no in-task queue; spawning above the concurrency cap is an immediate rejection.

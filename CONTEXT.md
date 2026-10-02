@@ -152,17 +152,47 @@ tools this package registers, independent of _PTC mode_ (which decides
 which of the registered tools are _active_). Read from the agent-dir
 `ptc.json` beside `defaultMode`. Three values, in increasing order of what
 this package takes responsibility for: `off`, `subagents`, `full`.
-With no key set it is **detected**: a pi that ships its own `codemode`
-resolves to `subagents`, a pi that does not resolves to `full`, and a probe
-that cannot answer resolves to `full` in the safe direction -- and the session
-names that outcome at startup rather than defaulting in silence, because a
-detection that cannot be seen is indistinguishable from a pi that moved its
-`dist`. ADR-0025, ADR-0026. _Avoid_: "PTC mode" (that is the hide-the-built-ins
+With no key set it is **detected**, and the detection asks two questions, not one.
+Does this pi ship a `codemode` extension directory, and will pi actually load
+it? The second one is not redundant: since pi 0.99.0 a user can disable a
+built-in extension, so a pi can ship `codemode` and be told not to run it.
+Shipped **and** loading resolves to `subagents`; shipped but not loading, or
+not shipped at all, resolves to `full` -- and a probe that cannot answer also
+resolves to `full` in the safe direction. The session names that outcome at
+startup rather than defaulting in silence, because a detection that cannot be
+seen is indistinguishable from a pi that moved its `dist`. ADR-0025,
+ADR-0026, ADR-0027. _Avoid_: "PTC mode" (that is the hide-the-built-ins
 toggle; the
 two are separate and both exist), "mode" unqualified (ambiguous in this
 repository), "enable" (a surface mode of `off` leaves the package
 installed and doing nothing, which "disabled" would hide), "default"
 (the default is a function of the pi, so call it the detected default).
+
+**codemode switch** — whether the pi that loaded us will actually load its own
+`codemode` extension, as distinct from the **codemode probe** (whether the
+extension directory is on disk). Three states: `absent` (nothing configured it,
+and pi loads built-ins by default), `enabled`, `disabled`. Read from the same
+three places pi reads it and in the same order: the command line
+(`-e builtin:codemode`, then `-ne` / `--no-extensions`), then
+`<cwd>/.pi/settings.json`, then `<agentDir>/settings.json`. It exists because
+pi 0.99.0 added `-builtin:<name>`, which made the two questions have different
+answers; answering only the first one hands orchestration to a tool that is not
+running. ADR-0027. _Avoid_: "codemode probe" (that is the filesystem
+question), "is codemode enabled" (the tool is separately registered inactive via
+`defaultActive: false`, which this switch does not read), "extension enabled"
+(ambiguous between the extension loading and the tool being in the active set).
+
+**structured result** — the `structuredContent` a model-facing tool returns
+alongside its `content`, declared by an `outputSchema`, for **programmatic
+callers only**: pi's `codemode` scripts receive it instead of the text, and it
+is never sent to the model. It is a **projection**, not a mirror of `details` --
+lean, stable, and shaped to match what the model was shown in the text block, so
+a script and the transcript agree. `ptc_task_*` and `ptc_subagent` declare one;
+`pi.dispatch` does not. ADR-0028. _Avoid_: "structured output" (pi's
+`outputSchema` describes the result, it does not validate it — nothing checks
+the two agree), "details" (that is the TUI's own richer channel, and the two are
+allowed to drift), "the result" (ambiguous between `content`, `details` and this;
+say which).
 
 **orchestration surface** — the tool a model uses to compose many tool
 calls into one program. Two exist and they are alternatives, never both:
