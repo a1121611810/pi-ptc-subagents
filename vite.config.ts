@@ -60,6 +60,14 @@ export default defineConfig({
     // running, at whatever version this repo pinned, plus pi-tui's own `marked` and
     // `get-east-asian-width` — 184.81 kB → 102.69 kB once externalised. tsdown's "Detected
     // dependencies in bundle" hint is what surfaced it. See ADR-0008's addendum.
+    //
+    // `minimatch` is deliberately NOT on this list (added 2026-10-02 with ADR-0027's mirror of
+    // pi's `matchesAnyPattern`). Everything above is on it because pi PROVIDES the package and an
+    // inline copy would be a second, wrong one. `minimatch` is the opposite case: it is ours to
+    // ship, declared in `dependencies`, so tsdown externalises it and npm installs it beside the
+    // extension. Putting it here would break the install instead of protecting it — and a build
+    // that emitted the "Detected dependencies in bundle" hint for it is the signal that it moved to
+    // `devDependencies` by accident.
     deps: {
       neverBundle: [
         /^node:/,

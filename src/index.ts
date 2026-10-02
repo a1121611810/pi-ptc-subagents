@@ -57,9 +57,11 @@ import {
   readDefaultModeConfig,
   readSurfaceModeConfig,
   resolveBaseOnStart,
+  surfaceModeConflict,
 } from "./mode/ptc-mode.ts";
 import type {
   CodemodePresence,
+  CodemodeSwitchResolution,
   ModeHideStrategy,
   PersistedModeState,
   SurfaceMode,
@@ -80,12 +82,20 @@ export {
   PTC_MODE_ENTRY_TYPE,
   PTC_MODE_STATUS_KEY,
   PTC_MODE_TOOL_NAMES,
+  probeCodemodePresence,
+  readCodemodeSwitch,
   readDefaultModeConfig,
   readSurfaceModeConfig,
   resolveBaseOnStart,
+  resolveCodemodeSwitch,
   sameToolSet,
+  surfaceModeConflict,
 } from "./mode/ptc-mode.ts";
 export type {
+  CodemodePresence,
+  CodemodeSwitch,
+  CodemodeSwitchResolution,
+  CodemodeSwitchSource,
   DefaultModeConfig,
   ModeBlockReason,
   ModeEntryDecision,
@@ -93,6 +103,7 @@ export type {
   ModeHideStrategy,
   PersistedModeState,
   PtcModeState,
+  SurfaceModeConfig,
 } from "./mode/ptc-mode.ts";
 export {
   buildPtcSkillsSection,
@@ -184,6 +195,13 @@ export interface PtcSubagentsOptions {
    * which is how the previous version of that test passed for the wrong reason.
    */
   codemode?: CodemodePresence;
+  /**
+   * ADR-0027 test seam: whether pi will actually LOAD its own codemode. Undefined in
+   * production, where `readCodemodeSwitch` reads pi's real settings files. Separate from
+   * `codemode` on purpose — a pi can ship the directory and still be told not to load it,
+   * and that is the case this seam exists to state.
+   */
+  codemodeSwitch?: CodemodeSwitchResolution;
 }
 
 export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOptions = {}): void {
@@ -201,9 +219,15 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
    * a surface never asked the pi anything, so there is no probe result to report. That is what
    * makes `surface.codemode !== undefined` the exact test for "the surface was detected" below.
    */
+  // ADR-0026 reads the surface once, here, because registration has to happen in the factory and
+  // `cwd` only matters for the `!` bucket's globs. It is left at its `process.cwd()` default
+  // deliberately: that is the directory pi's own `DefaultPackageManager` resolves project-scope
+  // globs against for a session launched from a shell, and the one case where the two can differ —
+  // an SDK embedder passing an explicit `cwd` — is recorded in ADR-0027 as a known limit rather
+  // than papered over by threading a value an extension cannot observe.
   const surface =
     options.surfaceMode === undefined
-      ? readSurfaceModeConfig(getAgentDir(), options.codemode)
+      ? readSurfaceModeConfig(getAgentDir(), options.codemode, options.codemodeSwitch)
       : { surfaceMode: options.surfaceMode, source: "file" as const };
   // Set on entry, cleared after the briefing has been injected, so the instruction lands once
   // per mode entry instead of on every turn.
@@ -618,6 +642,47 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
           'codemode, set "surfaceMode" in ' +
           PTC_MODE_CONFIG_FILE +
           " -- an explicit key always wins over detection.",
+        "info",
+      );
+    }
+
+    /*
+     * ADR-0027: a settings file we could not read is reported the same way a broken `ptc.json`
+     * is -- as a warning that names the file -- rather than being allowed to change which
+     * tools exist silently. The switch it describes has already fallen through to the next
+     * source by the time this runs.
+     */
+    if (surface.codemodeSwitch?.error !== undefined) {
+      ctx.ui.notify(`pi-ptc-subagents: ${surface.codemodeSwitch.error}`, "warning");
+    }
+
+    /*
+     * ADR-0027: the explicit key WINS -- that is what an override is for -- so this only
+     * reports. The case worth a warning is the one where the two disagree about who
+     * orchestrates: a user who disabled pi's codemode and pinned `surfaceMode: "subagents"`
+     * has asked for a surface that assumes an orchestrator which is not loaded, and will
+     * find `ptc_run_code` missing with nothing to replace it.
+     *
+     * `info`, not `warning`: the pinned value was honoured, so nothing is broken. `off` never
+     * reaches here (see `surfaceModeConflict`), and agreeing values never reach here either.
+     */
+    if (
+      surface.source === "file" &&
+      surface.detected !== undefined &&
+      surfaceModeConflict(surface.surfaceMode, surface.detected)
+    ) {
+      const sw = surface.codemodeSwitch;
+      ctx.ui.notify(
+        "pi-ptc-subagents: surfaceMode is pinned to " +
+          JSON.stringify(surface.surfaceMode) +
+          ", but this pi resolves to " +
+          JSON.stringify(surface.detected) +
+          (sw === undefined
+            ? ""
+            : " (pi's codemode is on disk and its switch is " + sw.switch + ")") +
+          ". The pinned value is in force. Change it in " +
+          PTC_MODE_CONFIG_FILE +
+          " if that is not what you meant.",
         "info",
       );
     }

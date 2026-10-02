@@ -201,7 +201,14 @@ async function capturePayload(options: {
   const out = join(dir, "payload.json");
   const args = [
     "--no-session",
-    "-ne",
+    // `-ne` keeps the developer's extensions out of the measurement, and it is safe for every
+    // case that pins `surfaceMode` in ptc.json. It is NOT safe for the "detected" half, and
+    // ADR-0027 is why: `-ne` resolves the codemode SWITCH to `disabled`, so with it the detected
+    // default is `full` and that half would never reach the cell it is named for. The
+    // PI_CODING_AGENT_DIR pin below already excludes the developer's real packages, so dropping
+    // `-ne` for this one spawn costs no isolation and puts pi back in its default state --
+    // built-ins loaded, which is the "ships codemode AND loads it" cell.
+    ...(options.surfaceMode === "detected" ? [] : ["-ne"]),
     "-e",
     PROBE,
     ...(options.withDist === true ? ["-e", DIST] : []),

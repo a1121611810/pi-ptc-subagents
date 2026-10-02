@@ -46,10 +46,13 @@
     "verify:dist": "node scripts/verify-dist-render.mjs",
     "prepublishOnly": "npm run typecheck && npm run lint && npm run fmt:check && npm run build && npm run test"
   },
+  "dependencies": {
+    "minimatch": "^10.2.6"
+  },
   "devDependencies": {
-    "@earendil-works/pi-ai": "^0.86.1",
-    "@earendil-works/pi-coding-agent": "^0.86.1",
-    "@earendil-works/pi-tui": "^0.87.0",
+    "@earendil-works/pi-ai": "^1.0.0",
+    "@earendil-works/pi-coding-agent": "^1.0.0",
+    "@earendil-works/pi-tui": "^1.0.0",
     "@types/node": "^22.0.0",
     "@vitest/coverage-v8": "4.1.11",
     "oxfmt": "^0.70.0",
