@@ -397,10 +397,6 @@ const EXTERNAL_VOCABULARY: ReadonlyMap<string, string> = new Map([
     "pi 的 ExtensionAPI 方法，工厂时点为 notInitialized 桩；ADR-0026 不依赖它，ADR-0027 说明它也救不了工厂时点的判定（要等 bindCore，而那时已无法撤销注册）",
   ],
   [
-    "unregisterTool",
-    "pi 1.0.0 并不提供该方法（只有 unregisterProvider）；ADR-0027 引用它是为了记录「没有撤销注册这条路」这个约束本身",
-  ],
-  [
     "unregisterProvider",
     "pi 的 ExtensionAPI 方法，本仓不调用；与 unregisterTool 并列出现在 ADR-0027 的同一处论证里",
   ],
@@ -413,8 +409,15 @@ const EXTERNAL_VOCABULARY: ReadonlyMap<string, string> = new Map([
   ["ToolCallTree", "DSH 渲染层的子调用树组件类"],
   ["UserConfig", "pi 宿主配置文件里的用户配置类型"],
   ["_baseSystemPromptOptions", "pi 宿主内部字段（下划线前缀即私有）"],
+  [
+    "_refreshToolRegistry",
+    "pi 宿主内部方法（下划线前缀即私有）：reload 时按新的 loadout 重建工具表",
+  ],
   ["additionalContexts", "pi 宿主的上下文数组字段"],
   ["deferContext", "pi 宿主的上下文延迟注入接口"],
+  ["ExtensionRunner", "pi 宿主的扩展执行器类；本仓只通过 ExtensionAPI 消费它"],
+  ["loadExtensionsCached", "pi 宿主的扩展加载入口（带缓存，reload 前由 clearExtensionCache 清空）"],
+  ["unregisterVirtualModel", "pi 宿主的虚拟模型注销接口"],
   ["maxSubCalls", "DSH 侧 sub-call 深度上限字段"],
   ["notificationCadenceMs", "宿主任务通知的节流字段"],
   ["notificationRateLimit", "宿主任务通知的限流字段"],
@@ -425,10 +428,6 @@ const EXTERNAL_VOCABULARY: ReadonlyMap<string, string> = new Map([
   [
     "neverBundle",
     "tsdown 的构建配置键（vite.config.ts 的 deps.neverBundle），不是 src/ 里的符号；ADR-0008 附录说明为何 minimatch 故意不列入",
-  ],
-  [
-    "DefaultResourceLoader",
-    "pi 的资源加载器，DefaultPackageManager 的 cwd 由它传入；ADR-0027 引用它是为了说明 process.cwd() 与宿主 cwd 何时一致",
   ],
   [
     "full_output_path",
@@ -1144,6 +1143,10 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       "docs/adr/0029-surface-follows-codemode-activation.md:105 -> src/index.ts:771",
       "docs/adr/0029-surface-follows-codemode-activation.md:129 -> ptc-mode.ts:27",
       "docs/adr/0029-surface-follows-codemode-activation.md:154 -> src/index.ts:729",
+      // 2026-10-03 第四次复核（ADR-0030）：0030:68 指向 `ptc-mode.ts:27-31` 那段「loadout 被外部改写
+      // 时模式如何退让」，27 行是段首。ADR-0030 另外四处引用写的是 pi 宿主的行号而非本仓文件，
+      // 解析器不收，因此不进这份基线——它们由 ADR 正文里的表格自带出处。
+      "docs/adr/0030-surface-switch-reloads.md:68 -> ptc-mode.ts:27",
     ]);
   });
 

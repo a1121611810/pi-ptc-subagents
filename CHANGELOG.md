@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`/ptc surface off|subagents|full` switches the extension surface without a new session.** The
+  surface was configurable only by hand-editing `~/.pi/agent/ptc.json` and restarting, because it is
+  read once in the extension factory and pi has no way to unregister a tool. The new subcommand
+  writes the key and then performs pi's own `/reload`, which clears pi's extension cache and
+  re-runs every factory — the same path the built-in takes, from inside the extension. A malformed
+  `ptc.json` is reported and left byte-for-byte alone, `defaultMode` in the same file survives, and
+  setting the value that is already there writes nothing and does not reload
+  ([ADR-0030](./docs/adr/0030-surface-switch-reloads.md)).
+
 ### Fixed
 
 - **A default pi session no longer starts with no orchestration tool at all.** The detected surface

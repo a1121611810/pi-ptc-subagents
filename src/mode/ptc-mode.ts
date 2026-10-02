@@ -36,7 +36,7 @@
  * scripts buys nothing and breaks them. A session that was *launched* with an explicit tool
  * restriction is left alone too — see `decideModeEntry`.
  */
-import { readFileSync, realpathSync, statSync } from "node:fs";
+import { readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { minimatch } from "minimatch";
 import { BUILTIN_BINDING_NAMES } from "../runtime/bindings.ts";
@@ -847,10 +847,91 @@ export function readSurfaceModeConfig(
   };
 }
 
+/** Outcome of writing `surfaceMode` for `/ptc surface`. */
+export type SurfaceModeWrite =
+  | {
+      ok: true;
+      path: string;
+      /** The value already in the file, or `undefined` when there was none. */
+      previous: SurfaceMode | undefined;
+      /** False when the file already said this, in which case NOTHING was written. */
+      changed: boolean;
+    }
+  | { ok: false; path: string; error: string };
+
+/**
+ * Write one `surfaceMode` key into the agent-dir config, preserving every other key.
+ *
+ * Three rules, each of which is a way a naive rewrite goes wrong:
+ *
+ * - **A malformed file is never overwritten.** An unparseable `ptc.json` is a file the user may
+ *   be mid-edit on, and this command is not a licence to replace it with something valid that
+ *   drops whatever was in it. The read side already reports that shape rather than acting on it
+ *   ({@link readSurfaceModeConfig}), and the write side has to agree.
+ * - **Other keys survive.** `defaultMode` lives in the same file (ADR-0010), and a command that
+ *   wrote `{"surfaceMode": …}` wholesale would silently reset the user's mode preference.
+ * - **An unchanged value writes nothing.** `/ptc surface full` on a session already at `full`
+ *   should not touch the file's mtime, and — more to the point — should not trigger the reload
+ *   that would follow, since a reload replaces every extension instance for no reason.
+ */
+export function setSurfaceMode(agentDir: string, value: unknown): SurfaceModeWrite {
+  const path = join(agentDir, PTC_MODE_CONFIG_FILE);
+  if (typeof value !== "string" || !SURFACE_MODES.includes(value as SurfaceMode)) {
+    return {
+      ok: false,
+      path,
+      error: `surfaceMode must be one of ${SURFACE_MODES.join(" | ")}`,
+    };
+  }
+  const wanted = value as SurfaceMode;
+
+  let raw: string | undefined;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch {
+    raw = undefined;
+  }
+  let parsed: Record<string, unknown> = {};
+  if (raw !== undefined) {
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(raw);
+    } catch (error) {
+      return {
+        ok: false,
+        path,
+        error: `${path} is not valid JSON (${error instanceof Error ? error.message : String(error)}), so it was left alone`,
+      };
+    }
+    if (decoded === null || typeof decoded !== "object" || Array.isArray(decoded)) {
+      return {
+        ok: false,
+        path,
+        error: `${path} must contain a JSON object, so it was left alone`,
+      };
+    }
+    parsed = decoded as Record<string, unknown>;
+  }
+
+  const existing = parsed.surfaceMode;
+  const previous = typeof existing === "string" ? (existing as SurfaceMode) : undefined;
+  if (previous === wanted) return { ok: true, path, previous, changed: false };
+
+  try {
+    writeFileSync(path, JSON.stringify({ ...parsed, surfaceMode: wanted }, null, 2) + "\n", "utf8");
+  } catch (error) {
+    return {
+      ok: false,
+      path,
+      error: `could not write ${path} (${error instanceof Error ? error.message : String(error)})`,
+    };
+  }
+  return { ok: true, path, previous, changed: true };
+}
+
 // --------------------------------------------------------------------------------------
 // Entry decision
 // --------------------------------------------------------------------------------------
-
 /** Why the mode declined to turn on. Surfaced in the entry notification / debug logs. */
 export type ModeBlockReason = "not-tui" | "config-off" | "tools-unavailable" | "restricted-session";
 

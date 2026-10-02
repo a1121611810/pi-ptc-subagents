@@ -33,6 +33,7 @@ ADRs for pi-ptc-subagents, per `docs/agents/domain.md` (single-context repo).
 | [0027](./0027-codemode-switch-decides-surface.md)          | The detected surface follows whether pi will LOAD codemode, not whether it ships it              | accepted |
 | [0028](./0028-structured-results-for-codemode.md)          | Model-facing tools declare a structured result for codemode — a projection, not a mirror         | accepted |
 | [0029](./0029-surface-follows-codemode-activation.md)      | The detected surface follows whether codemode will be ACTIVE, not only whether it ships or loads | accepted |
+| [0030](./0030-surface-switch-reloads.md)                   | The surface is switched by writing the file and reloading, not by mutating the loadout           | accepted |
 
 Numbering gaps are deliberate: 0001/0006 were reserved while wayfinder map #7 was charting and dropped when G1 resolved; keeping their slots means every cross-reference in the map and its tickets stays valid.
 

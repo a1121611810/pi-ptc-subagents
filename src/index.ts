@@ -14,6 +14,7 @@
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type {
   ExtensionAPI,
+  ExtensionCommandContext,
   ExtensionContext,
   NormalizedBuildSystemPromptOptions,
 } from "@earendil-works/pi-coding-agent";
@@ -57,7 +58,9 @@ import {
   readDefaultModeConfig,
   readSurfaceModeConfig,
   resolveBaseOnStart,
+  setSurfaceMode,
   surfaceModeConflict,
+  SURFACE_MODES,
 } from "./mode/ptc-mode.ts";
 import type {
   CodemodePresence,
@@ -87,9 +90,12 @@ export {
   readDefaultModeConfig,
   readSurfaceModeConfig,
   resolveBaseOnStart,
+  resolveCodemodeActivation,
   resolveCodemodeSwitch,
   sameToolSet,
+  setSurfaceMode,
   surfaceModeConflict,
+  SURFACE_MODES,
 } from "./mode/ptc-mode.ts";
 export type {
   CodemodePresence,
@@ -523,11 +529,95 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     return undefined;
   };
 
+  /**
+   * `/ptc surface [off|subagents|full]`.
+   *
+   * The surface is read once, in the factory, and pi has no `unregisterTool` — so a change cannot
+   * take effect in the running session. What CAN take effect is a reload, and that is pi's own
+   * `/reload`: `DefaultResourceLoader.reload()` calls `clearExtensionCache()`
+   * (`resource-loader.js:353`) and re-runs every factory, and `AgentSession.reload()`
+   * (`agent-session.js:2899`) then rebuilds the runner and re-emits `session_start` with reason
+   * `reload` — which is precisely the moment the surface is decided. `ctx.reload()` is the same
+   * path from inside an extension, so the user does not have to type a second command.
+   *
+   * The notification is emitted BEFORE the reload, never after: `ctx.reload()` invalidates this
+   * command context (`runner.js:482` says so in as many words), so anything read from `ctx`
+   * afterwards is stale by contract rather than by accident.
+   */
+  const handleSurfaceCommand = async (
+    value: string,
+    ctx: ExtensionCommandContext,
+  ): Promise<void> => {
+    const agentDir = getAgentDir();
+    if (value === "") {
+      const current = readSurfaceModeConfig(agentDir);
+      const detected =
+        current.detected === undefined || current.detected === current.surfaceMode
+          ? ""
+          : " (detection would say " + JSON.stringify(current.detected) + ")";
+      ctx.ui.notify(
+        "Extension surface: " +
+          JSON.stringify(current.surfaceMode) +
+          ", from " +
+          current.source +
+          detected +
+          ". Set it with /ptc surface " +
+          SURFACE_MODES.join("|") +
+          "; the change needs a reload, which this command performs.",
+        "info",
+      );
+      return;
+    }
+
+    const written = setSurfaceMode(agentDir, value);
+    if (!written.ok) {
+      ctx.ui.notify("pi-ptc-subagents: " + written.error + ". Nothing was changed.", "warning");
+      return;
+    }
+    if (!written.changed) {
+      ctx.ui.notify(
+        "The surface is already " + JSON.stringify(value) + " — nothing written, nothing reloaded.",
+        "info",
+      );
+      return;
+    }
+
+    const lines = [
+      "Surface " +
+        (written.previous === undefined
+          ? "(unset, so detected)"
+          : JSON.stringify(written.previous)) +
+        " → " +
+        JSON.stringify(value) +
+        " in " +
+        written.path +
+        ". Reloading so it takes effect now.",
+    ];
+    // Said before the reload, and only when it is true: the mode needs ptc_run_code or
+    // ptc_workflow to enter at all (`decideModeEntry` policy 3), so a `subagents` or `off`
+    // surface ends a running mode rather than carrying it across.
+    if (mode.enabled && value !== "full") {
+      lines.push("PTC mode was ON and cannot survive this surface — run /ptc on afterwards.");
+    }
+    if (value === "subagents") {
+      lines.push(
+        "subagents hands orchestration to pi's codemode, so it needs codemode in this session's " +
+          "tool list; if it is not there the startup warning will say so.",
+      );
+    }
+    ctx.ui.notify(lines.join("\n"), "info");
+    await ctx.reload();
+  };
+
   pi.registerCommand("ptc", {
     description:
-      "Show or toggle PTC mode (built-in tools reachable only from inside a PTC program)",
+      "Show or toggle PTC mode, or set the extension surface (/ptc surface off|subagents|full)",
     handler: async (args, ctx) => {
       const action = args.trim().toLowerCase();
+      if (action === "surface" || action.startsWith("surface ")) {
+        await handleSurfaceCommand(action.slice("surface".length).trim(), ctx);
+        return;
+      }
       if (action === "off") {
         if (!mode.enabled) {
           ctx.ui.notify("PTC mode is already off.", "info");

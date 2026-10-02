@@ -201,8 +201,12 @@ the session. The mode's rationale and rejected alternatives are in [ADR-0010](./
 ```
 
 **Choosing the surface.** `defaultMode` decides whether the session _enters_ PTC mode; `surfaceMode`
-decides which model-facing tools this package registers at all. It is read once, at startup, so a
-surface change needs a new session ([ADR-0025](./docs/adr/0025-extension-surface-is-a-setting.md)):
+decides which model-facing tools this package registers at all ([ADR-0025](./docs/adr/0025-extension-surface-is-a-setting.md)):
+
+```
+/ptc surface              # report the current surface and where it came from
+/ptc surface subagents    # write the key and reload so it applies now
+```
 
 ```jsonc
 // ~/.pi/agent/ptc.json
@@ -213,6 +217,15 @@ surface change needs a new session ([ADR-0025](./docs/adr/0025-extension-surface
 - `subagents` — `ptc_subagent` plus the three `ptc_task_*` tools, with pi's own `codemode`
   doing the orchestration; warns at startup when `codemode` is not in the active tool set.
 - `full` — today's set: `ptc_run_code` / `ptc_workflow` plus the three `ptc_task_*` tools.
+
+The command exists because the alternative is editing JSON by hand and starting a new session: the
+surface is read once in the extension factory and pi has no way to unregister a tool, so a change
+cannot apply in place. `/ptc surface` writes the key and then performs pi's own `/reload`, which
+re-runs every extension factory ([ADR-0030](./docs/adr/0030-surface-switch-reloads.md)). Two things
+it will not do silently: a malformed `ptc.json` is reported and left exactly as it was, and an
+unchanged value does not reload — a reload replaces every extension instance in the session, so
+retyping the value you already have costs you in-flight state for nothing. Switching to
+`subagents` or `off` also ends a running PTC mode, which the command says before it does it.
 
 **The default is detected, and it follows three questions, not one**
 ([ADR-0026](./docs/adr/0026-surface-default-is-detected.md),

@@ -133,6 +133,13 @@ export interface ExtensionStub {
   entries: { customType: string; data?: unknown }[];
   notifications: { message: string; type?: string }[];
   statuses: { key: string; text: string | undefined }[];
+  /**
+   * How many notifications had been raised when `ctx.reload()` was called, in call order
+   * (ADR-0030). A number rather than a boolean because the ORDER is the thing worth asserting:
+   * a reload invalidates the command context, so a notification emitted after it is stale by
+   * contract. An empty array means the command never reloaded.
+   */
+  reloads: number[];
   /** Custom messages sent through `pi.sendMessage`, in order. */
   sentMessages: {
     customType: string;
@@ -209,6 +216,7 @@ export function makeExtensionStub(
   const entries: { customType: string; data?: unknown }[] = [];
   const notifications: { message: string; type?: string }[] = [];
   const statuses: { key: string; text: string | undefined }[] = [];
+  const reloads: number[] = [];
   const sentMessages: ExtensionStub["sentMessages"] = [];
   const sentUserMessages: ExtensionStub["sentUserMessages"] = [];
   const active = [...(options.active ?? DEFAULT_SESSION_TOOLS), "ptc_run_code", "ptc_workflow"];
@@ -223,6 +231,7 @@ export function makeExtensionStub(
     entries,
     notifications,
     statuses,
+    reloads,
     sentMessages,
     sentUserMessages,
     api: undefined as unknown as ExtensionAPI,
@@ -329,6 +338,8 @@ export function modeContext(
     sessionDir?: string;
     notify?: (message: string, type?: string) => void;
     setStatus?: (key: string, text: string | undefined) => void;
+    /** ADR-0030: present so a command can end in a reload; records nothing by default. */
+    reload?: () => Promise<void>;
   } = {},
 ): ExtensionContext {
   return {
@@ -342,6 +353,7 @@ export function modeContext(
       getEntries: () => options.entries ?? [],
       getSessionDir: () => options.sessionDir,
     },
+    reload: options.reload ?? (async () => {}),
   } as unknown as ExtensionContext;
 }
 
@@ -362,6 +374,15 @@ export function stubContext(
     notify: (message, type) =>
       stub.notifications.push({ message, ...(type === undefined ? {} : { type }) }),
     setStatus: (key, text) => stub.statuses.push({ key, text }),
+    // ADR-0030: `/ptc surface` ends in `ctx.reload()`, so a stub without one would make the
+    // command untestable at exactly the step that matters. It records rather than reloading,
+    // because a real reload replaces every extension instance and there is nothing in a unit
+    // test to replace. `stub.reloads.length` is the assertion; the ORDER relative to the
+    // notification is the assertion that matters, and it is checkable because both land in
+    // recorded arrays on the same stub.
+    reload: async () => {
+      stub.reloads.push(stub.notifications.length);
+    },
   });
 }
 
