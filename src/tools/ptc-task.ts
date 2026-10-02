@@ -16,6 +16,11 @@
  * `ChildProcessLifecycle` parameter is part of the factory contract so the wiring site hands the
  * same seam the dispatcher uses; this module only guards it is present.
  *
+ * Each tool additionally declares pi 1.0.0's `outputSchema` and sets `structuredContent` — a lean
+ * codemode-facing projection, not a copy of `details` (see "codemode projection" below). The model
+ * never sees it: pi documents `structuredContent` as "Not sent to the model", and the three text
+ * blocks and `details` shapes are unchanged by it.
+ *
  * Always-on (ADR-0022 "What we deliberately don't add" 1 + map Notes clause 5): `/ptc off` gates
  * *new spawn*, not in-flight lifecycle, so these tools are not part of PTC mode's gated loadout.
  * `src/index.ts` constructs all three factories against the session-scoped stable holder
@@ -27,6 +32,7 @@
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import type { Static } from "typebox";
 import type { ChildProcessLifecycle } from "../runtime/child-process-lifecycle.ts";
 import { applyAdr0015Truncation, type OutputStorage } from "../runtime/output-storage.ts";
 import { OUTPUT_PREVIEW_MAX_BYTES, type TaskRegistry } from "../runtime/task-registry.ts";
@@ -71,6 +77,44 @@ const TASK_STATUS_SCHEMA = Type.Union([
 ]);
 
 // ---------------------------------------------------------------------------
+//  codemode projection (`structuredContent` + `outputSchema`)
+// ---------------------------------------------------------------------------
+
+/**
+ * The three tools also declare pi 1.0.0's `ToolDefinition.outputSchema` and set
+ * `structuredContent` on every successful result, which is the value a *codemode script* receives
+ * instead of the text block (`toScriptValue` in pi's `dist/extensions/codemode/execute.js`:
+ * `if (tool.outputSchema && result.structuredContent !== undefined) return result.structuredContent;`).
+ * Two rules decide what goes in.
+ *
+ * **1. A lean projection, never a mirror of `details`.** `details` is the TUI's structure and is
+ * allowed to be rich — a `TaskRecord` carries `outputPreview` (≤ 2 KB), `outputRef` and the
+ * ADR-0023 owner fields, so mirroring {@link PtcTaskListDetails.tasks} would push ~200 KB of
+ * preview text into a QuickJS sandbox whose whole job is to filter and aggregate. Each schema
+ * below therefore keeps only the fields a script filters or aggregates on, and `details` keeps
+ * everything.
+ *
+ * **2. Absent, never `undefined`.** `structuredContent` is a `JsonValue` and `JsonObject` is
+ * `{ [key: string]: JsonValue }`, so `undefined` is not assignable — an optional key is omitted
+ * with the same conditional spread `details` already uses (see {@link PtcTaskOutputDetails}).
+ *
+ * **Nothing validates the value against the schema** — pi checks neither shape nor presence — so
+ * each value below is annotated `Static<typeof …_OUTPUT_SCHEMA>`: a missing key, an extra key or a
+ * wrong type is a compile error rather than a silent lie a codemode script would read as data.
+ *
+ * Adding this changes nothing for a model making a direct tool call: pi documents
+ * `AgentToolResult.structuredContent` as "Not sent to the model; `content` remains the
+ * model-facing result". `content` and `details` are untouched by design, and the three throw paths
+ * (unknown `taskId`, bad `sinceBytes`) have no result at all, so they have no projection.
+ *
+ * Key spelling follows the text {@link formatTaskLine} prints — `id`, `status`, agent, `depth=`,
+ * label, `<bytes>B`, `error=<message>` — so a script comparing a structured result against what the
+ * model was shown does not have to remember a third spelling. `agent` (not `agentName`) and the
+ * snake_case `output_bytes` / `error_message` are deliberate; this projection is read next to the
+ * model's text block, not next to `TaskRecord`.
+ */
+
+// ---------------------------------------------------------------------------
 //  ptc_task_list
 // ---------------------------------------------------------------------------
 
@@ -93,6 +137,58 @@ const LIST_PARAMETERS = Type.Object({
     }),
   ),
 });
+
+/** `structuredContent` for `ptc_task_list`; see the codemode projection note above. */
+const LIST_OUTPUT_SCHEMA = Type.Object({
+  tasks: Type.Array(
+    Type.Object({
+      id: Type.String({
+        description: "The task's ULID — the id ptc_task_output and ptc_task_stop take.",
+      }),
+      status: Type.String({
+        description: "One of running, stopping, succeeded, failed, canceled, lost (ADR-0022 §2).",
+      }),
+      agent: Type.String({
+        description: "The agent the task was dispatched with (the record's agentName).",
+      }),
+      depth: Type.Number({
+        description:
+          "0 for a direct child of the session, 1 for a grandchild, and so on (ADR-0016).",
+      }),
+      label: Type.String({ description: "The label the task was dispatched with." }),
+      output_bytes: Type.Optional(
+        Type.Number({
+          description: "Captured output size; absent while the task has flushed no output.",
+        }),
+      ),
+      error_message: Type.Optional(
+        Type.String({ description: "Failure text; absent unless the record carries an error." }),
+      ),
+    }),
+    { description: "One row per task, newest first — the same order as details.tasks." },
+  ),
+  count: Type.Number({ description: "Number of rows in `tasks`." }),
+});
+
+/** One projected row — the compile-time twin of `LIST_OUTPUT_SCHEMA`'s array element. */
+type PtcTaskListRow = Static<typeof LIST_OUTPUT_SCHEMA>["tasks"][number];
+
+/**
+ * Project one record onto the fields a script filters or aggregates on. `outputBytes` and
+ * `errorMessage` are omitted (never set to `undefined`) when the record has none, matching the two
+ * conditionals in {@link formatTaskLine} so a row says exactly what the model's line said.
+ */
+function projectTaskRow(record: TaskRecord): PtcTaskListRow {
+  return {
+    id: record.id,
+    status: record.status,
+    agent: record.agentName,
+    depth: record.depth,
+    label: record.label,
+    ...(record.outputBytes === undefined ? {} : { output_bytes: record.outputBytes }),
+    ...(record.errorMessage === undefined ? {} : { error_message: record.errorMessage }),
+  };
+}
 
 /** One line per record for the model-facing text block. */
 function formatTaskLine(record: TaskRecord): string {
@@ -125,6 +221,7 @@ export function createPtcTaskListTool(registry: TaskRegistry): AnyTool {
       "List background tasks and their live status (id, status, agent, label, output size)",
     promptGuidelines: [...PTC_TASK_TOOL_GUIDELINES],
     parameters: LIST_PARAMETERS,
+    outputSchema: LIST_OUTPUT_SCHEMA,
     async execute(_toolCallId, params) {
       const records = await registry.query({
         ...(params.status === undefined ? {} : { status: params.status }),
@@ -135,9 +232,14 @@ export function createPtcTaskListTool(registry: TaskRegistry): AnyTool {
         records.length === 0
           ? "(no background tasks)"
           : records.map((record) => formatTaskLine(record)).join("\n");
+      const structuredContent: Static<typeof LIST_OUTPUT_SCHEMA> = {
+        tasks: records.map((record) => projectTaskRow(record)),
+        count: records.length,
+      };
       return {
         content: [{ type: "text", text }],
         details: { tasks: records, count: records.length },
+        structuredContent,
       };
     },
 
@@ -198,6 +300,37 @@ const OUTPUT_PARAMETERS = Type.Object({
   ),
 });
 
+/** `structuredContent` for `ptc_task_output`; see the codemode projection note above. */
+const OUTPUT_OUTPUT_SCHEMA = Type.Object({
+  task_id: Type.String({ description: "The background task id that was asked for." }),
+  status: Type.String({
+    description:
+      "The task's status at read time (ADR-0022 §2's six states), so a polling script does not need a second ptc_task_list call.",
+  }),
+  output: Type.String({
+    description: "The page the model reads: the stored output's tail, ADR-0015-truncated.",
+  }),
+  output_bytes: Type.Number({
+    description:
+      "Total bytes stored for the task, regardless of sinceBytes or ADR-0015 truncation.",
+  }),
+  output_preview: Type.Optional(
+    Type.String({
+      description:
+        "The complete stored output; present only at or below the 2048-byte preview ceiling (ADR-0022 §7).",
+    }),
+  ),
+  output_truncated: Type.Boolean({
+    description: "Whether ADR-0015 cut anything out of `output`.",
+  }),
+  output_full_path: Type.Optional(
+    Type.String({
+      description:
+        "A file holding the complete output; present only when `output_truncated` is true (ADR-0015 §2).",
+    }),
+  ),
+});
+
 /**
  * Build `ptc_task_output` (ADR-0022 §3): read the record (existence + current status), read the
  * raw bytes through {@link OutputStorage}, apply ADR-0015's tail rule, and report the truncation
@@ -216,6 +349,7 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
       "Read a background task's output (tail-truncated, with the full-output file path)",
     promptGuidelines: [...PTC_TASK_TOOL_GUIDELINES],
     parameters: OUTPUT_PARAMETERS,
+    outputSchema: OUTPUT_OUTPUT_SCHEMA,
     async execute(_toolCallId, params) {
       const taskId = params.taskId as ULID;
       const record = await loadTaskOrThrow(registry, taskId, "ptc_task_output");
@@ -261,7 +395,18 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
         details.output.length > 0
           ? details.output
           : `(no output yet; task ${taskId} is ${record.status})`;
-      return { content: [{ type: "text", text }], details };
+      // Same computed values, projected onto the declared schema. `status` is free here:
+      // `record` is already loaded for the existence check above.
+      const structuredContent: Static<typeof OUTPUT_OUTPUT_SCHEMA> = {
+        task_id: taskId,
+        status: record.status,
+        output: truncation.text,
+        output_bytes: outputBytes,
+        ...(outputPreview === undefined ? {} : { output_preview: outputPreview }),
+        output_truncated: truncation.truncated,
+        ...(truncation.fullPath === undefined ? {} : { output_full_path: truncation.fullPath }),
+      };
+      return { content: [{ type: "text", text }], details, structuredContent };
     },
 
     ...createTaskPanelRenderers("task-output"),
@@ -302,6 +447,25 @@ const STOP_PARAMETERS = Type.Object({
   ),
 });
 
+/** `structuredContent` for `ptc_task_stop`; see the codemode projection note above. */
+const STOP_OUTPUT_SCHEMA = Type.Object({
+  task_id: Type.String({ description: "The background task id that was asked to stop." }),
+  status: Type.String({
+    description:
+      "The task's status AFTER the stop command — `stopping`, not the terminal `canceled`; the dispatcher pump owns the latter (ADR-0022 §8).",
+  }),
+  from_status: Type.String({
+    description:
+      "The status observed before the stop: `running` for a fresh stop, `stopping` for the idempotent late-arrival path (ADR-0022 §8).",
+  }),
+  stop_reason: Type.Optional(
+    Type.String({
+      description:
+        "The reason recorded as the task's stopReason; absent when the record carries none.",
+    }),
+  ),
+});
+
 /**
  * Build `ptc_task_stop` (ADR-0022 §8): drive `running -> stopping` through the registry and
  * return the updated record. The model stop is explicit and synchronous; the *dispatcher pump*
@@ -332,6 +496,7 @@ export function createPtcTaskStopTool(
     promptSnippet: "Ask a background task to stop (dispatcher delivers the signal)",
     promptGuidelines: [...PTC_TASK_TOOL_GUIDELINES],
     parameters: STOP_PARAMETERS,
+    outputSchema: STOP_OUTPUT_SCHEMA,
     async execute(_toolCallId, params) {
       const taskId = params.taskId as ULID;
       const existing = await loadTaskOrThrow(registry, taskId, "ptc_task_stop");
@@ -348,9 +513,19 @@ export function createPtcTaskStopTool(
       );
       const reason =
         record.stopReason === undefined ? "" : `  reason=${sanitizeText(record.stopReason)}`;
+      // `details.fromStatus` and `structuredContent.from_status` are the same observation, so the
+      // registry's fallback is resolved once here rather than written twice into two surfaces.
+      const observedFromStatus = fromStatus ?? existing.status;
+      const structuredContent: Static<typeof STOP_OUTPUT_SCHEMA> = {
+        task_id: taskId,
+        status: record.status,
+        from_status: observedFromStatus,
+        ...(record.stopReason === undefined ? {} : { stop_reason: record.stopReason }),
+      };
       return {
         content: [{ type: "text", text: `${record.id}  ${record.status}${reason}` }],
-        details: { task: record, fromStatus: fromStatus ?? existing.status },
+        details: { task: record, fromStatus: observedFromStatus },
+        structuredContent,
       };
     },
 
