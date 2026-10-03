@@ -300,9 +300,17 @@ DSH `v0.1.6-alpha.2` vs `v0.2.0-rc.2`；pi `0.86.1` vs DSH 用的 `0.87.1`。`li
 | pi-host-contract | pi 宿主契约与易漏能力                                 | `/tmp/dsh-research/05-pi-host-contract.md`                                             |
 | upstream-web     | 官方 web 一手资料                                     | `/tmp/dsh-research/06-upstream-web.md`（+ v0.99.0 release notes / `docs/cli.md` 复核） |
 
-DSH 源提取副本：`/tmp/dsh-src`（667 文件 / 6.8 MB，源自 `app.asar/dsh/node_modules/@deepseek-ai/*`）。
+DSH 上游公开仓：`deepseek-ai/deepseek-harness`，tag `dsh-v0.2.0-rc.2`（MIT）。本轮审计读的是该
+tag 的公开源码；`app.asar/dsh/node_modules/@deepseek-ai/*` 是同一 release 的已发布构建产物。
 
-> **可复现性说明**：上表六份子代理报告与 `/tmp/dsh-src` 提取副本是**当次会话的临时产物，未进版本库**
+A fourth form appears as `x.js:NN` without a directory: that is a line in the **published
+build output** (`lib/*.js`) of the same `0.2.0-rc.2` release, not in the source. It is kept
+verbatim rather than re-derived because the build's line numbering is not reproducible from
+the source tree, and it stays checkable: the build is published as the npm package for that
+same version. Where a claim was worth a source line, it got one — `path:line` in the form
+above.
+
+> **可复现性说明**：上表六份子代理报告是**当次会话的临时产物，未进版本库**
 > ——新 clone 无法从它们重新推导任何 `path:line`。本报告的公开引用仍可独立复核：pi 侧指向
 > v0.99.0 的 release notes 与 `docs/cli.md`，DSH 侧指向 tag `dsh-v0.2.0-rc.2` 的 `app.asar` 内
 > `node_modules/@deepseek-ai/*`；两者都随对应版本固定。本仓的 `path:line` 则直接对着本仓 `src/`

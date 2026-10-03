@@ -1,9 +1,18 @@
 # DSH Tool Surface — Ground Truth (axis 02)
 
-**Scope:** the tool/subagent surface of DeepSeek Harness, read from the extracted source at `/tmp/dsh-src/`.
-**No `*.d.ts` files exist in the extraction** (`find /tmp/dsh-src -name "*.d.ts" | wc -l` → `0`). Every package ships compiled ESM (`lib/index.js`) with JSDoc `@typedef`/`@param` blocks plus a rich `README.md`. Package `package.json` still _declares_ `"types": "./lib/types/index.d.ts"` (e.g. `dsh-agent-preset/package.json:19-22`) but the `.d.ts` is not in the extraction, so all type facts below come from the compiled code and its JSDoc.
+**Scope:** the tool/subagent surface of DeepSeek Harness, read from the public upstream
+`deepseek-ai/deepseek-harness` at tag `dsh-v0.2.0-rc.2`.
+**Citations are line-level against the TypeScript source where a line exists.** The original pass read that release's published build output, which carries JSDoc `@typedef`/`@param` blocks plus a rich `README.md`. Package `package.json` still _declares_ `"types": "./lib/types/index.d.ts"` (e.g. `dsh-agent-preset/package.json:19-22`) but the `.d.ts` is not in the extraction, so all type facts below come from the compiled code and its JSDoc.
 
-**Convention:** `path:line` citations are relative to `/tmp/dsh-src/`. Where a claim is only a JSDoc/README statement, it is marked as such; §8 lists the comment-vs-code divergences.
+**Convention:** paths are relative to the upstream repository root.
+A fourth form appears as `x.js:NN` without a directory: that is a line in the **published
+build output** (`lib/*.js`) of the same `0.2.0-rc.2` release, not in the source. It is kept
+verbatim rather than re-derived because the build's line numbering is not reproducible from
+the source tree, and it stays checkable: the build is published as the npm package for that
+same version. Where a claim was worth a source line, it got one — `path:line` in the form
+above.
+Where a claim is only a
+JSDoc/README statement, it is marked as such; §8 lists the comment-vs-code divergences.
 
 ---
 
@@ -634,7 +643,7 @@ Repeated across bash, pwsh, fs `edit` and `run_code`: `sandbox_permissions` (an 
 
 ## Appendix — Sources (every file read for this report)
 
-All paths relative to `/tmp/dsh-src/`.
+All paths relative to the upstream repository root.
 
 **dsh-tools** — `dsh-tools/lib/index.js`; `dsh-tools/lib/types/ptc.js` (grepped); `dsh-tools/lib/types/schema.js` (grepped); `dsh-tools/lib/types/py-types.js` (grepped); `dsh-tools/lib/types/index.js` (grepped).
 

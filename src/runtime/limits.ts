@@ -1,10 +1,20 @@
 /**
  * PTC run limits and spawn-time hardening, in one frozen `DEFAULT_CONFIG`.
  *
- * The numbers are DSH's (`dsh-v0.1.6-alpha.2`, `@deepseek-ai/dsh-ptc-runtime-node`)
- * carried over verbatim — see ADR-0003 (output budget), ADR-0004 (pending calls) and
- * ADR-0005 (execution boundary, F1–F4). Tests assert against these constants rather
- * than repeating the literals, so a future re-sync only has to change this file.
+ * The numbers are DSH's (`dsh-v0.2.0-rc.2`, `@deepseek-ai/dsh-ptc-runtime-node`,
+ * `NodePtcRuntime.Config` defaults) carried over verbatim — see ADR-0003 (output budget),
+ * ADR-0004 (pending calls) and ADR-0005 (execution boundary, F1–F4). Tests assert against
+ * these constants rather than repeating the literals, so a future re-sync only has to change
+ * this file.
+ *
+ * The baseline was `dsh-v0.1.6-alpha.2` until 2026-10-03. That tag was never the source of
+ * these numbers — the research the values came from read a `0.2.0-rc.2` checkout, and the
+ * values are byte-identical in both tags (verified field by field: 120000 / 600000 /
+ * 67108864 / 134217728 / 128 / 3000, in `packages/ptc-runtime/ptc-runtime-node/src/index.ts`).
+ * So the correction is to the version label only; no constant changed. The prior label was
+ * wrong for a different reason worth keeping in mind: it was read off this comment rather
+ * than off the research, and `docs/research/ptc-upstream-parity-audit-20260930.md` had
+ * already recorded the mismatch (and that this file's self-description was the stale side).
  *
  * Deliberately absent:
  * - `syncTimeoutMs` / `maxConcurrentAgents` / `maxTotalAgents` — workflow-engine caps

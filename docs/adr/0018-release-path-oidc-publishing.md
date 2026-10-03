@@ -15,6 +15,18 @@ registry, not about what a `pi` user gets.
 Status: accepted (2026-09-23). Reversible per release: the manual path is kept as the
 fallback (§8), so nothing here can block a release that needs to happen.
 
+> Amended by ADR-0031 (2026-10-03): §6 and §7 only. The release mechanism is unchanged — the
+> tag is still the release's identity and authentication is still OIDC trusted publishing.
+> **§6's deferral is resolved**: the repository is public, the npm package is set to "Require
+> two-factor authentication and disallow tokens" (which does not affect OIDC publishes), and
+> release authority is enforced by a `refs/tags/v*` ruleset rather than by where a credential is
+> kept. **§7's stated cause no longer holds**: npm generates provenance attestations
+> automatically under trusted publishing when the source repository is public, so versions
+> released from here carry `dist.attestations` and the missing badge is no longer expected.
+> The claim in §7 that the manual path survives as the fallback (§8) also stands, but note it is
+> no longer the same cost: publishing by hand forfeits the attestation. ADR-0031's text governs
+> both points.
+
 ## Decision
 
 **1. §1 · The release act is pushing an annotated tag `v<version>` on `main`.** The

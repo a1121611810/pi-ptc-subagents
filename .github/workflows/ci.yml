@@ -7,8 +7,9 @@ on:
   push:
     branches: [main]
 
-# `checkout` needs read access to this private repository (the docs' samples
-# assume a public repo where `permissions: {}` is enough).
+# `checkout` needs read access to clone. The repository is public now, so `permissions:
+# {}` would be enough too; `contents: read` is kept because narrowing it is a change
+# with CI risk and nothing here needs the narrowing.
 permissions:
   contents: read
 
@@ -17,6 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       # pnpm/action-setup reads `packageManager: pnpm@…` from package.json,
       # runs `corepack enable`, and prepares the matching pnpm version. This
       # is required because actions/setup-node with `cache: pnpm` verifies

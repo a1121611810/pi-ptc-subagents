@@ -13,8 +13,8 @@ memory. Every row below carries a `file:line` or a named symbol.
 
 | side          | artifact                                                                                                                                                                                             | version      |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
-| pi `codemode` | `/Users/lilianda/.bun/install/global/node_modules/@earendil-works/pi-coding-agent` (`dist/extensions/codemode/`)                                                                                     | `0.99.1`     |
-| pi sandbox    | `/Users/lilianda/.bun/install/global/node_modules/@earendil-works/pi-codemode` (`dist/runtime/`)                                                                                                     | `0.99.1`     |
+| pi `codemode` | `<global-node-modules>/@earendil-works/pi-coding-agent` (`dist/extensions/codemode/`)                                                                                                                | `0.99.1`     |
+| pi sandbox    | `<global-node-modules>/@earendil-works/pi-codemode` (`dist/runtime/`)                                                                                                                                | `0.99.1`     |
 | this repo     | `src/tools/run-code.ts`, `src/tools/workflow.ts`, `src/tools/ptc-task.ts`, `src/runtime/{dispatch,dispatcher,background-runtime,limits,worker-main,worker-pool,bindings}.ts`, `src/mode/ptc-mode.ts` | working tree |
 
 Short paths below: `pi:` = the pi-coding-agent `dist/`; `cm:` = the pi-codemode

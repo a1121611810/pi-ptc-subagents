@@ -404,6 +404,10 @@ const EXTERNAL_VOCABULARY: ReadonlyMap<string, string> = new Map([
   ["max_output_tokens", "pi 内建 codemode 的脚本级输出预算选项，本仓不声明（ADR-0025）"],
   ["timeout_ms", "pi 内建 codemode 的脚本级死线选项；本仓同名概念是 maxTimeoutMs（ADR-0025）"],
   ["SessionShutdownEvent", "pi 宿主生命周期事件，本仓只消费不声明"],
+  [
+    "RUN_CODE_NAME",
+    "DSH 上游的 tool-surface 常量（packages/core/tools/src/ptc.ts），本仓只引用其名不声明（ADR-0031 §C）",
+  ],
   ["ShimmerDecorator", "DSH 渲染层的装饰器类"],
   ["TextShimmer", "DSH 渲染层的 shimmer 组件类"],
   ["ToolCallTree", "DSH 渲染层的子调用树组件类"],
@@ -455,8 +459,14 @@ const EXTERNAL_VOCABULARY: ReadonlyMap<string, string> = new Map([
   ["ptc_task_resume", "ADR-0022 v2 方法，v1 明确 out of scope"],
   ["start_or_steer_turn", "宿主 PTC 生命周期事件名，非本仓导出"],
   // D. 第三方词表
+  ["_authToken", "npm .npmrc 的凭据键名，ADR-0031 §B 只在描述 npm 侧的访问设置时提到"],
   ["_npmUser", "GitHub Actions / npm trusted publishing 的发布环境变量"],
-  ["pull_request", "GitHub Actions 的事件名字面量"],
+  ["non_fast_forward", "GitHub ruleset 的规则类型名，ADR-0031 §A 的 main 门禁表逐条列出"],
+  [
+    "pull_request",
+    "GitHub Actions 的事件名字面量；同时是 GitHub ruleset 的规则类型名（ADR-0031 §A）",
+  ],
+  ["required_status_checks", "GitHub ruleset 的规则类型名，ADR-0031 §A 的 main 门禁表逐条列出"],
   ["toEqual", "vitest 的断言器名，ADR 里在讲测试写法"],
   ["tool_name", "竞态采集表的列名字面量，不是代码符号"],
 ]);
@@ -1116,6 +1126,11 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       // 32/105→index.ts:771 = decision-4 的 `if (... && !pi.getActiveTools().includes("codemode"))`；
       // 129→ptc-mode.ts:27 = 「## Fail-safe on external loadout changes」段首，27-31 覆盖 setActiveTools 那段；
       // 154→index.ts:729 = `if (detected.present && !known) {`。
+      // 2026-10-03 第四次复核：ADR-0031 引入 1 条。逐条：
+      // 105→limits.ts:4 = `* The numbers are DSH's (`dsh-v0.2.0-rc.2`, …` — 即 ADR-0031 §C
+      // 讨论的那一行版本自述，本次复核时该行已被本次改动一并更正为 0.2.0-rc.2，所以引用
+      // 指到的是**改过之后**的行；这正是「引用能解析」与「引用指对了东西」要分开看的原因，
+      // 改文档和改引用在同一批里发生，光看解析通过不足以说明它还指对。
     ).toEqual([
       "docs/adr/0013-ptc-row-compact-summary.md:140 -> src/tools/render.ts:78",
       "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:145",
@@ -1147,6 +1162,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       // 时模式如何退让」，27 行是段首。ADR-0030 另外四处引用写的是 pi 宿主的行号而非本仓文件，
       // 解析器不收，因此不进这份基线——它们由 ADR 正文里的表格自带出处。
       "docs/adr/0030-surface-switch-reloads.md:68 -> ptc-mode.ts:27",
+      "docs/adr/0031-open-source-and-publish-authority.md:105 -> src/runtime/limits.ts:4",
     ]);
   });
 

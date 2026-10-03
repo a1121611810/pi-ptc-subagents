@@ -1,8 +1,16 @@
 # DSH Ground Truth — How PTC results and tool calls are presented
 
-**Axis:** presentation / rendering only. Source of truth: the extracted package tree under
-`/tmp/dsh-src/`. Every claim below cites `path:line` relative to `/tmp/dsh-src`.
+**Axis:** presentation / rendering only. Source of truth: the public upstream
+`deepseek-ai/deepseek-harness` at tag `dsh-v0.2.0-rc.2`. Every claim below cites `path:line`
+inside that repository.
 Where a fact lives in a package that is **not** in the extraction, this document says
+A fourth form appears as `x.js:NN` without a directory: that is a line in the **published
+build output** (`lib/*.js`) of the same `0.2.0-rc.2` release, not in the source. It is kept
+verbatim rather than re-derived because the build's line numbering is not reproducible from
+the source tree, and it stays checkable: the build is published as the npm package for that
+same version. Where a claim was worth a source line, it got one — `path:line` in the form
+above.
+
 **"not found in source"** rather than inferring it.
 
 The extracted `lib/*.js` files are _bundled_ output (rolldown/rollup `//#region` blocks
@@ -23,7 +31,7 @@ preserve the original module paths in comments), so line numbers refer to the bu
 | `dsh-attachment-local`         | `lib/index.js`                 | 1079        |
 | `dsh-compaction-image-offload` | `lib/index.js` + `lib/types/*` | 154 + types |
 
-`dsh-file-reference/` and `dsh-file-reference-local/` **do not exist** in `/tmp/dsh-src`
+`dsh-file-reference/` and `dsh-file-reference-local/` **do not exist** in that release
 (verified: `ls: dsh-file-reference: No such file or directory`). Nothing to report on them.
 
 ---
@@ -863,7 +871,7 @@ when no live state exists, so a detached replay produces byte-identical nodes
 
 ## 9. Audit checklist for a third-party port
 
-Derived from the ground truth above; each item is falsifiable against `/tmp/dsh-src`.
+Derived from the ground truth above; each item is falsifiable against that tag of the upstream repository.
 
 1. Does the port have **two** surfaces (nested chat tree + virtualized ledger) or one? DSH has two,
    with independent models.

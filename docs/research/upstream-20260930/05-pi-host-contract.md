@@ -11,7 +11,7 @@ installed file.
 | `@earendil-works/pi-tui`          | **0.87.0**              |
 | `@earendil-works/pi-agent-core`   | **0.86.1** (transitive) |
 
-Base: `/Users/lilianda/develop/pi-ptc-subagents/node_modules/@earendil-works/`
+Base: `<repo>/node_modules/@earendil-works/`
 
 The audited host project declares exactly these: `package.json:44-48`
 (`devDependencies` `^0.86.1` / `^0.87.0`, `peerDependencies` `>=0.86.0`) and
@@ -967,7 +967,7 @@ them**: `@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`,
 
 ## Appendix — Sources
 
-Base: `/Users/lilianda/develop/pi-ptc-subagents/node_modules/@earendil-works/`
+Base: `<repo>/node_modules/@earendil-works/`
 
 **pi-coding-agent 0.86.1**
 
@@ -1044,7 +1044,7 @@ Base: `/Users/lilianda/develop/pi-ptc-subagents/node_modules/@earendil-works/`
 
 **Host project** (read only, for version confirmation)
 
-- `/Users/lilianda/develop/pi-ptc-subagents/package.json` — :44-48 deps, :63-77 peerDeps,
+- `<repo>/package.json` — :44-48 deps, :63-77 peerDeps,
   :78-83 `pi.extensions`
 
 **Not read, by instruction**: the host project's `src/`, README, docs, `AGENTS.md`, `CONTEXT.md`.
