@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest a capability or a change in behaviour
+labels: ["needs triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve
+      description: Describe the situation you are in, not the API you want. That is usually more useful.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+      description: |
+        A sketch is fine. If this changes what the *model* sees rather than what the
+        *caller* sees, say which — the two have different compatibility bars here.
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Before you file
+      options:
+        - label: |
+            This is not a bug report — I checked the existing issues.
+        - label: |
+            This does not need a security disclosure channel.

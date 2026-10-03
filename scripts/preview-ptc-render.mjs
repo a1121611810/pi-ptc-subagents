@@ -11,11 +11,36 @@
  * Prints the composed rows (call line + result line, as they sit inside the tool's content box)
  * with ANSI colors, so the terminal shows what the interactive TUI shows.
  *
- * Usage: node scripts/preview-ptc-render.mjs [width]
+ * Usage: PI_ROOT=<pi install dir> node scripts/preview-ptc-render.mjs [width]
+ *
+ * `PI_ROOT` is the `@earendil-works/pi-coding-agent` install directory, because the preview
+ * imports pi's real theme rather than a stub. It has no default: a hardcoded path would only
+ * ever be correct on the machine it was written on, and every other contributor would get an
+ * ERR_MODULE_NOT_FOUND from three frames down. Failing here with instructions beats that.
  */
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-const PI = "/Users/lilianda/.bun/install/global/node_modules/@earendil-works/pi-coding-agent";
+const PI = process.env.PI_ROOT;
+if (!PI || !existsSync(PI)) {
+  const which = PI ? `PI_ROOT is set to "${PI}", which does not exist.` : "PI_ROOT is not set.";
+  console.error(
+    [
+      `Cannot preview: ${which}`,
+      "This script imports pi's real theme, so it needs pi's install directory.",
+      "",
+      "Find it with whichever matches how you installed pi:",
+      "  npm root -g           # npm",
+      "  pnpm root -g          # pnpm",
+      "  ls ~/.bun/install/global/node_modules   # bun",
+      "",
+      "Then run:",
+      `  PI_ROOT=<global-root>/@earendil-works/pi-coding-agent \\`,
+      "    node scripts/preview-ptc-render.mjs [width]",
+    ].join("\n"),
+  );
+  process.exit(1);
+}
 
 // Real theme: initTheme() populates the singleton `theme` export for a terminal mode.
 const themeMod = await import(`${PI}/dist/modes/interactive/theme/theme.js`);

@@ -7,8 +7,9 @@ on:
   push:
     branches: [main]
 
-# `checkout` needs read access to this private repository (the docs' samples
-# assume a public repo where `permissions: {}` is enough).
+# `checkout` needs read access to clone. The repository is public now, so `permissions:
+# {}` would be enough too; `contents: read` is kept because narrowing it is a change
+# with CI risk and nothing here needs the narrowing.
 permissions:
   contents: read
 
@@ -32,3 +33,7 @@ jobs:
       # so the build has to happen before the tests — ADR-0018 §3.
       - run: pnpm run build
       - run: pnpm test
+      # ADR-0031 §D: the only check that exercises the *published artifact*. A change
+      # can pass every gate above and still fail here — a feature once passed three
+      # review rounds and 696 tests, then broke this on the built bundle.
+      - run: pnpm run verify:dist

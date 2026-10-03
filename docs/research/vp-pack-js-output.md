@@ -217,7 +217,7 @@ OutExtensionObject | undefined`. `OutExtensionContext` exposes
 
 ### 9. ADR-0008 in this repo records the prior outcome
 
-- Path: `/Users/lilianda/develop/pi-ptc-subagents/docs/adr/0008-vite-plus-and-pnpm.md`
+- Path: `docs/adr/0008-vite-plus-and-pnpm.md`
   (lines 65–103, "Phase 2 outcome" section)
 - Paraphrase: The ADR documents that `vp pack` produced
   `dist/index.mjs` + `dist/index.d.mts` even with

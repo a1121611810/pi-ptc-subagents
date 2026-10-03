@@ -12,9 +12,9 @@ on:
     tags: [v*]
 
 # `id-token: write` is what lets the npm CLI exchange a GitHub OIDC token for a
-# short-lived publish credential. `contents: read` is needed for `checkout` on a
-# private repository (the docs' samples assume a public repo where `permissions: {}`
-# is enough). Same reason as ci.yml.
+# short-lived publish credential. `contents: read` is needed for `checkout`; the
+# repository is public now, so `permissions: {}` would be enough too, and it is kept
+# for the same reason as in the other three workflows.
 permissions:
   id-token: write
   contents: read
@@ -59,8 +59,15 @@ jobs:
       # prepublishOnly, for the same reason — ADR-0018 §3.
       - run: pnpm run build
       - run: pnpm test
-      # No `--provenance`: npm generates attestations only for public source
-      # repositories, and this repository is private (ADR-0018 §7). Verbose is the level
+      # ADR-0031 §D: gate the artifact that is about to ship, not just the source.
+      - run: pnpm run verify:dist
+      # No `--provenance` flag, and still none needed. Under trusted publishing npm
+      # generates the attestation automatically (docs.npmjs.com/trusted-publishers:
+      # "you don't need to add the `--provenance` flag to your publish command"); the
+      # precondition is a *public* source repository, which this now is — so the
+      # versions released from here carry `dist.attestations` for the first time.
+      # (ADR-0018 §7 recorded the absence as a property of the repository being
+      # private; that condition no longer holds.) Verbose is the level
       # at which npm reports the OIDC exchange, so the release log records it instead of
       # hiding both success and failure (ADR-0018 §2).
       - run: npm publish --loglevel verbose

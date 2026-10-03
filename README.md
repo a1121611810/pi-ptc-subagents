@@ -4,13 +4,21 @@ DSH-style **PTC mode** (Programmable Tool Calling) for [pi](https://pi.dev):
 the model writes a JS/TS program that calls pi's tools from inside a worker,
 and only the program's return value plus its logs come back to the model.
 
+**Source is open.** This repository is public and the source is here — `dist/` on npm is the
+compiled form of what you read below. Contributions go through pull requests: see
+[CONTRIBUTING.md](./CONTRIBUTING.md) for the gate your PR has to pass, and
+[SECURITY.md](./SECURITY.md) before reporting anything. Releases are cut from `main` by the
+maintainer only; if you find something you think needs a release, open an issue and say so.
+
 ## Status
 
-Pre-1.0, but functional: `ptc_run_code` and `ptc_workflow` are registered and run
+Functional and actively used: `ptc_run_code` and `ptc_workflow` are registered and run
 programs through the same tested worker machinery (dispatcher, wire protocol,
 budgets, built-in bindings). The implementation is written clean-room from
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) PTC
-behaviour (tracked as a wayfinder map in this repo's issues).
+behaviour — see [ADR-0002](./docs/adr/0002-source-strategy.md) for how that boundary is
+kept, and [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for the attribution that
+follows from it.
 
 ## Install
 
@@ -338,7 +346,8 @@ pnpm run test:ui      # vp test --ui (local browser UI; not for CI)
 pnpm exec vp test --run tests/render-ptc.test.ts  # renderer unit tests only
 pnpm run build        # vp pack + declaration emit
 pnpm run verify:dist  # exercise renderCall/renderResult through the built dist (no LLM needed)
-node scripts/preview-ptc-render.mjs   # print the rendered rows with real theme colors
+PI_ROOT=<global-node-modules>/@earendil-works/pi-coding-agent \
+  node scripts/preview-ptc-render.mjs   # print the rendered rows with real theme colors
 ```
 
 Tooling: [oxc](https://oxc.rs) — `oxlint` + `oxfmt` (official defaults) — alongside
@@ -346,6 +355,14 @@ Tooling: [oxc](https://oxc.rs) — `oxlint` + `oxfmt` (official defaults) — al
 
 See ADR-0009 for the Vitest adoption decision (reopens ADR-0008's earlier deferment).
 
+## Credits
+
+Built clean-room from the PTC behaviour of
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (MIT,
+Copyright (c) 2026 DeepSeek), read at tag `dsh-v0.2.0-rc.2`, and hosted by
+[pi](https://pi.dev) (`earendil-works/pi`, MIT). Full attribution, and what is
+derived from what, is in [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).
+
 ## License
 
-Apache-2.0
+Apache-2.0. See [LICENSE](./LICENSE) and [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).

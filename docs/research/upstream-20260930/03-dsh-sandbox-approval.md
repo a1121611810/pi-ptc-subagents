@@ -1,6 +1,14 @@
 # DSH Ground Truth — Sandboxing, Isolation & Human Approval
 
-**Scope:** original ground truth for DSH's isolation and human-approval axis, extracted from `/tmp/dsh-src/` (shipped `lib/` build output; 667 files, 253 of them `lib/*.js`). Every claim cites `path:line`. Absent behaviour is stated as **not found in source**.
+**Scope:** original ground truth for DSH's isolation and human-approval axis, read from the public
+upstream `deepseek-ai/deepseek-harness` at tag `dsh-v0.2.0-rc.2`. Every claim cites `path:line`.
+Absent behaviour is stated as **not found in source**.
+A fourth form appears as `x.js:NN` without a directory: that is a line in the **published
+build output** (`lib/*.js`) of the same `0.2.0-rc.2` release, not in the source. It is kept
+verbatim rather than re-derived because the build's line numbering is not reproducible from
+the source tree, and it stays checkable: the build is published as the npm package for that
+same version. Where a claim was worth a source line, it got one — `path:line` in the form
+above.
 
 ---
 
@@ -103,7 +111,7 @@ if (policy.mode === "workspace-write") readWrite.push("/tmp", policy.workspaceRo
 return grantArgs({ readOnly: ["/"], readWrite });
 ```
 
-The launcher itself is `@deepseek-ai/node-addon-system/landlock-run` (imported at `dsh-sandbox-local/lib/index.js:6`) — **not present in `/tmp/dsh-src/`**, so the native grant syscall is **not found in source**. Landlock also self-reports partial enforcement on older ABIs (`RUNNER_FAILURE_RULES.landlock[0].informationalLines`, `dsh-sandbox-local/lib/index.js:236`).
+The launcher itself is `@deepseek-ai/node-addon-system/landlock-run` (imported at `dsh-sandbox-local/lib/index.js:6`) — **not present in that release's published packages**, so the native grant syscall is **not found in source**. Landlock also self-reports partial enforcement on older ABIs (`RUNNER_FAILURE_RULES.landlock[0].informationalLines`, `dsh-sandbox-local/lib/index.js:236`).
 
 **Windows — ACL restricted token + Low integrity + DACL/mandatory-label grants.** Runner: `lib/runner.js` launched as `[node, runner, ...]` (`dsh-sandbox-local/lib/index.js:539-553`). Restricted-token creation (`dsh-sandbox-windows-acl/lib/types-Cl_DXjhk.js:884-897`):
 
@@ -748,7 +756,7 @@ Things a third-party design must get right, in the order they matter:
 
 ## Sources
 
-### Primary code (all under `/tmp/dsh-src/`)
+### Primary code (all under the upstream `packages/` tree)
 
 | Path                                                 | Lines cited                                                                                                                                                   | What                                                                                                                                                                                         |
 | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -804,4 +812,4 @@ Things a third-party design must get right, in the order they matter:
 - **Containers, microVMs, chroots, namespaces as a confinement tier** — explicitly out of scope (`dsh-sandbox/lib/index.js:252-256`, `dsh-sandbox/README.md:168`).
 - **"Always allow" / persistent allow-lists** — the outcome vocabulary is four values and `allowed-once` is the only grant.
 - **A built-in/terminal approval answerer** — the service ships none (`dsh-user-approval/README.md:157`).
-- **The Landlock native launcher internals** — `@deepseek-ai/node-addon-system/landlock-run` is not in `/tmp/dsh-src/`.
+- **The Landlock native launcher internals** — `@deepseek-ai/node-addon-system/landlock-run` is not among that release's published packages.

@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`verify:dist` is now part of the release gate.** `scripts/verify-dist-render.mjs` is the only
+  check that exercises the _built_ artifact, and it ran nowhere: not in CI, not in the publish
+  workflow, not in `prepublishOnly`. A feature in this project's own history passed three review
+  rounds and 696 tests and then failed this script on the release artifact. It now runs on every
+  pull request, in `publish.yml` before the publish step, and in `prepublishOnly`
+  ([ADR-0031](./docs/adr/0031-open-source-and-publish-authority.md) §D).
+- **`THIRD_PARTY_NOTICES.md`**, stating what is derived from DeepSeek Harness (MIT, Copyright (c)
+  2026 DeepSeek) and from `pi` (MIT), and shipped inside the npm tarball rather than only on
+  GitHub. The MIT notice is an obligation for the source excerpts in `docs/research/`, not a
+  courtesy.
+
+### Changed
+
+- **The repository is public, and `main` is writable only by the maintainer.** Everything else is
+  a pull request that needs CI green and one approving review. Release authority is enforced by a
+  `refs/tags/v*` ruleset plus the npm package's "Require two-factor authentication and disallow
+  tokens" setting, so it no longer depends on where a credential file is kept
+  ([ADR-0031](./docs/adr/0031-open-source-and-publish-authority.md) §A–§B).
+- **The next version published from here carries an npm provenance attestation.** Under trusted
+  publishing npm generates it automatically once the source repository is public, with no workflow
+  change — so the `homepage` and `repository` fields that pointed at a private GitHub now resolve,
+  and the missing provenance badge that ADR-0018 §7 recorded as expected is no longer expected.
+- **`node scripts/preview-ptc-render.mjs` requires `PI_ROOT`.** It imported pi's theme from a hard-coded
+  path on one developer's machine, so following the README from anywhere else failed inside a
+  module loader. It now reads the install directory from the environment and, when it is missing or
+  wrong, says so with the commands to find it.
+- **The DSH citations in `docs/research/` point at the public upstream repository** instead of a
+  temporary local extraction, so a reader can follow them. The baseline is tag `dsh-v0.2.0-rc.2`
+  — the release the research actually read. `src/runtime/limits.ts:4` named `0.1.6-alpha.2`; the
+  constants are byte-identical across both tags, so only the version label changed and no behaviour
+  did ([ADR-0031](./docs/adr/0031-open-source-and-publish-authority.md) §C).
+
 ## [1.4.0] - 2026-10-03
 
 ### Added

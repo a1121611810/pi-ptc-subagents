@@ -1,0 +1,44 @@
+# Dependabot on a package that publishes releases.
+#
+# Grouped so a routine bump is one PR instead of eight, and so a minor bump to the
+# toolchain (rolldown, typescript, vite-plus) never arrives alone — those three can
+# break the build in ways that only show up in `verify:dist`, which CI does not run.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # The host this extension loads into. A minor bump can add or change
+      # ExtensionAPI surface, so it is reviewed rather than auto-merged.
+      pi-host:
+        patterns: ["@earendil-works/*"]
+      # Toolchain that can break the build or the published artifact.
+      build-toolchain:
+        patterns: ["rolldown", "rolldown-plugin-dts", "typescript", "vite-plus", "vitest"]
+      # Lint/format. oxfmt output changes are repo-wide, so they arrive alone.
+      linters:
+        patterns: ["oxlint", "oxlint-tsgolint", "oxfmt"]
+      # Everything else, including the single runtime dependency.
+      runtime:
+        patterns: ["*"]
+        exclude-patterns:
+          - "@earendil-works/*"
+          - "rolldown"
+          - "rolldown-plugin-dts"
+          - "typescript"
+          - "vite-plus"
+          - "vitest"
+          - "oxlint"
+          - "oxlint-tsgolint"
+          - "oxfmt"
