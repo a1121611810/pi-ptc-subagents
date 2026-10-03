@@ -28,10 +28,10 @@ jobs:
           persist-credentials: false
       # pnpm/action-setup reads `packageManager: pnpm@…` from package.json and
       # prepares the matching pnpm version.
-      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
       # Node is pinned rather than `lts/*` (ci.yml's choice): trusted publishing
       # needs npm CLI >= 11.5.1, which ships with the runtime.
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           # No `registry-url`: it would write `_authToken=${NODE_AUTH_TOKEN}` into
