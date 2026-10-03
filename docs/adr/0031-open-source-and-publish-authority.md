@@ -146,7 +146,14 @@ It is added to `prepublishOnly` too, which is a third path to the same gate: a m
 - `docs/research/**` cites a public repository and can be checked by anyone. The citations that
   survived as file-level (no line) are the ones whose original basis was a build artifact — a
   bundle's barrel `export { … }` line or a `//#region` marker — and the files say so in their
-  own preamble rather than carrying invented line numbers.
+  own preamble rather than carrying invented line numbers. The same applies to the 567 short-form
+  `x.js:NN` references, which are lines in the **published build output** of that same release
+  and are resolvable against the published npm package. They were measured before being left
+  alone: only 4% of them could have their referring module determined from the line they sit on
+  (a short form names a basename, and the module is usually named in an earlier bullet), and
+  **none of those 22 could be matched to a unique source line**. Re-deriving them would mean
+  reading all 567 in context, and a wrong source line is worse than an honest build line — so
+  they keep the form they were written in, and each file's preamble says what they are.
 - `verify:dist` is now part of the definition of a passing change, so a red run in it is a signal
   rather than a curiosity.
 

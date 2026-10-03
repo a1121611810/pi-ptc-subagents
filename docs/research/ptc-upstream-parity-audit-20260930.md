@@ -2,8 +2,8 @@
 
 > 方法：全部结论取自**一手来源**，不采信本仓库自述。
 >
-> - DSH 权威源：`/tmp/dsh-research/deepseek-harness`（上游 clone，tag `dsh-v0.2.0-rc.2`，remote `github.com/deepseek-ai/deepseek-harness`）
-> - DSH 已发布产物：`app.asar/dsh/node_modules/@deepseek-ai/dsh-ptc-runtime-node`（`0.2.0-rc.2`）
+> - DSH 权威源：`deepseek-ai/deepseek-harness`，tag `dsh-v0.2.0-rc.2`（公开仓，本轮读的是该 tag 的源码；
+>   同 release 的已发布构建产物为 `app.asar/dsh/node_modules/@deepseek-ai/dsh-ptc-runtime-node`）
 > - pi 宿主契约：`node_modules/@earendil-works/pi-{ai,coding-agent,tui}`（随包发布的一手 docs + examples + `.d.ts`）+ 上游 `v0.99.0` release notes / docs
 > - 被审对象只看 `src/` `tests/` `package.json`，**不采信本仓库 docs/README/CONTEXT/ADR**
 > - 六个子代理并发分轴调研（DSH 核心 / 工具面 / 沙箱 / 呈现层 / pi 契约 / 上游 web）
@@ -291,14 +291,14 @@ DSH `v0.1.6-alpha.2` vs `v0.2.0-rc.2`；pi `0.86.1` vs DSH 用的 `0.87.1`。`li
 
 六个子代理并发分轴，全程禁止读取被审仓库的 docs：
 
-| 代理             | 轴                                                    | 产物                                                                                   |
-| ---------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| dsh-ptc-core     | DSH PTC 运行时/协议/结果/失败语义                     | `/tmp/dsh-research/01-dsh-ptc-core.md`（538 行，118 处 `path:line`）                   |
-| dsh-tool-surface | DSH 工具面 + 子代理                                   | `/tmp/dsh-research/02-dsh-tool-surface.md`                                             |
-| dsh-sandbox      | DSH 沙箱/审批 fail-open vs fail-closed（24 行判定表） | `/tmp/dsh-research/03-dsh-sandbox-approval.md`（750 行）                               |
-| dsh-presentation | DSH 呈现层/图片/结果卡                                | `/tmp/dsh-research/04-dsh-presentation.md`                                             |
-| pi-host-contract | pi 宿主契约与易漏能力                                 | `/tmp/dsh-research/05-pi-host-contract.md`                                             |
-| upstream-web     | 官方 web 一手资料                                     | `/tmp/dsh-research/06-upstream-web.md`（+ v0.99.0 release notes / `docs/cli.md` 复核） |
+| 代理             | 轴                                                    | 产物                                                                                                       |
+| ---------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| dsh-ptc-core     | DSH PTC 运行时/协议/结果/失败语义                     | [`upstream-20260930/01-dsh-ptc-core.md`](./upstream-20260930/01-dsh-ptc-core.md)（589 行）                 |
+| dsh-tool-surface | DSH 工具面 + 子代理                                   | [`upstream-20260930/02-dsh-tool-surface.md`](./upstream-20260930/02-dsh-tool-surface.md)（666 行）`        |
+| dsh-sandbox      | DSH 沙箱/审批 fail-open vs fail-closed（24 行判定表） | [`upstream-20260930/03-dsh-sandbox-approval.md`](./upstream-20260930/03-dsh-sandbox-approval.md)（815 行） |
+| dsh-presentation | DSH 呈现层/图片/结果卡                                | [`upstream-20260930/04-dsh-presentation.md`](./upstream-20260930/04-dsh-presentation.md)（895 行）`        |
+| pi-host-contract | pi 宿主契约与易漏能力                                 | [`upstream-20260930/05-pi-host-contract.md`](./upstream-20260930/05-pi-host-contract.md)（1050 行）`       |
+| upstream-web     | 官方 web 一手资料                                     | [`upstream-20260930/06-upstream-web.md`](./upstream-20260930/06-upstream-web.md)（894 行）                 |
 
 DSH 上游公开仓：`deepseek-ai/deepseek-harness`，tag `dsh-v0.2.0-rc.2`（MIT）。本轮审计读的是该
 tag 的公开源码；`app.asar/dsh/node_modules/@deepseek-ai/*` 是同一 release 的已发布构建产物。

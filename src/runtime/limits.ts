@@ -16,6 +16,18 @@
  * than off the research, and `docs/research/ptc-upstream-parity-audit-20260930.md` had
  * already recorded the mismatch (and that this file's self-description was the stale side).
  *
+ * **These limits match a generation of the upstream that upstream has since deprecated.**
+ * `dsh-v0.0.x` through `v0.1.6-alpha.2` ran a PTC program on `worker_threads` inside the host
+ * process; DSH superseded that on 2026-09-11 and moved Node PTC into a separate process in
+ * `v0.1.7-rc.1`, which also renamed the packages into the `ptc-runtime` family with no legacy
+ * aliases. The numeric defaults did not change across that move — which is why they still match
+ * — but the *shape* around them did, and this file configures the superseded shape (ADR-0005's
+ * worker boundary, not a process boundary). So "the numbers are DSH's" is true of two versions
+ * and describes an architecture upstream no longer recommends. Upstream's own README warns that
+ * there will be compatibility-breaking changes; the parity audit's recommendations 1-3 (upgrade
+ * pi, compare against its built-in `codemode`, and re-base this project's position) are the open
+ * work, and none of them is a comment fix.
+ *
  * Deliberately absent:
  * - `syncTimeoutMs` / `maxConcurrentAgents` / `maxTotalAgents` — workflow-engine caps
  *   for a cooperative VM and for `agent()`. We run the program directly in the worker
