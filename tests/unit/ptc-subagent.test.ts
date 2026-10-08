@@ -714,14 +714,18 @@ describe("ptc_subagent structuredContent", () => {
       // The property the change exists for. A codemode script gets this object INSTEAD of the text
       // block, so its routing decision has to be readable from here -- with key sets, because
       // `exit_code: 0` and "no exit_code" are the same observation to any truthiness test.
-      expect(Object.keys(handle).sort(), "a handle is {task_id, status}").toEqual([
+      // `report_channel` is on BOTH, and that is the point: it is the total field, present even
+      // where nothing was reported, so a script can tell "ignored the contract" from "still
+      // running" without a text block. It is on neither branch's DISCRIMINATING key.
+      expect(Object.keys(handle).sort(), "a handle is {task_id, status, report_channel}").toEqual([
+        "report_channel",
         "status",
         "task_id",
       ]);
-      expect(Object.keys(finished).sort(), "a finished call is {status, exit_code}").toEqual([
-        "exit_code",
-        "status",
-      ]);
+      expect(
+        Object.keys(finished).sort(),
+        "a finished call is {status, exit_code, report_channel}",
+      ).toEqual(["exit_code", "report_channel", "status"]);
       expect("task_id" in handle, "so a script branches on task_id for 'poll me'").toBe(true);
       expect("task_id" in finished, "and on its absence for 'already done'").toBe(false);
       // Not on `status`, which would also discriminate. The two branches differ in WHICH key they
@@ -755,9 +759,11 @@ describe("ptc_subagent structuredContent", () => {
       ].sort();
       const declared = Object.keys(SUBAGENT_OUTPUT_SCHEMA.properties ?? {}).sort();
       expect(emitted, "every emitted key is a declared one").toEqual(declared);
-      // And the projection stays LEAN -- four keys, none of them the `details` spelling, and no
-      // field that exists only to say "this does not apply".
-      expect(declared).toEqual(["exit_code", "report", "status", "task_id"]);
+      // And the projection stays LEAN -- five keys, none of them the `details` spelling, and no
+      // field that exists only to say "this does not apply". `report_channel` is the exception
+      // that proves the rule: it exists ONLY to say that `report` does not apply, and it is here
+      // because ADR-0032 makes an unstated degradation a defect.
+      expect(declared).toEqual(["exit_code", "report", "report_channel", "status", "task_id"]);
       expect(declared, "snake_case, like pi's own builtins").not.toContain("taskId");
       expect(declared).not.toContain("exitCode");
     });
@@ -775,8 +781,8 @@ describe("ptc_subagent structuredContent", () => {
       expect(JSON.parse(JSON.stringify(finished))).toStrictEqual(finished);
       // The key sets, again by length and by hasOwn: the round trip above compares VALUES, and a
       // dropped key is a shape change a value comparison can report as equal.
-      expect(Object.keys(JSON.parse(JSON.stringify(handle)))).toHaveLength(2);
-      expect(Object.keys(JSON.parse(JSON.stringify(finished)))).toHaveLength(2);
+      expect(Object.keys(JSON.parse(JSON.stringify(handle)))).toHaveLength(3);
+      expect(Object.keys(JSON.parse(JSON.stringify(finished)))).toHaveLength(3);
     });
   });
 
@@ -960,6 +966,34 @@ describe("ptc_subagent renders the child report into the text the model reads", 
       // the whole projection having vanished.
       expect(structured.status).toBe("fulfilled");
       expect(structured.exit_code).toBe(FOREGROUND_EXIT_CODE);
+      // ...and the channel is what says WHY it is absent. Without this key the two ways a
+      // `report` can be missing -- the child ignored the contract, or a handle has not finished --
+      // are the same value, which is the silent degradation ADR-0032 exists to prevent.
+      expect(structured.report_channel).toBe("none");
+    });
+  });
+
+  test("report_channel says why a report is absent, on every branch that can omit it", async () => {
+    // Three outcomes, one of them compliant. Two of them omit `report`, and without the channel
+    // they are the same value to a caller -- which is the silent degradation ADR-0032 forbids.
+    // Counterfactual: dropping `report_channel`, or leaving it off the handle branch, turns this
+    // red; so does an implementation that claims a channel it did not use.
+    await withAgent(async (dir) => {
+      const nonCompliant = structuredOf(await dispatchForegroundSaying(dir, "no report here"));
+      expect(Object.hasOwn(nonCompliant, "report")).toBe(false);
+      expect(nonCompliant.report_channel).toBe("none");
+
+      const handleStructured = structuredOf((await dispatchBackground(dir)).result);
+      expect(Object.hasOwn(handleStructured, "report")).toBe(false);
+      expect(handleStructured.report_channel).toBe("none");
+      // What IS different between the two non-compliant outcomes, so this pair is not vacuous.
+      expect(Object.hasOwn(handleStructured, "task_id")).toBe(true);
+
+      const compliant = structuredOf(
+        await dispatchForegroundSaying(dir, childSaying("done", CHILD_REPORT_LITERAL)),
+      );
+      expect(Object.hasOwn(compliant, "report")).toBe(true);
+      expect(compliant.report_channel).toBe("prompt-json");
     });
   });
 });
