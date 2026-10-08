@@ -59,6 +59,7 @@
  * §5 (Subscription cursor), §7 (event payload), §8 (signal layering); ADR-0023 (task ownership).
  */
 
+import type { ChildReport, ChildReportChannel } from "./child-report.ts";
 import type { TaskEvent, TaskFilter, TaskRecord, TaskStorage, TaskStatus } from "./task-storage.ts";
 import type { ULID } from "./task-storage.ts";
 import { createUlidMinter, type UlidMinter } from "./ulid.ts";
@@ -74,6 +75,7 @@ export type {
   TaskStorage,
   ULID,
 } from "./task-storage.ts";
+export type { ChildReport, ChildReportChannel } from "./child-report.ts";
 
 /** Minimal structured logger seam (ADR-0022 implementation spec §12). */
 export interface RegistryLogger {
@@ -154,6 +156,12 @@ export type TaskCommand =
    * `childError` is the failure the child itself reported (issue #70): pi's JSONL carries it on
    * the assistant `message_end` as `stopReason: "error"` plus `errorMessage`, and the
    * subprocess still exits 0. Without it the record would be a failure with no diagnosis.
+   *
+   * `report` / `reportChannel` are ADR-0032's child report as the pump read it off the child's
+   * final message. `reportChannel` is REQUIRED here (it is total on the foreground
+   * `DispatchResult` too, so making it optional at the persistence boundary would be the one
+   * place a degradation could go unstated) but the pair is applied ONLY when this close resolves
+   * `succeeded` — see {@link DefaultTaskRegistry}.
    */
   | {
       kind: "resolve-exit";
@@ -163,6 +171,8 @@ export type TaskCommand =
       outputBytes?: number;
       outputPreview?: string;
       childError?: string;
+      report?: ChildReport;
+      reportChannel: ChildReportChannel;
     };
 
 /** Outcome of one successful command: the persisted record, emitted events, and cursor. */
@@ -646,6 +656,14 @@ export class DefaultTaskRegistry implements TaskRegistry {
    * answered"); the background path used to read the exit code alone, so a child that died on a
    * 429 or a model error — no text, exit 0 — was recorded as a success the model was then told
    * about, with `ptc_task_output` returning "(no output yet; task X is succeeded)".
+   *
+   * ADR-0032: this is also where the child report is decided. The report is written **only** on
+   * `succeeded`, and it is written here rather than in the pump because `to` is computed here: a
+   * pump that stamped the report before the transition would have to guess the outcome, and one
+   * that stamped it after would write to a record whose terminal state it does not own. A
+   * `failed` or `canceled` record therefore carries NO `report` and NO `reportChannel` — not an
+   * empty report and not a `none` marker. A child that did not finish has not reported, and "has
+   * not reported yet" is a different claim from "complied with nothing to say".
    */
   async #resolveExit(
     command: Extract<TaskCommand, { kind: "resolve-exit" }>,
@@ -674,6 +692,11 @@ export class DefaultTaskRegistry implements TaskRegistry {
       outputBytes: command.outputBytes,
       outputPreview: command.outputPreview,
       errorMessage: resolveExitErrorMessage(record, command, to, producedText),
+      // A non-succeeded close contributes no report fields at all: `undefined` here means
+      // "leave the record's absent report alone", never "write an empty one".
+      ...(to === "succeeded"
+        ? { report: command.report, reportChannel: command.reportChannel }
+        : {}),
     });
   }
 
@@ -707,6 +730,9 @@ export class DefaultTaskRegistry implements TaskRegistry {
       outputRef?: string;
       outputBytes?: number;
       outputPreview?: string;
+      /** ADR-0032; only ever set by the `succeeded` branch of #resolveExit. */
+      report?: ChildReport;
+      reportChannel?: ChildReportChannel;
     },
   ): Promise<TransitionResult> {
     const now = Math.max(0, Math.floor(ctx.clock()));
@@ -721,6 +747,11 @@ export class DefaultTaskRegistry implements TaskRegistry {
     if (fields.outputRef !== undefined) updated.outputRef = fields.outputRef;
     if (fields.outputBytes !== undefined) updated.outputBytes = fields.outputBytes;
     if (fields.outputPreview !== undefined) updated.outputPreview = fields.outputPreview;
+    // ADR-0032. `reportChannel` is set on its own: a compliant channel with no payload is
+    // impossible (the extraction only names `prompt-json`/`tool` when it parsed one), but a
+    // `none` marker with no report is exactly the non-compliant case and must survive.
+    if (fields.report !== undefined) updated.report = fields.report;
+    if (fields.reportChannel !== undefined) updated.reportChannel = fields.reportChannel;
     if (fields.reason !== undefined) {
       // The generic `reason` lands in the field ADR-0022 §8 gives that state: stopReason for
       // the stop states, errorMessage for the failure states. Explicit fields win.

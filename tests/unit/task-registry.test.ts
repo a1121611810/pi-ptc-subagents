@@ -568,6 +568,162 @@ describe("TaskRegistry.stop", () => {
 
 describe("TaskRegistry.resolve-exit", () => {
   /**
+   * ADR-0032: the report the background pump reads off the child's final message is written onto
+   * the record when — and only when — the close resolves `succeeded`. The fixture is the same
+   * literal report the child-report suite drives the pump with, plus the host-measured usage
+   * (a child cannot report its own token count).
+   */
+  test("a succeeded close persists the report and the channel that delivered it", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+
+    const resolved = await h.registry.transition(
+      {
+        kind: "resolve-exit",
+        taskId: TASK_1,
+        exitCode: 0,
+        outputBytes: 4,
+        reportChannel: "prompt-json",
+        report: {
+          summary: "the gate runs before discovery",
+          findings: [{ what: "slot first", evidence: "the acquire precedes discoverAgent" }],
+          files_touched: ["src/runtime/dispatch.ts"],
+          usage: { input: 900, output: 260, cost: 0.0123, turns: 1 },
+        },
+      },
+      callContext(h, CALLER),
+    );
+
+    expect(resolved.record.status).toBe("succeeded");
+    expect(resolved.record.reportChannel).toBe("prompt-json");
+    expect(resolved.record.report?.summary).toBe("the gate runs before discovery");
+    // The whole payload survives the write, not just the summary: `ptc_task_output` renders
+    // findings and files_touched, so a partial persist would be an unreadable record.
+    expect(resolved.record.report?.findings).toEqual([
+      { what: "slot first", evidence: "the acquire precedes discoverAgent" },
+    ]);
+    expect(resolved.record.report?.files_touched).toEqual(["src/runtime/dispatch.ts"]);
+    expect(resolved.record.report?.usage).toEqual({
+      input: 900,
+      output: 260,
+      cost: 0.0123,
+      turns: 1,
+    });
+    // And it is the PERSISTED record, not just the returned copy — a writer that returned the
+    // report without saving it would satisfy every assertion above.
+    const stored = await h.storage.loadTask(TASK_1);
+    expect(stored?.reportChannel).toBe("prompt-json");
+    expect(stored?.report?.summary).toBe("the gate runs before discovery");
+  });
+
+  /**
+   * A child that ignored the contract is still `succeeded` — it ran, answered, and its prose is
+   * kept. What it did not do is report, and ADR-0032 requires that degradation to be stated
+   * rather than left as a silent prose fallback.
+   */
+  test("a succeeded close with no report persists the explicit channel-none marker", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+
+    const resolved = await h.registry.transition(
+      { kind: "resolve-exit", taskId: TASK_1, exitCode: 0, outputBytes: 4, reportChannel: "none" },
+      callContext(h, CALLER),
+    );
+
+    expect(resolved.record.status).toBe("succeeded");
+    expect(resolved.record.reportChannel).toBe("none");
+    // Absent, not an empty report: `toBeUndefined()` would also pass for `{report: {}}`.
+    expect(Object.hasOwn(resolved.record, "report")).toBe(false);
+  });
+
+  /**
+   * THE failure this ticket exists to prevent (constraint #5, counterfactual). A child that
+   * failed has not reported — it has not finished — so the record carries NEITHER field, even
+   * though the pump handed a perfectly good report to this same command.
+   *
+   * Counterfactual: replacing the `to === "succeeded"` gate with an unconditional write turns
+   * this red, and so does writing an empty/`null` report instead of leaving the field absent.
+   * Both are the same defect wearing two costumes.
+   */
+  test("a failed close persists no report and no channel, even when the pump supplied one", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+
+    const resolved = await h.registry.transition(
+      {
+        kind: "resolve-exit",
+        taskId: TASK_1,
+        exitCode: 1,
+        outputBytes: 7,
+        reportChannel: "prompt-json",
+        report: {
+          summary: "partial answer from a child that then died",
+          findings: [],
+          files_touched: [],
+          usage: { input: 1, output: 1, cost: 0, turns: 1 },
+        },
+      },
+      callContext(h, CALLER),
+    );
+
+    expect(resolved.record.status).toBe("failed");
+    expect(Object.hasOwn(resolved.record, "report")).toBe(false);
+    expect(Object.hasOwn(resolved.record, "reportChannel")).toBe(false);
+  });
+
+  /**
+   * The same rule on the cancel edge: a stopped child was killed mid-flight, so its last text is
+   * partial and is not a report. `canceled` is a different terminal state from `succeeded` and
+   * must not inherit the report.
+   */
+  test("a canceled close persists no report and no channel either", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    await h.registry.transition(
+      { kind: "stop", taskId: TASK_1, reason: "model stop" },
+      callContext(h, CALLER),
+    );
+
+    const resolved = await h.registry.transition(
+      {
+        kind: "resolve-exit",
+        taskId: TASK_1,
+        exitCode: 0,
+        outputBytes: 9,
+        reportChannel: "prompt-json",
+        report: {
+          summary: "half a sentence before the signal landed",
+          findings: [],
+          files_touched: [],
+          usage: { input: 1, output: 1, cost: 0, turns: 1 },
+        },
+      },
+      callContext(h, CALLER),
+    );
+
+    expect(resolved.record.status).toBe("canceled");
+    expect(Object.hasOwn(resolved.record, "report")).toBe(false);
+    expect(Object.hasOwn(resolved.record, "reportChannel")).toBe(false);
+  });
+
+  /**
+   * A still-running record has not reported YET, which is a different claim from "reported
+   * nothing" (the `succeeded` + `none` marker above). Asserted with `Object.hasOwn`, because a
+   * record carrying `report: undefined` would be indistinguishable from a real report to a
+   * consumer that checks truthiness but not key presence — and `JSON.stringify` would write it.
+   */
+  test("a running record has no report field at all, before the child closes", async () => {
+    const h = createHarness(1000);
+    const spawned = await spawnTask(h, TASK_1);
+
+    expect(spawned.record.status).toBe("running");
+    expect(Object.hasOwn(spawned.record, "report")).toBe(false);
+    expect(Object.hasOwn(spawned.record, "reportChannel")).toBe(false);
+    const stored = await h.storage.loadTask(TASK_1);
+    expect(Object.hasOwn(stored as object, "report")).toBe(false);
+  });
+
+  /**
    * ADR-0022 §2 (amended 2026-09-30, issue #70): `succeeded` is "child exits 0 **and** produced
    * assistant text", the same rule `decideCloseOutcome` already applied to the foreground path.
    * The expectation carries the byte count because the writer decides from `outputBytes`; a
@@ -579,11 +735,18 @@ describe("TaskRegistry.resolve-exit", () => {
     await spawnTask(h, TASK_2);
 
     const ok = await h.registry.transition(
-      { kind: "resolve-exit", taskId: TASK_1, exitCode: 0, outputBytes: 4, outputPreview: "PONG" },
+      {
+        kind: "resolve-exit",
+        taskId: TASK_1,
+        exitCode: 0,
+        outputBytes: 4,
+        outputPreview: "PONG",
+        reportChannel: "none",
+      },
       callContext(h, CALLER),
     );
     const bad = await h.registry.transition(
-      { kind: "resolve-exit", taskId: TASK_2, exitCode: 1, outputBytes: 0 },
+      { kind: "resolve-exit", taskId: TASK_2, exitCode: 1, outputBytes: 0, reportChannel: "none" },
       callContext(h, CALLER),
     );
 
@@ -609,7 +772,7 @@ describe("TaskRegistry.resolve-exit", () => {
     await spawnTask(h, TASK_1);
 
     const resolved = await h.registry.transition(
-      { kind: "resolve-exit", taskId: TASK_1, exitCode: 0, outputBytes: 0 },
+      { kind: "resolve-exit", taskId: TASK_1, exitCode: 0, outputBytes: 0, reportChannel: "none" },
       callContext(h, CALLER),
     );
 
@@ -621,7 +784,14 @@ describe("TaskRegistry.resolve-exit", () => {
     const other = createHarness(1000);
     await spawnTask(other, TASK_2);
     const nonZero = await other.registry.transition(
-      { kind: "resolve-exit", taskId: TASK_2, exitCode: 1, outputBytes: 7, outputPreview: "boom!" },
+      {
+        kind: "resolve-exit",
+        taskId: TASK_2,
+        exitCode: 1,
+        outputBytes: 7,
+        outputPreview: "boom!",
+        reportChannel: "none",
+      },
       callContext(h, CALLER),
     );
     expect(nonZero.record.status).toBe("failed");
@@ -648,6 +818,7 @@ describe("TaskRegistry.resolve-exit", () => {
         exitCode: 0,
         outputBytes: 0,
         childError: providerError,
+        reportChannel: "none",
       },
       callContext(h, CALLER),
     );
@@ -676,6 +847,7 @@ describe("TaskRegistry.resolve-exit", () => {
         exitCode: 0,
         outputBytes: 0,
         childError: "child reported stopReason: error",
+        reportChannel: "none",
       },
       callContext(h, CALLER),
     );
@@ -697,7 +869,7 @@ describe("TaskRegistry.resolve-exit", () => {
     );
 
     const resolved = await h.registry.transition(
-      { kind: "resolve-exit", taskId: TASK_1, exitCode: 0 },
+      { kind: "resolve-exit", taskId: TASK_1, exitCode: 0, reportChannel: "none" },
       callContext(h, CALLER),
     );
 
@@ -718,6 +890,7 @@ describe("TaskRegistry.resolve-exit", () => {
         outputRef: "memory:tasks/x/output.log",
         outputBytes: 4,
         outputPreview: "PONG",
+        reportChannel: "none",
       },
       callContext(h, CALLER),
     );
@@ -733,7 +906,7 @@ describe("TaskRegistry.resolve-exit", () => {
 
     await expect(
       h.registry.transition(
-        { kind: "resolve-exit", taskId: TASK_1, exitCode: 0 },
+        { kind: "resolve-exit", taskId: TASK_1, exitCode: 0, reportChannel: "none" },
         callContext(h, CALLER),
       ),
     ).rejects.toThrow(/resolve-exit: task .* is terminal \(succeeded\)/);

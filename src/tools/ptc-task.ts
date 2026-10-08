@@ -34,6 +34,7 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { Static } from "typebox";
 import type { ChildProcessLifecycle } from "../runtime/child-process-lifecycle.ts";
+import type { ChildReport, ChildReportChannel } from "../runtime/child-report.ts";
 import { applyAdr0015Truncation, type OutputStorage } from "../runtime/output-storage.ts";
 import { OUTPUT_PREVIEW_MAX_BYTES, type TaskRegistry } from "../runtime/task-registry.ts";
 import type { TaskRecord, TaskStatus, ULID } from "../runtime/task-storage.ts";
@@ -61,7 +62,7 @@ const STOP_CALLER_FALLBACK = "ptc_task_stop";
 /** Shared guidance for the three tools (they are one surface and should read that way). */
 export const PTC_TASK_TOOL_GUIDELINES: readonly string[] = [
   "Use ptc_task_list to see the background tasks this session dispatched and their live status.",
-  "Use ptc_task_output to read a task's captured output (it is tail-truncated; the footer names the full-output file).",
+  "Use ptc_task_output to read a task's captured output (it is tail-truncated; the footer names the full-output file). A succeeded task's child report is rendered there, ahead of the prose.",
   "Use ptc_task_stop to ask a running task to stop; the dispatcher delivers the actual signal, so the task transitions through stopping to canceled.",
   "These background-task tools stay callable when PTC mode is off — /ptc off only blocks new dispatches.",
 ];
@@ -286,6 +287,78 @@ export interface PtcTaskOutputDetails {
   outputTruncated: boolean;
   /** The full-output temp file; present only when `outputTruncated` is true. */
   outputFullPath?: string;
+  /**
+   * ADR-0032: the background child's report, read off the record the pump persisted it on.
+   * Absent for every task that has not reached `succeeded` — a running child has not reported
+   * yet and a failed one did not report at all, and neither is the same claim as "reported
+   * nothing", which arrives as `reportChannel: "none"` with no `report`.
+   */
+  report?: ChildReport;
+  /**
+   * ADR-0032 "The channel is always stated": which channel delivered `report`, or the explicit
+   * `none` marker for a child that ignored the contract. Absent exactly when `report` is absent.
+   */
+  reportChannel?: ChildReportChannel;
+}
+
+// ---------------------------------------------------------------------------
+//  ADR-0032: the persisted child report, rendered into the model's text block
+// ---------------------------------------------------------------------------
+
+/**
+ * Findings cap for the model-facing render (ADR-0032: "bounded at 20 findings with the withheld
+ * count stated in-band"). The literal is ADR-0032's; the withheld count is stated because a
+ * silently shortened list reads as "these were all of them".
+ */
+export const MAX_RENDERED_REPORT_FINDINGS = 20;
+
+/**
+ * Render one record's persisted child report (ADR-0032), or `undefined` when the record carries
+ * none — the `running` and `failed` cases, where "has not reported yet" is the honest answer and
+ * an empty report block would claim otherwise.
+ *
+ * A `succeeded` record with `reportChannel: "none"` DOES render, as the explicit non-compliance
+ * marker ADR-0032 requires: the child's prose follows it, and the model is told the prose is not
+ * backed by a report rather than being left to infer it from the absence of one.
+ *
+ * Shape follows the `<bg-task-notification>` XML the same subsystem emits, so a model reading
+ * both surfaces sees one convention: the channel is always an attribute, the payload is the body.
+ */
+export function renderChildReport(record: TaskRecord): string | undefined {
+  const channel = record.reportChannel;
+  if (channel === undefined) return undefined;
+  if (channel === "none") {
+    return (
+      '<child-report channel="none">the child produced no report; it did not comply with the ' +
+      "report contract. What follows is its prose, unbacked by a report.</child-report>"
+    );
+  }
+  const report = record.report;
+  if (report === undefined) {
+    // Unreachable through the registry (a channel is only ever written with its report or as the
+    // `none` marker), and stated rather than silently skipped if some other writer produces it.
+    return `<child-report channel="${channel}">the record names channel ${channel} but carries no report.</child-report>`;
+  }
+  const lines = [`<child-report channel="${channel}">`, `summary: ${report.summary}`];
+  const shown = report.findings.slice(0, MAX_RENDERED_REPORT_FINDINGS);
+  const withheld = report.findings.length - shown.length;
+  lines.push(`findings (${String(report.findings.length)}):`);
+  for (const [index, finding] of shown.entries()) {
+    lines.push(`  ${String(index + 1)}. ${finding.what} — evidence: ${finding.evidence}`);
+  }
+  if (withheld > 0) lines.push(`  …+${String(withheld)} more findings not shown`);
+  lines.push(
+    report.files_touched.length === 0
+      ? "files_touched: (none)"
+      : `files_touched: ${report.files_touched.join(", ")}`,
+  );
+  // The host's counter, not the child's claim — see ChildReportPayload.
+  lines.push(
+    `usage: input=${String(report.usage.input)} output=${String(report.usage.output)} ` +
+      `cost=${String(report.usage.cost)} turns=${String(report.usage.turns)}`,
+  );
+  lines.push("</child-report>");
+  return lines.join("\n");
 }
 
 const OUTPUT_PARAMETERS = Type.Object({
@@ -329,6 +402,35 @@ const OUTPUT_OUTPUT_SCHEMA = Type.Object({
         "A file holding the complete output; present only when `output_truncated` is true (ADR-0015 §2).",
     }),
   ),
+  report_channel: Type.Optional(
+    Type.String({
+      description:
+        "Which channel delivered the child's report: `tool`, `prompt-json`, or `none` when the child ignored the contract (ADR-0032). Absent until the task succeeds — a running or failed task carries no report claim at all.",
+    }),
+  ),
+  report: Type.Optional(
+    Type.Object({
+      summary: Type.String({ description: "The child's own one-line summary." }),
+      findings: Type.Array(
+        Type.Object({
+          what: Type.String({ description: "The claim the child makes." }),
+          evidence: Type.String({ description: "The evidence that claim rests on." }),
+        }),
+        { description: "One entry per claim the child made." },
+      ),
+      files_touched: Type.Array(Type.String(), {
+        description: "Paths the child says it touched.",
+      }),
+      usage: Type.Object({
+        input: Type.Number({
+          description: "Host-observed input tokens (never the child's claim).",
+        }),
+        output: Type.Number({ description: "Host-observed output tokens." }),
+        cost: Type.Number({ description: "Host-observed cost." }),
+        turns: Type.Number({ description: "Host-observed assistant turns." }),
+      }),
+    }),
+  ),
 });
 
 /**
@@ -342,6 +444,7 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
     label: "PTC Task Output",
     description: [
       "Read a background task's captured output.",
+      'A succeeded task also renders its child report (summary, findings, files touched, usage) ahead of the prose, and says which channel delivered it; a channel of "none" means the child ignored the report contract.',
       "The text is tail-truncated to pi's ADR-0015 limits (50 KB / 2000 lines); when anything is cut, outputFullPath names a file with the complete output.",
       "Pass sinceBytes to skip a prefix of the stored output when paging.",
     ].join("\n"),
@@ -383,6 +486,10 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
       const truncation = applyAdr0015Truncation(slice, full);
       // ADR-0022 §7: inline the preview only at or below the 2048-byte ceiling.
       const outputPreview = outputBytes <= OUTPUT_PREVIEW_MAX_BYTES ? full : undefined;
+      // ADR-0032: the report is read off the record, exactly where the child's prose comes from
+      // (the pump persisted both through the same terminal write), so the two cannot describe
+      // different messages. Both are absent together.
+      const reportBlock = renderChildReport(record);
       const details: PtcTaskOutputDetails = {
         taskId,
         output: truncation.text,
@@ -390,11 +497,17 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
         ...(outputPreview === undefined ? {} : { outputPreview }),
         outputTruncated: truncation.truncated,
         ...(truncation.fullPath === undefined ? {} : { outputFullPath: truncation.fullPath }),
+        ...(record.report === undefined ? {} : { report: record.report }),
+        ...(record.reportChannel === undefined ? {} : { reportChannel: record.reportChannel }),
       };
-      const text =
+      // ADR-0032 rendering: the report reads first, the child's prose after — conclusion first,
+      // reasoning second. A task with a report always has output too (a `succeeded` child produced
+      // text), so the "(no output yet)" fallback can never swallow the report block.
+      const body =
         details.output.length > 0
           ? details.output
           : `(no output yet; task ${taskId} is ${record.status})`;
+      const text = reportBlock === undefined ? body : `${reportBlock}\n${body}`;
       // Same computed values, projected onto the declared schema. `status` is free here:
       // `record` is already loaded for the existence check above.
       const structuredContent: Static<typeof OUTPUT_OUTPUT_SCHEMA> = {
@@ -405,6 +518,8 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
         ...(outputPreview === undefined ? {} : { output_preview: outputPreview }),
         output_truncated: truncation.truncated,
         ...(truncation.fullPath === undefined ? {} : { output_full_path: truncation.fullPath }),
+        ...(record.reportChannel === undefined ? {} : { report_channel: record.reportChannel }),
+        ...(record.report === undefined ? {} : { report: record.report }),
       };
       return { content: [{ type: "text", text }], details, structuredContent };
     },

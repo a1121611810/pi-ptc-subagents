@@ -234,6 +234,59 @@ describe("FileTaskStorage: task CRUD (loadTask / saveTask / deleteTask)", () => 
     }
   });
 
+  /**
+   * ADR-0032: the child report is persisted with the same durability as the rest of the record,
+   * so it is readable by a LATER adapter instance over the same directory — which is what "the
+   * process that wrote it is gone" looks like from inside one test process. The point is not
+   * only the round-trip: `listTasks` (the path `reconcileLostTasks` and `ptc_task_list` take)
+   * has to carry the report too, or a restarted session could not reconcile a task whose report
+   * only the writer's own cache still had.
+   */
+  test("a persisted child report survives to a fresh adapter, through loadTask and listTasks", async () => {
+    const base = await makeBase();
+    try {
+      const writer: TaskStorage = new FileTaskStorage(base);
+      const record = fixtureTask({
+        status: "succeeded",
+        report: {
+          summary: "the child answered in prose with no fenced block",
+          findings: [],
+          files_touched: ["docs/usage/bgdispatch.md"],
+          usage: { input: 12, output: 34, cost: 0.5, turns: 2 },
+        },
+        reportChannel: "prompt-json",
+      });
+      await writer.saveTask(record);
+
+      // A second adapter over the same base: nothing is shared but the bytes on disk.
+      const reader: TaskStorage = new FileTaskStorage(base);
+      const loaded = await reader.loadTask(record.id);
+      expect(loaded).toEqual(record);
+      expect(loaded?.reportChannel).toBe("prompt-json");
+
+      const listed = await collect(reader.listTasks());
+      expect(listed).toEqual([record]);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  test("a non-compliant child persists the explicit none marker and no report", async () => {
+    const base = await makeBase();
+    try {
+      const storage: TaskStorage = new FileTaskStorage(base);
+      await storage.saveTask(fixtureTask({ status: "succeeded", reportChannel: "none" }));
+
+      const loaded = await storage.loadTask("01JBZ00000000000000000000A" as ULID);
+      // The marker is on disk; the report is not merely empty, it is absent. `toBeUndefined()`
+      // would pass for `{"report": null}`, so the key check is the assertion that matters.
+      expect(loaded?.reportChannel).toBe("none");
+      expect(Object.hasOwn(loaded as object, "report")).toBe(false);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
   test("loadTask returns null for an unknown id (ENOENT = absent, not a throw)", async () => {
     const base = await makeBase();
     try {

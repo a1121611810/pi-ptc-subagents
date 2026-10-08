@@ -47,11 +47,13 @@ import {
   createPtcTaskOutputTool,
   createPtcTaskStopTool,
   DEFAULT_STOP_REASON,
+  MAX_RENDERED_REPORT_FINDINGS,
   type AnyTool,
   type PtcTaskListDetails,
   type PtcTaskOutputDetails,
   type PtcTaskStopDetails,
 } from "../../src/tools/ptc-task.ts";
+import type { ChildReport } from "../../src/runtime/child-report.ts";
 
 // ---------------------------------------------------------------------------
 //  Fixtures and harness
@@ -447,6 +449,174 @@ describe("ptc_task_output", () => {
     await expect(callTool(tool, { taskId: TASK_1, sinceBytes: 4 })).rejects.toThrow(
       `ptc_task_output: sinceBytes 4 exceeds the 3-byte output of task ${TASK_1}`,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+//  ptc_task_output — the persisted child report (ADR-0032)
+// ---------------------------------------------------------------------------
+
+/** The literal report a background child is persisted with (ADR-0032's four fields + host usage). */
+const PERSISTED_REPORT: ChildReport = {
+  summary: "the depth gate is checked before the agent is discovered",
+  findings: [
+    { what: "depth precedes discovery", evidence: "the gate returns before discoverAgent" },
+    { what: "the refusal text names the next step", evidence: "the message ends with next_step:" },
+  ],
+  files_touched: ["src/runtime/dispatch.ts", "docs/usage/bgdispatch.md"],
+  usage: { input: 900, output: 260, cost: 0.0123, turns: 1 },
+};
+
+describe("ptc_task_output shows the persisted child report (ADR-0032)", () => {
+  test("renders the report and the child's prose, report first", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    h.clock.set(1500);
+    // The record reaches `succeeded` through the registry, carrying the report the pump wrote.
+    await h.registry.transition(
+      {
+        kind: "resolve-exit",
+        taskId: TASK_1,
+        exitCode: 0,
+        outputRef: h.outputs.outputRef(TASK_1),
+        outputBytes: 12,
+        outputPreview: SMALL_OUTPUT,
+        report: PERSISTED_REPORT,
+        reportChannel: "prompt-json",
+      },
+      { clock: h.clock.clock, callerId: CALLER },
+    );
+    await h.outputs.writeOutput(TASK_1, SMALL_OUTPUT);
+    const tool = createPtcTaskOutputTool(h.registry, h.outputs);
+
+    const result = await callTool<PtcTaskOutputDetails>(tool, { taskId: TASK_1 });
+    const text = textOf(result);
+
+    // ADR-0032 rendering: conclusion first, reasoning second — the block precedes the prose.
+    expect(text.indexOf('<child-report channel="prompt-json">')).toBeGreaterThanOrEqual(0);
+    expect(text.indexOf(PERSISTED_REPORT.summary)).toBeLessThan(text.indexOf("hello"));
+    // Every field the model needs, from the same values the pump stamped.
+    expect(text).toContain("depth precedes discovery");
+    expect(text).toContain("the gate returns before discoverAgent");
+    expect(text).toContain("src/runtime/dispatch.ts, docs/usage/bgdispatch.md");
+    expect(text).toContain("usage: input=900 output=260 cost=0.0123 turns=1");
+    // Prose is preserved beside the report, never replaced by it.
+    expect(result.details.output).toBe(SMALL_OUTPUT);
+    expect(text).toContain("world");
+    // And the same value reaches `details` and the codemode projection, not just the text.
+    expect(result.details.report).toEqual(PERSISTED_REPORT);
+    expect(result.details.reportChannel).toBe("prompt-json");
+    const structured = await callStructured<{
+      report?: ChildReport;
+      report_channel?: string;
+    }>(tool, { taskId: TASK_1 });
+    expect(structured.report).toEqual(PERSISTED_REPORT);
+    expect(structured.report_channel).toBe("prompt-json");
+  });
+
+  test("bounds the rendered findings at 20 and states the withheld count in-band", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    h.clock.set(1500);
+    const findings = Array.from({ length: 23 }, (_, index) => ({
+      what: `finding-${String(index)}`,
+      evidence: `evidence-${String(index)}`,
+    }));
+    await h.registry.transition(
+      {
+        kind: "resolve-exit",
+        taskId: TASK_1,
+        exitCode: 0,
+        outputBytes: 12,
+        report: { ...PERSISTED_REPORT, findings },
+        reportChannel: "prompt-json",
+      },
+      { clock: h.clock.clock, callerId: CALLER },
+    );
+    await h.outputs.writeOutput(TASK_1, SMALL_OUTPUT);
+    const tool = createPtcTaskOutputTool(h.registry, h.outputs);
+
+    const text = textOf(await callTool<PtcTaskOutputDetails>(tool, { taskId: TASK_1 }));
+
+    expect(MAX_RENDERED_REPORT_FINDINGS).toBe(20);
+    expect(text).toContain("finding-19");
+    expect(text).not.toContain("finding-20");
+    // The withheld count is stated, not silently dropped — a shortened list must not read as
+    // "these were all of them".
+    expect(text).toContain("+3 more findings not shown");
+  });
+
+  test("a non-compliant child reads as the explicit none marker, not as a silent prose answer", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    h.clock.set(1500);
+    await h.registry.transition(
+      {
+        kind: "resolve-exit",
+        taskId: TASK_1,
+        exitCode: 0,
+        outputBytes: 12,
+        reportChannel: "none",
+      },
+      { clock: h.clock.clock, callerId: CALLER },
+    );
+    await h.outputs.writeOutput(TASK_1, SMALL_OUTPUT);
+    const tool = createPtcTaskOutputTool(h.registry, h.outputs);
+
+    const result = await callTool<PtcTaskOutputDetails>(tool, { taskId: TASK_1 });
+    const text = textOf(result);
+
+    expect(text).toContain('<child-report channel="none">');
+    expect(text).toContain("did not comply with the report contract");
+    expect(result.details.reportChannel).toBe("none");
+    expect(result.details.report).toBeUndefined();
+    // The answer is still handed over; the marker says it is unbacked, not that it is missing.
+    expect(result.details.output).toBe(SMALL_OUTPUT);
+  });
+
+  test("a running task renders no report block and reports no channel", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    const tool = createPtcTaskOutputTool(h.registry, h.outputs);
+
+    const result = await callTool<PtcTaskOutputDetails>(tool, { taskId: TASK_1 });
+
+    // "Has not reported yet" is not "reported nothing": a running task says neither.
+    expect(textOf(result)).not.toContain("<child-report");
+    expect(result.details.reportChannel).toBeUndefined();
+    expect(result.details.report).toBeUndefined();
+    const structured = await callStructured<Record<string, unknown>>(tool, { taskId: TASK_1 });
+    // Absent, never `undefined` — `structuredContent` must stay a JsonValue (constraint in this
+    // file's header: the optional keys are omitted, not set).
+    expect(Object.hasOwn(structured, "report")).toBe(false);
+    expect(Object.hasOwn(structured, "report_channel")).toBe(false);
+  });
+
+  test("a failed task renders no report block either", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    h.clock.set(1500);
+    await h.registry.transition(
+      {
+        kind: "resolve-exit",
+        taskId: TASK_1,
+        exitCode: 1,
+        outputBytes: 0,
+        reportChannel: "prompt-json",
+        report: PERSISTED_REPORT,
+      },
+      { clock: h.clock.clock, callerId: CALLER },
+    );
+    const tool = createPtcTaskOutputTool(h.registry, h.outputs);
+
+    const result = await callTool<PtcTaskOutputDetails>(tool, { taskId: TASK_1 });
+
+    // The registry already refused to persist the report on a failed record, so the tool has
+    // nothing to render. Asserted here anyway: the read surface is where a model would notice.
+    expect((await h.registry.get(TASK_1))?.status).toBe("failed");
+    expect(textOf(result)).not.toContain("<child-report");
+    expect(result.details.report).toBeUndefined();
+    expect(result.details.reportChannel).toBeUndefined();
   });
 });
 

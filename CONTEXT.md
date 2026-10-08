@@ -486,8 +486,12 @@ completion (`lost_on_session_restart`). See ADR-0022 + ADR-0023.
 lifecycle of one background child. 19-field schema (ADR-0022 §3's code block;
 its "21 fields" heading is an authoring miscount) plus two
 optional owner-identity fields (`ownerPid`, `ownerBootMs`, ADR-0023)
-stamped at spawn, persisted to `<sessionDir>/tasks/<taskId>.json` per R1.
-Independent of `DispatchResult` and `SubCallRecord`. See ADR-0022 + ADR-0023.
+stamped at spawn, persisted to `<sessionDir>/tasks/<taskId>.json` per R1,
+plus two optional _child report_ fields (`report`, `reportChannel`,
+ADR-0032) written only when the record reaches `succeeded` — so a
+still-running or failed task carries neither, because "has not reported
+yet" is not "reported nothing". Independent of `DispatchResult` and
+`SubCallRecord`. See ADR-0022 + ADR-0023 + ADR-0032.
 
 **TaskStatus** — the 6-state enum for `TaskRecord.status`:
 `running / stopping / succeeded / failed / canceled / lost`. The `queued`
@@ -523,8 +527,9 @@ deferred to v2. See ADR-0022.
 on (not gated by `/ptc off`, per ADR-0022 + map Notes clause 5):
 `ptc_task_list({ status?, limit? })` returns matching TaskRecords
 (newest first, default limit 100); `ptc_task_output({ taskId, sinceBytes? })`
-dereferences `outputRef` and applies ADR-0015 truncateTail;
-`ptc_task_stop({ taskId, reason? })` triggers
+dereferences `outputRef`, applies ADR-0015 truncateTail, and renders the
+persisted _child report_ ahead of the prose when the record reached
+`succeeded` (ADR-0032); `ptc_task_stop({ taskId, reason? })` triggers
 `running → stopping → canceled` (the dispatcher delivers the signal).
 See ADR-0022.
 
