@@ -461,9 +461,11 @@ export const CODEMODE_TOOL_NAME = "codemode";
  * Whether `codemode` will be CALLABLE, as a third question distinct from whether pi ships the
  * directory (ADR-0026) and whether it will load the extension (ADR-0027).
  *
- * - `"active"` — a loadout names it, so the model can call it.
- * - `"inactive"` — nothing names it, which on a real install is the DEFAULT: pi registers
- *   `codemode` with `defaultActive: false` and activates it only when a loadout says so.
+ * - `"active"` — a loadout names it OR pi's MCP extension will auto-enable it from `mcp.json`
+ *   (ADR-0033), so the model can call it.
+ * - `"inactive"` — nothing names it and nothing auto-enables it, which on a real install is the
+ *   DEFAULT: pi registers `codemode` with `defaultActive: false`
+ *   (`dist/extensions/codemode/index.js:26`).
  *
  * `"inactive"` is what every failure of this probe on the positive side resolves to, and that is
  * the design rather than a fallback: `subagents` is chosen only on positive evidence that the tool
@@ -471,8 +473,12 @@ export const CODEMODE_TOOL_NAME = "codemode";
  */
 export type CodemodeActivation = "active" | "inactive";
 
-/** How the answer was decided, so a test can tell a configured answer from pi's default. */
-export type CodemodeActivationSource = "cli" | "project" | "user" | "default" | "invalid";
+/**
+ * How the answer was decided, so a test can tell a configured answer from pi's default.
+ * `"mcp"` is ADR-0033: the loadout mirror said `inactive` and the MCP auto-enable evidence
+ * said pi will activate `codemode` anyway.
+ */
+export type CodemodeActivationSource = "cli" | "project" | "user" | "default" | "invalid" | "mcp";
 
 /** The answer plus enough provenance to explain it in a notice. */
 export interface CodemodeActivationResolution {
@@ -480,6 +486,11 @@ export interface CodemodeActivationResolution {
   source: CodemodeActivationSource;
   /** Set when a settings file could not be read as a JSON object; the answer still resolves. */
   error?: string;
+  /**
+   * Set when an `mcp.json` could not be read as a JSON object (ADR-0033); that file contributed
+   * nothing to the answer, and the answer still resolves.
+   */
+  mcpError?: string;
 }
 
 /** pi's default active tool names (`settings-manager.js:35`). None of them is `codemode`. */
@@ -559,8 +570,10 @@ function cliToolAllowlist(args: readonly string[]): string[] | undefined {
 }
 
 /**
- * Resolve whether `codemode` will be in the model's tool list, in the order pi resolves the
- * loadout: the command-line allowlist, then the merged `defaultTools`, then pi's own default.
+ * Resolve the LOADOUT half of whether `codemode` will be in the model's tool list: the
+ * command-line allowlist, then the merged `defaultTools`, then pi's own default. This is the
+ * ADR-0029 mirror; the MCP auto-enable evidence (ADR-0033) is unioned on top by
+ * {@link applyMcpAutoEnableEvidence}, which {@link readCodemodeActivation} calls.
  *
  * The last of those is the load-bearing one and is what makes absence of evidence mean
  * `inactive`: pi registers `codemode` inactive, so a session that configured nothing does not get
@@ -593,7 +606,9 @@ export function resolveCodemodeActivation(
 
 /**
  * Read pi's own settings files and resolve the activation, from the same two files and in the
- * same order as {@link readCodemodeSwitch}.
+ * same order as {@link readCodemodeSwitch}, and union the MCP auto-enable evidence on top
+ * (ADR-0033) — the MCP extension activates `codemode` by calling `pi.setActiveTools`, which no
+ * settings file records.
  */
 export function readCodemodeActivation(
   agentDir: string,
@@ -602,9 +617,354 @@ export function readCodemodeActivation(
 ): CodemodeActivationResolution {
   const project = readSettingsObject(join(cwd, ".pi", "settings.json"));
   const user = readSettingsObject(join(agentDir, "settings.json"));
-  const resolved = resolveCodemodeActivation(argv, project.value, user.value);
+  const resolved = applyMcpAutoEnableEvidence(
+    resolveCodemodeActivation(argv, project.value, user.value),
+    readMcpAutoEnableEvidence(agentDir, cwd),
+  );
   const error = project.error ?? user.error;
   return error === undefined ? resolved : { ...resolved, source: "invalid", error };
+}
+
+// --------------------------------------------------------------------------------------
+// MCP auto-enable evidence: pi's MCP extension activates codemode from mcp.json (ADR-0033)
+// --------------------------------------------------------------------------------------
+
+/** The exposure names pi's MCP config accepts, in pi's order (`dist/core/mcp-servers.js:7`). */
+const MCP_EXPOSURES: readonly string[] = ["codemode", "deferred", "direct", "hidden"];
+
+/**
+ * pi's one exposure alias (`mcp-servers.js:9`): an older config spells the default exposure
+ * `codemode-deferred`, and validation rewrites it to `codemode` before anything reads it.
+ */
+const MCP_EXPOSURE_ALIASES: Readonly<Record<string, string>> = { "codemode-deferred": "codemode" };
+
+/** pi's server-name charset (`mcp-servers.js:18`). */
+const MCP_SERVER_NAME = /^[A-Za-z0-9_-]+$/;
+
+function resolveMcpExposureAlias(value: unknown): unknown {
+  return typeof value === "string" ? (MCP_EXPOSURE_ALIASES[value] ?? value) : value;
+}
+
+function isMcpExposure(value: unknown): boolean {
+  return typeof value === "string" && MCP_EXPOSURES.includes(value);
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+  return isPlainRecord(value) && Object.values(value).every((entry) => typeof entry === "string");
+}
+
+/** Whether a `url` is one pi transports over, from pi's url check (`mcp-servers.js:137-139`). */
+function isHttpTransportUrl(value: string): boolean {
+  if (!URL.canParse(value)) return false;
+  return /^https?:$/.test(new URL(value).protocol);
+}
+
+/** The three fields of a server entry the auto-enable question reads, after alias resolution. */
+interface MirroredMcpServer {
+  enabled: boolean | undefined;
+  /** Alias-resolved. `undefined` is pi's default, which IS `codemode` (`index.js:60-62`). */
+  exposure: string | undefined;
+  /** Alias-resolved per-tool overrides. */
+  toolExposure: Record<string, string> | undefined;
+}
+
+/**
+ * The structural subset of pi's `validateMcpServerConfig` (`dist/core/mcp-servers.js:107-169`)
+ * that decides whether a server entry survives into the registry, carrying only the fields the
+ * auto-enable question reads.
+ *
+ * Deliberately a SUBSET. Mirrored check-for-check: the name charset, the object shape, `exposure`
+ * and `toolExposure` value validity after alias resolution, the `enabled` / `description` /
+ * `timeout` types, the `sse` rejection, and the transport requirements (`args` a string array,
+ * `env` and `headers` string records, `cwd` a string, `url` an http(s) URL). NOT mirrored: the
+ * `oauth` object validation and the `auth.provider` rules (`:143-155`) — the only omissions, and
+ * both live in the validator rather than in the file reader, whose one scope rule (a project may
+ * not carry `auth` on a URL server, `config.js:66-69`) is mirrored in {@link foldMcpConfigFile}.
+ *
+ * The omission can only OVER-predict activation — an entry pi rejects for those reasons alone is
+ * counted here as evidence, while pi drops it and never auto-enables. That is the loud, safe
+ * direction: the decision-4 warning measures the real loadout and fires. It can never
+ * under-predict, which is the silent double-surface defect this evidence exists to close. An
+ * entry pi drops for a mirrored reason contributes nothing, exactly as in pi.
+ *
+ * Scoped claim, because the sentence above is about THIS SUBSET and not about the probe: pi's
+ * server list is `loadMcpConfig`'s output PLUS whatever extensions registered through
+ * `pi.registerMcpServer()` (`index.js:853`, where the two lists are merged; the activation call at
+ * `:857`, the registry at `:232-247`), so a server registered that way activates
+ * codemode with no `mcp.json` anywhere and no probe can see it. That is a real under-report, and
+ * it is the live path the drift notice exists for rather than a failure of the mirror below.
+ */
+function mirrorMcpServerConfig(name: string, raw: unknown): MirroredMcpServer | undefined {
+  if (!MCP_SERVER_NAME.test(name)) return undefined;
+  if (!isPlainRecord(raw)) return undefined;
+  const exposure = resolveMcpExposureAlias(raw.exposure);
+  const toolExposure = isPlainRecord(raw.toolExposure)
+    ? Object.fromEntries(
+        Object.entries(raw.toolExposure).map(([tool, value]) => [
+          tool,
+          resolveMcpExposureAlias(value),
+        ]),
+      )
+    : raw.toolExposure;
+  if (exposure !== undefined && !isMcpExposure(exposure)) return undefined;
+  if (toolExposure !== undefined) {
+    if (!isPlainRecord(toolExposure)) return undefined;
+    if (!Object.values(toolExposure).every((value) => isMcpExposure(value))) return undefined;
+  }
+  if (raw.enabled !== undefined && typeof raw.enabled !== "boolean") return undefined;
+  if (raw.description !== undefined && typeof raw.description !== "string") return undefined;
+  if (raw.timeout !== undefined && (typeof raw.timeout !== "number" || !(raw.timeout > 0))) {
+    return undefined;
+  }
+  if (raw.type === "sse") return undefined;
+  const server: MirroredMcpServer = {
+    enabled: raw.enabled as boolean | undefined,
+    exposure: exposure as string | undefined,
+    toolExposure: toolExposure as Record<string, string> | undefined,
+  };
+  const type = raw.type;
+  if (
+    typeof raw.url === "string" &&
+    (type === undefined || type === "http" || type === "streamable-http")
+  ) {
+    if (!isHttpTransportUrl(raw.url)) return undefined;
+    if (raw.headers !== undefined && !isStringRecord(raw.headers)) return undefined;
+    return server;
+  }
+  if (typeof raw.command === "string" && (type === undefined || type === "stdio")) {
+    if (
+      raw.args !== undefined &&
+      !(Array.isArray(raw.args) && raw.args.every((arg) => typeof arg === "string"))
+    ) {
+      return undefined;
+    }
+    if (raw.env !== undefined && !isStringRecord(raw.env)) return undefined;
+    if (raw.cwd !== undefined && typeof raw.cwd !== "string") return undefined;
+    return server;
+  }
+  return undefined;
+}
+
+interface McpEvidenceState {
+  /** The last boolean seen wins, which is how a project value overrides the global one. */
+  autoEnableCodemode: boolean | undefined;
+  servers: Map<string, { namespace: string; server: MirroredMcpServer }>;
+  error: string | undefined;
+}
+
+/** Which of the two files is being folded — pi reads one rule differently per scope. */
+type McpConfigScope = "global" | "project";
+
+/**
+ * Record a probe failure without losing an earlier one.
+ *
+ * pi keeps an `errors` ARRAY (`config.js:78`) and pushes one entry per failing file (`config.js:40-53`),
+ * so two
+ * broken `mcp.json` files are two reported problems. A single carried string with
+ * last-write-wins reported one of them and let the user believe the other was fine — the
+ * global file is folded first, so the project file's error always erased it. Semicolon-joined
+ * because the resolution's `error` is one string (the session-start notice emits one line);
+ * nothing here decides anything on its own, so the join is the whole of the loss.
+ */
+function noteMcpError(state: McpEvidenceState, message: string): void {
+  state.error = state.error === undefined ? message : `${state.error}; ${message}`;
+}
+
+/**
+ * pi's `readConfigFile` (`dist/extensions/mcp/config.js:34-72`) with its `errors` array collapsed
+ * into the one carried error. An absent file contributes nothing and says nothing (pi's
+ * `existsSync` check, `:36-37`); a file that exists and cannot be READ is carried as the error
+ * pi would have pushed (`:39-44` wraps the read and the parse in one `try`). A server pi drops —
+ * invalid name, shape or config — contributes nothing, exactly as in pi; the reason is not
+ * carried because pi reports it once at startup and a second copy of the same line would be
+ * noise, while the probe's own I/O failures ARE carried.
+ */
+function foldMcpConfigFile(
+  path: string,
+  raw: string | undefined,
+  readError: string | undefined,
+  scope: McpConfigScope,
+  state: McpEvidenceState,
+): void {
+  if (raw === undefined) {
+    // pi's `existsSync` guard skips an absent file without a word (`config.js:36-37`). A file
+    // that EXISTS but could not be read is a different case: pi's read and parse share one
+    // `try` (`:39-44`), so it reports one, and so do we.
+    if (readError !== undefined) noteMcpError(state, readError);
+    return;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    noteMcpError(
+      state,
+      `${path} is not valid JSON (${error instanceof Error ? error.message : String(error)})`,
+    );
+    return;
+  }
+  if (
+    !isPlainRecord(parsed) ||
+    (parsed.mcpServers !== undefined && !isPlainRecord(parsed.mcpServers))
+  ) {
+    noteMcpError(state, `${path} must contain a JSON object with an "mcpServers" object`);
+    return;
+  }
+  if (typeof parsed.autoEnableCodemode === "boolean") {
+    state.autoEnableCodemode = parsed.autoEnableCodemode;
+  } else if (parsed.autoEnableCodemode !== undefined) {
+    noteMcpError(state, `${path}: autoEnableCodemode must be a boolean`);
+  }
+  for (const [name, value] of Object.entries(parsed.mcpServers ?? {})) {
+    const server = mirrorMcpServerConfig(name, value);
+    if (server === undefined) continue;
+    // pi's one scope rule, and it lives in the file reader rather than in the validator: a
+    // project may not put `auth` on a URL server, so a repository cannot choose where its
+    // credential goes (`config.js:66-69`). Mirrored rather than listed as an omission, because
+    // it is one comparison and its absence would make a trusted project's file count a server
+    // pi drops.
+    if (scope === "project" && isPlainRecord(value) && "url" in value && value.auth) continue;
+    // pi's namespace clash rule (`config.js:60-64`): names differing only in `-` / `_` would
+    // share `mcp__<server>`, and the LATER server is dropped.
+    const namespace = `mcp__${name.replace(/-/g, "_")}`;
+    const clash = [...state.servers.entries()].some(
+      ([other, entry]) => other !== name && entry.namespace === namespace,
+    );
+    if (clash) continue;
+    // Same-name project entries REPLACE the global one, which is what `Map.set` does here.
+    state.servers.set(name, { namespace, server });
+  }
+}
+
+/** One `mcp.json`, as {@link resolveMcpAutoEnableEvidence} takes it. */
+export interface McpConfigFileInput {
+  path: string;
+  /** The file's raw content, or `undefined` when the file is absent or unreadable. */
+  raw: string | undefined;
+  /**
+   * Why the file could not be READ (a permission, a directory, a symlink loop), or `undefined`
+   * when it was absent or read fine. The two are different facts: pi skips an absent file
+   * silently (`config.js:36-37`) and pushes an error for a file it could not read
+   * (`config.js:39-44`, which wraps the read and the parse in one `try`), so collapsing them
+   * here would make a probe failure look like a decision.
+   */
+  readError?: string;
+}
+
+/** Whether pi's MCP extension will activate `codemode` from this config, and what it cost to know. */
+export interface McpAutoEnableEvidence {
+  autoEnablesCodemode: boolean;
+  /** Set when an `mcp.json` could not be read as a JSON object; that file contributed nothing. */
+  error?: string;
+}
+
+/**
+ * pi's `ensureDiscoveryActive` decision as a pure function of the two `mcp.json` files
+ * (`dist/extensions/mcp/index.js:352-389`).
+ *
+ * The fold order is pi's `loadMcpConfig` (`config.js:77-87`): the global file, then the project
+ * file, so a project `autoEnableCodemode` replaces the global one and a project server replaces
+ * the global server of the same name.
+ *
+ * pi computes this "from the config, so the tool is active before the servers connect"
+ * (`index.js:353-354`) — which is what makes a config mirror exact rather than approximate:
+ * whether a server CONNECTS is not an input, so a server that fails to connect does not stop pi
+ * from activating `codemode`, and a config naming one is enough evidence for us. The remaining pi
+ * condition is the tool being registered at all (`hasCodemode`, `:367`), which is the presence
+ * and switch probes this package already runs.
+ */
+export function resolveMcpAutoEnableEvidence(
+  globalFile: McpConfigFileInput,
+  projectFile: McpConfigFileInput,
+): McpAutoEnableEvidence {
+  const state: McpEvidenceState = {
+    autoEnableCodemode: undefined,
+    servers: new Map(),
+    error: undefined,
+  };
+  foldMcpConfigFile(globalFile.path, globalFile.raw, globalFile.readError, "global", state);
+  foldMcpConfigFile(projectFile.path, projectFile.raw, projectFile.readError, "project", state);
+  const needsCodemode = [...state.servers.values()].some(({ server }) => {
+    if (server.enabled === false) return false;
+    // `configuredExposures` (`index.js:64-66`): the server's own exposure (default `codemode`)
+    // union the per-tool overrides.
+    const exposures = new Set<string>([
+      server.exposure ?? "codemode",
+      ...Object.values(server.toolExposure ?? {}),
+    ]);
+    return exposures.has("codemode");
+  });
+  return {
+    autoEnablesCodemode: state.autoEnableCodemode !== false && needsCodemode,
+    ...(state.error !== undefined ? { error: state.error } : {}),
+  };
+}
+
+/**
+ * Read the two files pi's `loadMcpConfig` reads (`config.js:79-81`): `<agentDir>/mcp.json`, then
+ * `<cwd>/.pi/mcp.json`.
+ *
+ * The project file is read unconditionally, accepting the same over-prediction hazard ADR-0029
+ * records for project settings: an untrusted project's `mcp.json` is ignored by pi
+ * (`loadMcpConfig` takes `projectTrusted`, `config.js:80`) and counted by this probe. That too
+ * can only claim `active` when pi says `inactive` — the direction the decision-4 warning bounds.
+ */
+export function readMcpAutoEnableEvidence(agentDir: string, cwd: string): McpAutoEnableEvidence {
+  const read = (path: string): McpConfigFileInput => {
+    try {
+      return { path, raw: readFileSync(path, "utf8") };
+    } catch (error) {
+      // Absent is the normal case and is silent, exactly as in pi's `existsSync` guard. A file
+      // that exists and cannot be read is not the same fact: pi's read and parse share one `try`
+      // (`config.js:39-44`) and report it, so the probe has to as well — otherwise "codemode will
+      // stay inactive" and "we could not tell" would resolve to the same answer, and only one of
+      // them is a decision. `ENOENT` is the only absence; every other code is a read failure
+      // (`EACCES`, `EISDIR` — a directory named `mcp.json` is real — `ELOOP`, …).
+      const code = (error as NodeJS.ErrnoException).code;
+      return code === "ENOENT"
+        ? { path, raw: undefined }
+        : {
+            path,
+            raw: undefined,
+            readError: `${path} could not be read (${error instanceof Error ? error.message : String(error)})`,
+          };
+    }
+  };
+  return resolveMcpAutoEnableEvidence(
+    read(join(agentDir, "mcp.json")),
+    read(join(cwd, ".pi", "mcp.json")),
+  );
+}
+
+/**
+ * Union the loadout mirror with the MCP evidence. pi's MCP extension ADDS `codemode` to whatever
+ * loadout resolved — `pi.setActiveTools([...active, ...activate])` (`index.js:377-378`) — so
+ * either source being positive means the model can call it, and a CLI allowlist excluding
+ * `codemode` does not veto it.
+ *
+ * When both agree the loadout's provenance wins: it is the answer the user configured, and naming
+ * it in a notice would point at the file they edited rather than at a default. `"mcp"` means the
+ * loadout said `inactive` and the evidence said otherwise.
+ */
+export function applyMcpAutoEnableEvidence(
+  loadout: CodemodeActivationResolution,
+  mcp: McpAutoEnableEvidence,
+): CodemodeActivationResolution {
+  const withError = mcp.error === undefined ? loadout : { ...loadout, mcpError: mcp.error };
+  if (loadout.activation === "active" || !mcp.autoEnablesCodemode) return withError;
+  // Spread the incoming answer rather than building a fresh object: an `error` it carries is a
+  // probe failure of the OTHER source, and the evidence has nothing to say about it. Dropping it
+  // here is the same silent loss `mcpError` exists to prevent, one field over.
+  return {
+    ...loadout,
+    activation: "active",
+    source: "mcp",
+    ...(mcp.error !== undefined ? { mcpError: mcp.error } : {}),
+  };
 }
 
 /**
@@ -625,7 +985,8 @@ export function readCodemodeActivation(
  * The fourth row is the default on a real install, and it is the reason this takes three
  * arguments: pi registers `codemode` with `defaultActive: false`, so "pi ships it" and "pi loads
  * it" are both true on an ordinary session that configured nothing, and neither means the model
- * can call it.
+ * can call it. `active` may rest on either evidence class — a loadout naming codemode, or
+ * ADR-0033's MCP auto-enable evidence — because both say the same thing about the model.
  */
 export function detectedSurfaceMode(
   presence: CodemodePresence,
@@ -766,8 +1127,16 @@ export interface SurfaceModeConfig {
  * them and the real probes answer, but only on a path that actually needs the answer: they are
  * resolved inside the fallback branches rather than in a default parameter, because a default
  * parameter is evaluated on EVERY call -- including the ones an explicit `surfaceMode` key
- * short-circuits, where the user paid a `realpathSync` plus up to three `statSync` and two
- * settings reads to set one line of JSON and get a constant.
+ * short-circuits, where the user paid a `realpathSync` plus up to three `statSync` and the
+ * settings reads below to set one line of JSON and get a constant.
+ *
+ * The probes do NOT save an explicit key their reads, though, and the cost is worth naming exactly
+ * rather than in the round number it is usually quoted as: `detected()` runs the switch probe AND
+ * the activation probe, and each reads the SAME two settings files (`readCodemodeSwitch` and
+ * `readCodemodeActivation` each call `readSettingsObject` twice), so one detected surface costs
+ * four settings reads over two files, plus the two `mcp.json` reads ADR-0033 added. The
+ * duplication is pre-existing and deliberate — each probe is copied from pi whole and kept
+ * self-contained — so the number is recorded, not optimised.
  */
 export function readSurfaceModeConfig(
   agentDir: string,

@@ -61,12 +61,15 @@ export async function writeAgentSettings(agentDir: string, body: unknown): Promi
  *
  * `ptc` is the `ptc.json` body, or `null` for no file. `agentSettings` is the `settings.json`
  * body; omitted means the default session, where codemode is not active and the surface is
- * `full`.
+ * `full`. `mcpJson` is the RAW agent-dir `mcp.json` content (ADR-0033): raw rather than a body
+ * because a test has to be able to write a file that will not parse, which is the failure path
+ * the evidence probe has to carry.
  */
 export async function makeStubInAgentDir(
   options: {
     ptc?: unknown;
     agentSettings?: unknown;
+    mcpJson?: string;
     codemode?: CodemodePresence;
     codemodeSwitch?: CodemodeSwitchResolution;
     active?: readonly string[];
@@ -82,6 +85,9 @@ export async function makeStubInAgentDir(
     }
     if (options.agentSettings !== undefined) {
       await writeAgentSettings(dir, options.agentSettings);
+    }
+    if (options.mcpJson !== undefined) {
+      await writeFile(join(dir, "mcp.json"), options.mcpJson, "utf8");
     }
     return {
       stub: makeExtensionStub({
@@ -371,8 +377,15 @@ export function stubContext(
 ): ExtensionContext {
   return modeContext({
     ...options,
-    notify: (message, type) =>
-      stub.notifications.push({ message, ...(type === undefined ? {} : { type }) }),
+    // ADR-0033: `ctx.ui.notify` is TUI-only — a `--print` session emits nothing through it
+    // (ADR-0025's known limitation, which ADR-0033 restates for its two new notices). The stub
+    // recorded unconditionally, which made "this notice is TUI-only" untestable HERE: a test
+    // asking for `--print` silence would have seen the line and failed for the wrong reason, so
+    // the property was asserted in a record while nothing exercised it.
+    notify: (message, type) => {
+      if (options.mode === "print") return;
+      stub.notifications.push({ message, ...(type === undefined ? {} : { type }) });
+    },
     setStatus: (key, text) => stub.statuses.push({ key, text }),
     // ADR-0030: `/ptc surface` ends in `ctx.reload()`, so a stub without one would make the
     // command untestable at exactly the step that matters. It records rather than reloading,

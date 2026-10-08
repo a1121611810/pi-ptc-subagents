@@ -19,6 +19,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   CODEMODE_TOOL_NAME,
+  type CodemodeActivationResolution,
   detectedSurfaceMode,
   readCodemodeActivation,
   resolveCodemodeActivation,
@@ -29,10 +30,9 @@ const PI = ["node", "pi"];
 const NO_SETTINGS = { activation: "inactive", source: "default" } as const;
 
 /** Both settings scopes at once, so a test states only the half it is exercising. */
-function settings(overrides: { project?: unknown; user?: unknown } = {}): {
-  activation: "active" | "inactive";
-  source: "cli" | "project" | "user" | "default" | "invalid";
-} {
+function settings(
+  overrides: { project?: unknown; user?: unknown } = {},
+): CodemodeActivationResolution {
   return resolveCodemodeActivation(PI, overrides.project, overrides.user);
 }
 

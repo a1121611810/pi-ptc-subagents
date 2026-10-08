@@ -380,7 +380,10 @@ const ALL_SCANNED_NAMES: ReadonlySet<string> = new Set(
  * 将来谁想扩清单必须先回答同一个问题。配套有两条反向守护（见「排除清单不会无声膨胀」
  * describe），所以清单不会退化成「什么都往里塞」。
  *
- * 分类与实测（扫描面 = adr + specs + usage + README + CONTEXT，239 个 token、36 条命中本清单）：
+ * 分类（扫描面 = adr + specs + usage + README + CONTEXT；「扫描面」随仓库文档增减，本段不写死
+ * token 数或清单条数——那两个数字每次加一份 ADR 或一个词条就会过期，且过期时没有任何门禁会红。
+ * 要重算：`ALL_SCANNED_NAMES.size`（token 数）与 `EXTERNAL_VOCABULARY.size`（清单条数），
+ * 两者都在本文件内由模块级常量直接给出）：
  *   A. DSH / pi 宿主 API —— 本仓是被宿主加载的 mode extension，不可能声明宿主的类与字段；
  *   B. 打包与构建配置 —— rolldown / vite / package.json 的词表；
  *   C. ADR-0022 明确推迟到 v2 的宿主 PTC 方法（文档自己写了 out of scope）；
@@ -412,6 +415,14 @@ const EXTERNAL_VOCABULARY: ReadonlyMap<string, string> = new Map([
   ["TextShimmer", "DSH 渲染层的 shimmer 组件类"],
   ["ToolCallTree", "DSH 渲染层的子调用树组件类"],
   ["UserConfig", "pi 宿主配置文件里的用户配置类型"],
+  // ADR-0033 逐个点名 pi 1.0.0 MCP 扩展的函数来镜像它的激活判定。它们全部来自已安装的
+  // pi 产物（dist/core/mcp-servers.js、dist/extensions/mcp/index.js、dist/extensions/mcp/config.js），
+  // 本仓从不声明也从不调用——ADR-0033 复制的是它们的**判定**（读同一批文件、按同一顺序折叠），
+  // 而 pi 的这些函数没有导出，镜像只能是逐字重写而非 import。
+  [
+    "mcpNamespace",
+    "pi 1.0.0 的 MCP 命名空间函数（dist/core/mcp-servers.js:20-22）；ADR-0033 引用它是为了镜像命名冲突规则（一个服务器名会把 `-` 换成 `_`）",
+  ],
   // ADR-0032 §What pi 1.0.0 actually offers 逐层点名 pi 1.0.0 的 flag / session 面来论证
   // 「结构化输出在 assistant message 这一层不存在」。这五个符号全部来自已安装的 pi 产物
   // （dist/core/sdk.d.ts、dist/core/agent-session.d.ts、@earendil-works/pi-ai/dist/types.d.ts），

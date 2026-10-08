@@ -462,8 +462,52 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
    */
   pi.registerTool(createChildReportTool(ptcDepth > 0));
 
-  pi.on("turn_start", async () => {
+  /**
+   * ADR-0033: the activation drift no config probe can see. pi's MCP extension activates `codemode`
+   * by calling `pi.setActiveTools` when an `mcp.json` server asks for it — a runtime call no
+   * settings file records. The evidence probe (ADR-0033) predicts that from the config, which
+   * covers the common case; what it cannot cover is a codemode activated by anything else (an
+   * extension calling `setActiveTools`, an `mcp.json` this probe could not read). Then the probe
+   * says `inactive`, the surface defaults to `full`, and the model is being offered two
+   * orchestration tools — the measured defect ADR-0025 exists to remove.
+   *
+   * So this compares the two things instead of trusting one: the probe's answer, and
+   * `pi.getActiveTools()`. Checked at session start AND on the first turn, because the MCP
+   * extension's own `session_start` may run after ours (extension order is not ours to choose),
+   * so the first turn is the second chance. Once fired, never again — per turn would be crying
+   * wolf.
+   *
+   * `warning`, not `info`, matching the probe-missed notice in `session_start`: same double
+   * surface, same one-line fix. TUI-only, like every other notice here (`ctx.ui.notify` emits
+   * nothing in `--print`) — ADR-0025's known limitation, restated rather than solved.
+   *
+   * An explicit `surfaceMode` stands: the user picked this surface, and repeating ADR-0027's
+   * "the pinned value is in force" for a surface they pinned would be noise.
+   */
+  let codemodeDriftNotified = false;
+  const notifyCodemodeDrift = (ctx: ExtensionContext): void => {
+    if (codemodeDriftNotified) return;
+    if (surface.source === "file") return;
+    if (surface.codemodeActivation?.activation !== "inactive") return;
+    if (!pi.getActiveTools().includes("codemode")) return;
+    codemodeDriftNotified = true;
+    ctx.ui.notify(
+      "pi-ptc-subagents: pi's codemode is active in this session, but nothing this package " +
+        "reads predicted it — no tool list names it and no readable mcp.json auto-enables it — " +
+        "so the surface defaulted to " +
+        FALLBACK_SURFACE_MODE +
+        ", and your model is being offered two orchestration tools. pi activates codemode at " +
+        "runtime in ways no settings file records (its MCP extension is one). Set an explicit " +
+        '"surfaceMode" in ' +
+        PTC_MODE_CONFIG_FILE +
+        " to pick one.",
+      "warning",
+    );
+  };
+
+  pi.on("turn_start", async (_event, ctx) => {
     turnActive = true;
+    notifyCodemodeDrift(ctx);
   });
 
   pi.on("agent_settled", async () => {
@@ -766,6 +810,17 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     }
 
     /*
+     * ADR-0033: an `mcp.json` we could not read is reported for the same reason a settings file
+     * is — the probe's input silently vanishing would otherwise make "codemode will stay inactive"
+     * indistinguishable from "we could not tell", and the first is a decision while the second is
+     * a probe failure. The file contributed nothing to the activation answer, so the surface still
+     * resolves; the notice says which.
+     */
+    if (surface.codemodeActivation?.mcpError !== undefined) {
+      ctx.ui.notify(`pi-ptc-subagents: ${surface.codemodeActivation.mcpError}`, "warning");
+    }
+
+    /*
      * ADR-0027: the explicit key WINS -- that is what an override is for -- so this only
      * reports. The case worth a warning is the one where the two disagree about who
      * orchestrates: a user who disabled pi's codemode and pinned `surfaceMode: "subagents"`
@@ -886,6 +941,10 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
         "warning",
       );
     }
+
+    // ADR-0033: the probe answered, then pi's real loadout gets the last word — here and on the
+    // first turn, because the MCP extension may activate codemode after this handler ran.
+    notifyCodemodeDrift(ctx);
 
     const persisted = readPersistedMode(ctx);
     const active = pi.getActiveTools();
