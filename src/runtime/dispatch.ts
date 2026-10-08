@@ -145,6 +145,14 @@ export interface DispatchDeps {
    * can dereference the bytes (BG-07).
    */
   outputStorage?: OutputStorage;
+  /**
+   * ADR-0032: where the background pump hands the child report it read off the child's final
+   * message. There is deliberately no `TaskRecord` field for it yet — persisting it is #104's
+   * work, and faking one here would put a half-built field on the persisted record. The callback
+   * is the seam that work will replace; the foreground path needs nothing equivalent because it
+   * returns the report on its own `DispatchResult`.
+   */
+  onChildReport?: (taskId: string, extraction: ChildReportExtraction) => void;
 }
 
 /**
@@ -216,6 +224,57 @@ export interface DispatchUsage {
   turns: number;
 }
 
+/**
+ * Which channel a {@link ChildReport} arrived over (ADR-0032 "The channel is always stated").
+ *
+ * `tool` is the report tool's `structuredContent`, read off `tool_execution_end`; `prompt-json`
+ * is the fenced block in the child's final assistant message, which is the only channel this
+ * module produces; `none` means the contract was on and the child did not comply.
+ */
+export type ChildReportChannel = "tool" | "prompt-json" | "none";
+
+/** One claim the child makes, with the evidence it rests on. */
+export interface ChildReportFinding {
+  what: string;
+  evidence: string;
+}
+
+/**
+ * The structured value a dispatched child produces (ADR-0032, `CONTEXT.md` §child report).
+ *
+ * Four fields and no more. `files_touched` is snake_case on purpose: this object is produced by
+ * a model emitting JSON, and renaming it on the way in would mean the wire text and the type
+ * disagree. The child's prose is returned alongside it, never replaced by it.
+ */
+export interface ChildReportPayload {
+  summary: string;
+  findings: ChildReportFinding[];
+  files_touched: string[];
+}
+
+/**
+ * The structured value a dispatched child produces (ADR-0032, `CONTEXT.md` §child report).
+ *
+ * `ChildReportPayload` is what the child DECLARES; `usage` is what the host OBSERVED, stamped on
+ * at settle time from the child's own `message_end` usage blocks. A model cannot know its token
+ * count, so a child-declared `usage` would be a fabricated number that happened to look like a
+ * measurement — `docs/testing-constraints.md` #4 requires the expected value to point at an
+ * independent source, and the host's counter is that source. Anything the child puts under `usage`
+ * is read and discarded.
+ */
+export interface ChildReport extends ChildReportPayload {
+  usage: { input: number; output: number; cost: number; turns: number };
+}
+
+/**
+ * What one extraction attempt yielded. `reportChannel: "none"` with no `report` is an ordinary
+ * outcome, not an error: the child ran, answered, and did not comply with the contract.
+ */
+export interface ChildReportExtraction {
+  report?: ChildReportPayload;
+  reportChannel: ChildReportChannel;
+}
+
 /** Structured return value of pi.dispatch(...). Shape mirrors Promise.allSettled records. */
 export interface DispatchResult {
   text: string;
@@ -236,6 +295,16 @@ export interface DispatchResult {
   usage?: DispatchUsage;
   stderr?: string;
   errorMessage?: string;
+  /** The child's child report, when one arrived over either channel. */
+  report?: ChildReport;
+  /**
+   * ADR-0032 "The channel is always stated": TOTAL, present on every result including every
+   * refusal. A degradation the caller cannot see is a silent failure (`docs/testing-constraints.md`
+   * #3), so `reportChannel: "none"` is stated rather than left to be inferred from the absence
+   * of `report`. This ticket only ever produces `"prompt-json"` and `"none"`; `"tool"` is in the
+   * type so the report tool (#101) does not have to change it.
+   */
+  reportChannel: ChildReportChannel;
 }
 
 /** Discovery of an agent by name; mirrors pi's subagent extension AgentConfig shape. */
@@ -276,6 +345,33 @@ export interface DispatchContext {
 }
 
 /**
+ * The child report clause of the child's appended system prompt (ADR-0032).
+ *
+ * It DOES restate the JSON shape, and that is a deliberate temporary state, not the ADR's end
+ * state. ADR-0032 makes the report tool's description the shape's one home — but the tool does not
+ * exist yet, and until it does this clause is the ONLY place a child can learn the shape. A
+ * channel that describes its own payload badly is not a fallback.
+ *
+ * So this constant is written to be DELETED rather than edited: when #101 lands the tool, this
+ * clause shrinks to the single sentence below with the shape removed, and no surviving sentence
+ * has to be reworded. Ticket #100's brief wrongly asked for no shape here; that was my error, not
+ * the implementer's.
+ *
+ * The three fields are the CHILD-DECLARED ones. `usage` is deliberately absent: the host measures
+ * that, and a child asked for it would only invent it. See `ChildReportPayload`.
+ */
+const CHILD_REPORT_SHAPE =
+  'a JSON object with exactly these keys: "summary" (one line, your own words), "findings" ' +
+  '(an array of objects each with "what" and "evidence", where evidence is the independent thing ' +
+  'that supports the claim), and "files_touched" (an array of paths you created or modified)';
+
+const CHILD_REPORT_PROMPT_CLAUSE =
+  "End your reply with a child report: a fenced ```json block containing " +
+  CHILD_REPORT_SHAPE +
+  ". The host reads that block off your final message, and your prose is kept alongside it. " +
+  "Do not report usage or token counts — those are measured by the host.";
+
+/**
  * Compose the system prompt handed to the child subprocess.
  *
  * The agent's own markdown body is the user-supplied content; pi-ptc appends a
@@ -296,6 +392,7 @@ export function appendDepthHint(systemPrompt: string, depth: number, maxDepth: n
       depth +
       ". Beyond it, pi.dispatch rejects with",
     '{ status: "rejected", errorMessage: "dispatch depth limit reached" }.',
+    CHILD_REPORT_PROMPT_CLAUSE,
     "</pi-ptc-context>",
   ].join("\n");
   return systemPrompt.length === 0 ? hint : systemPrompt + "\n\n" + hint;
@@ -310,6 +407,8 @@ export function dispatchDepthLimitReached(): DispatchResult {
     agentName: "unknown",
     durationMs: 0,
     exitCode: -1,
+    // Total field (ADR-0032): a refusal never carries a report, and says so.
+    reportChannel: "none",
     // Verbatim: the hint block appendDepthHint appends to the child's system
     // prompt promises the program exactly this errorMessage.
     errorMessage: "dispatch depth limit reached",
@@ -332,6 +431,7 @@ export function dispatchConcurrencyLimitReached(): DispatchResult {
     agentName: "unknown",
     durationMs: 0,
     exitCode: -1,
+    reportChannel: "none",
     errorMessage: DISPATCH_CONCURRENCY_LIMIT_MESSAGE,
   };
 }
@@ -825,6 +925,7 @@ export function missingAgentResult(input: RegisteredAgentsListInput): DispatchRe
     agentName: "",
     durationMs: 0,
     exitCode: 1,
+    reportChannel: "none",
     errorMessage:
       "agent is required (there is no default agent) — " + describeRegisteredAgents(input),
   };
@@ -859,6 +960,7 @@ export function unknownAgentResult(
     agentName: agent,
     durationMs,
     exitCode: 1,
+    reportChannel: "none",
     errorMessage:
       "unknown agent: " +
       agent +
@@ -1008,6 +1110,132 @@ function assistantText(event: ParsedAgentEvent): string | undefined {
  * Only `stopReason === "error"` counts. A normal turn ends with `stopReason: "stop"`, and
  * treating every stopReason as a failure would mark healthy children failed.
  */
+/**
+ * One fenced block found in a child's final text, with the fence's info string and its body.
+ */
+interface FencedBlock {
+  info: string;
+  body: string;
+}
+
+/**
+ * Split one message into its fenced blocks, in source order.
+ *
+ * A fence opened and never closed yields a block whose body runs to the end of the text. That is
+ * deliberate: a child cut off mid-report is exactly the malformed case the contract has to name,
+ * and closing the block for it would hand the parser a body that happens to be valid JSON.
+ */
+function fencedBlocks(text: string): FencedBlock[] {
+  const blocks: FencedBlock[] = [];
+  let open: { marker: string; info: string; body: string[] } | undefined;
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (open === undefined) {
+      const opener = /^(`{3,}|~{3,})(.*)$/.exec(trimmed);
+      if (opener) {
+        open = { marker: (opener[1] ?? "")[0] as string, info: (opener[2] ?? "").trim(), body: [] };
+      }
+      continue;
+    }
+    if (new RegExp("^" + open.marker + "{3,}\\s*$").test(trimmed)) {
+      blocks.push({ info: open.info, body: open.body.join("\n") });
+      open = undefined;
+    } else {
+      open.body.push(line);
+    }
+  }
+  if (open !== undefined) blocks.push({ info: open.info, body: open.body.join("\n") });
+  return blocks;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Validate one decoded child-report payload (ADR-0032).
+ *
+ * Lenient about keys the child invented, strict about the ones the contract names: a payload
+ * missing or mistyping any required field is NOT a report. Returns `undefined` for those, which
+ * the callers turn into `reportChannel: "none"` — the degradation stays visible instead of
+ * arriving half-parsed.
+ *
+ * Exported because the report tool's `structuredContent` (#101) validates through the same
+ * function; two validators for one shape is the two-copies problem ADR-0032 rejects.
+ */
+export function validateChildReport(value: unknown): ChildReportPayload | undefined {
+  if (!isPlainObject(value)) return undefined;
+  const { summary, findings, files_touched } = value as Record<string, unknown>;
+  if (typeof summary !== "string") return undefined;
+
+  if (!Array.isArray(findings)) return undefined;
+  const validatedFindings: ChildReportFinding[] = [];
+  for (const finding of findings) {
+    if (!isPlainObject(finding)) return undefined;
+    if (typeof finding.what !== "string" || typeof finding.evidence !== "string") {
+      return undefined;
+    }
+    validatedFindings.push({ what: finding.what, evidence: finding.evidence });
+  }
+
+  if (!Array.isArray(files_touched)) return undefined;
+  const validatedFiles: string[] = [];
+  for (const file of files_touched) {
+    if (typeof file !== "string") return undefined;
+    validatedFiles.push(file);
+  }
+
+  // `usage` is deliberately NOT read here. See ChildReportPayload: it is host-observed, and a
+  // child-supplied one is discarded rather than trusted.
+  return {
+    summary,
+    findings: validatedFindings,
+    files_touched: validatedFiles,
+  };
+}
+
+/**
+ * The prompt channel (ADR-0032 channel 2, the fallback): read a child report out of one child's
+ * final text. Prose is NOT consumed and NOT a candidate — only a fenced block is, and only the
+ * LAST one, because the contract says the child ends its reply with the block.
+ *
+ * Everything that is not a report comes back as `reportChannel: "none"` with no `report`: no
+ * fence, unparseable JSON, a valid-JSON-but-wrong-shape payload, a truncated fence. The child
+ * still resolved with its prose, so this is a downgrade, not a failure.
+ */
+export function extractChildReportFromText(text: string): ChildReportExtraction {
+  const blocks = fencedBlocks(text);
+  const last = blocks[blocks.length - 1];
+  if (last === undefined) return { reportChannel: "none" };
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(last.body);
+  } catch {
+    return { reportChannel: "none" };
+  }
+  const report = validateChildReport(decoded);
+  if (report === undefined) return { reportChannel: "none" };
+  return { report, reportChannel: "prompt-json" };
+}
+
+/**
+ * The extraction seam, as a pure fold over a child's parsed events.
+ *
+ * Pure on purpose: it takes the events a transcript fixture yields and returns the extraction, so
+ * the whole contract can be exercised with literal JSONL and no spawn. The two dispatch loops
+ * stream and cannot buffer a transcript, so they apply {@link extractChildReportFromText} per text
+ * part instead — this is the same fold spelled out, and the foreground loop's accumulation is the
+ * identical one-line update.
+ */
+export function extractChildReport(events: readonly ParsedAgentEvent[]): ChildReportExtraction {
+  let extraction: ChildReportExtraction = { reportChannel: "none" };
+  for (const event of events) {
+    const text = assistantText(event);
+    if (text !== undefined) extraction = extractChildReportFromText(text);
+  }
+  return extraction;
+}
+
 function childAssistantError(event: ParsedAgentEvent): string | undefined {
   if (event.type !== "message_end" || event.message?.role !== "assistant") return undefined;
   const message = event.message;
@@ -1151,10 +1379,16 @@ async function dispatchBackground(
     void (async (): Promise<void> => {
       let output = "";
       let childError: string | undefined;
+      // ADR-0032: the same extraction the foreground loop runs, so the two fronts cannot
+      // disagree about whether a transcript carried a child report.
+      let extraction: ChildReportExtraction = { reportChannel: "none" };
       try {
         for await (const event of lifecycle.events(handle)) {
           const text = assistantText(event);
-          if (text !== undefined) output = text;
+          if (text !== undefined) {
+            output = text;
+            extraction = extractChildReportFromText(text);
+          }
           // The last error wins: a child that retried and then gave up reports the reason that
           // ended it, not the first transient one.
           const error = childAssistantError(event);
@@ -1210,6 +1444,11 @@ async function dispatchBackground(
           },
           { clock, callerId, logger },
         );
+
+        // ADR-0032: hand the extraction out AFTER the terminal state is written, so a throwing
+        // seam costs the report, never the record. Persisting it is #104's work; until then this
+        // is the only place the background front's report is observable.
+        deps.onChildReport?.(taskId, extraction);
       } catch (err) {
         // A pump failure must not vanish. A task already driven terminal by a model stop
         // lands here on the illegal running -> terminal edge; log it so it is observable.
@@ -1252,6 +1491,7 @@ async function dispatchBackground(
       agentName: input.agent,
       durationMs: 0,
       exitCode: -1,
+      reportChannel: "none",
       errorMessage: "background dispatch failed: " + message,
     };
   }
@@ -1362,6 +1602,9 @@ export async function dispatch(
   return await new Promise<DispatchResult>((resolve) => {
     let finalText = "";
     let usage: DispatchUsage | undefined;
+    // ADR-0032: the last assistant text part both becomes `text` and is re-read for the child
+    // report, so the prose and the report can never describe different messages.
+    let extraction: ChildReportExtraction = { reportChannel: "none" };
     let exitCode = -1;
     let stderrText = "";
     let resolved = false;
@@ -1421,7 +1664,24 @@ export async function dispatch(
         agentName: agent.name,
         durationMs: Date.now() - start,
         exitCode,
+        // Total field (ADR-0032): stated on every outcome, including a rejected one.
+        reportChannel: extraction.reportChannel,
       };
+      // `usage` is stamped HERE, from the host's own counter, rather than taken from the child's
+      // JSON — see ChildReportPayload. A child that reported no usage block yields zeros rather
+      // than a missing field: the report's shape is total, and "this child cost nothing" and
+      // "we did not measure" are not the same claim.
+      if (extraction.report) {
+        out.report = {
+          ...extraction.report,
+          usage: {
+            input: usage?.input ?? 0,
+            output: usage?.output ?? 0,
+            cost: usage?.cost ?? 0,
+            turns: usage?.turns ?? 0,
+          },
+        };
+      }
       if (usage) out.usage = usage;
       if (stderrText.length > 0) out.stderr = stderrText;
       if (errorMessage) out.errorMessage = errorMessage;
@@ -1500,6 +1760,9 @@ export async function dispatch(
               for (const part of m.content) {
                 if (part && part.type === "text" && typeof part.text === "string") {
                   finalText = part.text;
+                  // Sibling of `finalText`, not a replacement: the prose above is returned
+                  // whatever this returns.
+                  extraction = extractChildReportFromText(part.text);
                 }
               }
             }

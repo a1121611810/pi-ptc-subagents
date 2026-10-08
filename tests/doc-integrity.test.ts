@@ -412,6 +412,30 @@ const EXTERNAL_VOCABULARY: ReadonlyMap<string, string> = new Map([
   ["TextShimmer", "DSH 渲染层的 shimmer 组件类"],
   ["ToolCallTree", "DSH 渲染层的子调用树组件类"],
   ["UserConfig", "pi 宿主配置文件里的用户配置类型"],
+  // ADR-0032 §What pi 1.0.0 actually offers 逐层点名 pi 1.0.0 的 flag / session 面来论证
+  // 「结构化输出在 assistant message 这一层不存在」。这五个符号全部来自已安装的 pi 产物
+  // （dist/core/sdk.d.ts、dist/core/agent-session.d.ts、@earendil-works/pi-ai/dist/types.d.ts），
+  // 本仓只在 ADR 里引用其名，从不声明也从不调用；结论正是它们各自都没有 schema / format 字段。
+  [
+    "CreateAgentSessionOptions",
+    "pi 1.0.0 SDK 的建会选项类型（dist/core/sdk.d.ts）；ADR-0032 引用它是为了证明它没有 schema 字段（ADR-0032）",
+  ],
+  [
+    "AgentSessionConfig",
+    "pi 1.0.0 的会话配置类型（dist/core/agent-session.d.ts）；ADR-0032 引用它是为了证明它没有 schema / format 字段（ADR-0032）",
+  ],
+  [
+    "StreamOptions",
+    "@earendil-works/pi-ai 的流选项类型；ADR-0032 引用它是为了证明它没有 schema / format 字段（ADR-0032）",
+  ],
+  [
+    "agent_end",
+    "pi 宿主的事件名（dist/core/agent-session.d.ts）；ADR-0032 引用它是为了说明它只带 messages、不带结果对象（ADR-0032）",
+  ],
+  [
+    "createAgentSession",
+    "pi 1.0.0 SDK 的建会函数；ADR-0032 §Rejected 明确**否决**了进程内子方案，所以本仓不调用它（ADR-0032）",
+  ],
   ["_baseSystemPromptOptions", "pi 宿主内部字段（下划线前缀即私有）"],
   [
     "_refreshToolRegistry",
@@ -1163,6 +1187,27 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       // 解析器不收，因此不进这份基线——它们由 ADR 正文里的表格自带出处。
       "docs/adr/0030-surface-switch-reloads.md:68 -> ptc-mode.ts:27",
       "docs/adr/0031-open-source-and-publish-authority.md:105 -> src/runtime/limits.ts:4",
+      // 2026-10-08 第五次复核：ADR-0032 引入 7 条。11/27/101 三条指向
+      // dispatch.ts，ticket #100 往该文件插入了类型与抽取代码，把它们整体下移；这里记的是
+      // **改过之后**的行号 —— 11→dispatch.ts:1055 = `function assistantText(event: ParsedAgentEvent)`
+      // （其上方注释即「the last part wins」那句）；27→dispatch.ts:1715 = 前景事件循环里的
+      // `if (m.usage) {`，即 usage 累加的起点；101→dispatch.ts:976 = buildArgv 里的
+      // `if (agent.tools && agent.tools.length > 0) {`。另外四条本仓未移动，原样收录：
+      // 20→subagent.ts:108 = `outputSchema` 的声明；49→subagent.ts:146 与
+      // ptc-task.ts:224/352/499 = 三处读取 structuredContent；70→src/index.ts:279 =
+      // surfaceMode === "off" 的早退。
+      //
+      // 同日**第六次**复核改了一处：70→index.ts 原本记的是 **280**，而那一行是**空行**。
+      // 断言四只校验行号能解析到目标文件，不校验该行写了什么，所以这条一直是绿的 ——
+      // 这正是 AGENTS.md 记的那类漂移（review round 5：引用指向了被上一处编辑变成注释的行），
+      // 此处是它的空行版本。已改回 279 = `if (surface.surfaceMode === "off") return;`。
+      "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1055",
+      "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:108",
+      "docs/adr/0032-child-report.md:27 -> src/runtime/dispatch.ts:1715",
+      "docs/adr/0032-child-report.md:49 -> src/tools/subagent.ts:146",
+      "docs/adr/0032-child-report.md:49 -> src/tools/ptc-task.ts:224",
+      "docs/adr/0032-child-report.md:70 -> src/index.ts:279",
+      "docs/adr/0032-child-report.md:101 -> src/runtime/dispatch.ts:976",
     ]);
   });
 

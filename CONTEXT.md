@@ -289,7 +289,7 @@ like the value tree. ADR-0032.
 _NOT the same as_ **structured result** (that is `structuredContent`, defined
 above as never reaching the model), and the two point in opposite directions:
 `structured result` is machine-only and model-blind, a child report is
-model-facing and is *also* what a program reads. Reusing the older term for
+model-facing and is _also_ what a program reads. Reusing the older term for
 this would invert its meaning. _Avoid_: "subagent report" (the word
 _subagent_ is reserved for the top-level _subagent surface_, `CONTEXT.md`
 §subagent surface), "structured output" (pi has no such concept — see

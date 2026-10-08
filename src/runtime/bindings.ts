@@ -353,6 +353,9 @@ export function createBuiltinBindings(options: CreateBuiltinBindingsOptions): Bi
             agentName: rawAgent,
             durationMs: 0,
             exitCode: 1,
+            // ADR-0032: the total channel field, for the same reason every other refusal has
+            // it — this shape never carries a report, and a program must not have to infer that.
+            reportChannel: "none",
             errorMessage: error instanceof Error ? error.message : String(error),
           };
         }

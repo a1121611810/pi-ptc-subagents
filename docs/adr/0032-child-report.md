@@ -8,7 +8,7 @@ status: accepted (2026-10-08)
 
 A dispatched child is a fresh `pi` subprocess. Everything it hands back crosses one boundary: the
 host reads the child's stdout, parses it as JSONL, and keeps the **last text part of its final
-assistant message** (`assistantText`, `src/runtime/dispatch.ts:980` — whose own comment says "the
+assistant message** (`assistantText`, `src/runtime/dispatch.ts:1055` — whose own comment says "the
 last part wins"). That string is the entire result.
 
 Both kinds of caller are worse off than they need to be, for different reasons:
@@ -24,7 +24,7 @@ Both kinds of caller are worse off than they need to be, for different reasons:
 Two facts are already collected and never surfaced:
 
 - `DispatchResult.usage` is accumulated from the child's `message_end` blocks
-  (`src/runtime/dispatch.ts:1482`) and then dropped, so neither caller can budget a child.
+  (`src/runtime/dispatch.ts:1715`) and then dropped, so neither caller can budget a child.
 - Which files a child touched is only knowable by the child. A child that edits through `bash`
   cannot be observed by the host at all.
 
@@ -39,7 +39,7 @@ Measured against the installed artifact, not the release notes.
    (`dist/core/agent-session.d.ts:111-153`) and `StreamOptions`
    (`@earendil-works/pi-ai/dist/types.d.ts:111-131`) have no schema or format field. What does exist
    — `Tool.constrainedSampling` (`pi-ai/dist/types.d.ts:517-522`) — is a property of a **tool
-   declaration**: it constrains a tool call's *arguments*, never the assistant's reply.
+   declaration**: it constrains a tool call's _arguments_, never the assistant's reply.
 2. **No terminal event carries a result object.** `agent_end` (`dist/core/agent-session.d.ts:50-52`)
    carries `messages`; `agent_settled` (`:54`) carries nothing. A design that waits for a "done"
    event with a payload will never fire against pi 1.0.0.
@@ -67,7 +67,7 @@ prose is preserved alongside it, never replaced.
    clause; the host parses a fenced JSON block from the final text.
 
 The fallback is not a formality. The tool channel has a **reachable** failure mode: it exists in
-the child only when this package loads there. `src/index.ts:280` returns early when
+the child only when this package loads there. `src/index.ts:279` returns early when
 `surfaceMode === "off"`, and pi's `-ne` removes extensions entirely. A design that treated the
 fallback as decorative would have a primary channel that is simply absent on a meaningful fraction
 of installs — silently, since nothing reports a missing tool.
@@ -98,7 +98,7 @@ tool descriptions versus the binding-contract module.
 
 The host merges the report tool into the child's tool list when the contract is on. This is easy to
 get wrong in a way that fails silently: `buildArgv` only emits a tool-list flag when the agent's
-markdown declares tools of its own (`src/runtime/dispatch.ts:901`), so a child whose agent declares
+markdown declares tools of its own (`src/runtime/dispatch.ts:976`), so a child whose agent declares
 none would receive **no** flag at all, and the tool would sit inactive with no error anywhere.
 
 ### The opt-out
@@ -137,7 +137,7 @@ surface.
 - **A retry loop on non-compliance.** Doubles the cost of the failure and can loop. Explicit
   degradation instead.
 - **Per-agent report schemas.** Reopens the two-copies problem for flexibility nobody has asked for.
-- **Replacing the prose with the structured value.** Discards the only place a child can say *why*
+- **Replacing the prose with the structured value.** Discards the only place a child can say _why_
   it concluded what it did.
 
 ## See also
