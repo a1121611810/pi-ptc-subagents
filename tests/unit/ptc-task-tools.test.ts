@@ -54,6 +54,9 @@ import {
   type PtcTaskStopDetails,
 } from "../../src/tools/ptc-task.ts";
 import type { ChildReport } from "../../src/runtime/child-report.ts";
+// Aliased on import: the describe block below is about the RENDERER, and a local alias keeps the
+// assertions reading as renderer assertions rather than reaching through a tool-execution harness.
+import { renderChildReport as renderChildReportForTest } from "../../src/tools/ptc-task.ts";
 
 // ---------------------------------------------------------------------------
 //  Fixtures and harness
@@ -1058,5 +1061,43 @@ describe("task panel renderer wiring", () => {
       expect(typeof tool.renderCall).toBe("function");
       expect(typeof tool.renderResult).toBe("function");
     }
+  });
+});
+
+describe("ptc_task_output renders an opted-out background child correctly (ADR-0032)", () => {
+  // Review round 1, finding 4: an opted-out agent resolves `succeeded` with `reportChannel:
+  // "opted-out"` and NO report. That is an ordinary outcome — nobody was asked — but it was
+  // falling into the "names a channel but carries no report" anomaly branch and being announced
+  // to the model as an anomaly. `tools/render.ts` had the same defect and was fixed in 29b3a9a;
+  // this is the other renderer, and it was missed.
+  //
+  // Counterfactual: delete the opted-out branch and this goes red.
+  function recordFor(channel: string, report?: unknown): TaskRecord {
+    return { reportChannel: channel, report } as unknown as TaskRecord;
+  }
+
+  test("opted-out says nobody was asked, rather than reporting a missing report", () => {
+    const rendered = renderChildReportForTest(recordFor("opted-out"));
+
+    expect(rendered).toContain('channel="opted-out"');
+    expect(rendered).toContain("opts out of the report contract");
+    expect(rendered).toContain("nothing is missing");
+    expect(rendered).not.toContain("but carries no report");
+  });
+
+  test("none still reads as non-compliance, and does not borrow opted-out's wording", () => {
+    const rendered = renderChildReportForTest(recordFor("none"));
+
+    expect(rendered).toContain("did not comply");
+    expect(rendered).not.toContain("opts out of the report contract");
+  });
+
+  test("the anomaly branch is still reachable for a channel that arrived with nothing", () => {
+    // So the fix above did not simply delete the anomaly branch to make the common case quiet.
+    const rendered = renderChildReportForTest(recordFor("tool"));
+
+    expect(rendered).toContain("but carries no report");
+    expect(rendered).not.toContain("opts out of the report contract");
+    expect(rendered).not.toContain("did not comply");
   });
 });

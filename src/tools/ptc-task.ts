@@ -337,10 +337,21 @@ export function renderChildReport(record: TaskRecord): string | undefined {
       "report contract. What follows is its prose, unbacked by a report.</child-report>"
     );
   }
+  if (channel === "opted-out") {
+    // NOT the anomaly branch below, and the difference is the whole point: an opted-out agent
+    // resolves `succeeded` carrying this channel and no report, which is an ORDINARY outcome, not
+    // a writer that broke a promise. Rendering it in anomaly voice told the model a channel was
+    // announced when nobody was ever asked. `tools/render.ts` got the same fix in 29b3a9a.
+    return (
+      '<child-report channel="opted-out">this agent opts out of the report contract, so none ' +
+      "was asked for; the prose below is the whole of what it produced, and nothing is " +
+      "missing.</child-report>"
+    );
+  }
   const report = record.report;
   if (report === undefined) {
-    // Unreachable through the registry (a channel is only ever written with its report or as the
-    // `none` marker), and stated rather than silently skipped if some other writer produces it.
+    // Anomaly branch: a channel was announced and nothing arrived. Reachable if some writer other
+    // than the registry ever sets one, and stated rather than silently skipped when it does.
     return `<child-report channel="${channel}">the record names channel ${channel} but carries no report.</child-report>`;
   }
   const lines = [`<child-report channel="${channel}">`, `summary: ${report.summary}`];

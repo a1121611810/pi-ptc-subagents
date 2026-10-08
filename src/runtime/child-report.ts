@@ -119,9 +119,12 @@ export const CHILD_REPORT_TOOL_NAME = "ptc_child_report";
  * home", #101).
  *
  * It used to live inside `CHILD_REPORT_PROMPT_CLAUSE` in `dispatch.ts` as well, which is the two
- * copies this repo has already paid for twice. Ticket #101 is the migration: the text moved here
- * and the prompt clause shrank to a single sentence requiring the child to CALL the tool, so the
- * tool's own description is now the only thing a child is told the shape by.
+ * copies this repo has already paid for twice. Ticket #101 moved it HERE on the one-home rule and
+ * then moved it BACK, once building #101 showed the tool is not always in the child: with the
+ * shape in the tool, a child that cannot call it had nothing to comply with and the prompt
+ * channel became dead code that still had tests. So the prompt renders it, the tool description
+ * points here, and the single-source scan in the tests names `runtime/dispatch.ts` as the one
+ * consumer — which is what stops it being pasted into the description a second time.
  *
  * Three fields, and only the child-DECLARED ones: `usage` is deliberately absent because the
  * host measures that and a child asked for it would only invent it (see {@link ChildReport}).

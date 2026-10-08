@@ -8,7 +8,7 @@ status: accepted (2026-10-08)
 
 A dispatched child is a fresh `pi` subprocess. Everything it hands back crosses one boundary: the
 host reads the child's stdout, parses it as JSONL, and keeps the **last text part of its final
-assistant message** (`assistantText`, `src/runtime/dispatch.ts:1055` — whose own comment says "the
+assistant message** (`assistantText`, `src/runtime/dispatch.ts:1149` — whose own comment says "the
 last part wins"). That string is the entire result.
 
 Both kinds of caller are worse off than they need to be, for different reasons:
@@ -17,14 +17,14 @@ Both kinds of caller are worse off than they need to be, for different reasons:
   is prose. To use it, the program — or the model writing the program — parses English. That is the
   least reliable link in the chain.
 - A **model** using `ptc_subagent` gets the same prose and has nowhere else to look. The tool
-  already declares an `outputSchema` (`src/tools/subagent.ts:108`), but ADR-0028 established that
+  already declares an `outputSchema` (`src/tools/subagent.ts:171`), but ADR-0028 established that
   `structuredContent` is "not sent to the model" — and in `surface mode: subagents` there is no
   `codemode`, so that channel currently reaches **nobody**.
 
 Two facts are already collected and never surfaced:
 
 - `DispatchResult.usage` is accumulated from the child's `message_end` blocks
-  (`src/runtime/dispatch.ts:1715`) and then dropped, so neither caller can budget a child.
+  (`src/runtime/dispatch.ts:1172`) and then dropped, so neither caller can budget a child.
 - Which files a child touched is only knowable by the child. A child that edits through `bash`
   cannot be observed by the host at all.
 
@@ -46,7 +46,7 @@ Measured against the installed artifact, not the release notes.
 3. **`tool_execution_end.result.structuredContent` _is_ reachable.** It is the full
    `AgentToolResult` (`pi-agent-core/dist/types.d.ts:370-391`), emitted verbatim at
    `pi-agent-core/dist/agent-loop.js:640-648`. This repo already depends on that mechanism
-   (`src/tools/subagent.ts:146`, `src/tools/ptc-task.ts:224, 352, 499`).
+   (`src/tools/subagent.ts:288`, `src/tools/ptc-task.ts:229, 459, 618`).
 
 So a structured return is reachable exactly two ways, and neither is enforced by pi: prompt the
 child into emitting JSON, or give it a tool whose declared schema the host reads back.
@@ -67,7 +67,7 @@ prose is preserved alongside it, never replaced.
    clause; the host parses a fenced JSON block from the final text.
 
 The fallback is not a formality. The tool channel has a **reachable** failure mode: it exists in
-the child only when this package loads there. `src/index.ts:279` returns early when
+the child only when this package loads there. `src/index.ts:280` returns early when
 `surfaceMode === "off"`, and pi's `-ne` removes extensions entirely. A design that treated the
 fallback as decorative would have a primary channel that is simply absent on a meaningful fraction
 of installs — silently, since nothing reports a missing tool.
@@ -112,8 +112,10 @@ shape now has exactly one home that survives the install where the tool is missi
 
 The host merges the report tool into the child's tool list when the contract is on. This is easy to
 get wrong in a way that fails silently: `buildArgv` only emits a tool-list flag when the agent's
-markdown declares tools of its own (`src/runtime/dispatch.ts:976`), so a child whose agent declares
-none would receive **no** flag at all, and the tool would sit inactive with no error anywhere.
+markdown declares tools of its own, so a child whose agent declares none would receive **no** flag at
+all, and the tool would sit inactive with no error anywhere. That merge now lives in `childToolList`
+(`src/runtime/dispatch.ts:1031`), and the `if (agent.tools && agent.tools.length > 0)` guard this
+decision originally named no longer exists on this branch — see the amendment below.
 
 Amendment (2026-10-08, #101): the merge is necessary but **not sufficient**, and the reason is a
 property of the flag rather than of this code. pi reads `--tools` as an ALLOWLIST — `sdk.js` turns
@@ -128,13 +130,12 @@ active set through it. So the flag cuts both ways, and activation needs **two** 
    `--tools ptc_child_report` on its own would leave the child with exactly one tool and no
    `read` / `bash` / `edit` / `write` — a strictly worse outcome than the silence it fixes.
 
-The same amendment fixes the "single home" claim for the prompt: the shape moved out of
-`CHILD_REPORT_PROMPT_CLAUSE` and into the tool's description, and the clause is now one sentence
-that requires the child to call the tool. The consequence is stated rather than hidden — a child
-that cannot call the tool has no shape to comply with, so in an installation where this package
-does not load in the child (`surfaceMode: "off"`, pi's `-ne`) the report is unreachable rather than
-merely unlikely. The host still READS a compliant fenced block if one arrives; that is what the
-prompt channel is for now.
+The same amendment first moved the shape out of `CHILD_REPORT_PROMPT_CLAUSE` and into the tool's
+description, on the one-home rule. **That was wrong and was reversed in the same ticket** — see
+§"The contract has exactly one home — and it is the PROMPT". Moving it into the tool made the
+report unreachable, not merely unlikely, in an installation where this package does not load in
+the child (`surfaceMode: "off"`, pi's `-ne`), because a child without the tool then had nothing to
+comply with. The shape is back in the prompt; the tool description points at it.
 
 ### The opt-out
 
@@ -155,20 +156,27 @@ the contract produced the same string, and §"The channel is always stated" has 
 `none` as the latter. `docs/testing-constraints.md` #3 treats a value that cannot distinguish those
 two as a silent failure, so the union grew rather than the guarantee weakening.
 
-Known gap, stated rather than hidden: `tools/render.ts`'s no-report block has two branches, keyed
-on `"none"` and on "anything else", so an `opted-out` result currently renders through the second
-and says "the opted-out channel was announced but no report reached the host". That is inaccurate
-(it was never announced) though not non-compliance, and the renderers were explicitly out of scope
-for this ticket — `tools/ptc-task.ts` degrades correctly without a change, because its fallback
-branch only reports the channel value and the absence. The third branch belongs with the renderer
-work in #105.
+Known gap, CLOSED in `29b3a9a` (review round 1): `tools/render.ts`'s no-report block had two
+branches, keyed on `"none"` and on "anything else", so an `opted-out` result rendered through the
+second and said "the opted-out channel was announced but no report reached the host". That is not
+merely imprecise — it is false, because an opted-out agent was never asked and nothing was
+announced. Both renderers now have an `opted-out` branch that says so in its own words.
 
 ### Rendering
 
 The model-facing surface does not hand over raw JSON: the host renders the report into a fixed
-shape, following the existing value-tree conventions, bounded at 20 findings with the withheld
-count stated in-band. The child's prose follows the rendered block — conclusion first, reasoning
-second. The program-facing surface gets the field, not the rendering; a program is not a display
+shape, following the existing value-tree conventions. Three bounds apply, each stated in-band when
+it withholds: **20 findings**, **20 files touched**, and **150 characters of evidence per finding**.
+
+Only the findings bound was decided in the grill; the other two were added in #103 because an
+unbounded report is an unbounded input to a bounded parent context, and the symmetry argument is
+what fixes them rather than taste. `CHILD_REPORT_MAX_EVIDENCE_CHARS` is not free either — 150 is
+derived from `MAX_LINE_CHARS = 200` minus the 3 connector columns, the 5-column finding indent, the
+finding index, and a 2-space margin, and `.opencodereview/rules/ptc-render-bounds.md` carries the
+arithmetic. The program-facing projection is NOT bounded: a program is not a display surface, and a
+script silently losing three findings is worse than a long read.
+
+The child's prose follows the rendered block — conclusion first, reasoning second. The program-facing surface gets the field, not the rendering; a program is not a display
 surface.
 
 ## Consequences

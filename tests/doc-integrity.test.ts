@@ -1187,27 +1187,33 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       // 解析器不收，因此不进这份基线——它们由 ADR 正文里的表格自带出处。
       "docs/adr/0030-surface-switch-reloads.md:68 -> ptc-mode.ts:27",
       "docs/adr/0031-open-source-and-publish-authority.md:105 -> src/runtime/limits.ts:4",
-      // 2026-10-08 第五次复核：ADR-0032 引入 7 条。11/27/101 三条指向
-      // dispatch.ts，ticket #100 往该文件插入了类型与抽取代码，把它们整体下移；这里记的是
-      // **改过之后**的行号 —— 11→dispatch.ts:1055 = `function assistantText(event: ParsedAgentEvent)`
-      // （其上方注释即「the last part wins」那句）；27→dispatch.ts:1715 = 前景事件循环里的
-      // `if (m.usage) {`，即 usage 累加的起点；101→dispatch.ts:976 = buildArgv 里的
-      // `if (agent.tools && agent.tools.length > 0) {`。另外四条本仓未移动，原样收录：
-      // 20→subagent.ts:108 = `outputSchema` 的声明；49→subagent.ts:146 与
-      // ptc-task.ts:224/352/499 = 三处读取 structuredContent；70→src/index.ts:279 =
-      // surfaceMode === "off" 的早退。
+      // 2026-10-08 **第六次**复核：ADR-0032 的 7 条全部重新逐行核对，且这次是按**内容**核对的。
       //
-      // 同日**第六次**复核改了一处：70→index.ts 原本记的是 **280**，而那一行是**空行**。
-      // 断言四只校验行号能解析到目标文件，不校验该行写了什么，所以这条一直是绿的 ——
-      // 这正是 AGENTS.md 记的那类漂移（review round 5：引用指向了被上一处编辑变成注释的行），
-      // 此处是它的空行版本。已改回 279 = `if (surface.surfaceMode === "off") return;`。
-      "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1055",
-      "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:108",
-      "docs/adr/0032-child-report.md:27 -> src/runtime/dispatch.ts:1715",
-      "docs/adr/0032-child-report.md:49 -> src/tools/subagent.ts:146",
-      "docs/adr/0032-child-report.md:49 -> src/tools/ptc-task.ts:224",
-      "docs/adr/0032-child-report.md:70 -> src/index.ts:279",
-      "docs/adr/0032-child-report.md:101 -> src/runtime/dispatch.ts:976",
+      // 前五次里有一次是空行漂移（index.ts 280 → 279），已被本仓抓出。但第六次复核发现的更糟：
+      // 第五次记录在案的这批行号，在 #101 之后**没有一条还对得上内容**，而断言四一直是绿的——
+      // 它只校验行号能解析到目标文件，不校验该行写了什么。所以「第五次已逐行核对过」这句话在
+      // 第六次复核时是**假的**。这正是 docs/testing-constraints.md「What the gate does not check」
+      // 说的那一类：门能看见形状，看不见引用指向的东西。
+      //
+      // 逐条内容（写在这里，是为了让下一个复核者不必重跑一遍就能知道每条该是什么）：
+      //   11 → dispatch.ts:1149 = `function assistantText(event: ParsedAgentEvent)`
+      //   20 → subagent.ts:171  = `export const SUBAGENT_OUTPUT_SCHEMA: SubagentOutputSchema`
+      //   27 → dispatch.ts:1172 = `function accumulateUsage(`（usage 的累加点，前景后台共用）
+      //   49 → subagent.ts:288  = structuredContent 分支里读 `outcome.reportChannel` 的那一行
+      //   49 → ptc-task.ts:229/459/618 = 三处 `outputSchema:` 声明
+      //   70 → index.ts:280     = `if (surface.surfaceMode === "off") return;`
+      //  117 → dispatch.ts:1031 = `export function childToolList(`，即合并进子进程 --tools 的那个函数
+      //
+      // 注意 117 这一条**换了目标而不是只移行号**：#101 之前的实现是一句
+      // `if (agent.tools && agent.tools.length > 0)` 的 guard，那行现在已经不在分支上了，
+      // 替换它的是 childToolList。只把行号从 101 挪到 117 会把一个假的引用钉得更牢。
+      "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1149",
+      "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:171",
+      "docs/adr/0032-child-report.md:27 -> src/runtime/dispatch.ts:1172",
+      "docs/adr/0032-child-report.md:49 -> src/tools/subagent.ts:288",
+      "docs/adr/0032-child-report.md:49 -> src/tools/ptc-task.ts:229",
+      "docs/adr/0032-child-report.md:70 -> src/index.ts:280",
+      "docs/adr/0032-child-report.md:117 -> src/runtime/dispatch.ts:1031",
     ]);
   });
 

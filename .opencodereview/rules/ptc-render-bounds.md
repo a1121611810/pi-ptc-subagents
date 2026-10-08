@@ -78,10 +78,10 @@ ADR-0028)。连接符 / `Array(n)` / 标签槽沿用 value tree 的形状,行宽
 | `CHILD_REPORT_MAX_FILES`          | 20  | 同一块里 `files_touched` 的条数上限,同样在行内注明被扣留的条数          | ADR-0032 §Rendering |
 | `CHILD_REPORT_MAX_EVIDENCE_CHARS` | 150 | 单条 finding 的 evidence 字符上限,截断时在该行注明被截断                | ADR-0032 §Rendering |
 
-`CHILD_REPORT_MAX_EVIDENCE_CHARS = 150` 不是自由取值:它由 `MAX_LINE_CHARS = 200` 反推——3 列连接符
-
-- 5 列 finding 下标缩进 + `evidence: ` + 截断提示本身,留出空间让**提示不被同一行的行宽截断**。
-  调大它会让「此处被截断」这句话自己被截掉,那正是这条约束要挡的失败。
+`CHILD_REPORT_MAX_EVIDENCE_CHARS = 150` 不是自由取值:它由 `MAX_LINE_CHARS = 200` 反推——
+3 列连接符 + 5 列 finding 下标缩进 + `evidence: ` + 截断提示本身,留出空间让**提示不被同一行的行宽
+截断**。调大它会让「此处被截断」这句话自己被截掉,那正是这条约束要挡的失败。算式是
+3 + 5 + 10 + 150 + 2 + 25 = 195 ≤ 200。
 
 ### task-panel-render.ts 的面板渲染上限
 
