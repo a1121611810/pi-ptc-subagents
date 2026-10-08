@@ -60,6 +60,27 @@ export interface ParsedAgentEvent {
     errorMessage?: string;
   };
   message_text?: string;
+  /**
+   * `tool_execution_end` carries the executed tool's name (`pi-agent-core`'s
+   * `ToolExecutionEndEvent`, alongside `toolCallId` and `isError`).
+   */
+  toolName?: string;
+  /** The tool call this event closes; carried through because the wire carries it. */
+  toolCallId?: string;
+  /** Whether that call was treated as an error; a failed call's payload is not a report. */
+  isError?: boolean;
+  /**
+   * The executed tool's full `AgentToolResult`, verbatim. `result.structuredContent` is where a
+   * tool that DECLARES an `outputSchema` puts its machine-readable value (ADR-0032's tool
+   * channel), and this repo already depends on that reaching it for three other tools.
+   *
+   * Typed `unknown` rather than a hand-written mirror of `AgentToolResult`: what arrives is
+   * whatever the child actually wrote, and the one reader of it validates through
+   * `validateChildReport` rather than trusting the shape to have survived the wire.
+   */
+  result?: {
+    structuredContent?: unknown;
+  };
 }
 
 /**

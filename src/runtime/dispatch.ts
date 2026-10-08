@@ -39,6 +39,10 @@ import type {
   ChildReportFinding,
   ChildReportPayload,
 } from "./child-report.ts";
+// The report tool's NAME is a value, not a type: `buildArgv` has to put it in the child's tool
+// list. It comes from the same import-free vocabulary module the types do, so this edge pulls in
+// nothing that could cycle (see the note at the head of `child-report.ts`).
+import { CHILD_REPORT_TOOL_NAME } from "./child-report.ts";
 import { DEFAULT_CONFIG } from "./limits.ts";
 import {
   DefaultTaskRegistry,
@@ -306,29 +310,21 @@ export interface DispatchContext {
 /**
  * The child report clause of the child's appended system prompt (ADR-0032).
  *
- * It DOES restate the JSON shape, and that is a deliberate temporary state, not the ADR's end
- * state. ADR-0032 makes the report tool's description the shape's one home — but the tool does not
- * exist yet, and until it does this clause is the ONLY place a child can learn the shape. A
- * channel that describes its own payload badly is not a fallback.
+ * ONE sentence, and it names no shape. The shape lives in the report tool's own description
+ * ({@link CHILD_REPORT_SHAPE}, rendered by `src/tools/child-report-tool.ts`) — this clause used to
+ * carry a second copy, and deleting that copy is exactly what ticket #101 was for. The clause
+ * survives at all because the tool is not always there: it exists in the child only when this
+ * package loads there, and `src/index.ts` returns early on `surfaceMode === "off"`.
  *
- * So this constant is written to be DELETED rather than edited: when #101 lands the tool, this
- * clause shrinks to the single sentence below with the shape removed, and no surviving sentence
- * has to be reworded. Ticket #100's brief wrongly asked for no shape here; that was my error, not
- * the implementer's.
- *
- * The three fields are the CHILD-DECLARED ones. `usage` is deliberately absent: the host measures
- * that, and a child asked for it would only invent it. See `ChildReportPayload`.
+ * Stated honestly: with the shape gone from here, a child that cannot call the tool has nothing
+ * left to comply with. The HOST still reads a compliant fenced block if one arrives
+ * ({@link extractChildReportFromText}) — that is what the prompt channel is for — but a child in
+ * an installation without this package has to volunteer a shape it was never shown. ADR-0032
+ * records the two channels as both implemented; this is the seam between that decision and the
+ * one-home rule, and it is a real one.
  */
-const CHILD_REPORT_SHAPE =
-  'a JSON object with exactly these keys: "summary" (one line, your own words), "findings" ' +
-  '(an array of objects each with "what" and "evidence", where evidence is the independent thing ' +
-  'that supports the claim), and "files_touched" (an array of paths you created or modified)';
-
 const CHILD_REPORT_PROMPT_CLAUSE =
-  "End your reply with a child report: a fenced ```json block containing " +
-  CHILD_REPORT_SHAPE +
-  ". The host reads that block off your final message, and your prose is kept alongside it. " +
-  "Do not report usage or token counts — those are measured by the host.";
+  "Before you finish, call the `" + CHILD_REPORT_TOOL_NAME + "` tool once, with your child report.";
 
 /**
  * Compose the system prompt handed to the child subprocess.
@@ -337,8 +333,18 @@ const CHILD_REPORT_PROMPT_CLAUSE =
  * `<pi-ptc-context depth="N" max-depth="M">...</pi-ptc-context>` hint so the child
  * agent can see how much recursion room it has. The shape mirrors DSH's existing
  * subagent-context injection so the field recognises it.
+ *
+ * `options.reportContract` is the ADR-0032 opt-out: `false` leaves the clause out entirely,
+ * because an agent that opted out is never asked for a report. It defaults to on, so an agent
+ * whose markdown says nothing about it gets the contract (ticket #102).
  */
-export function appendDepthHint(systemPrompt: string, depth: number, maxDepth: number): string {
+export function appendDepthHint(
+  systemPrompt: string,
+  depth: number,
+  maxDepth: number,
+  options: { reportContract?: boolean } = {},
+): string {
+  const reportContract = options.reportContract !== false;
   const hint = [
     '<pi-ptc-context depth="' + depth + '" max-depth="' + maxDepth + '">',
     "You are a PTC run at depth " +
@@ -351,7 +357,7 @@ export function appendDepthHint(systemPrompt: string, depth: number, maxDepth: n
       depth +
       ". Beyond it, pi.dispatch rejects with",
     '{ status: "rejected", errorMessage: "dispatch depth limit reached" }.',
-    CHILD_REPORT_PROMPT_CLAUSE,
+    ...(reportContract ? [CHILD_REPORT_PROMPT_CLAUSE] : []),
     "</pi-ptc-context>",
   ].join("\n");
   return systemPrompt.length === 0 ? hint : systemPrompt + "\n\n" + hint;
@@ -933,6 +939,35 @@ export function unknownAgentResult(
 }
 
 /**
+ * The child's tool list: whatever its agent markdown declared, plus the report tool when the
+ * contract is on (ADR-0032 "Activation is load-bearing", ticket #101).
+ *
+ * Returns `undefined` when there is nothing to say, which is the case `buildArgv` turns into "no
+ * `--tools` flag at all" — pi's own defaults, unchanged.
+ *
+ * The report tool is merged rather than appended so an agent that DID restrict its child keeps
+ * exactly the restriction it asked for, plus the one tool the contract needs. That direction
+ * matters: pi reads `--tools` as an ALLOWLIST (`sdk.js` → `allowedToolNames`, filtered by
+ * `AgentSession._isAllowedTool`), so naming the report tool alongside an agent's own list
+ * activates it, while leaving it out would filter it away again — the silent failure this merge
+ * exists to prevent.
+ *
+ * An agent that declares NO tools gets no flag, and is activated by the other half of the pair:
+ * the report tool registers with `defaultActive` set from `PI_PTC_DEPTH`, so it is live in every
+ * dispatched child. Neither half covers the other's case, which is why both exist — see
+ * `src/tools/child-report-tool.ts`.
+ */
+export function childToolList(
+  agent: Pick<AgentConfigLike, "tools">,
+): readonly string[] | undefined {
+  const declared = agent.tools ?? [];
+  if (declared.length === 0) return undefined;
+  return declared.includes(CHILD_REPORT_TOOL_NAME)
+    ? declared
+    : [...declared, CHILD_REPORT_TOOL_NAME];
+}
+
+/**
  * Build the argv handed to the child pi subprocess. Model / thinking / tools / agentScope
  * precedence: dispatch input (call site) > agent markdown frontmatter > nothing.
  * The agent's system prompt (with the depth hint appended) is materialised to a tmpfile
@@ -959,8 +994,9 @@ export function buildArgv(
   // accept an --agent-scope flag (the subagent extension does not pass one either), and
   // in --no-session mode pi loads user-scope agents from ~/.pi/agent/agents by default.
   // Project agents would need a different mechanism (e.g. PI_CODING_AGENT_DIR override).
-  if (agent.tools && agent.tools.length > 0) {
-    args.push("--tools", agent.tools.join(","));
+  const tools = childToolList(agent);
+  if (tools !== undefined) {
+    args.push("--tools", tools.join(","));
   }
   args.push("--append-system-prompt", promptFilePath);
   args.push("Task: " + input.task);
@@ -1212,21 +1248,94 @@ export function extractChildReportFromText(text: string): ChildReportExtraction 
 }
 
 /**
+ * The tool channel (ADR-0032 channel 1, the preferred one): read a child report off the
+ * `tool_execution_end` event the report tool's own call produces, through the SAME
+ * {@link validateChildReport} the prompt channel uses.
+ *
+ * `pi` emits the tool's full `AgentToolResult` verbatim on that event
+ * (`pi-agent-core/types.d.ts` `ToolExecutionEndEvent`: `toolCallId` / `toolName` / `result` /
+ * `isError`), and `result.structuredContent` is where the declared payload sits. A `toolName` that
+ * is not ours is not our event and is left alone — a child calling `bash` does not produce a
+ * report, and a report cannot be smuggled in through some other tool.
+ *
+ * Returns `undefined` for everything that is not a report: no event, another tool, an errored
+ * call, a missing or malformed `structuredContent`. The caller keeps whatever the prompt channel
+ * found, so a bad tool call degrades to the fallback instead of erasing it.
+ */
+export function extractChildReportFromToolEvent(
+  event: ParsedAgentEvent,
+): ChildReportPayload | undefined {
+  if (event.type !== "tool_execution_end") return undefined;
+  if (event.toolName !== CHILD_REPORT_TOOL_NAME) return undefined;
+  if (event.isError === true) return undefined;
+  return validateChildReport(event.result?.structuredContent);
+}
+
+/**
+ * The running state of one child's report scan: the prompt channel's answer and the tool
+ * channel's, kept apart until the transcript ends.
+ *
+ * Two slots rather than one because the two channels are not the same kind of thing. The prompt
+ * channel is re-read per assistant text part and the LAST part wins — that is what makes
+ * `DispatchResult.text` and the report describe the same message. The tool channel fires once per
+ * CALL, and the last call wins for the same reason. Collapsing them into one variable as events
+ * arrive is what would make the answer depend on interleaving: a tool call after the final text
+ * part would be wiped by nothing, but a text part after the tool call would wipe the tool.
+ */
+export interface ChildReportScan {
+  /** What the prompt channel has found so far. */
+  prompt: ChildReportExtraction;
+  /** What the tool channel has found so far, if it has fired. */
+  tool: ChildReportPayload | undefined;
+}
+
+/** A fresh scan: no channel has fired yet. */
+export function newChildReportScan(): ChildReportScan {
+  return { prompt: { reportChannel: "none" }, tool: undefined };
+}
+
+/**
+ * Fold ONE `tool_execution_end` into a running scan. Every other event type is a no-op here, so
+ * both dispatch loops can call this unconditionally for every event they see and keep the
+ * tool channel from becoming a special case in one front and not the other.
+ */
+export function scanChildReportToolEvent(scan: ChildReportScan, event: ParsedAgentEvent): void {
+  const report = extractChildReportFromToolEvent(event);
+  if (report !== undefined) scan.tool = report;
+}
+
+/**
+ * The scan's answer, and the precedence rule in one place (ADR-0032 "when that channel fires it
+ * WINS over the prompt channel in the same transcript").
+ *
+ * The tool channel wins because it is JSON produced against a declared schema rather than text
+ * scraped off a fence — but only when it actually fired. A transcript in which it never fired
+ * yields the prompt channel's answer unchanged, which is what keeps the fallback a fallback
+ * rather than a formality (ADR-0032's bet: the tool is absent whenever this package does not load
+ * in the child).
+ */
+export function finishChildReportScan(scan: ChildReportScan): ChildReportExtraction {
+  if (scan.tool !== undefined) return { report: scan.tool, reportChannel: "tool" };
+  return scan.prompt;
+}
+
+/**
  * The extraction seam, as a pure fold over a child's parsed events.
  *
  * Pure on purpose: it takes the events a transcript fixture yields and returns the extraction, so
  * the whole contract can be exercised with literal JSONL and no spawn. The two dispatch loops
- * stream and cannot buffer a transcript, so they apply {@link extractChildReportFromText} per text
- * part instead — this is the same fold spelled out, and the foreground loop's accumulation is the
- * identical one-line update.
+ * stream and cannot buffer a transcript, so they run the same three calls — {@link newChildReportScan},
+ * {@link scanChildReportToolEvent} / {@link extractChildReportFromText}, {@link finishChildReportScan}
+ * — over their own event stream instead. One rule, three entry points, no second opinion.
  */
 export function extractChildReport(events: readonly ParsedAgentEvent[]): ChildReportExtraction {
-  let extraction: ChildReportExtraction = { reportChannel: "none" };
+  const scan = newChildReportScan();
   for (const event of events) {
+    scanChildReportToolEvent(scan, event);
     const text = assistantText(event);
-    if (text !== undefined) extraction = extractChildReportFromText(text);
+    if (text !== undefined) scan.prompt = extractChildReportFromText(text);
   }
-  return extraction;
+  return finishChildReportScan(scan);
 }
 
 function childAssistantError(event: ParsedAgentEvent): string | undefined {
@@ -1372,9 +1481,9 @@ async function dispatchBackground(
     void (async (): Promise<void> => {
       let output = "";
       let childError: string | undefined;
-      // ADR-0032: the same extraction the foreground loop runs, so the two fronts cannot
-      // disagree about whether a transcript carried a child report.
-      let extraction: ChildReportExtraction = { reportChannel: "none" };
+      // ADR-0032: the same scan the foreground loop runs, so the two fronts cannot disagree
+      // about whether a transcript carried a child report — over EITHER channel.
+      const scan: ChildReportScan = newChildReportScan();
       // ADR-0032: the host's own token counter, accumulated over the child's assistant
       // `message_end` blocks. A child cannot report its own usage, so this is the only source
       // the persisted report's `usage` can come from — same rule, same accumulation, as the
@@ -1382,10 +1491,11 @@ async function dispatchBackground(
       let usage: DispatchUsage | undefined;
       try {
         for await (const event of lifecycle.events(handle)) {
+          scanChildReportToolEvent(scan, event);
           const text = assistantText(event);
           if (text !== undefined) {
             output = text;
-            extraction = extractChildReportFromText(text);
+            scan.prompt = extractChildReportFromText(text);
           }
           usage = accumulateUsage(usage, event);
           // The last error wins: a child that retried and then gave up reports the reason that
@@ -1431,6 +1541,7 @@ async function dispatchBackground(
         // read-then-write race in the pump. `childError` is the reason the child itself gave
         // (issue #70): an exit-0 child that reported `stopReason: "error"` and no assistant
         // text is a failure, and the record has to say why.
+        const extraction = finishChildReportScan(scan);
         await registry.transition(
           {
             kind: "resolve-exit",
@@ -1616,8 +1727,9 @@ export async function dispatch(
     let finalText = "";
     let usage: DispatchUsage | undefined;
     // ADR-0032: the last assistant text part both becomes `text` and is re-read for the child
-    // report, so the prose and the report can never describe different messages.
-    let extraction: ChildReportExtraction = { reportChannel: "none" };
+    // report, so the prose and the report can never describe different messages; the tool channel
+    // is folded into the same scan, and wins over the prompt channel when both fired.
+    const scan: ChildReportScan = newChildReportScan();
     let exitCode = -1;
     let stderrText = "";
     let resolved = false;
@@ -1670,6 +1782,7 @@ export async function dispatch(
       cancelKillEscalation?.();
       if (ctx.signal) ctx.signal.removeEventListener("abort", onAbort);
       cleanupTmp(tmp);
+      const extraction = finishChildReportScan(scan);
       const out: DispatchResult = {
         text: finalText,
         status,
@@ -1750,6 +1863,7 @@ export async function dispatch(
       const h = handle;
       try {
         for await (const ev of lifecycle.events(h)) {
+          scanChildReportToolEvent(scan, ev);
           if (ev.type === "message_end" && ev.message && ev.message.role === "assistant") {
             const m = ev.message;
             usage = accumulateUsage(usage, ev);
@@ -1759,7 +1873,7 @@ export async function dispatch(
                   finalText = part.text;
                   // Sibling of `finalText`, not a replacement: the prose above is returned
                   // whatever this returns.
-                  extraction = extractChildReportFromText(part.text);
+                  scan.prompt = extractChildReportFromText(part.text);
                 }
               }
             }

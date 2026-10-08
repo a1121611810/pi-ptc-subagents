@@ -188,11 +188,14 @@ describe("buildArgv", () => {
     expect(argv[modelIdx + 1]).toBe("input-model");
   });
 
-  test("agent.tools is passed via --tools", () => {
+  test("agent.tools is passed via --tools, with the report tool merged in", () => {
+    // ADR-0032 "Activation is load-bearing": pi reads `--tools` as an ALLOWLIST, so an agent
+    // that restricts its child must have the report tool NAMED there or the child filters it
+    // straight back out and the tool sits inactive with no error anywhere.
     const argv = buildArgv({ agent: "scout", task: "t" }, sampleAgent, "/tmp/p.md");
     const toolsIdx = argv.indexOf("--tools");
     expect(toolsIdx).toBeGreaterThan(-1);
-    expect(argv[toolsIdx + 1]).toBe("read,grep");
+    expect(argv[toolsIdx + 1]).toBe("read,grep,ptc_child_report");
   });
 });
 

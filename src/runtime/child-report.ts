@@ -6,10 +6,17 @@
  * name the shape without a type-only import back up into the dispatch layer — a record that
  * stores a report has to be able to say what a report is, and the storage layer is below the
  * dispatcher, not above it. `dispatch.ts` re-exports all four, so every existing import site
- * (and the report tool's, when it lands) keeps working unchanged.
+ * (and the report tool's) keeps working unchanged.
  *
- * The EXTRACTION stays in `dispatch.ts`. This module owns vocabulary, not parsing: a second copy
- * of the shape text is exactly what ADR-0032's "the contract has exactly one home" forbids.
+ * The EXTRACTION stays in `dispatch.ts`. This module owns vocabulary, not parsing.
+ *
+ * #101 added the last two constants here, and the reason is the same one: ADR-0032's "the
+ * contract has exactly one home". The report tool's NAME and the SHAPE it demands are both
+ * needed by two modules that must not know about each other — `dispatch.ts`, which has to put
+ * the tool in the child's argv and read its `structuredContent` back, and the tool declaration
+ * in `src/tools/`, which must not import `dispatch.ts` (that edge has broken this repo's tests
+ * once; see `CHILD_REPORT_MAX_FINDINGS` below for why). Neither can reach the other's module, so
+ * both read the text from here, which imports nothing at all.
  */
 
 /** One claim the child makes, with the evidence it rests on. */
@@ -22,9 +29,9 @@ export interface ChildReportFinding {
  * Which channel a {@link ChildReport} arrived over (ADR-0032 "The channel is always stated").
  *
  * `tool` is the report tool's `structuredContent`, read off `tool_execution_end`; `prompt-json`
- * is the fenced block in the child's final assistant message, which is the only channel the
- * dispatch module currently produces; `none` means the contract was on and the child did not
- * comply.
+ * is the fenced block in the child's final assistant message, which is the channel that still
+ * works when this package does not load in the child at all; `none` means the contract was on and
+ * the child did not comply.
  */
 export type ChildReportChannel = "tool" | "prompt-json" | "none";
 
@@ -84,3 +91,31 @@ export interface ChildReportExtraction {
  * trade.
  */
 export const CHILD_REPORT_MAX_FINDINGS = 20;
+
+/**
+ * The name of the report tool a dispatched child calls (ADR-0032 §"Two channels, both
+ * implemented", channel 1).
+ *
+ * A name and not a constant object because THREE modules have to agree on it and two of them
+ * cannot import each other: the tool declaration in `src/tools/child-report-tool.ts` registers
+ * under it, `src/index.ts` decides whether it is active, and `buildArgv` puts it in the child's
+ * tool list. A second literal would be a second home for the same string.
+ */
+export const CHILD_REPORT_TOOL_NAME = "ptc_child_report";
+
+/**
+ * The ONE place the child's report shape is written down (ADR-0032 "The contract has exactly one
+ * home", #101).
+ *
+ * It used to live inside `CHILD_REPORT_PROMPT_CLAUSE` in `dispatch.ts` as well, which is the two
+ * copies this repo has already paid for twice. Ticket #101 is the migration: the text moved here
+ * and the prompt clause shrank to a single sentence requiring the child to CALL the tool, so the
+ * tool's own description is now the only thing a child is told the shape by.
+ *
+ * Three fields, and only the child-DECLARED ones: `usage` is deliberately absent because the
+ * host measures that and a child asked for it would only invent it (see {@link ChildReport}).
+ */
+export const CHILD_REPORT_SHAPE: string =
+  'a JSON object with exactly these keys: "summary" (one line, your own words), "findings" ' +
+  '(an array of objects each with "what" and "evidence", where evidence is the independent thing ' +
+  'that supports the claim), and "files_touched" (an array of paths you created or modified)';

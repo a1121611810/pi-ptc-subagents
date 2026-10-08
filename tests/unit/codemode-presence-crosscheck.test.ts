@@ -113,7 +113,7 @@ test("a detected subagents surface on a pi that KNOWS codemode but did not activ
   ).toHaveLength(1);
   // The surface itself is the one the detection picked: ptc_subagent beside the task tools, and
   // no run-code orchestrator beside a live codemode.
-  expect(tools).toEqual(["ptc_subagent", ...TASK_TOOLS]);
+  expect(tools).toEqual(["ptc_subagent", ...TASK_TOOLS, "ptc_child_report"]);
 });
 
 test("the same pi with codemode ABSENT from the registry does get the cross-check warning", async () => {
@@ -144,5 +144,5 @@ test("a pi that knows AND activates codemode raises neither warning", async () =
     ),
     "healthy means silent: known and active is the one state with nothing to report",
   ).toEqual([]);
-  expect(tools).toEqual(["ptc_subagent", ...TASK_TOOLS]);
+  expect(tools).toEqual(["ptc_subagent", ...TASK_TOOLS, "ptc_child_report"]);
 });

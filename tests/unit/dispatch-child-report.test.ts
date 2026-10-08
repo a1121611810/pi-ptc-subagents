@@ -19,21 +19,36 @@
  * both use in-memory task storage — no `pi` process, no home directory, no ambient agent.
  */
 import { EventEmitter } from "node:events";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { fileURLToPath } from "node:url";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
   DispatchSlotCounter,
   appendDepthHint,
+  buildArgv,
+  childToolList,
   dispatch,
   extractChildReport,
   extractChildReportFromText,
+  extractChildReportFromToolEvent,
+  validateChildReport,
+  finishChildReportScan,
+  newChildReportScan,
+  scanChildReportToolEvent,
+  type AgentConfigLike,
   type ChildReport,
   type ChildReportPayload,
   type DispatchDeps,
   type DispatchResult,
 } from "../../src/runtime/dispatch.ts";
+import { CHILD_REPORT_SHAPE, CHILD_REPORT_TOOL_NAME } from "../../src/runtime/child-report.ts";
+import {
+  CHILD_REPORT_DESCRIPTION,
+  createChildReportTool,
+} from "../../src/tools/child-report-tool.ts";
+import { makeExtensionStub } from "../helpers/ptc.ts";
 import {
   MockChildProcessLifecycle,
   parseAgentEvent,
@@ -57,10 +72,17 @@ import { makeTempDir, removeTempDir } from "../helpers/ptc.ts";
 const childTranscript = vi.hoisted(() => ({ lines: [] as string[] }));
 /** When set, the fake child reports this as an async spawn failure instead of a clean close. */
 const spawnFailure = vi.hoisted(() => ({ error: undefined as Error | undefined }));
+/**
+ * Every argv the fake child was launched with. ADR-0032 "Activation is load-bearing" is a claim
+ * about argv, and argv is the only place it is visible from the foreground path: the background
+ * path can read its own mock's recorder, this one cannot, so the mock records it here.
+ */
+const childArgv = vi.hoisted(() => ({ calls: [] as string[][] }));
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
-  const fakeSpawn = (): EventEmitter => {
+  const fakeSpawn = (_command: string, args: readonly string[]): EventEmitter => {
+    childArgv.calls.push([...args]);
     const proc = new EventEmitter() as EventEmitter & {
       stdout: EventEmitter;
       stderr: EventEmitter;
@@ -210,7 +232,18 @@ async function withAgent<T>(body: (dir: string) => Promise<T>): Promise<T> {
 
 beforeEach(() => {
   childTranscript.lines = [];
+  childArgv.calls = [];
   spawnFailure.error = undefined;
+});
+
+/**
+ * `PI_PTC_DEPTH` is how a pi process knows it is a dispatched child (ADR-0016 Recursive
+ * section), and the report tool's activation is read off exactly that. These tests set it, so
+ * every one of them restores it — a leaked value would silently make a LATER test in this file
+ * a child, which is the kind of ambient state `docs/testing-constraints.md` warns about.
+ */
+afterEach(() => {
+  delete process.env.PI_PTC_DEPTH;
 });
 
 // ---------------------------------------------------------------------------
@@ -424,7 +457,7 @@ describe("dispatch() foreground carries the child report", () => {
     });
   });
 
-  test("the child prompt carries the contract clause", async () => {
+  test("the child prompt names the report tool and no longer restates the shape", async () => {
     await withAgent(async (dir) => {
       childTranscript.lines = [...COMPLIANT_TRANSCRIPT];
 
@@ -435,18 +468,23 @@ describe("dispatch() foreground carries the child report", () => {
       );
 
       const prompt = appendDepthHint("You report.", 1, 3);
-      expect(prompt).toContain("fenced ```json block");
+      // The clause still exists, because the tool is not always there — but it is ONE sentence
+      // that requires the child to call it, and it says nothing about the shape.
+      expect(prompt).toContain("call the `" + CHILD_REPORT_TOOL_NAME + "` tool");
 
-      // The shape IS here, and that is a deliberate TEMPORARY state, not ADR-0032's end state.
-      // The report tool that becomes the shape's one home does not exist until #101; until it
-      // does, this clause is the only place a child can learn what to emit. #101's job is to
-      // DELETE the shape from here, and this assertion is written to be the thing that fails
-      // when that deletion happens — so the migration cannot be forgotten silently.
-      expect(prompt).toContain("files_touched");
+      // THE MIGRATION, asserted in both directions (ADR-0032 "the contract has exactly one
+      // home"). This is the assertion ticket #100 wrote to be the thing that fails when the
+      // deletion happens, and #101 is the deletion: the shape is out of the prompt, and the same
+      // text is now in the tool's description. Put the shape back in the prompt and the first
+      // assertion goes red; take it out of the description and the second does.
+      expect(prompt).not.toContain(CHILD_REPORT_SHAPE);
+      expect(prompt).not.toContain("files_touched");
+      expect(CHILD_REPORT_DESCRIPTION).toContain(CHILD_REPORT_SHAPE);
 
-      // What must never appear, in either state: an ask for usage. The host measures that, and a
+      // What must never appear, in any state: an ask for usage. The host measures that, and a
       // child asked for it invents a number. See ChildReportPayload.
-      expect(prompt).toContain("Do not report usage or token counts");
+      expect(prompt).not.toContain("Do not report usage or token counts");
+      expect(CHILD_REPORT_DESCRIPTION).toContain("Do not report usage or token counts");
     });
   });
 });
@@ -701,5 +739,459 @@ describe("reportChannel is present on every result shape", () => {
     expect(result.agentName).toBe("");
     expect(result.reportChannel).toBe("none");
     expect(result.report).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+//  Seam 5 — the contract has exactly one home (ADR-0032, ticket #101)
+// ---------------------------------------------------------------------------
+
+/** A distinctive tail of the shape text, so a scan can find copies of the WHOLE thing. */
+const SHAPE_FINGERPRINT = '"files_touched" (an array of paths you created or modified)';
+
+/**
+ * Drop comments before scanning, so a `{@link CHILD_REPORT_SHAPE}` in a docstring does not count
+ * as a USE of the constant. Crude on purpose: it is a test helper, not a parser, and the only
+ * thing it has to get right is "code mentions it, prose does not".
+ */
+function stripComments(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+}
+
+async function sourceFiles(dir: string): Promise<string[]> {
+  const out: string[] = [];
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...(await sourceFiles(full)));
+    else if (entry.name.endsWith(".ts")) out.push(full);
+  }
+  return out;
+}
+
+describe("the contract text lives in exactly one place in src/", () => {
+  test("the shape text appears once in the whole shipped source, in the vocabulary module", async () => {
+    // COUNTERFACTUAL (constraint 5). This is the test that makes "the contract has exactly one
+    // home" a MECHANICAL claim rather than a sentence. Two separate failures it has to catch,
+    // because they look identical in review and are not:
+    //
+    //   * a SECOND LITERAL — someone pastes the shape into the prompt clause or a second tool
+    //     description. Caught by the fingerprint scan below.
+    //   * a SECOND USE — someone concatenates `CHILD_REPORT_SHAPE` into a second place, which is
+    //     the same defect with no second literal to find. Caught by the reference scan, and NOT
+    //     by the fingerprint one: measured, restoring the shape to the prompt clause left this
+    //     assertion green on its own.
+    //
+    // Independent source (#4): the fingerprint is a literal lifted from ADR-0032's own wording of
+    // the shape, and both scans walk every `.ts` file the package actually ships, read from disk
+    // — not a list of files this test happens to know about.
+    const srcRoot = fileURLToPath(new URL("../../src", import.meta.url));
+    const literalHits: string[] = [];
+    const referenceHits: string[] = [];
+    for (const file of await sourceFiles(srcRoot)) {
+      const text = await readFile(file, "utf-8");
+      const name = file.slice(srcRoot.length + 1);
+      if (text.includes(SHAPE_FINGERPRINT)) literalHits.push(name);
+      if (stripComments(text).includes("CHILD_REPORT_SHAPE")) referenceHits.push(name);
+    }
+    expect(literalHits).toEqual(["runtime/child-report.ts"]);
+    // Declared in the vocabulary module, read by exactly one consumer: the tool description.
+    expect(referenceHits.sort()).toEqual(["runtime/child-report.ts", "tools/child-report-tool.ts"]);
+  });
+
+  test("the shape the tool declares is the shape the host validates", async () => {
+    // The two ends of the channel, compared rather than trusted: the tool's declared `parameters`
+    // and the host's `validateChildReport` must accept the same object. VALID_REPORT is the
+    // literal from ADR-0032's four fields, not a fixture derived from either side.
+    const tool = createChildReportTool(true);
+    const result = await tool.execute(
+      "call-1",
+      VALID_REPORT as unknown as Parameters<typeof tool.execute>[1],
+      undefined,
+      undefined,
+      {} as Parameters<typeof tool.execute>[4],
+    );
+    // What the host reads off the event: `result.structuredContent`, validated by the ONE
+    // validator both channels share.
+    const validated = extractChildReportFromToolEvent({
+      type: "tool_execution_end",
+      toolCallId: "call-1",
+      toolName: CHILD_REPORT_TOOL_NAME,
+      isError: false,
+      result: { structuredContent: result.structuredContent },
+    });
+    expect(validated).toEqual(VALID_REPORT);
+    expect(validateChildReport(result.structuredContent)).toEqual(VALID_REPORT);
+  });
+
+  test("a child-declared usage is dropped by the tool, not carried into the structured channel", () => {
+    // `usage` is host-observed (ChildReportPayload). A child that sends one anyway must not be
+    // able to hand the host a number wearing the costume of a measurement.
+    const tool = createChildReportTool(true);
+    return tool
+      .execute(
+        "call-1",
+        {
+          ...VALID_REPORT,
+          usage: { input: 9_999_999, output: 1, cost: 99, turns: 99 },
+        } as unknown as Parameters<typeof tool.execute>[1],
+        undefined,
+        undefined,
+        {} as Parameters<typeof tool.execute>[4],
+      )
+      .then((result) => {
+        expect(Object.hasOwn(result.structuredContent as object, "usage")).toBe(false);
+      });
+  });
+});
+
+// ---------------------------------------------------------------------------
+//  Seam 6 — the tool channel (ADR-0032 channel 1)
+// ---------------------------------------------------------------------------
+
+/**
+ * One `tool_execution_end` line in the shape pi really emits: `ToolExecutionEndEvent` carries
+ * `toolCallId` / `toolName` / `result` (the full `AgentToolResult`, `structuredContent` inside
+ * it) / `isError`. `pi-agent-core/dist/types.d.ts`.
+ */
+function reportToolLine(payload: unknown, toolName = CHILD_REPORT_TOOL_NAME): string {
+  return JSON.stringify({
+    type: "tool_execution_end",
+    toolCallId: "call-report-1",
+    toolName,
+    isError: false,
+    result: {
+      content: [{ type: "text", text: "child report recorded (2 findings)" }],
+      details: undefined,
+      structuredContent: payload,
+    },
+  });
+}
+
+/** A transcript where the child called the report tool and then answered in prose. */
+const TOOL_CHANNEL_TRANSCRIPT: readonly string[] = [
+  reportToolLine(VALID_REPORT),
+  assistantLine("Read the gate and wrote it up.", {
+    input: 900,
+    output: 260,
+    cacheRead: 0,
+    cacheWrite: 0,
+    cost: { total: 0.0123 },
+  }),
+];
+
+describe("the report tool channel", () => {
+  test("a tool call carrying structuredContent yields reportChannel tool", () => {
+    const extraction = extractChildReport(parseTranscript(TOOL_CHANNEL_TRANSCRIPT));
+
+    expect(extraction.reportChannel).toBe("tool");
+    expect(extraction.report).toEqual(VALID_REPORT);
+  });
+
+  test("the tool channel WINS over the prompt channel in the same transcript", () => {
+    // Both present, deliberately: the prompt block is a DIFFERENT payload, so the assertion can
+    // tell which one survived. Reversing the precedence keeps `reportChannel: "tool"` — the
+    // string an assertion like the one above checks — and therefore still passes, while the
+    // payload silently becomes the scraped one. That is why the payload is checked here and the
+    // channel there.
+    const other: ChildReportPayload = {
+      summary: "the fenced block's own summary, which must NOT win",
+      findings: [],
+      files_touched: [],
+    };
+    const extraction = extractChildReport(
+      parseTranscript([
+        reportToolLine(VALID_REPORT),
+        assistantLine("done\n\n```json\n" + JSON.stringify(other) + "\n```"),
+      ]),
+    );
+
+    expect(extraction.reportChannel).toBe("tool");
+    expect(extraction.report).toEqual(VALID_REPORT);
+    expect(extraction.report?.summary).toBe(VALID_REPORT.summary);
+  });
+
+  test("a tool_execution_end for ANOTHER tool is not a report", () => {
+    // A child that calls `bash` does not produce a report, and a report cannot be smuggled in
+    // through some other tool's structuredContent.
+    const extraction = extractChildReport(
+      parseTranscript([reportToolLine(VALID_REPORT, "bash"), assistantLine("done")]),
+    );
+
+    expect(extraction.reportChannel).toBe("none");
+    expect(extraction.report).toBeUndefined();
+  });
+
+  test("an ERRORED report call is not a report", () => {
+    const line = JSON.stringify({
+      type: "tool_execution_end",
+      toolCallId: "call-report-1",
+      toolName: CHILD_REPORT_TOOL_NAME,
+      isError: true,
+      result: { structuredContent: VALID_REPORT },
+    });
+    const extraction = extractChildReport(parseTranscript([line, assistantLine("done")]));
+
+    expect(extraction.reportChannel).toBe("none");
+    expect(extraction.report).toBeUndefined();
+  });
+
+  test("a malformed structuredContent is no report, not a crash and not a half-report", () => {
+    for (const bad of [undefined, null, "a string", [], { summary: "only a summary" }]) {
+      const extraction = extractChildReport(
+        parseTranscript([reportToolLine(bad), assistantLine("done")]),
+      );
+      expect(extraction.reportChannel, "channel for " + JSON.stringify(bad)).toBe("none");
+      expect(extraction.report, "report for " + JSON.stringify(bad)).toBeUndefined();
+    }
+  });
+
+  test("a bad tool call does not erase a good prompt report", () => {
+    // The degradation is one-directional on purpose: the tool channel failing falls BACK to the
+    // prompt channel, never to "nothing". The reverse would discard a valid report over a
+    // malformed later call.
+    const extraction = extractChildReport(
+      parseTranscript([assistantLine(COMPLIANT_TEXT), reportToolLine({ summary: "junk" })]),
+    );
+
+    expect(extraction.reportChannel).toBe("prompt-json");
+    expect(extraction.report).toEqual(VALID_REPORT);
+  });
+
+  test("the LAST report call wins, matching 'the last part wins' for prose", () => {
+    const second: ChildReportPayload = {
+      summary: "the second call's summary",
+      findings: [{ what: "w", evidence: "e" }],
+      files_touched: ["b.ts"],
+    };
+    const scan = newChildReportScan();
+    scanChildReportToolEvent(
+      scan,
+      parseAgentEvent(reportToolLine(VALID_REPORT)) as ParsedAgentEvent,
+    );
+    scanChildReportToolEvent(scan, parseAgentEvent(reportToolLine(second)) as ParsedAgentEvent);
+
+    expect(finishChildReportScan(scan)).toEqual({ report: second, reportChannel: "tool" });
+  });
+
+  test("dispatch() foreground reports the tool channel, with the host's usage stamped on", async () => {
+    await withAgent(async (dir) => {
+      childTranscript.lines = [...TOOL_CHANNEL_TRANSCRIPT];
+
+      const result = asResult(
+        await dispatch(
+          { agent: "reporter", task: "check the gates", agentScope: "project" },
+          { callId: 20, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          { slots: new DispatchSlotCounter(4) },
+        ),
+      );
+
+      expect(result.status).toBe("fulfilled");
+      expect(result.reportChannel).toBe("tool");
+      // `usage` is the HOST's counter over the same transcript, never the child's declaration.
+      expect(result.report).toEqual(REPORT_WITH_HOST_USAGE);
+      expect(result.text).toBe("Read the gate and wrote it up.");
+    });
+  });
+
+  test("dispatch() background persists the tool channel too (parity with foreground)", async () => {
+    await withAgent(async (dir) => {
+      const h = createBackgroundHarness();
+      const handle = asHandle(
+        await dispatch(
+          { agent: "reporter", task: "check the gates", background: true, agentScope: "project" },
+          { callId: 21, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          h.deps,
+        ),
+      );
+
+      driveBackground(h.lifecycle, TOOL_CHANNEL_TRANSCRIPT);
+      const record = await terminalRecord(h, handle.taskId);
+
+      expect(record.reportChannel).toBe("tool");
+      expect(record.report).toEqual(REPORT_WITH_HOST_USAGE);
+    });
+  });
+
+  test("a transcript where the tool channel never fires still yields a prompt-json report", async () => {
+    // ADR-0032's bet, made mechanical: the tool exists in the child only when this package
+    // loads there (`src/index.ts` returns early on `surfaceMode === "off"`, and pi's `-ne`
+    // removes extensions entirely). Whatever the child was told, the host keeps reading a
+    // compliant fenced block, so the fallback is a fallback and not a decoration.
+    await withAgent(async (dir) => {
+      childTranscript.lines = [...COMPLIANT_TRANSCRIPT];
+
+      const result = asResult(
+        await dispatch(
+          { agent: "reporter", task: "check the gates", agentScope: "project" },
+          { callId: 22, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          { slots: new DispatchSlotCounter(4) },
+        ),
+      );
+
+      expect(result.reportChannel).toBe("prompt-json");
+      expect(result.report).toEqual(REPORT_WITH_HOST_USAGE);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+//  Seam 7 — activation is load-bearing (ADR-0032, the trap this ticket exists for)
+// ---------------------------------------------------------------------------
+
+/** Write a project-scope agent whose frontmatter is exactly `frontmatter`, plus a body. */
+async function withAgentFrontmatter<T>(
+  frontmatter: string,
+  body: (dir: string) => Promise<T>,
+): Promise<T> {
+  const dir = await makeTempDir();
+  try {
+    await mkdir(join(dir, ".pi", "agents"), { recursive: true });
+    await writeFile(
+      join(dir, ".pi", "agents", "reporter.md"),
+      "---\nname: reporter\n" + frontmatter + "---\nYou report.\n",
+      { encoding: "utf-8" },
+    );
+    return await body(dir);
+  } finally {
+    await removeTempDir(dir);
+  }
+}
+
+/** The `--tools` value the foreground dispatch launched the child with, or `undefined`. */
+function launchedToolList(): string | undefined {
+  const call = childArgv.calls[0];
+  if (call === undefined) throw new Error("no child was spawned");
+  const index = call.indexOf("--tools");
+  return index === -1 ? undefined : call[index + 1];
+}
+
+describe("the report tool is activated in the child and not in the parent", () => {
+  test("an agent that declares NO tools still reaches the report tool", async () => {
+    // THE TRAP. `buildArgv` emitted a tool-list flag only when the agent's markdown declared
+    // tools of its own, so the obvious implementation leaves an agent with an absent `tools:`
+    // key — the overwhelmingly common shape — receiving no flag at all, with the tool
+    // registered, documented, and never called, and no error anywhere.
+    //
+    // Both halves of the answer are asserted here, because neither covers the other:
+    //   * `defaultActive` puts the tool in front of EVERY dispatched child, including this one;
+    //   * the `--tools` merge is what puts it in front of a child whose agent RESTRICTED its
+    //     tools, because pi reads `--tools` as an allowlist and would filter it straight back out.
+    // Drop either half and this file's argv/registration assertions go red; that is the point.
+    await withAgent(async (dir) => {
+      childTranscript.lines = [...COMPLIANT_TRANSCRIPT];
+
+      await dispatch(
+        { agent: "reporter", task: "t", agentScope: "project" },
+        { callId: 23, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+        { slots: new DispatchSlotCounter(4) },
+      );
+
+      // No `--tools` flag: the child's own tool list is untouched, which is the whole reason the
+      // activation is NOT done by emitting a flag here. pi reads `--tools` as an ALLOWLIST
+      // (`sdk.js` -> `allowedToolNames`, filtered by `AgentSession._isAllowedTool`), so
+      // `--tools ptc_child_report` alone would leave the child with exactly one tool and no
+      // read / bash / edit / write.
+      expect(launchedToolList()).toBeUndefined();
+      expect(childToolList({})).toBeUndefined();
+
+      // The other half, for the child process itself.
+      process.env.PI_PTC_DEPTH = "1";
+      const childStub = makeExtensionStub({ surfaceMode: "full" });
+      const childTool = childStub.tools.get(CHILD_REPORT_TOOL_NAME);
+      expect(childTool, "the child registers the report tool").toBeDefined();
+      expect(childTool?.defaultActive, "and activates it").toBe(true);
+    });
+  });
+
+  test("an agent that declares its own tools keeps them and gains the report tool", async () => {
+    await withAgentFrontmatter("tools: read, bash\n", async (dir) => {
+      childTranscript.lines = [...COMPLIANT_TRANSCRIPT];
+
+      await dispatch(
+        { agent: "reporter", task: "t", agentScope: "project" },
+        { callId: 24, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+        { slots: new DispatchSlotCounter(4) },
+      );
+
+      // The restriction the agent asked for is preserved verbatim, and the contract's tool is
+      // ADDED to it rather than replacing it. Order matters for the assertion: an implementation
+      // that put the report tool first would still activate it, so the expected string is the
+      // agent's own list with exactly one name appended.
+      expect(launchedToolList()).toBe("read,bash," + CHILD_REPORT_TOOL_NAME);
+      expect(childToolList({ tools: ["read", "bash"] })).toEqual([
+        "read",
+        "bash",
+        CHILD_REPORT_TOOL_NAME,
+      ]);
+    });
+  });
+
+  test("buildArgv is where the merge lives, not discoverAgent", () => {
+    // A second, argv-level reading of the same rule, with no process involved: mutate
+    // `buildArgv` back to `if (agent.tools && agent.tools.length > 0)` and both of the two
+    // tests above turn red on their `--tools` assertion.
+    const agent: AgentConfigLike = { name: "a", source: "user", systemPrompt: "", tools: ["read"] };
+    expect(buildArgv({ agent: "a", task: "t" }, agent, "/tmp/p.md")).toContain("--tools");
+    const restricted = buildArgv({ agent: "a", task: "t" }, agent, "/tmp/p.md");
+    expect(restricted[restricted.indexOf("--tools") + 1]).toBe("read," + CHILD_REPORT_TOOL_NAME);
+  });
+
+  test("the merge does not duplicate a name the agent already lists", () => {
+    // Idempotent, because an agent may list the report tool itself once this ships. A merge that
+    // appended unconditionally would hand pi an allowlist with the same name twice.
+    expect(childToolList({ tools: ["read", CHILD_REPORT_TOOL_NAME] })).toEqual([
+      "read",
+      CHILD_REPORT_TOOL_NAME,
+    ]);
+  });
+
+  test("the report tool is NOT active in the parent's ordinary surface", () => {
+    // Requirement 4 of the ticket, and the reason `defaultActive` is a parameter at all. pi
+    // activates a `direct` tool on registration unless this says otherwise, so a parent that
+    // registered it plainly would offer every session a tool with no caller and a description
+    // that instructs the model to hand over a report it has no way to send anywhere.
+    const parentStub = makeExtensionStub({ surfaceMode: "full" });
+    const tool = parentStub.tools.get(CHILD_REPORT_TOOL_NAME);
+
+    // Registered — so a child pi can be told the name and find it — but never activated.
+    expect(tool, "registered in the parent").toBeDefined();
+    expect(tool?.defaultActive, "but not activated there").toBe(false);
+    expect(parentStub.active, "and absent from the active loadout").not.toContain(
+      CHILD_REPORT_TOOL_NAME,
+    );
+  });
+
+  test("the two activation halves are decided by PI_PTC_DEPTH and by nothing else", () => {
+    // A counterfactual for the wiring rather than for the tool: hardcode `defaultActive: true`
+    // in the factory and the parent test above goes red; hardcode `false` and the child test
+    // above does. The env var is the only input, and it is the one ADR-0016 already stamps.
+    for (const [depth, expected] of [
+      [undefined, false],
+      ["0", false],
+      ["1", true],
+      ["2", true],
+    ] as const) {
+      if (depth === undefined) delete process.env.PI_PTC_DEPTH;
+      else process.env.PI_PTC_DEPTH = depth;
+      const stub = makeExtensionStub({ surfaceMode: "subagents" });
+      expect(
+        stub.tools.get(CHILD_REPORT_TOOL_NAME)?.defaultActive,
+        "PI_PTC_DEPTH=" + String(depth),
+      ).toBe(expected);
+    }
+  });
+
+  test("the report tool declares an output schema and a usable description", () => {
+    // The other end of "the shape it accepts matches the shape the host validates": pi only
+    // hands a codemode script the `structuredContent` of a tool that DECLARES an output schema,
+    // so an undeclared one is a report only this host could ever read.
+    const tool = createChildReportTool(true);
+    expect(tool.outputSchema).toBeDefined();
+    // One schema, declared twice on purpose: the same value on both ends is what stops the
+    // accepted shape and the carried shape from drifting apart.
+    expect(tool.parameters).toBe(tool.outputSchema);
+    expect(tool.description).toBe(CHILD_REPORT_DESCRIPTION);
+    expect(tool.promptSnippet, "without a snippet pi omits it from the system prompt").toBeTruthy();
+    expect(tool.promptGuidelines?.length ?? 0).toBeGreaterThan(0);
   });
 });

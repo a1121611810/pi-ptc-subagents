@@ -101,6 +101,27 @@ get wrong in a way that fails silently: `buildArgv` only emits a tool-list flag 
 markdown declares tools of its own (`src/runtime/dispatch.ts:976`), so a child whose agent declares
 none would receive **no** flag at all, and the tool would sit inactive with no error anywhere.
 
+Amendment (2026-10-08, #101): the merge is necessary but **not sufficient**, and the reason is a
+property of the flag rather than of this code. pi reads `--tools` as an ALLOWLIST — `sdk.js` turns
+it into `allowedToolNames`, and `AgentSession._isAllowedTool` filters both the registry and the
+active set through it. So the flag cuts both ways, and activation needs **two** halves:
+
+1. the argv merge, which is what keeps the tool alive for a child whose agent **restricts** its
+   tools (`tools: read, bash` → `--tools read,bash,ptc_child_report`). Without the merge the
+   allowlist filters the report tool straight back out — the silent failure above;
+2. `defaultActive`, set from `PI_PTC_DEPTH`, which is what puts the tool in front of a child whose
+   agent declares **no** tools. That case cannot be served by the flag, and emitting
+   `--tools ptc_child_report` on its own would leave the child with exactly one tool and no
+   `read` / `bash` / `edit` / `write` — a strictly worse outcome than the silence it fixes.
+
+The same amendment fixes the "single home" claim for the prompt: the shape moved out of
+`CHILD_REPORT_PROMPT_CLAUSE` and into the tool's description, and the clause is now one sentence
+that requires the child to call the tool. The consequence is stated rather than hidden — a child
+that cannot call the tool has no shape to comply with, so in an installation where this package
+does not load in the child (`surfaceMode: "off"`, pi's `-ne`) the report is unreachable rather than
+merely unlikely. The host still READS a compliant fenced block if one arrives; that is what the
+prompt channel is for now.
+
 ### The opt-out
 
 Agent frontmatter carries one switch, **defaulting to on**. It names a yes/no; it does not carry a
