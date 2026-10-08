@@ -1,28 +1,10 @@
-review round 1: seven citations re-confirmed by content, two stale records, one half-landed fix
+chore(release): 1.5.0 — the child report, and the open-source readiness that was pending
 
-断言四 was RED at HEAD and seven ADR-0032 citations were wrong. Worse than
-the red: the baseline's own comment claimed each target had been verified by
-content, and after #101 not one of them still was — the gate only checks a
-line RESOLVES, so it flagged the shift while six wrong targets sat behind it.
+Moves the Unreleased section that accumulated after v1.4.0 (verify:dist in the
+gate, THIRD_PARTY_NOTICES, the public-repo and provenance notes, PI_ROOT, the DSH
+citation rebase) into 1.5.0, and adds the child report on top of it.
 
-All seven re-confirmed by hand and re-pointed. One changed target rather than
-shifting a line: :117 cited the `if (agent.tools && agent.tools.length > 0)`
-guard, which no longer exists on this branch — #101 replaced it with
-childToolList. Bumping the number would have pinned a false reference harder.
-
-Two records still asserted the one-home decision this branch reversed; both
-now say what the code does, including that #101 moved the shape into the tool
-and then moved it back.
-
-ADR's "known gap" said render.ts's no-report block had two branches and that
-the third belonged to #105. #105 had landed it for render.ts — and the review
-found ptc_task_output's renderer had the same defect, missed because the ADR
-said it "degrades correctly". An opted-out child resolves `succeeded` with the
-channel and no report, which is ORDINARY, and it was being announced to the
-model as an anomaly. Fixed and covered in both renderers.
-
-CHILD_REPORT_MAX_FILES and MAX_EVIDENCE_CHARS cited ADR-0032 §Rendering,
-which bounds findings only. The ADR now states all three and says which was
-decided and which follow by symmetry — a bound with no stated source is not a
-specification. Fixed a line-wrap accident orphaning a sentence in the bounds
-rule, and recorded the arithmetic the 150 was derived from.
+The release act is pushing an annotated tag v1.5.0 on main; publish.yml checks
+the tag against package.json's version and publishes under OIDC trusted
+publishing (ADR-0018). No manual npm publish — that path is the deprecated
+fallback and it forfeits the provenance attestation (ADR-0031).

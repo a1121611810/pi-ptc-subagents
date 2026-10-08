@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+(nothing yet)
+
+## [1.5.0] - 2026-10-08
+
 ### Added
 
 - **`verify:dist` is now part of the release gate.** `scripts/verify-dist-render.mjs` is the only
@@ -19,9 +23,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   2026 DeepSeek) and from `pi` (MIT), and shipped inside the npm tarball rather than only on
   GitHub. The MIT notice is an obligation for the source excerpts in `docs/research/`, not a
   courtesy.
+- **A dispatched child returns a _child report_ instead of prose alone.** `summary` in the child's
+  own words, `findings` each carrying the independent thing that supports the claim,
+  `files_touched`, and the token usage **the host measured**. The child's prose is kept alongside
+  the report, never replaced by it ([ADR-0032](./docs/adr/0032-child-report.md)).
+- **Two delivery channels, and the result names which one delivered it.** A declared
+  `ptc_child_report` tool (the reliable one) or a fenced JSON block in the child's final text (the
+  fallback, for installs where this package does not load in the child). `reportChannel` is
+  **always** present — `tool`, `prompt-json`, `none` or `opted-out` — because a degradation a
+  caller cannot see is a silent failure, and "ran but did not comply" must not read as "returned
+  nothing".
+- **The report contract is on by default** and an agent opts out with one frontmatter line,
+  `childReport: false`. An opted-out agent reads as `opted-out`, not `none`: nobody was asked is a
+  different claim from having been asked and ignored.
+- **`ptc_subagent` renders the report** where the model reads it, bounded at 20 findings /
+  20 files / 150 characters of evidence per finding, each bound stated in-band when it withholds.
+  This is the first real reader of that tool's declared `structuredContent` — on the `subagents`
+  surface there is no `codemode` to read it.
 
 ### Changed
 
+- `src/tools/subagent.ts` gained the OCR rule anchor it never had. It was resolving to the `**`
+  catch-all and being reviewed against the generic floor only.
 - **The repository is public, and `main` is writable only by the maintainer.** Everything else is
   a pull request that needs CI green and one approving review. Release authority is enforced by a
   `refs/tags/v*` ruleset plus the npm package's "Require two-factor authentication and disallow
