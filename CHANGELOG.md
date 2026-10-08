@@ -7,7 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(nothing yet)
+### Fixed
+
+- **Two claims this changelog and ADR-0031 made about 1.5.0 were false, and were measured after
+  the fact.** Both said the same root thing — that the repository had been made public:
+
+  - _"The repository is public, and `main` is writable only by the maintainer… Release authority
+    is enforced by a `refs/tags/v*` ruleset"_ — the repository is still **private**
+    (`.visibility` = `private`, unauthenticated API access returns `403`) and **no ruleset
+    exists**: `GET /repos/{owner}/{repo}/rulesets` returns `403` with GitHub's own _"Upgrade to
+    GitHub Pro or make this repository public to enable this feature."_ 1.5.0 was merged to `main`
+    and its tag pushed with no rule object having evaluated either.
+  - _"The next version published from here carries an npm provenance attestation"_ — it does not,
+    and never has. `dist.attestations` is empty for **every** published version (1.1.1, 1.2.1,
+    1.3.0, 1.4.0, 1.5.0). Provenance requires a public source repository under trusted publishing,
+    and the precondition was never met. ADR-0018 §7 — which said no attestation would appear while
+    the repository is private — was therefore never falsified and stands unchanged.
+
+  These were written as decisions in a previous session, recorded as facts in `c1dda59`, carried
+  through five review rounds and a green release gate, and then shipped inside the 1.5.0 tarball
+  because `CHANGELOG.md` is in `files`. Every gate in this repo checks the SHAPE of a claim —
+  that a `file:line` resolves, that a constant matches a rule — and none of them reads prose to
+  ask whether the thing it describes still exists. A document gate that could would have caught
+  this at `c1dda59`; see ADR-0031's correction block and `docs/testing-constraints.md` §"What the
+  gate does not check".
+
+  **The OIDC mechanism is not implicated.** 1.5.0's publish log reads `oidc Successfully retrieved
+and set token`, `PUT 202`, `+ pi-ptc-subagents@1.5.0`. Trusted publishing worked; its precondition
+  is what was missing.
 
 ## [1.5.0] - 2026-10-08
 
@@ -50,10 +77,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `refs/tags/v*` ruleset plus the npm package's "Require two-factor authentication and disallow
   tokens" setting, so it no longer depends on where a credential file is kept
   ([ADR-0031](./docs/adr/0031-open-source-and-publish-authority.md) §A–§B).
+  ~~**Measured 2026-10-08: this did not happen.** The repository is still private and no ruleset
+  exists — see §Unreleased above and ADR-0031's correction block. The npm 2FA setting is unverified
+  and is not claimed here.~~
 - **The next version published from here carries an npm provenance attestation.** Under trusted
   publishing npm generates it automatically once the source repository is public, with no workflow
   change — so the `homepage` and `repository` fields that pointed at a private GitHub now resolve,
   and the missing provenance badge that ADR-0018 §7 recorded as expected is no longer expected.
+  ~~**Measured 2026-10-08: this is false and always was.** `dist.attestations` is empty for every
+  published version including 1.5.0; the repository was never public, so the precondition never
+  held and ADR-0018 §7 stands unamended.~~
 - **`node scripts/preview-ptc-render.mjs` requires `PI_ROOT`.** It imported pi's theme from a hard-coded
   path on one developer's machine, so following the README from anywhere else failed inside a
   module loader. It now reads the install directory from the environment and, when it is missing or

@@ -23,11 +23,39 @@ This ADR amends ADR-0018 by reference, on two points only:
   publishing npm generates the attestation automatically, with no workflow change. Versions
   released from here carry `dist.attestations` for the first time.
 
+  > **CORRECTED 2026-10-08 — this bullet is FALSE as written, and its premise never happened.**
+  > The repository is still **private**, so ADR-0018 §7 was never falsified and npm has never
+  > generated an attestation. Measured, not inferred:
+  >
+  > - `gh api repos/a1121611810/pi-ptc-subagents --jq .visibility` → `private`
+  > - unauthenticated `GET https://api.github.com/repos/a1121611810/pi-ptc-subagents` → `403`
+  > - `dist.attestations` is **empty for every published version**: 1.1.1, 1.2.1, 1.3.0, 1.4.0
+  >   and 1.5.0 (released 2026-10-08T04:43:54Z).
+  >
+  > ADR-0018 §7 stands unchanged and unamended. The OIDC publish itself DID work — 1.5.0's log
+  > reads `oidc Successfully retrieved and set token`, `PUT 202`, `+ pi-ptc-subagents@1.5.0` — so
+  > what failed is the precondition (public repo), not the mechanism.
+
 Where the two ADRs read differently, this one governs. ADR-0018's text is deliberately not
 rewritten beyond the two amendment pointers it carries; the release mechanism, the tag-identity
 rule, and the `prepublishOnly` duplication argument all remain as specified there.
 
 ## §A — The repository is public, and `main` is owner-writable
+
+> **NOT EXECUTED as of 2026-10-08.** Everything in §A through §C below is a _decision that was
+> never carried out_. Measured: the repository is still private (`.visibility` = `private`;
+> unauthenticated API access returns `403`), and the ruleset the next paragraph describes **does
+> not exist** — `GET /repos/{owner}/{repo}/rulesets` returns `403` with GitHub's own message,
+> _"Upgrade to GitHub Pro or make this repository public to enable this feature."_
+>
+> So the consequence that follows from this section — that `main` is enforced owner-writable and
+> that release authority is gated — **is not in effect**. 1.5.0 was merged into `main` directly
+> and its `v1.5.0` tag pushed without any rule object having evaluated either. The tag was a
+> plain capability check, nothing more.
+>
+> The decision itself is unchanged and still the right one; only its execution is missing. Treat
+> every claim below this line as _planned_, not _done_, until `.visibility` reads `public` and the
+> ruleset endpoint returns the table above.
 
 The repository moves from private to public. The source, the ADRs, `CONTEXT.md`, the tests and
 the research notes all become readable, and the npm `homepage` stops being a dead link.

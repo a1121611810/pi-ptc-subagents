@@ -1186,7 +1186,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       // 时模式如何退让」，27 行是段首。ADR-0030 另外四处引用写的是 pi 宿主的行号而非本仓文件，
       // 解析器不收，因此不进这份基线——它们由 ADR 正文里的表格自带出处。
       "docs/adr/0030-surface-switch-reloads.md:68 -> ptc-mode.ts:27",
-      "docs/adr/0031-open-source-and-publish-authority.md:105 -> src/runtime/limits.ts:4",
+      "docs/adr/0031-open-source-and-publish-authority.md:133 -> src/runtime/limits.ts:4",
       // 2026-10-08 **第六次**复核：ADR-0032 的 7 条全部重新逐行核对，且这次是按**内容**核对的。
       //
       // 前五次里有一次是空行漂移（index.ts 280 → 279），已被本仓抓出。但第六次复核发现的更糟：
