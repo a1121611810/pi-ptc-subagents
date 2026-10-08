@@ -140,10 +140,16 @@ describe("ocr resolves sentinel files to project rules", () => {
   //
   // Explicit skip, not an early return: vitest reports a skipped suite as SKIPPED
   // so CI can see the guard did not run (test-discipline-oracle.md T4).
+  //
+  // `subagent.ts` and `README.md` are the pair that makes the titles load-bearing:
+  // the catch-all resolves to "General Review Baseline" and a real anchor to a
+  // contract title, so a file that silently falls through to `**` cannot pass as
+  // one that is anchored.
   const sentinels = [
     { file: "src/runtime/protocol.ts", title: "PTC Protocol Pair-Correctness" },
     { file: "src/runtime/limits.ts", title: "PTC Config Wiring" },
     { file: "src/tools/text.ts", title: "PTC Render Bounds" },
+    { file: "src/tools/subagent.ts", title: "Background Dispatch Contract" },
     { file: "src/runtime/turn-pools.ts", title: "PTC Worker Lifecycle" },
     { file: "src/runtime/sub-call-tracker.ts", title: "Background Dispatch Contract" },
     { file: "tests/limits.test.ts", title: "Test Discipline" },
