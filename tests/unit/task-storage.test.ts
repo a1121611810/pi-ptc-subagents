@@ -134,6 +134,48 @@ describe("InMemoryTaskStorage: task CRUD (loadTask / saveTask / deleteTask)", ()
     expect(await storage.loadTask(record.id)).toEqual(record);
   });
 
+  /**
+   * ADR-0032: a background child's report is part of the record, so it is persisted with the
+   * same discipline as every other field — deep equality, not a shallow field check. The fixture
+   * is the same literal report shape `dispatch-child-report.test.ts` drives the pump with, so a
+   * drop of `files_touched` or a flattened `findings` is caught here.
+   */
+  test("saveTask + loadTask round-trip preserves a persisted child report (ADR-0032)", async () => {
+    const storage: TaskStorage = new InMemoryTaskStorage();
+    const record = fixtureTask({
+      status: "succeeded",
+      report: {
+        summary: "the concurrency gate precedes agent discovery",
+        findings: [
+          { what: "the gate runs first", evidence: "slot acquire returns before discoverAgent" },
+        ],
+        files_touched: ["src/runtime/dispatch.ts"],
+        usage: { input: 900, output: 260, cost: 0.0123, turns: 1 },
+      },
+      reportChannel: "prompt-json",
+    });
+    await storage.saveTask(record);
+
+    const loaded = await storage.loadTask(record.id);
+    expect(loaded).toEqual(record);
+    // The storage clone must not alias the caller's object: a later mutation of the report the
+    // caller still holds must not rewrite what was persisted.
+    (record.report as { summary: string }).summary = "mutated after save";
+    const reread = await storage.loadTask(record.id);
+    expect(reread?.report?.summary).toBe("the concurrency gate precedes agent discovery");
+  });
+
+  test("a record whose child never reported persists with both report fields absent", async () => {
+    const storage: TaskStorage = new InMemoryTaskStorage();
+    await storage.saveTask(fixtureTask({ status: "running" }));
+
+    const loaded = await storage.loadTask("01JBZ00000000000000000000A" as ULID);
+    // "Not yet" and "reported nothing" are different claims, so the absent form is asserted as
+    // ABSENT — `toBeUndefined()` would also pass for `{report: undefined}`.
+    expect(Object.hasOwn(loaded as object, "report")).toBe(false);
+    expect(Object.hasOwn(loaded as object, "reportChannel")).toBe(false);
+  });
+
   test("a legacy record without owner fields round-trips with the fields absent", async () => {
     const storage: TaskStorage = new InMemoryTaskStorage();
     const record = fixtureTask();

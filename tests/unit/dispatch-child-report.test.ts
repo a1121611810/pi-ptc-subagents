@@ -31,7 +31,6 @@ import {
   extractChildReportFromText,
   type ChildReport,
   type ChildReportPayload,
-  type ChildReportExtraction,
   type DispatchDeps,
   type DispatchResult,
 } from "../../src/runtime/dispatch.ts";
@@ -44,8 +43,8 @@ import {
 } from "../../src/runtime/child-process-lifecycle.ts";
 import { createTaskRegistry, type DispatchHandle } from "../../src/runtime/task-registry.ts";
 import { InMemoryOutputStorage } from "../../src/runtime/output-storage.ts";
-import { InMemoryTaskStorage } from "../../src/runtime/task-storage.ts";
-import { makeTempDir, removeTempDir, waitFor } from "../helpers/ptc.ts";
+import { InMemoryTaskStorage, type TaskRecord, type ULID } from "../../src/runtime/task-storage.ts";
+import { makeTempDir, removeTempDir } from "../helpers/ptc.ts";
 
 // ---------------------------------------------------------------------------
 //  node:child_process mock — the ONLY thing the foreground path spawns through
@@ -469,25 +468,21 @@ class RecordingLifecycle extends MockChildProcessLifecycle {
 
 interface BackgroundHarness {
   lifecycle: RecordingLifecycle;
+  storage: InMemoryTaskStorage;
   deps: DispatchDeps;
-  reports: Map<string, ChildReportExtraction>;
 }
 
 function createBackgroundHarness(): BackgroundHarness {
   const lifecycle = new RecordingLifecycle();
-  const reports = new Map<string, ChildReportExtraction>();
   const storage = new InMemoryTaskStorage();
   return {
     lifecycle,
-    reports,
+    storage,
     deps: {
       lifecycle,
       taskRegistry: createTaskRegistry(storage, { clock: (): number => 1000 }),
       outputStorage: new InMemoryOutputStorage(),
       slots: new DispatchSlotCounter(4),
-      onChildReport: (taskId, extraction): void => {
-        reports.set(taskId, extraction);
-      },
     },
   };
 }
@@ -503,8 +498,22 @@ function driveBackground(lifecycle: RecordingLifecycle, lines: readonly string[]
   lifecycle.resolveExit(handle, 0, null);
 }
 
-describe("dispatch() background yields the same report as foreground (parity)", () => {
-  test("the same compliant transcript produces the same report and channel", async () => {
+/**
+ * Wait for the pump's terminal write and hand back the PERSISTED record. This is where the
+ * background front's report lands (#104): there is no callback seam any more, so the record is
+ * the only place a background report can be observed — which is the point.
+ */
+async function terminalRecord(h: BackgroundHarness, taskId: string): Promise<TaskRecord> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const record = await h.storage.loadTask(taskId as ULID);
+    if (record !== null && record.status === "succeeded") return record;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  throw new Error("task " + taskId + " never reached succeeded");
+}
+
+describe("dispatch() background persists the same report as foreground returns (parity)", () => {
+  test("the same compliant transcript persists the same report and channel", async () => {
     await withAgent(async (dir) => {
       const h = createBackgroundHarness();
       const handle = asHandle(
@@ -516,18 +525,20 @@ describe("dispatch() background yields the same report as foreground (parity)", 
       );
 
       driveBackground(h.lifecycle, COMPLIANT_TRANSCRIPT);
-      await waitFor(() => h.reports.has(handle.taskId));
+      const record = await terminalRecord(h, handle.taskId);
 
-      const extraction = h.reports.get(handle.taskId) as ChildReportExtraction;
       // Compared against the pure seam, not against a captured foreground run: the two must be
       // the same function's answer to the same transcript.
-      expect(extraction).toEqual(extractChildReport(parseTranscript(COMPLIANT_TRANSCRIPT)));
-      expect(extraction.reportChannel).toBe("prompt-json");
-      expect(extraction.report).toEqual(VALID_REPORT);
+      const extraction = extractChildReport(parseTranscript(COMPLIANT_TRANSCRIPT));
+      expect(record.reportChannel).toBe(extraction.reportChannel);
+      expect(record.reportChannel).toBe("prompt-json");
+      // `usage` is the host's counter over the SAME transcript the foreground run counts, so the
+      // persisted report equals the foreground result's report field for field.
+      expect(record.report).toEqual(REPORT_WITH_HOST_USAGE);
     });
   });
 
-  test("the same non-compliant transcript produces channel none and no report", async () => {
+  test("the same non-compliant transcript persists channel none and no report", async () => {
     await withAgent(async (dir) => {
       const h = createBackgroundHarness();
       const handle = asHandle(
@@ -539,11 +550,11 @@ describe("dispatch() background yields the same report as foreground (parity)", 
       );
 
       driveBackground(h.lifecycle, PLAIN_TRANSCRIPT);
-      await waitFor(() => h.reports.has(handle.taskId));
+      const record = await terminalRecord(h, handle.taskId);
 
-      const extraction = h.reports.get(handle.taskId) as ChildReportExtraction;
-      expect(extraction.reportChannel).toBe("none");
-      expect(extraction.report).toBeUndefined();
+      // The explicit marker, never a silent prose fallback (ADR-0032, testing-constraints #3).
+      expect(record.reportChannel).toBe("none");
+      expect(record.report).toBeUndefined();
     });
   });
 

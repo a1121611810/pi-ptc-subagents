@@ -28,6 +28,17 @@ import {
   type ChildSpawnOptions,
   type ParsedAgentEvent,
 } from "./child-process-lifecycle.ts";
+// The report vocabulary (ADR-0032) lives in its own module so `task-storage.ts`, which persists a
+// report onto a TaskRecord, can name the shape without importing back up into this layer.
+// Re-exported below because `dispatch()` returns a report and every existing import site reads it
+// from this module. The EXTRACTION stays here; only the types moved.
+import type {
+  ChildReport,
+  ChildReportChannel,
+  ChildReportExtraction,
+  ChildReportFinding,
+  ChildReportPayload,
+} from "./child-report.ts";
 import { DEFAULT_CONFIG } from "./limits.ts";
 import {
   DefaultTaskRegistry,
@@ -43,6 +54,13 @@ import { InMemoryTaskStorage, type TaskSpawnSource, type ULID } from "./task-sto
 // `tests/dispatch-helpers.test.ts` imports `parseAgentEvent` / `safeKill` from this
 // module; rather than churn the test file, we re-export them.
 export { parseAgentEvent, safeKill } from "./child-process-lifecycle.ts";
+export type {
+  ChildReport,
+  ChildReportChannel,
+  ChildReportExtraction,
+  ChildReportFinding,
+  ChildReportPayload,
+};
 
 /**
  * Shared lifecycle adapter for the foreground `pi.dispatch` path. BG-03 extracted the
@@ -145,14 +163,6 @@ export interface DispatchDeps {
    * can dereference the bytes (BG-07).
    */
   outputStorage?: OutputStorage;
-  /**
-   * ADR-0032: where the background pump hands the child report it read off the child's final
-   * message. There is deliberately no `TaskRecord` field for it yet — persisting it is #104's
-   * work, and faking one here would put a half-built field on the persisted record. The callback
-   * is the seam that work will replace; the foreground path needs nothing equivalent because it
-   * returns the report on its own `DispatchResult`.
-   */
-  onChildReport?: (taskId: string, extraction: ChildReportExtraction) => void;
 }
 
 /**
@@ -222,57 +232,6 @@ export interface DispatchUsage {
   cacheWrite: number;
   cost: number;
   turns: number;
-}
-
-/**
- * Which channel a {@link ChildReport} arrived over (ADR-0032 "The channel is always stated").
- *
- * `tool` is the report tool's `structuredContent`, read off `tool_execution_end`; `prompt-json`
- * is the fenced block in the child's final assistant message, which is the only channel this
- * module produces; `none` means the contract was on and the child did not comply.
- */
-export type ChildReportChannel = "tool" | "prompt-json" | "none";
-
-/** One claim the child makes, with the evidence it rests on. */
-export interface ChildReportFinding {
-  what: string;
-  evidence: string;
-}
-
-/**
- * The structured value a dispatched child produces (ADR-0032, `CONTEXT.md` §child report).
- *
- * Four fields and no more. `files_touched` is snake_case on purpose: this object is produced by
- * a model emitting JSON, and renaming it on the way in would mean the wire text and the type
- * disagree. The child's prose is returned alongside it, never replaced by it.
- */
-export interface ChildReportPayload {
-  summary: string;
-  findings: ChildReportFinding[];
-  files_touched: string[];
-}
-
-/**
- * The structured value a dispatched child produces (ADR-0032, `CONTEXT.md` §child report).
- *
- * `ChildReportPayload` is what the child DECLARES; `usage` is what the host OBSERVED, stamped on
- * at settle time from the child's own `message_end` usage blocks. A model cannot know its token
- * count, so a child-declared `usage` would be a fabricated number that happened to look like a
- * measurement — `docs/testing-constraints.md` #4 requires the expected value to point at an
- * independent source, and the host's counter is that source. Anything the child puts under `usage`
- * is read and discarded.
- */
-export interface ChildReport extends ChildReportPayload {
-  usage: { input: number; output: number; cost: number; turns: number };
-}
-
-/**
- * What one extraction attempt yielded. `reportChannel: "none"` with no `report` is an ordinary
- * outcome, not an error: the child ran, answered, and did not comply with the contract.
- */
-export interface ChildReportExtraction {
-  report?: ChildReportPayload;
-  reportChannel: ChildReportChannel;
 }
 
 /** Structured return value of pi.dispatch(...). Shape mirrors Promise.allSettled records. */
@@ -1093,6 +1052,40 @@ function assistantText(event: ParsedAgentEvent): string | undefined {
 }
 
 /**
+ * Fold one assistant `message_end` into the host's token counter (ADR-0032: `usage` is observed,
+ * never declared). Returns `current` unchanged for every other event, so both fronts call this
+ * once per event in their drain loops and cannot drift on what counts as usage.
+ *
+ * One function rather than the two copies the foreground and background loops would otherwise
+ * each carry: the persisted background report's `usage` and the foreground `DispatchResult`'s are
+ * supposed to be the same measurement, and "the same code" is a stronger guarantee than a
+ * comment saying so.
+ */
+function accumulateUsage(
+  current: DispatchUsage | undefined,
+  event: ParsedAgentEvent,
+): DispatchUsage | undefined {
+  if (event.type !== "message_end") return current;
+  const message = event.message;
+  if (message?.role !== "assistant" || message.usage === undefined) return current;
+  const total: DispatchUsage = current ?? {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    cost: 0,
+    turns: 0,
+  };
+  total.input += message.usage.input ?? 0;
+  total.output += message.usage.output ?? 0;
+  total.cacheRead += message.usage.cacheRead ?? 0;
+  total.cacheWrite += message.usage.cacheWrite ?? 0;
+  total.cost += message.usage.cost?.total ?? 0;
+  total.turns += 1;
+  return total;
+}
+
+/**
  * The failure pi reported about the child's own turn, if any (issue #70).
  *
  * A child that hits a rate limit or a model error still exits 0: pi writes the reason onto the
@@ -1382,6 +1375,11 @@ async function dispatchBackground(
       // ADR-0032: the same extraction the foreground loop runs, so the two fronts cannot
       // disagree about whether a transcript carried a child report.
       let extraction: ChildReportExtraction = { reportChannel: "none" };
+      // ADR-0032: the host's own token counter, accumulated over the child's assistant
+      // `message_end` blocks. A child cannot report its own usage, so this is the only source
+      // the persisted report's `usage` can come from — same rule, same accumulation, as the
+      // foreground `finalize`.
+      let usage: DispatchUsage | undefined;
       try {
         for await (const event of lifecycle.events(handle)) {
           const text = assistantText(event);
@@ -1389,6 +1387,7 @@ async function dispatchBackground(
             output = text;
             extraction = extractChildReportFromText(text);
           }
+          usage = accumulateUsage(usage, event);
           // The last error wins: a child that retried and then gave up reports the reason that
           // ended it, not the first transient one.
           const error = childAssistantError(event);
@@ -1437,6 +1436,25 @@ async function dispatchBackground(
             kind: "resolve-exit",
             taskId,
             exitCode,
+            reportChannel: extraction.reportChannel,
+            // ADR-0032: `usage` is the host's own counter, accumulated off the child's
+            // `message_end` blocks exactly as the foreground loop does and stamped HERE rather
+            // than read off the report the child declared — a model cannot know its token count.
+            // The registry applies the pair only when this close resolves `succeeded`, so
+            // handing it a report on a failed child is not a way to persist one.
+            ...(extraction.report === undefined
+              ? {}
+              : {
+                  report: {
+                    ...extraction.report,
+                    usage: {
+                      input: usage?.input ?? 0,
+                      output: usage?.output ?? 0,
+                      cost: usage?.cost ?? 0,
+                      turns: usage?.turns ?? 0,
+                    },
+                  },
+                }),
             outputRef,
             outputBytes,
             outputPreview,
@@ -1444,11 +1462,6 @@ async function dispatchBackground(
           },
           { clock, callerId, logger },
         );
-
-        // ADR-0032: hand the extraction out AFTER the terminal state is written, so a throwing
-        // seam costs the report, never the record. Persisting it is #104's work; until then this
-        // is the only place the background front's report is observable.
-        deps.onChildReport?.(taskId, extraction);
       } catch (err) {
         // A pump failure must not vanish. A task already driven terminal by a model stop
         // lands here on the illegal running -> terminal edge; log it so it is observable.
@@ -1739,23 +1752,7 @@ export async function dispatch(
         for await (const ev of lifecycle.events(h)) {
           if (ev.type === "message_end" && ev.message && ev.message.role === "assistant") {
             const m = ev.message;
-            if (m.usage) {
-              const cur: DispatchUsage = usage ?? {
-                input: 0,
-                output: 0,
-                cacheRead: 0,
-                cacheWrite: 0,
-                cost: 0,
-                turns: 0,
-              };
-              cur.input += m.usage.input ?? 0;
-              cur.output += m.usage.output ?? 0;
-              cur.cacheRead += m.usage.cacheRead ?? 0;
-              cur.cacheWrite += m.usage.cacheWrite ?? 0;
-              cur.cost += m.usage.cost?.total ?? 0;
-              cur.turns += 1;
-              usage = cur;
-            }
+            usage = accumulateUsage(usage, ev);
             if (Array.isArray(m.content)) {
               for (const part of m.content) {
                 if (part && part.type === "text" && typeof part.text === "string") {
