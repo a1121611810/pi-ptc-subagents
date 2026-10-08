@@ -34,7 +34,11 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { Static } from "typebox";
 import type { ChildProcessLifecycle } from "../runtime/child-process-lifecycle.ts";
-import type { ChildReport, ChildReportChannel } from "../runtime/child-report.ts";
+import {
+  CHILD_REPORT_MAX_FINDINGS,
+  type ChildReport,
+  type ChildReportChannel,
+} from "../runtime/child-report.ts";
 import { applyAdr0015Truncation, type OutputStorage } from "../runtime/output-storage.ts";
 import { OUTPUT_PREVIEW_MAX_BYTES, type TaskRegistry } from "../runtime/task-registry.ts";
 import type { TaskRecord, TaskStatus, ULID } from "../runtime/task-storage.ts";
@@ -310,7 +314,7 @@ export interface PtcTaskOutputDetails {
  * count stated in-band"). The literal is ADR-0032's; the withheld count is stated because a
  * silently shortened list reads as "these were all of them".
  */
-export const MAX_RENDERED_REPORT_FINDINGS = 20;
+export const MAX_RENDERED_REPORT_FINDINGS: number = CHILD_REPORT_MAX_FINDINGS;
 
 /**
  * Render one record's persisted child report (ADR-0032), or `undefined` when the record carries

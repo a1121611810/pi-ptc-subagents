@@ -23,9 +23,10 @@ import {
   CHILD_REPORT_HEADER,
   CHILD_REPORT_MAX_EVIDENCE_CHARS,
   CHILD_REPORT_MAX_FILES,
-  CHILD_REPORT_MAX_FINDINGS,
   renderChildReportText,
 } from "../../src/tools/render.ts";
+import { CHILD_REPORT_MAX_FINDINGS } from "../../src/runtime/child-report.ts";
+import { renderChildReport as renderStoredChildReport } from "../../src/tools/ptc-task.ts";
 
 /**
  * The bound as a LITERAL, never as the exported constant.
@@ -294,5 +295,54 @@ describe("renderChildReportText — the bounds, stated in-band", () => {
     const block = renderChildReportText(COMPLIANT_REPORT, "prompt-json");
     expect(block).toContain(COMPLIANT_REPORT.findings[0]?.evidence ?? "");
     expect(block).not.toContain("truncated at");
+  });
+});
+
+describe("the two report renderers share one bound (ADR-0032)", () => {
+  // There are deliberately two renderers: `ptc_subagent` renders inline in the tool-result text
+  // and follows the value-tree house style, while `ptc_task_output` renders a stored background
+  // record and follows the `<bg-task-notification>` convention the rest of that subsystem uses.
+  // Two house styles is fine. TWO NUMBERS is the failure: a reader told "at most 20" by one
+  // surface and 20 by the other has learned nothing, and the day one moves the other does not.
+  //
+  // This is the guard that replaced collapsing them into one function, which turned out to be
+  // impossible without a `ptc-task -> render` import edge that drags `runtime/dispatch.ts` into
+  // `ptc-task.ts`'s graph through the pre-existing `bindings <-> dispatch` value cycle. See the
+  // note on `CHILD_REPORT_MAX_FINDINGS`.
+  //
+  // Counterfactual: bump either renderer past the shared constant and this goes red.
+  const manyFindings = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ what: `finding ${i}`, evidence: `evidence ${i}` }));
+
+  const reportAt = (n: number) => ({
+    summary: "s",
+    findings: manyFindings(n),
+    files_touched: [],
+    usage: { input: 0, output: 0, cost: 0, turns: 1 },
+  });
+
+  test("both renderers withhold beyond exactly CHILD_REPORT_MAX_FINDINGS findings", () => {
+    const at = CHILD_REPORT_MAX_FINDINGS;
+    const over = CHILD_REPORT_MAX_FINDINGS + 3;
+
+    const inline = renderChildReportText(reportAt(at), "prompt-json");
+    const inlineOver = renderChildReportText(reportAt(over), "prompt-json");
+    expect(inline, "at the bound, nothing is withheld").not.toContain("withheld");
+    expect(inlineOver, "past the bound, the inline renderer says so").toContain("withheld");
+
+    const stored = renderStoredChildReport({
+      reportChannel: "prompt-json",
+      report: reportAt(at),
+    } as unknown as Parameters<typeof renderStoredChildReport>[0]);
+    const storedOver = renderStoredChildReport({
+      reportChannel: "prompt-json",
+      report: reportAt(over),
+    } as unknown as Parameters<typeof renderStoredChildReport>[0]);
+
+    expect(stored, "at the bound, nothing is withheld").not.toContain("more findings not shown");
+    expect(storedOver, "past the bound, the stored renderer says so").toContain(
+      "more findings not shown",
+    );
+    expect(storedOver).toContain("+3");
   });
 });

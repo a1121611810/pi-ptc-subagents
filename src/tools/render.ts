@@ -41,6 +41,7 @@ import type {
 // Type-only, so the worker's module graph gains no edge to the dispatcher: a `ChildReport` and a
 // `ChildReportChannel` are read off a `DispatchResult` by the tool, never constructed here.
 import type { ChildReport, ChildReportChannel, ChildReportFinding } from "../runtime/dispatch.ts";
+import { CHILD_REPORT_MAX_FINDINGS } from "../runtime/child-report.ts";
 import { MAX_LINE_CHARS, renderModelValue, sanitizeText } from "./text.ts";
 import { DEFAULT_SHIMMER_INTERVAL_MS, type ShimmerState, withShimmer } from "./shimmer.ts";
 
@@ -612,7 +613,7 @@ export function renderValueTree(
 export const CHILD_REPORT_HEADER = "child report";
 
 /** ADR-0032 §Rendering commits to 20; the withheld count is stated on the last findings row. */
-export const CHILD_REPORT_MAX_FINDINGS = 20;
+export { CHILD_REPORT_MAX_FINDINGS };
 
 /** `files_touched` is bounded for the reason every other list here is: an unbounded one is noise. */
 export const CHILD_REPORT_MAX_FILES = 20;
