@@ -10,5 +10,6 @@
   "rules": {},
   "env": {
     "builtin": true
-  }
+  },
+  "ignorePatterns": ["docs/prototypes/**"]
 }

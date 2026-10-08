@@ -10,18 +10,19 @@ const CADENCE_REMINDER_BYTES = 100;
 const POLL_INTERVAL = 30000;
 
 function mulberry32(seed) {
-  return function() {
-    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+  return function () {
+    seed |= 0;
+    seed = (seed + 0x6d2b79f5) | 0;
     let t = seed;
-    t = Math.imul(t ^ t >>> 15, t | 1);
-    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
-    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
 
 function genRealisticDist(rnd) {
   const r = rnd();
-  if (r < 0.60) return 100 + rnd() * (2048 - 100);
+  if (r < 0.6) return 100 + rnd() * (2048 - 100);
   if (r < 0.85) return 2049 + rnd() * (8192 - 2049);
   if (r < 0.95) return 8193 + rnd() * (51200 - 8193);
   return 51201 + rnd() * (250000 - 51201);
@@ -32,7 +33,8 @@ function genTasks(count, arrival, seed) {
   const tasks = [];
   for (let i = 0; i < count; i++) {
     let completesAt;
-    if (arrival.kind === "uniform") completesAt = (i / count) * arrival.totalMs + rnd() * (arrival.totalMs / count);
+    if (arrival.kind === "uniform")
+      completesAt = (i / count) * arrival.totalMs + rnd() * (arrival.totalMs / count);
     else if (arrival.kind === "burst") completesAt = rnd() * 1000;
     else if (arrival.kind === "super_burst") completesAt = rnd() * 5000;
     else if (arrival.kind === "during_busy") completesAt = 30000 + rnd() * 270000;
@@ -63,23 +65,25 @@ function notifBytes(task) {
 
 function median(arr) {
   if (arr.length === 0) return 0;
-  const s = [...arr].sort((a,b)=>a-b);
-  return s[Math.floor(s.length/2)];
+  const s = [...arr].sort((a, b) => a - b);
+  return s[Math.floor(s.length / 2)];
 }
 function percentile(arr, p) {
   if (arr.length === 0) return 0;
-  const s = [...arr].sort((a,b)=>a-b);
-  return s[Math.floor(s.length * p / 100)];
+  const s = [...arr].sort((a, b) => a - b);
+  return s[Math.floor((s.length * p) / 100)];
 }
 function fmtBytes(b) {
   if (b < 1024) return b + " B";
   if (b < 1024 * 1024) return (b / 1024).toFixed(2) + " KB";
   return (b / 1024 / 1024).toFixed(3) + " MB";
 }
-function fmtMs(ms) { return Math.round(ms).toLocaleString() + " ms"; }
+function fmtMs(ms) {
+  return Math.round(ms).toLocaleString() + " ms";
+}
 
 function simulatePush(tasks, aiState) {
-  const sorted = [...tasks].sort((a,b) => a.completesAt - b.completesAt);
+  const sorted = [...tasks].sort((a, b) => a.completesAt - b.completesAt);
   let totalBytes = 0;
   let wakeCount = 0;
   let maxBacklog = 0;
@@ -91,8 +95,9 @@ function simulatePush(tasks, aiState) {
   let deliveryTimestamps = [];
   let i = 0;
   let t = 0;
-  const finiteCompletes = sorted.map(x => x.completesAt).filter(x => isFinite(x));
-  const maxT = Math.max(600000, finiteCompletes.length > 0 ? Math.max(...finiteCompletes) : 0) + 120000;
+  const finiteCompletes = sorted.map((x) => x.completesAt).filter((x) => isFinite(x));
+  const maxT =
+    Math.max(600000, finiteCompletes.length > 0 ? Math.max(...finiteCompletes) : 0) + 120000;
 
   while (t <= maxT) {
     while (i < sorted.length && sorted[i].completesAt <= t) {
@@ -102,7 +107,7 @@ function simulatePush(tasks, aiState) {
 
     const isIdle = aiState.idleAt(t);
     if (isIdle && backlog.length > 0) {
-      deliveryTimestamps = deliveryTimestamps.filter(x => x > t - RATE_LIMIT_WINDOW);
+      deliveryTimestamps = deliveryTimestamps.filter((x) => x > t - RATE_LIMIT_WINDOW);
       const slots = Math.max(0, RATE_LIMIT - deliveryTimestamps.length);
       const toDeliver = Math.min(backlog.length, Math.max(1, slots));
       const drained = backlog.splice(0, toDeliver);
@@ -136,14 +141,24 @@ function simulatePush(tasks, aiState) {
     const nextTaskAt = i < sorted.length ? sorted[i].completesAt : Infinity;
     const nextCadenceAt = lastCadenceTime + CADENCE_INTERVAL;
     const minNext = Math.min(nextTaskAt, nextCadenceAt);
-    t = (minNext > t) ? minNext : t + 1000;
+    t = minNext > t ? minNext : t + 1000;
   }
 
-  return { scheme: "push", totalBytes, wakeCount, maxBacklog, cadenceInjections, deliveredTasks: delivered, totalTasks: sorted.length, p50Latency: median(latencies), p99Latency: percentile(latencies, 99) };
+  return {
+    scheme: "push",
+    totalBytes,
+    wakeCount,
+    maxBacklog,
+    cadenceInjections,
+    deliveredTasks: delivered,
+    totalTasks: sorted.length,
+    p50Latency: median(latencies),
+    p99Latency: percentile(latencies, 99),
+  };
 }
 
 function simulateSub(tasks, aiState) {
-  const sorted = [...tasks].sort((a,b) => a.completesAt - b.completesAt);
+  const sorted = [...tasks].sort((a, b) => a.completesAt - b.completesAt);
   let totalBytes = 0;
   let wakeCount = 0;
   let maxBuffer = 0;
@@ -154,8 +169,9 @@ function simulateSub(tasks, aiState) {
   let lastPollAt = 0;
   let i = 0;
   let t = 0;
-  const finiteCompletes = sorted.map(x => x.completesAt).filter(x => isFinite(x));
-  const maxT = Math.max(600000, finiteCompletes.length > 0 ? Math.max(...finiteCompletes) : 0) + 120000;
+  const finiteCompletes = sorted.map((x) => x.completesAt).filter((x) => isFinite(x));
+  const maxT =
+    Math.max(600000, finiteCompletes.length > 0 ? Math.max(...finiteCompletes) : 0) + 120000;
 
   let wasIdle = true;
   while (t <= maxT) {
@@ -195,25 +211,95 @@ function simulateSub(tasks, aiState) {
     const nextTaskAt = i < sorted.length ? sorted[i].completesAt : Infinity;
     const nextPollAt = lastPollAt + POLL_INTERVAL;
     const minNext = Math.min(nextTaskAt, nextPollAt);
-    t = (minNext > t) ? minNext : t + 1000;
+    t = minNext > t ? minNext : t + 1000;
   }
 
-  return { scheme: "sub", totalBytes, wakeCount, maxBuffer, pollCount, deliveredTasks: delivered, totalTasks: sorted.length, p50Latency: median(latencies), p99Latency: percentile(latencies, 99) };
+  return {
+    scheme: "sub",
+    totalBytes,
+    wakeCount,
+    maxBuffer,
+    pollCount,
+    deliveredTasks: delivered,
+    totalTasks: sorted.length,
+    p50Latency: median(latencies),
+    p99Latency: percentile(latencies, 99),
+  };
 }
 
 const SCENARIOS = [
-  { name: "steady_60", count: 60, arrival: { kind: "uniform", totalMs: 600000 }, desc: "60 tasks over 10min, AI always idle" },
-  { name: "burst_100", count: 100, arrival: { kind: "burst" }, desc: "100 tasks complete in 1s, AI idle after 5s" },
-  { name: "super_burst_500", count: 500, arrival: { kind: "super_burst" }, desc: "500 tasks in 5s, AI idle after 10s" },
-  { name: "ai_busy_5min", count: 50, arrival: { kind: "during_busy" }, desc: "50 tasks complete during 5-min AI tool loop" },
-  { name: "restart", count: 60, arrival: { kind: "uniform", totalMs: 600000 }, desc: "AI crashes at 5min, restart at 11min" },
-  { name: "fork", count: 60, arrival: { kind: "uniform", totalMs: 600000 }, desc: "Session forks at 5min (both branches continue)" },
-  { name: "stop_spike", count: 50, arrival: { kind: "uniform", totalMs: 600000 }, desc: "50 tasks; stop called on 15 mid-flight" },
-  { name: "ptc_off", count: 30, arrival: { kind: "uniform", totalMs: 600000 }, desc: "30 tasks; /ptc off from 2-8min" },
-  { name: "cadence_pressure", count: 60, arrival: { kind: "during_idle" }, desc: "60 tasks complete during 12-min AI idle" },
-  { name: "mixed_500", count: 500, arrival: { kind: "uniform", totalMs: 600000 }, desc: "500 tasks over 10min (scale test)" },
-  { name: "zombie_60", count: 60, arrival: { kind: "uniform", totalMs: 600000 }, desc: "60 tasks; 10% never complete" },
-  { name: "slow_fast", count: 51, arrival: { kind: "burst" }, desc: "1 super-slow (10min) + 50 fast burst" },
+  {
+    name: "steady_60",
+    count: 60,
+    arrival: { kind: "uniform", totalMs: 600000 },
+    desc: "60 tasks over 10min, AI always idle",
+  },
+  {
+    name: "burst_100",
+    count: 100,
+    arrival: { kind: "burst" },
+    desc: "100 tasks complete in 1s, AI idle after 5s",
+  },
+  {
+    name: "super_burst_500",
+    count: 500,
+    arrival: { kind: "super_burst" },
+    desc: "500 tasks in 5s, AI idle after 10s",
+  },
+  {
+    name: "ai_busy_5min",
+    count: 50,
+    arrival: { kind: "during_busy" },
+    desc: "50 tasks complete during 5-min AI tool loop",
+  },
+  {
+    name: "restart",
+    count: 60,
+    arrival: { kind: "uniform", totalMs: 600000 },
+    desc: "AI crashes at 5min, restart at 11min",
+  },
+  {
+    name: "fork",
+    count: 60,
+    arrival: { kind: "uniform", totalMs: 600000 },
+    desc: "Session forks at 5min (both branches continue)",
+  },
+  {
+    name: "stop_spike",
+    count: 50,
+    arrival: { kind: "uniform", totalMs: 600000 },
+    desc: "50 tasks; stop called on 15 mid-flight",
+  },
+  {
+    name: "ptc_off",
+    count: 30,
+    arrival: { kind: "uniform", totalMs: 600000 },
+    desc: "30 tasks; /ptc off from 2-8min",
+  },
+  {
+    name: "cadence_pressure",
+    count: 60,
+    arrival: { kind: "during_idle" },
+    desc: "60 tasks complete during 12-min AI idle",
+  },
+  {
+    name: "mixed_500",
+    count: 500,
+    arrival: { kind: "uniform", totalMs: 600000 },
+    desc: "500 tasks over 10min (scale test)",
+  },
+  {
+    name: "zombie_60",
+    count: 60,
+    arrival: { kind: "uniform", totalMs: 600000 },
+    desc: "60 tasks; 10% never complete",
+  },
+  {
+    name: "slow_fast",
+    count: 51,
+    arrival: { kind: "burst" },
+    desc: "1 super-slow (10min) + 50 fast burst",
+  },
 ];
 
 function runScenario(s) {
@@ -225,9 +311,16 @@ function runScenario(s) {
     }
     tasks.sort((a, b) => a.completesAt - b.completesAt);
   }
-  if (s.name === "slow_fast") { tasks[0].completesAt = 600000; }
+  if (s.name === "slow_fast") {
+    tasks[0].completesAt = 600000;
+  }
   const aiState = aiStateFromScenario(s.name);
-  return { name: s.name, desc: s.desc, push: simulatePush(tasks, aiState), sub: simulateSub(tasks, aiState) };
+  return {
+    name: s.name,
+    desc: s.desc,
+    push: simulatePush(tasks, aiState),
+    sub: simulateSub(tasks, aiState),
+  };
 }
 
 console.log("# bgdispatch/G2 - Push vs Subscription head-to-head");
@@ -237,13 +330,15 @@ console.log("## Scenarios");
 console.log("");
 console.log("| # | scenario | desc | tasks |");
 console.log("|---|---|---|---|");
-SCENARIOS.forEach((s, i) => console.log("| " + (i+1) + " | " + s.name + " | " + s.desc + " | " + s.count + " |"));
+SCENARIOS.forEach((s, i) =>
+  console.log("| " + (i + 1) + " | " + s.name + " | " + s.desc + " | " + s.count + " |"),
+);
 console.log("");
 
 console.log("## Per-scenario: PUSH vs SUB");
 console.log("");
 const results = [];
-SCENARIOS.forEach(s => {
+SCENARIOS.forEach((s) => {
   const r = runScenario(s);
   results.push(r);
   const p = r.push;
@@ -252,12 +347,46 @@ SCENARIOS.forEach(s => {
   console.log("");
   console.log("| metric | PUSH | SUB | ratio (PUSH/SUB) |");
   console.log("|---|---|---|---|");
-  console.log("| total bytes | " + fmtBytes(p.totalBytes) + " | " + fmtBytes(ss.totalBytes) + " | " + (p.totalBytes/Math.max(1,ss.totalBytes)).toFixed(2) + "x |");
-  console.log("| wake count | " + p.wakeCount + " | " + ss.wakeCount + " | " + (p.wakeCount/Math.max(1,ss.wakeCount)).toFixed(2) + "x |");
-  console.log("| max backlog/buffer | " + p.maxBacklog + " | " + ss.maxBuffer + " | " + (p.maxBacklog/Math.max(1,ss.maxBuffer)).toFixed(2) + "x |");
+  console.log(
+    "| total bytes | " +
+      fmtBytes(p.totalBytes) +
+      " | " +
+      fmtBytes(ss.totalBytes) +
+      " | " +
+      (p.totalBytes / Math.max(1, ss.totalBytes)).toFixed(2) +
+      "x |",
+  );
+  console.log(
+    "| wake count | " +
+      p.wakeCount +
+      " | " +
+      ss.wakeCount +
+      " | " +
+      (p.wakeCount / Math.max(1, ss.wakeCount)).toFixed(2) +
+      "x |",
+  );
+  console.log(
+    "| max backlog/buffer | " +
+      p.maxBacklog +
+      " | " +
+      ss.maxBuffer +
+      " | " +
+      (p.maxBacklog / Math.max(1, ss.maxBuffer)).toFixed(2) +
+      "x |",
+  );
   console.log("| cadence injections | " + p.cadenceInjections + " | 0 | - |");
   console.log("| poll count | n/a | " + ss.pollCount + " | - |");
-  console.log("| delivered | " + p.deliveredTasks + "/" + p.totalTasks + " | " + ss.deliveredTasks + "/" + ss.totalTasks + " | - |");
+  console.log(
+    "| delivered | " +
+      p.deliveredTasks +
+      "/" +
+      p.totalTasks +
+      " | " +
+      ss.deliveredTasks +
+      "/" +
+      ss.totalTasks +
+      " | - |",
+  );
   console.log("| p50 latency | " + fmtMs(p.p50Latency) + " | " + fmtMs(ss.p50Latency) + " | - |");
   console.log("| p99 latency | " + fmtMs(p.p99Latency) + " | " + fmtMs(ss.p99Latency) + " | - |");
   console.log("");
@@ -275,10 +404,11 @@ for (const r of results) {
   if (p.maxBacklog > 5) pIssue += "backlog=" + p.maxBacklog + "; ";
   if (p.cadenceInjections > 0) pIssue += p.cadenceInjections + " cadence; ";
   if (p.p99Latency > 30000) pIssue += "p99 " + fmtMs(p.p99Latency) + "; ";
-  if (p.deliveredTasks < p.totalTasks) pIssue += (p.totalTasks - p.deliveredTasks) + " undelivered; ";
+  if (p.deliveredTasks < p.totalTasks) pIssue += p.totalTasks - p.deliveredTasks + " undelivered; ";
   if (ss.maxBuffer > 5) sIssue += "buffer=" + ss.maxBuffer + "; ";
   if (ss.p99Latency > 30000) sIssue += "p99 " + fmtMs(ss.p99Latency) + "; ";
-  if (ss.deliveredTasks < ss.totalTasks) sIssue += (ss.totalTasks - ss.deliveredTasks) + " undelivered; ";
+  if (ss.deliveredTasks < ss.totalTasks)
+    sIssue += ss.totalTasks - ss.deliveredTasks + " undelivered; ";
   if (!pIssue) pIssue = "(clean)";
   if (!sIssue) sIssue = "(clean)";
   console.log("| " + r.name + " | " + pIssue + " | " + sIssue + " |");
@@ -293,8 +423,8 @@ const pushTotalWake = results.reduce((a, r) => a + r.push.wakeCount, 0);
 const subTotalWake = results.reduce((a, r) => a + r.sub.wakeCount, 0);
 const pushTotalCadence = results.reduce((a, r) => a + r.push.cadenceInjections, 0);
 const subTotalPoll = results.reduce((a, r) => a + r.sub.pollCount, 0);
-const pushMaxBacklog = Math.max(...results.map(r => r.push.maxBacklog));
-const subMaxBuffer = Math.max(...results.map(r => r.sub.maxBuffer));
+const pushMaxBacklog = Math.max(...results.map((r) => r.push.maxBacklog));
+const subMaxBuffer = Math.max(...results.map((r) => r.sub.maxBuffer));
 console.log("| metric | PUSH | SUB |");
 console.log("|---|---|---|");
 console.log("| sum bytes | " + fmtBytes(pushTotalBytes) + " | " + fmtBytes(subTotalBytes) + " |");

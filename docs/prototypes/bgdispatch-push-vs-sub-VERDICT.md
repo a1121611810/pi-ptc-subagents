@@ -15,6 +15,7 @@
 ## Methodology
 
 **Schemes compared**:
+
 - **PUSH**: per-completion notification, rate-limited to 3 deliveries per 60s window, 60s cadence reminders injected as `<system-reminder>` to drain backlog, mid-turn steer delivery
 - **SUB**: per-completion event buffered on subscription, idle wake drains entire buffer in 1 wake (batch delivery), busy mode polls every 30s, no rate limit, no cadence
 
@@ -36,6 +37,7 @@ Both schemes use the **same payload shape** (per Q1: Map+smart-preview, ~200-2 K
 12. **slow_fast**: 1 super-slow (10min) + 50 fast burst
 
 **Metrics**:
+
 - total bytes (context consumed)
 - wake count (interruptions to AI)
 - max backlog/buffer (worst-case unread count)
@@ -50,14 +52,14 @@ Source: `docs/prototypes/bgdispatch-push-vs-sub-measurements.md`
 
 ## Headline results (12-scenario aggregate)
 
-| metric | PUSH | SUB | SUB advantage |
-|---|---|---|---|
-| sum bytes | 896 KB | 1.24 MB* | PUSH looks smaller because it **failed to deliver** stranded tasks |
-| sum wake count | 899 | 815 | similar (within 10%) |
-| sum cadence injections | **57** | **0** | SUB saves 57 system-reminder injections polluting AI context |
-| sum poll count | 0 (n/a) | 33 | SUB batched-drains via periodic polls when busy |
-| max backlog/buffer worst-case | 500 | 500 | tied |
-| **scenarios where PUSH undelivers > 0** | **4** | **1** (zombies only) | SUB completes; PUSH stragglers |
+| metric                                  | PUSH    | SUB                  | SUB advantage                                                      |
+| --------------------------------------- | ------- | -------------------- | ------------------------------------------------------------------ |
+| sum bytes                               | 896 KB  | 1.24 MB*             | PUSH looks smaller because it **failed to deliver** stranded tasks |
+| sum wake count                          | 899     | 815                  | similar (within 10%)                                               |
+| sum cadence injections                  | **57**  | **0**                | SUB saves 57 system-reminder injections polluting AI context       |
+| sum poll count                          | 0 (n/a) | 33                   | SUB batched-drains via periodic polls when busy                    |
+| max backlog/buffer worst-case           | 500     | 500                  | tied                                                               |
+| **scenarios where PUSH undelivers > 0** | **4**   | **1** (zombies only) | SUB completes; PUSH stragglers                                     |
 
 *SUB bytes higher because it actually delivered the burst-stranded tasks PUSH left behind.
 
@@ -118,22 +120,22 @@ SUB: 0 cadence (no need), 1 wake at AI's next turn.
 
 ### Where PUSH has unique failure modes (counter-arguments for SUB)
 
-| failure mode | PUSH | SUB |
-|---|---|---|
-| Tasks stranded > 12 min during burst | YES (28-428 stranded) | NO (1 batch delivers all) |
-| Cadence reminder pollutes context | YES (57 reminders) | NO (0 by design) |
-| Tasks lost on session restart | YES (11 stranded in restart scenario) | NO (cursor replay) |
-| Rate limit forces artificial delays | YES (60s window) | NO (model controls) |
-| 5+ min p99 latency in normal scenarios | YES (3-12 min) | NO (≤30s) |
+| failure mode                           | PUSH                                  | SUB                       |
+| -------------------------------------- | ------------------------------------- | ------------------------- |
+| Tasks stranded > 12 min during burst   | YES (28-428 stranded)                 | NO (1 batch delivers all) |
+| Cadence reminder pollutes context      | YES (57 reminders)                    | NO (0 by design)          |
+| Tasks lost on session restart          | YES (11 stranded in restart scenario) | NO (cursor replay)        |
+| Rate limit forces artificial delays    | YES (60s window)                      | NO (model controls)       |
+| 5+ min p99 latency in normal scenarios | YES (3-12 min)                        | NO (≤30s)                 |
 
 ### Where SUB has unique failure modes (counter-arguments for PUSH)
 
-| failure mode | SUB | PUSH |
-|---|---|---|
-| Subscription lifecycle complexity | YES (open/close on task spawn/end, fork, restart) | NO (no state to manage) |
-| Buffer grows unbounded if model never polls | YES (worst case in our sim: 500) | NO (rate-limited at registry, not unbounded) |
-| Fork ownership of subscription unclear | YES (which branch owns?) | NO (each branch has independent deliveredAt) |
-| Implementation more code paths | YES (subscription/cursor/poll) | NO (simple notification injection) |
+| failure mode                                | SUB                                               | PUSH                                         |
+| ------------------------------------------- | ------------------------------------------------- | -------------------------------------------- |
+| Subscription lifecycle complexity           | YES (open/close on task spawn/end, fork, restart) | NO (no state to manage)                      |
+| Buffer grows unbounded if model never polls | YES (worst case in our sim: 500)                  | NO (rate-limited at registry, not unbounded) |
+| Fork ownership of subscription unclear      | YES (which branch owns?)                          | NO (each branch has independent deliveredAt) |
+| Implementation more code paths              | YES (subscription/cursor/poll)                    | NO (simple notification injection)           |
 
 ---
 
@@ -150,26 +152,32 @@ The implementation simplicity argument is real but bounded — we already have a
 These matter but don't show up in 1-min steady simulation:
 
 ### Network failure during push delivery
+
 - **PUSH**: notification message lost mid-flight. TaskRecord.deliveredAt never written. On restart, AI sees "unread" task, must reconcile manually. Could lead to duplicate notification if delivery actually succeeded but ack was lost.
 - **SUB**: subscription reconnects, cursor-based replay handles missed events. **SUB wins by design** — WebSocket-style protocols handle this natively.
 
 ### Subscription ownership after fork
+
 - **PUSH**: each branch has independent deliveredAt (R1 + Q1 design). Fork is clean.
 - **SUB**: who owns the subscription after fork? Sub-fork needs to either (a) inherit parent's cursor (and continue), (b) clone cursor (independent observation), or (c) move cursor to max(parent, child) to prevent double-delivery. **Risk**: design complexity.
 
 ### Model agent killed mid-pipeline
+
 - **PUSH**: notifications queued for delivery are lost. On AI restart, must re-emit TASK_LOST events for un-notified tasks.
 - **SUB**: subscription buffer persists to disk (R1 lock). On restart, model polls from cursor. **SUB wins**.
 
 ### Subscription stale (subscriber zombie)
+
 - **PUSH**: no subscriber; just queue in TaskRegistry.
 - **SUB**: subscription has no consumer; buffer grows until cleanup. **Needs explicit cleanup mechanism** (TTL on subscription, or cleanup on session_end event).
 
 ### Two AI sessions on same task (multi-client)
+
 - **PUSH**: only one session's deliveredAt tracks; other session re-receives.
 - **SUB**: each session has its own subscription with its own cursor. Independent. **SUB wins** — multi-client is natural.
 
 ### Completion race with subscriber disconnect
+
 - **PUSH**: notification generated; if subscriber just disconnected, delivery hangs. Idempotency key prevents double-notify on reconnect.
 - **SUB**: event buffered on subscription; if subscriber disconnects, event sits in buffer until reconnect (cursor-based replay). **SUB wins**.
 
@@ -182,7 +190,7 @@ Concretely, SUB adds these to the TaskRegistry code:
 1. **`Subscription` struct**: `{ownerSessionId, cursor, buffer: TaskRecord[]}` (3 fields per subscription)
 2. **Lifecycle**: open on first `pi.dispatch({background:true})`, close on session_end
 3. **`ptc_task_events(opts?: {since?: ULID, limit?: number})`** tool — replaces the need for cadence
-5. **Cursor management**: monotonic ID per event; cursor persists with TaskRecord
+4. **Cursor management**: monotonic ID per event; cursor persists with TaskRecord
 
 Approximately **+200 LOC** vs PUSH's notification queue (which needs deliveredAt + rate-limit counter + cadence scheduler).
 

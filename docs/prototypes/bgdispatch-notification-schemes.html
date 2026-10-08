@@ -1,150 +1,369 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<title>bgdispatch/G2 — 通知方案对比原型</title>
-<style>
-  body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro", system-ui, "PingFang SC", sans-serif; max-width: 1180px; margin: 0 auto; padding: 20px 24px; color: #1a1a1a; background: #fbfbfb; line-height: 1.55; }
-  header { border-bottom: 2px solid #222; padding-bottom: 12px; margin-bottom: 24px; }
-  header h1 { margin: 0; font-size: 22px; }
-  header .subtitle { color: #555; font-size: 13px; margin-top: 4px; }
-  header .warn { background: #fff8e1; border-left: 3px solid #f9a825; padding: 8px 12px; margin-top: 10px; font-size: 12px; border-radius: 0 4px 4px 0; }
+  <head>
+    <meta charset="UTF-8" />
+    <title>bgdispatch/G2 — 通知方案对比原型</title>
+    <style>
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "SF Pro", system-ui, "PingFang SC", sans-serif;
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 20px 24px;
+        color: #1a1a1a;
+        background: #fbfbfb;
+        line-height: 1.55;
+      }
+      header {
+        border-bottom: 2px solid #222;
+        padding-bottom: 12px;
+        margin-bottom: 24px;
+      }
+      header h1 {
+        margin: 0;
+        font-size: 22px;
+      }
+      header .subtitle {
+        color: #555;
+        font-size: 13px;
+        margin-top: 4px;
+      }
+      header .warn {
+        background: #fff8e1;
+        border-left: 3px solid #f9a825;
+        padding: 8px 12px;
+        margin-top: 10px;
+        font-size: 12px;
+        border-radius: 0 4px 4px 0;
+      }
 
-  .tabs { display: flex; gap: 0; border-bottom: 1px solid #ccc; margin-bottom: 18px; }
-  .tabs button { background: none; border: 1px solid transparent; border-bottom: none; padding: 8px 18px; cursor: pointer; font-size: 14px; color: #555; }
-  .tabs button.active { background: white; border-color: #ccc; border-radius: 4px 4px 0 0; color: #222; font-weight: 600; }
+      .tabs {
+        display: flex;
+        gap: 0;
+        border-bottom: 1px solid #ccc;
+        margin-bottom: 18px;
+      }
+      .tabs button {
+        background: none;
+        border: 1px solid transparent;
+        border-bottom: none;
+        padding: 8px 18px;
+        cursor: pointer;
+        font-size: 14px;
+        color: #555;
+      }
+      .tabs button.active {
+        background: white;
+        border-color: #ccc;
+        border-radius: 4px 4px 0 0;
+        color: #222;
+        font-weight: 600;
+      }
 
-  .tab-panel { display: none; }
-  .tab-panel.active { display: block; }
+      .tab-panel {
+        display: none;
+      }
+      .tab-panel.active {
+        display: block;
+      }
 
-  .controls { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 20px; align-items: flex-end; padding: 14px; background: #f0f0f0; border-radius: 6px; }
-  .controls label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: #444; }
-  .controls select, .controls input { padding: 5px 8px; font-size: 13px; border: 1px solid #bbb; border-radius: 3px; background: white; }
-  .controls button { padding: 9px 18px; background: #0e639c; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; }
-  .controls button:hover { background: #0a4f7e; }
-  .controls button.secondary { background: #6c757d; }
-  .controls button.secondary:hover { background: #545b62; }
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px;
+        margin-bottom: 20px;
+        align-items: flex-end;
+        padding: 14px;
+        background: #f0f0f0;
+        border-radius: 6px;
+      }
+      .controls label {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        font-size: 11px;
+        color: #444;
+      }
+      .controls select,
+      .controls input {
+        padding: 5px 8px;
+        font-size: 13px;
+        border: 1px solid #bbb;
+        border-radius: 3px;
+        background: white;
+      }
+      .controls button {
+        padding: 9px 18px;
+        background: #0e639c;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 500;
+      }
+      .controls button:hover {
+        background: #0a4f7e;
+      }
+      .controls button.secondary {
+        background: #6c757d;
+      }
+      .controls button.secondary:hover {
+        background: #545b62;
+      }
 
-  table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 13px; }
-  th, td { border: 1px solid #ddd; padding: 7px 11px; text-align: left; }
-  th { background: #ececec; font-weight: 600; }
-  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-  tr.winner td { background: #e8f5e9; font-weight: 600; }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 10px 0;
+        font-size: 13px;
+      }
+      th,
+      td {
+        border: 1px solid #ddd;
+        padding: 7px 11px;
+        text-align: left;
+      }
+      th {
+        background: #ececec;
+        font-weight: 600;
+      }
+      td.num,
+      th.num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      tr.winner td {
+        background: #e8f5e9;
+        font-weight: 600;
+      }
 
-  .summary { background: white; border: 1px solid #ddd; border-radius: 6px; padding: 16px; margin: 10px 0; }
-  .summary h3 { margin-top: 0; font-size: 16px; color: #0e639c; }
-  .summary .metric { display: inline-block; padding: 6px 12px; margin: 4px 6px 4px 0; background: #f5f5f5; border-radius: 4px; font-size: 11px; color: #555; vertical-align: top; min-width: 90px; }
-  .summary .metric strong { display: block; font-size: 14px; color: #0e639c; margin-top: 2px; font-variant-numeric: tabular-nums; }
+      .summary {
+        background: white;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        padding: 16px;
+        margin: 10px 0;
+      }
+      .summary h3 {
+        margin-top: 0;
+        font-size: 16px;
+        color: #0e639c;
+      }
+      .summary .metric {
+        display: inline-block;
+        padding: 6px 12px;
+        margin: 4px 6px 4px 0;
+        background: #f5f5f5;
+        border-radius: 4px;
+        font-size: 11px;
+        color: #555;
+        vertical-align: top;
+        min-width: 90px;
+      }
+      .summary .metric strong {
+        display: block;
+        font-size: 14px;
+        color: #0e639c;
+        margin-top: 2px;
+        font-variant-numeric: tabular-nums;
+      }
 
-  .verdict { background: #e8f5e9; border-left: 4px solid #4caf50; padding: 14px 18px; margin: 14px 0; font-size: 13px; border-radius: 0 4px 4px 0; }
-  .verdict.warn { background: #fff3cd; border-left-color: #ffc107; }
-  .verdict.bad { background: #ffebee; border-left-color: #ef5350; }
-  .verdict h3 { margin-top: 0; }
+      .verdict {
+        background: #e8f5e9;
+        border-left: 4px solid #4caf50;
+        padding: 14px 18px;
+        margin: 14px 0;
+        font-size: 13px;
+        border-radius: 0 4px 4px 0;
+      }
+      .verdict.warn {
+        background: #fff3cd;
+        border-left-color: #ffc107;
+      }
+      .verdict.bad {
+        background: #ffebee;
+        border-left-color: #ef5350;
+      }
+      .verdict h3 {
+        margin-top: 0;
+      }
 
-  pre { background: #f0f0f0; padding: 12px; border-radius: 4px; font-size: 11.5px; overflow-x: auto; line-height: 1.45; }
+      pre {
+        background: #f0f0f0;
+        padding: 12px;
+        border-radius: 4px;
+        font-size: 11.5px;
+        overflow-x: auto;
+        line-height: 1.45;
+      }
 
-  details { background: #f5f5f5; padding: 8px 12px; margin: 6px 0; border-radius: 4px; }
-  details summary { cursor: pointer; font-size: 13px; font-weight: 600; padding: 4px 0; }
+      details {
+        background: #f5f5f5;
+        padding: 8px 12px;
+        margin: 6px 0;
+        border-radius: 4px;
+      }
+      details summary {
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 600;
+        padding: 4px 0;
+      }
 
-  .scenarios button { display: block; width: 100%; text-align: left; padding: 12px 14px; margin: 4px 0; background: white; border: 1px solid #ddd; border-radius: 4px; cursor: pointer; font-size: 13px; transition: background 0.15s; }
-  .scenarios button:hover { background: #f0f0f0; border-color: #0e639c; }
-  .scenarios button strong { color: #0e639c; }
-  .scenarios button .desc { color: #666; font-size: 11.5px; margin-top: 3px; }
+      .scenarios button {
+        display: block;
+        width: 100%;
+        text-align: left;
+        padding: 12px 14px;
+        margin: 4px 0;
+        background: white;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 13px;
+        transition: background 0.15s;
+      }
+      .scenarios button:hover {
+        background: #f0f0f0;
+        border-color: #0e639c;
+      }
+      .scenarios button strong {
+        color: #0e639c;
+      }
+      .scenarios button .desc {
+        color: #666;
+        font-size: 11.5px;
+        margin-top: 3px;
+      }
 
-  .bar-cell { display: flex; align-items: center; gap: 8px; }
-  .bar-bg { flex: 1; background: #eee; height: 14px; border-radius: 2px; overflow: hidden; min-width: 60px; }
-  .bar-fill { height: 100%; background: #0e639c; }
-  .bar-fill.tiered { background: #d32f2f; }
-  .bar-fill.reference { background: #f57c00; }
-  .bar-fill.map-preview { background: #388e3c; }
-  .bar-fill.map-strict { background: #1976d2; }
-</style>
-</head>
-<body>
+      .bar-cell {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .bar-bg {
+        flex: 1;
+        background: #eee;
+        height: 14px;
+        border-radius: 2px;
+        overflow: hidden;
+        min-width: 60px;
+      }
+      .bar-fill {
+        height: 100%;
+        background: #0e639c;
+      }
+      .bar-fill.tiered {
+        background: #d32f2f;
+      }
+      .bar-fill.reference {
+        background: #f57c00;
+      }
+      .bar-fill.map-preview {
+        background: #388e3c;
+      }
+      .bar-fill.map-strict {
+        background: #1976d2;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Background-dispatch 通知方案对比原型</h1>
+      <div class="subtitle">
+        bgdispatch/G2 — throwaway logic prototype on
+        <code>research/bgdispatch-notification-schemes</code> 分支
+      </div>
+      <div class="warn">
+        ⚠️ PROTOTYPE, not production. 测量 4 种通知方案在不同分布/任务数下的累积 context cost /
+        round-trip 数 / 派生延迟，决策不据此引入新基建。
+      </div>
+    </header>
 
-<header>
-  <h1>Background-dispatch 通知方案对比原型</h1>
-  <div class="subtitle">bgdispatch/G2 — throwaway logic prototype on <code>research/bgdispatch-notification-schemes</code> 分支</div>
-  <div class="warn">⚠️ PROTOTYPE, not production. 测量 4 种通知方案在不同分布/任务数下的累积 context cost / round-trip 数 / 派生延迟，决策不据此引入新基建。</div>
-</header>
+    <nav class="tabs">
+      <button class="active" data-tab="free">自由模式</button>
+      <button data-tab="guided">引导场景</button>
+      <button data-tab="method">方法论</button>
+      <button data-tab="verdict">结论</button>
+    </nav>
 
-<nav class="tabs">
-  <button class="active" data-tab="free">自由模式</button>
-  <button data-tab="guided">引导场景</button>
-  <button data-tab="method">方法论</button>
-  <button data-tab="verdict">结论</button>
-</nav>
+    <main>
+      <section id="free" class="tab-panel active">
+        <h2>自由模式</h2>
+        <p>Pick a scheme + distribution + task count to see per-scheme measurements.</p>
+        <div class="controls">
+          <label
+            >方案
+            <select id="scheme">
+              <option value="tiered">A. Tiered (8KB inline / 4KB tail preview / pointer)</option>
+              <option value="reference">B. Reference (always ref + ≤2KB preview)</option>
+              <option value="map-preview">C. Map + smart preview (no ref + ≤2KB preview)</option>
+              <option value="map-strict">D. Strict Map (no ref + no preview)</option>
+            </select>
+          </label>
+          <label
+            >分布
+            <select id="dist">
+              <option value="small">小结果为主 (all ≤2KB)</option>
+              <option value="small-medium">小+中 (80% ≤2KB, 20% 3-8KB)</option>
+              <option value="realistic" selected>
+                真实分布 (60% ≤2KB, 25% 3-8KB, 10% 8-50KB, 5% >50KB)
+              </option>
+              <option value="large">大结果为主 (30% 8-50KB, 70% >50KB)</option>
+              <option value="burst">突发 (power-law 70/20/7/3)</option>
+            </select>
+          </label>
+          <label
+            >任务数
+            <input type="number" id="count" value="60" min="1" max="1000" />
+          </label>
+          <label
+            >每 RT 延迟 (ms)
+            <input type="number" id="rt-latency" value="250" min="0" max="5000" />
+          </label>
+          <button id="run">运行</button>
+          <button id="compare-all" class="secondary">四方案横评</button>
+        </div>
+        <div id="result-free"></div>
+      </section>
 
-<main>
-  <section id="free" class="tab-panel active">
-    <h2>自由模式</h2>
-    <p>Pick a scheme + distribution + task count to see per-scheme measurements.</p>
-    <div class="controls">
-      <label>方案
-        <select id="scheme">
-          <option value="tiered">A. Tiered (8KB inline / 4KB tail preview / pointer)</option>
-          <option value="reference">B. Reference (always ref + ≤2KB preview)</option>
-          <option value="map-preview">C. Map + smart preview (no ref + ≤2KB preview)</option>
-          <option value="map-strict">D. Strict Map (no ref + no preview)</option>
-        </select>
-      </label>
-      <label>分布
-        <select id="dist">
-          <option value="small">小结果为主 (all ≤2KB)</option>
-          <option value="small-medium">小+中 (80% ≤2KB, 20% 3-8KB)</option>
-          <option value="realistic" selected>真实分布 (60% ≤2KB, 25% 3-8KB, 10% 8-50KB, 5% >50KB)</option>
-          <option value="large">大结果为主 (30% 8-50KB, 70% >50KB)</option>
-          <option value="burst">突发 (power-law 70/20/7/3)</option>
-        </select>
-      </label>
-      <label>任务数
-        <input type="number" id="count" value="60" min="1" max="1000">
-      </label>
-      <label>每 RT 延迟 (ms)
-        <input type="number" id="rt-latency" value="250" min="0" max="5000">
-      </label>
-      <button id="run">运行</button>
-      <button id="compare-all" class="secondary">四方案横评</button>
-    </div>
-    <div id="result-free"></div>
-  </section>
+      <section id="guided" class="tab-panel">
+        <h2>引导场景</h2>
+        <p>5 scenarios that capture the dimensions that matter.</p>
+        <div class="scenarios">
+          <button data-scenario="daily">
+            <strong>场景1: Daily coding</strong>
+            <div class="desc">60 tasks, realistic distribution — typical dev day</div>
+          </button>
+          <button data-scenario="bulk">
+            <strong>场景2: Bulk research</strong>
+            <div class="desc">100 tasks, mostly medium-large outputs</div>
+          </button>
+          <button data-scenario="sprint">
+            <strong>场景3: Sprint crunch</strong>
+            <div class="desc">200 tasks, realistic — context pressure test</div>
+          </button>
+          <button data-scenario="scaling">
+            <strong>场景4: 体量扫描</strong>
+            <div class="desc">10 / 50 / 100 / 200 / 500 tasks with realistic distribution</div>
+          </button>
+          <button data-scenario="extreme">
+            <strong>场景5: 极端分布</strong>
+            <div class="desc">500 tasks, mostly huge (>200KB) — worst case</div>
+          </button>
+          <button data-scenario="head-to-head">
+            <strong>场景6: 头对头</strong>
+            <div class="desc">每个分布 × 每个方案 × 每个任务数，全网格采样 + 平均</div>
+          </button>
+        </div>
+        <div id="result-guided"></div>
+      </section>
 
-  <section id="guided" class="tab-panel">
-    <h2>引导场景</h2>
-    <p>5 scenarios that capture the dimensions that matter.</p>
-    <div class="scenarios">
-      <button data-scenario="daily">
-        <strong>场景1: Daily coding</strong>
-        <div class="desc">60 tasks, realistic distribution — typical dev day</div>
-      </button>
-      <button data-scenario="bulk">
-        <strong>场景2: Bulk research</strong>
-        <div class="desc">100 tasks, mostly medium-large outputs</div>
-      </button>
-      <button data-scenario="sprint">
-        <strong>场景3: Sprint crunch</strong>
-        <div class="desc">200 tasks, realistic — context pressure test</div>
-      </button>
-      <button data-scenario="scaling">
-        <strong>场景4: 体量扫描</strong>
-        <div class="desc">10 / 50 / 100 / 200 / 500 tasks with realistic distribution</div>
-      </button>
-      <button data-scenario="extreme">
-        <strong>场景5: 极端分布</strong>
-        <div class="desc">500 tasks, mostly huge (>200KB) — worst case</div>
-      </button>
-      <button data-scenario="head-to-head">
-        <strong>场景6: 头对头</strong>
-        <div class="desc">每个分布 × 每个方案 × 每个任务数，全网格采样 + 平均</div>
-      </button>
-    </div>
-    <div id="result-guided"></div>
-  </section>
-
-  <section id="method" class="tab-panel">
-    <h2>方法论</h2>
-    <h3>4 方案每档位字节估算</h3>
-    <pre>
+      <section id="method" class="tab-panel">
+        <h2>方法论</h2>
+        <h3>4 方案每档位字节估算</h3>
+        <pre>
 // Constants
 META_BYTES          = 200  // XML/JSON overhead per notification (taskId, status, label, durationMs, etc.)
 REF_STRING_BYTES    = 100  // file path string for outputRef
@@ -176,147 +395,161 @@ RT: ≤2KB → 0 RT, >2KB → 1 RT
 bytes = META                                                  // metadata only
 RT: 1 RT every task
     </pre>
-    <h3>Token 估算</h3>
-    <p>1 token ≈ 4 chars (English/JSON/XML)。<strong>200K 上下文窗口 = 800 KB raw bytes</strong>。占窗% = <code>(bytes / 4) / 200000 * 100</code>。</p>
-    <h3>Round-trip 延迟</h3>
-    <p>默认 250 ms/turn 模拟 LLM tool call 决策（pi/Claude 经验值）；可调。deref 走 <code>ptc_task_output(taskId)</code>。</p>
-    <h3>为什么 reference 体积用字节而不是字符</h3>
-    <p>JSON / XML / path 字符串 ASCII 主导，4 char ≈ 1 token 是合理近似。中文输出 60% token 效率会下降，但不影响**方案间相对差距**——所有方案按相同规则吃亏。</p>
-  </section>
+        <h3>Token 估算</h3>
+        <p>
+          1 token ≈ 4 chars (English/JSON/XML)。<strong>200K 上下文窗口 = 800 KB raw bytes</strong
+          >。占窗% = <code>(bytes / 4) / 200000 * 100</code>。
+        </p>
+        <h3>Round-trip 延迟</h3>
+        <p>
+          默认 250 ms/turn 模拟 LLM tool call 决策（pi/Claude 经验值）；可调。deref 走
+          <code>ptc_task_output(taskId)</code>。
+        </p>
+        <h3>为什么 reference 体积用字节而不是字符</h3>
+        <p>
+          JSON / XML / path 字符串 ASCII 主导，4 char ≈ 1 token 是合理近似。中文输出 60% token
+          效率会下降，但不影响**方案间相对差距**——所有方案按相同规则吃亏。
+        </p>
+      </section>
 
-  <section id="verdict" class="tab-panel">
-    <h2>最终结论</h2>
-    <div id="verdict-content">
-      <p>Run <strong>场景6 (头对头)</strong> to populate the verdict.</p>
-    </div>
-  </section>
-</main>
+      <section id="verdict" class="tab-panel">
+        <h2>最终结论</h2>
+        <div id="verdict-content">
+          <p>Run <strong>场景6 (头对头)</strong> to populate the verdict.</p>
+        </div>
+      </section>
+    </main>
 
-<script>
-// ============================================================
-// Constants (per method.md)
-// ============================================================
-const META_BYTES = 200;
-const REF_STRING_BYTES = 100;
-const INLINE_THRESHOLD_A = 8 * 1024;
-const PREVIEW_THRESHOLD_BC = 2 * 1024;
-const PREVIEW_TAIL_A = 4 * 1024;
-const MEDIUM_THRESHOLD_A = 50 * 1024;
-const TOKENS_PER_BYTE = 4; // 1 token per 4 chars
-const WINDOW_BYTES = 200000 * TOKENS_PER_BYTE; // 200K tokens = 800KB raw
+    <script>
+      // ============================================================
+      // Constants (per method.md)
+      // ============================================================
+      const META_BYTES = 200;
+      const REF_STRING_BYTES = 100;
+      const INLINE_THRESHOLD_A = 8 * 1024;
+      const PREVIEW_THRESHOLD_BC = 2 * 1024;
+      const PREVIEW_TAIL_A = 4 * 1024;
+      const MEDIUM_THRESHOLD_A = 50 * 1024;
+      const TOKENS_PER_BYTE = 4; // 1 token per 4 chars
+      const WINDOW_BYTES = 200000 * TOKENS_PER_BYTE; // 200K tokens = 800KB raw
 
-// ============================================================
-// Distribution sampler
-// ============================================================
-function genTaskSizes(distKey, count, seed) {
-  let s = seed;
-  const rnd = () => {
-    // Mulberry32 (small deterministic PRNG)
-    s |= 0; s = s + 0x6D2B79F5 | 0;
-    let t = s;
-    t = Math.imul(t ^ t >>> 15, t | 1);
-    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
-    return ((t ^ t >>> 14) >>> 0) / 4294967296;
-  };
-  const sizes = [];
-  for (let i = 0; i < count; i++) {
-    const r = rnd();
-    let sz;
-    switch (distKey) {
-      case 'small':
-        sz = 100 + r() * (2048 - 100);
-        break;
-      case 'small-medium':
-        sz = r() < 0.8 ? 100 + r() * (2048 - 100) : 2049 + r() * (8192 - 2049);
-        break;
-      case 'realistic':
-        if (r() < 0.60)      sz = 100 + r() * (2048 - 100);
-        else if (r() < 0.85) sz = 2049 + r() * (8192 - 2049);
-        else if (r() < 0.95) sz = 8193 + r() * (51200 - 8193);
-        else                 sz = 51201 + r() * (250000 - 51201);
-        break;
-      case 'large':
-        if (r() < 0.3) sz = 8193 + r() * (51200 - 8193);
-        else           sz = 51201 + r() * (250000 - 51201);
-        break;
-      case 'burst':
-        if (r() < 0.70)      sz = 100 + r() * (2048 - 100);
-        else if (r() < 0.90) sz = 2049 + r() * (8192 - 2049);
-        else if (r() < 0.97) sz = 8193 + r() * (51200 - 8193);
-        else                 sz = 51201 + r() * (300000 - 51201);
-        break;
-    }
-    sizes.push(Math.max(50, Math.floor(sz)));
-  }
-  return sizes;
-}
-
-// ============================================================
-// Per-scheme computation
-// ============================================================
-function computeScheme(scheme, sizes) {
-  let totalBytes = 0;
-  let totalRoundTrips = 0;
-  const perTask = [];
-  for (const sz of sizes) {
-    let bytes = 0;
-    let rt = 0;
-    if (scheme === 'tiered') {
-      if (sz <= INLINE_THRESHOLD_A) {
-        bytes = sz + META_BYTES;
-        rt = 0;
-      } else if (sz <= MEDIUM_THRESHOLD_A) {
-        bytes = PREVIEW_TAIL_A + META_BYTES + REF_STRING_BYTES;
-        rt = 1;
-      } else {
-        bytes = META_BYTES + REF_STRING_BYTES;
-        rt = 1;
+      // ============================================================
+      // Distribution sampler
+      // ============================================================
+      function genTaskSizes(distKey, count, seed) {
+        let s = seed;
+        const rnd = () => {
+          // Mulberry32 (small deterministic PRNG)
+          s |= 0;
+          s = (s + 0x6d2b79f5) | 0;
+          let t = s;
+          t = Math.imul(t ^ (t >>> 15), t | 1);
+          t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+          return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+        const sizes = [];
+        for (let i = 0; i < count; i++) {
+          const r = rnd();
+          let sz;
+          switch (distKey) {
+            case "small":
+              sz = 100 + r() * (2048 - 100);
+              break;
+            case "small-medium":
+              sz = r() < 0.8 ? 100 + r() * (2048 - 100) : 2049 + r() * (8192 - 2049);
+              break;
+            case "realistic":
+              if (r() < 0.6) sz = 100 + r() * (2048 - 100);
+              else if (r() < 0.85) sz = 2049 + r() * (8192 - 2049);
+              else if (r() < 0.95) sz = 8193 + r() * (51200 - 8193);
+              else sz = 51201 + r() * (250000 - 51201);
+              break;
+            case "large":
+              if (r() < 0.3) sz = 8193 + r() * (51200 - 8193);
+              else sz = 51201 + r() * (250000 - 51201);
+              break;
+            case "burst":
+              if (r() < 0.7) sz = 100 + r() * (2048 - 100);
+              else if (r() < 0.9) sz = 2049 + r() * (8192 - 2049);
+              else if (r() < 0.97) sz = 8193 + r() * (51200 - 8193);
+              else sz = 51201 + r() * (300000 - 51201);
+              break;
+          }
+          sizes.push(Math.max(50, Math.floor(sz)));
+        }
+        return sizes;
       }
-    } else if (scheme === 'reference') {
-      bytes = META_BYTES + REF_STRING_BYTES;
-      if (sz <= PREVIEW_THRESHOLD_BC) {
-        bytes += sz;
-        rt = 0;
-      } else {
-        rt = 1;
-      }
-    } else if (scheme === 'map-preview') {
-      bytes = META_BYTES;
-      if (sz <= PREVIEW_THRESHOLD_BC) {
-        bytes += sz;
-        rt = 0;
-      } else {
-        rt = 1;
-      }
-    } else if (scheme === 'map-strict') {
-      bytes = META_BYTES;
-      rt = 1;
-    }
-    totalBytes += bytes;
-    totalRoundTrips += rt;
-    perTask.push({ sz, bytes, rt });
-  }
-  return { totalBytes, totalRoundTrips, perTask };
-}
 
-// ============================================================
-// Formatters
-// ============================================================
-function fmtBytes(b) {
-  if (b < 1024) return b + ' B';
-  if (b < 1024 * 1024) return (b / 1024).toFixed(2) + ' KB';
-  return (b / 1024 / 1024).toFixed(3) + ' MB';
-}
-function fmtTokens(b) { return Math.round(b / TOKENS_PER_BYTE).toLocaleString() + ' tok'; }
-function fmtPctFill(b) { return ((b / TOKENS_PER_BYTE) / 200000 * 100).toFixed(2) + '%'; }
+      // ============================================================
+      // Per-scheme computation
+      // ============================================================
+      function computeScheme(scheme, sizes) {
+        let totalBytes = 0;
+        let totalRoundTrips = 0;
+        const perTask = [];
+        for (const sz of sizes) {
+          let bytes = 0;
+          let rt = 0;
+          if (scheme === "tiered") {
+            if (sz <= INLINE_THRESHOLD_A) {
+              bytes = sz + META_BYTES;
+              rt = 0;
+            } else if (sz <= MEDIUM_THRESHOLD_A) {
+              bytes = PREVIEW_TAIL_A + META_BYTES + REF_STRING_BYTES;
+              rt = 1;
+            } else {
+              bytes = META_BYTES + REF_STRING_BYTES;
+              rt = 1;
+            }
+          } else if (scheme === "reference") {
+            bytes = META_BYTES + REF_STRING_BYTES;
+            if (sz <= PREVIEW_THRESHOLD_BC) {
+              bytes += sz;
+              rt = 0;
+            } else {
+              rt = 1;
+            }
+          } else if (scheme === "map-preview") {
+            bytes = META_BYTES;
+            if (sz <= PREVIEW_THRESHOLD_BC) {
+              bytes += sz;
+              rt = 0;
+            } else {
+              rt = 1;
+            }
+          } else if (scheme === "map-strict") {
+            bytes = META_BYTES;
+            rt = 1;
+          }
+          totalBytes += bytes;
+          totalRoundTrips += rt;
+          perTask.push({ sz, bytes, rt });
+        }
+        return { totalBytes, totalRoundTrips, perTask };
+      }
 
-// ============================================================
-// Render helpers
-// ============================================================
-function renderResult(result, schemeName, distName, count, rtLatency) {
-  const totalRT = result.totalRoundTrips;
-  const totalMs = totalRT * rtLatency;
-  return `
+      // ============================================================
+      // Formatters
+      // ============================================================
+      function fmtBytes(b) {
+        if (b < 1024) return b + " B";
+        if (b < 1024 * 1024) return (b / 1024).toFixed(2) + " KB";
+        return (b / 1024 / 1024).toFixed(3) + " MB";
+      }
+      function fmtTokens(b) {
+        return Math.round(b / TOKENS_PER_BYTE).toLocaleString() + " tok";
+      }
+      function fmtPctFill(b) {
+        return ((b / TOKENS_PER_BYTE / 200000) * 100).toFixed(2) + "%";
+      }
+
+      // ============================================================
+      // Render helpers
+      // ============================================================
+      function renderResult(result, schemeName, distName, count, rtLatency) {
+        const totalRT = result.totalRoundTrips;
+        const totalMs = totalRT * rtLatency;
+        return `
     <div class="summary">
       <h3>${schemeName} — ${distName} — ${count} tasks</h3>
       <div class="metric">总通知字节<strong>${fmtBytes(result.totalBytes)}</strong></div>
@@ -331,33 +564,39 @@ function renderResult(result, schemeName, distName, count, rtLatency) {
     <table>
       <thead><tr><th>#</th><th class="num">output bytes</th><th class="num">notif bytes</th><th class="num">RT</th></tr></thead>
       <tbody>
-      ${result.perTask.slice(0, 30).map((t, i) =>
-        `<tr><td>${i+1}</td><td class="num">${fmtBytes(t.sz)}</td><td class="num">${fmtBytes(t.bytes)}</td><td class="num">${t.rt}</td></tr>`
-      ).join('')}
+      ${result.perTask
+        .slice(0, 30)
+        .map(
+          (t, i) =>
+            `<tr><td>${i + 1}</td><td class="num">${fmtBytes(t.sz)}</td><td class="num">${fmtBytes(t.bytes)}</td><td class="num">${t.rt}</td></tr>`,
+        )
+        .join("")}
       </tbody>
     </table>
     </details>
   `;
-}
+      }
 
-function renderComparison(schemeResults, distName, count) {
-  const minB = Math.min(...schemeResults.map(s => s[2].totalBytes));
-  const minRT = Math.min(...schemeResults.map(s => s[2].totalRoundTrips));
-  const rows = schemeResults.map(([name, key, res]) => {
-    const winB = res.totalBytes === minB;
-    const winRT = res.totalRoundTrips === minRT;
-    return `
-      <tr class="${winB ? 'winner' : ''}">
-        <td>${winB ? '★ ' : ''}${name}</td>
+      function renderComparison(schemeResults, distName, count) {
+        const minB = Math.min(...schemeResults.map((s) => s[2].totalBytes));
+        const minRT = Math.min(...schemeResults.map((s) => s[2].totalRoundTrips));
+        const rows = schemeResults
+          .map(([name, key, res]) => {
+            const winB = res.totalBytes === minB;
+            const winRT = res.totalRoundTrips === minRT;
+            return `
+      <tr class="${winB ? "winner" : ""}">
+        <td>${winB ? "★ " : ""}${name}</td>
         <td class="num">${fmtBytes(res.totalBytes)}</td>
         <td class="num">${fmtTokens(res.totalBytes)}</td>
-        <td class="num">${winRT ? '★ ' : ''}${res.totalRoundTrips}</td>
+        <td class="num">${winRT ? "★ " : ""}${res.totalRoundTrips}</td>
         <td class="num">${fmtPctFill(res.totalBytes)}</td>
         <td class="num">${(res.totalBytes / count).toFixed(0)}</td>
       </tr>
     `;
-  }).join('');
-  return `
+          })
+          .join("");
+        return `
     <table>
       <thead>
         <tr><th>方案</th><th class="num">总字节</th><th class="num">总 tokens</th><th class="num">总 RT ★</th><th class="num">200K 窗口%</th><th class="num">avg B/task</th></tr>
@@ -366,212 +605,233 @@ function renderComparison(schemeResults, distName, count) {
     </table>
     <p style="font-size:11px; color:#666; margin-top:4px;">★ = 该列最优。min bytes = 总通知字节最低；min RT = 总 round-trip 最低。</p>
   `;
-}
-
-// ============================================================
-// UI wiring
-// ============================================================
-document.querySelectorAll('.tabs button').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-    document.getElementById(btn.dataset.tab).classList.add('active');
-  });
-});
-
-const SCHEME_NAMES = {
-  tiered: 'A. Tiered (8K inline / 4K tail / ptr)',
-  reference: 'B. Reference (ref + ≤2K preview)',
-  'map-preview': 'C. Map + smart preview (no ref + ≤2K preview)',
-  'map-strict': 'D. Strict Map (no ref + no preview)'
-};
-const DIST_NAMES = {
-  small: '小结果为主',
-  'small-medium': '小+中',
-  realistic: '真实分布',
-  large: '大结果为主',
-  burst: '突发 power-law'
-};
-
-function runFree() {
-  const scheme = document.getElementById('scheme').value;
-  const dist = document.getElementById('dist').value;
-  const count = parseInt(document.getElementById('count').value);
-  const rtLatency = parseInt(document.getElementById('rt-latency').value);
-  const sizes = genTaskSizes(dist, count, 42);
-  const result = computeScheme(scheme, sizes);
-  document.getElementById('result-free').innerHTML = renderResult(result, SCHEME_NAMES[scheme], DIST_NAMES[dist], count, rtLatency);
-}
-
-function runCompareAll() {
-  const dist = document.getElementById('dist').value;
-  const count = parseInt(document.getElementById('count').value);
-  const sizes = genTaskSizes(dist, count, 42);
-  const allSchemes = ['tiered', 'reference', 'map-preview', 'map-strict'];
-  const results = allSchemes.map(s => [SCHEME_NAMES[s], s, computeScheme(s, sizes)]);
-  let html = `<h3>${DIST_NAMES[dist]} — ${count} tasks — 4 schemes head-to-head</h3>`;
-  html += renderComparison(results, DIST_NAMES[dist], count);
-  document.getElementById('result-free').innerHTML = html;
-}
-
-document.getElementById('run').addEventListener('click', runFree);
-document.getElementById('compare-all').addEventListener('click', runCompareAll);
-
-document.querySelectorAll('.scenarios button').forEach(btn => {
-  btn.addEventListener('click', () => runGuidedScenario(btn.dataset.scenario));
-});
-
-function runGuidedScenario(name) {
-  let dist, count, html = '';
-  const allSchemes = ['tiered', 'reference', 'map-preview', 'map-strict'];
-
-  if (name === 'scaling') {
-    dist = 'realistic';
-    const counts = [10, 50, 100, 200, 500];
-    html = `<h3>Scaling — realistic dist, varying task count</h3>`;
-    html += `<table><thead><tr><th>Tasks</th>`;
-    for (const s of allSchemes) html += `<th class="num">${SCHEME_NAMES[s].split(' ')[0]}<br>bytes</th>`;
-    html += `<th class="num">B vs C<br>ratio</th>`;
-    html += `<th class="num">A vs C<br>ratio</th>`;
-    html += `</tr></thead><tbody>`;
-    for (const c of counts) {
-      const sizes = genTaskSizes(dist, c, 42);
-      const results = allSchemes.map(s => computeScheme(s, sizes));
-      const [a, b, c2, d] = results;
-      html += `<tr>`;
-      html += `<td><strong>${c}</strong></td>`;
-      html += `<td class="num">${fmtBytes(a.totalBytes)}</td>`;
-      html += `<td class="num">${fmtBytes(b.totalBytes)}</td>`;
-      html += `<td class="num" style="background:#e8f5e9;"><strong>${fmtBytes(c2.totalBytes)}</strong></td>`;
-      html += `<td class="num">${fmtBytes(d.totalBytes)}</td>`;
-      html += `<td class="num">${(b.totalBytes / c2.totalBytes).toFixed(2)}x</td>`;
-      html += `<td class="num">${(a.totalBytes / c2.totalBytes).toFixed(2)}x</td>`;
-      html += `</tr>`;
-    }
-    html += `</tbody></table>`;
-    html += `<p style="font-size:11px; color:#555;">C = Map+smart preview (推荐候选)。"B vs C" / "A vs C" = B (reference) 和 A (tiered) 相对 C 的倍数。</p>`;
-    document.getElementById('result-guided').innerHTML = html;
-    return;
-  }
-
-  if (name === 'head-to-head') {
-    const dists = ['small', 'small-medium', 'realistic', 'large', 'burst'];
-    const counts = [20, 60, 100, 200, 500];
-    html = `<h3>Head-to-head: ${dists.length} dists × ${counts.length} counts × ${allSchemes.length} schemes</h3>`;
-    html += `<p style="font-size:12px; color:#555;">聚合每个 (dist, count) cell 内的方案对比；列 = 方案，行 = (dist, count)。★ 标记 wins。</p>`;
-    html += `<table><thead><tr><th>(dist, count)</th>`;
-    for (const s of allSchemes) html += `<th class="num">${SCHEME_NAMES[s].split(' ')[0]}<br>bytes</th>`;
-    html += `<th class="num">RT total</th><th class="num">winner bytes</th></tr></thead><tbody>`;
-    for (const d of dists) {
-      for (const c of counts) {
-        const sizes = genTaskSizes(d, c, 42);
-        const results = allSchemes.map(s => computeScheme(s, sizes));
-        const minB = Math.min(...results.map(r => r.totalBytes));
-        const totalRT = results.reduce((a, r) => a + r.totalRoundTrips, 0);
-        const winnerKey = allSchemes[results.findIndex(r => r.totalBytes === minB)];
-        const winnerName = SCHEME_NAMES[winnerKey].split(' ')[0];
-        html += `<tr>`;
-        html += `<td>${DIST_NAMES[d]}<br><small>${c} tasks</small></td>`;
-        for (const r of results) {
-          const isWin = r.totalBytes === minB;
-          html += `<td class="num" ${isWin ? 'style="background:#e8f5e9; font-weight:600;"' : ''}>${fmtBytes(r.totalBytes)}</td>`;
-        }
-        html += `<td class="num">${totalRT}</td>`;
-        html += `<td>${winnerName}</td>`;
-        html += `</tr>`;
       }
-    }
-    html += `</tbody></table>`;
-    document.getElementById('result-guided').innerHTML = html;
-    populateVerdict();
-    return;
-  }
 
-  switch (name) {
-    case 'daily':    dist = 'realistic'; count = 60;  break;
-    case 'bulk':     dist = 'large';     count = 100; break;
-    case 'sprint':   dist = 'realistic'; count = 200; break;
-    case 'extreme':  dist = 'large';     count = 500; break;
-  }
-  const sizes = genTaskSizes(dist, count, 42);
-  const results = allSchemes.map(s => [SCHEME_NAMES[s], s, computeScheme(s, sizes)]);
-  html = `<h3>Scenario: ${name} (${DIST_NAMES[dist]}, ${count} tasks)</h3>`;
-  html += renderComparison(results, DIST_NAMES[dist], count);
-  for (const [name2, key, res] of results) {
-    html += `<details><summary>${name2} — full breakdown</summary>${renderResult(res, name2, DIST_NAMES[dist], count, 250)}</details>`;
-  }
-  document.getElementById('result-guided').innerHTML = html;
-}
-
-// ============================================================
-// Verdict aggregator
-// ============================================================
-function populateVerdict() {
-  const dists = ['small', 'small-medium', 'realistic', 'large', 'burst'];
-  const counts = [20, 60, 100, 200, 500];
-  const allSchemes = ['tiered', 'reference', 'map-preview', 'map-strict'];
-  const winsByScheme = {tiered: 0, reference: 0, 'map-preview': 0, 'map-strict': 0};
-  const totalCells = dists.length * counts.length;
-  let avgBytes = {tiered: 0, reference: 0, 'map-preview': 0, 'map-strict': 0};
-  let avgRT = {tiered: 0, reference: 0, 'map-preview': 0, 'map-strict': 0};
-
-  for (const d of dists) {
-    for (const c of counts) {
-      const sizes = genTaskSizes(d, c, 42);
-      const results = allSchemes.map(s => computeScheme(s, sizes));
-      const minB = Math.min(...results.map(r => r.totalBytes));
-      const winIdx = results.findIndex(r => r.totalBytes === minB);
-      winsByScheme[allSchemes[winIdx]]++;
-      results.forEach((r, i) => {
-        avgBytes[allSchemes[i]] += r.totalBytes;
-        avgRT[allSchemes[i]] += r.totalRoundTrips;
+      // ============================================================
+      // UI wiring
+      // ============================================================
+      document.querySelectorAll(".tabs button").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          document.querySelectorAll(".tabs button").forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
+          document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
+          document.getElementById(btn.dataset.tab).classList.add("active");
+        });
       });
-    }
-  }
-  for (const s of allSchemes) {
-    avgBytes[s] /= totalCells;
-    avgRT[s] /= totalCells;
-  }
 
-  const winner = Object.entries(winsByScheme).sort((a, b) => b[1] - a[1])[0];
-  const winnerName = SCHEME_NAMES[winner[0]];
-  const winnerWins = winner[1];
+      const SCHEME_NAMES = {
+        tiered: "A. Tiered (8K inline / 4K tail / ptr)",
+        reference: "B. Reference (ref + ≤2K preview)",
+        "map-preview": "C. Map + smart preview (no ref + ≤2K preview)",
+        "map-strict": "D. Strict Map (no ref + no preview)",
+      };
+      const DIST_NAMES = {
+        small: "小结果为主",
+        "small-medium": "小+中",
+        realistic: "真实分布",
+        large: "大结果为主",
+        burst: "突发 power-law",
+      };
 
-  let html = `<h3>Verdict (over ${totalCells} head-to-head cells)</h3>`;
-  html += `<table><thead><tr><th>方案</th><th class="num">wins</th><th class="num">%</th><th class="num">avg bytes/cell</th><th class="num">avg RT/cell</th></tr></thead><tbody>`;
-  for (const s of allSchemes) {
-    const isWinner = s === winner[0];
-    html += `<tr class="${isWinner ? 'winner' : ''}"><td>${SCHEME_NAMES[s]}</td><td class="num">${winsByScheme[s]}</td><td class="num">${(winsByScheme[s]/totalCells*100).toFixed(0)}%</td><td class="num">${fmtBytes(avgBytes[s])}</td><td class="num">${avgRT[s].toFixed(1)}</td></tr>`;
-  }
-  html += `</tbody></table>`;
-  html += `<div class="verdict"><h3>${winnerWins}/${totalCells} cells win → ${winnerName}</h3>`;
+      function runFree() {
+        const scheme = document.getElementById("scheme").value;
+        const dist = document.getElementById("dist").value;
+        const count = parseInt(document.getElementById("count").value);
+        const rtLatency = parseInt(document.getElementById("rt-latency").value);
+        const sizes = genTaskSizes(dist, count, 42);
+        const result = computeScheme(scheme, sizes);
+        document.getElementById("result-free").innerHTML = renderResult(
+          result,
+          SCHEME_NAMES[scheme],
+          DIST_NAMES[dist],
+          count,
+          rtLatency,
+        );
+      }
 
-  // Verdict text
-  if (winner[0] === 'map-preview') {
-    html += `<p><strong>Map + smart preview (≤2KB inline)</strong> 优于其余三方案。理由:</p>`;
-    html += `<ul>`;
-    html += `<li><strong>Context window cost</strong>: 在所有 (dist, count) cell 里字节最低或与最优持平；与 reference 比省 ~50 B/notif 的 ref 字符串。</li>`;
-    html += `<li><strong>Round-trip 数</strong>: 小结果 (≤2KB) 0 RT（preview=full），大结果 1 RT——与 reference 平手。</li>`;
-    html += `<li><strong>架构</strong>: 通知不再携带 file path，所有状态由 TaskRegistry 单源持有；notification payload uniform shape——TUI 渲染器分支减半。</li>`;
-    html += `<li><strong>唯一 trade-off</strong>: 3-8 KB 中间档无 inline preview（预览阈值 2 KB），模型必调 ptc_task_output 拉全文；A/B 方案在此档可 0 RT。这档占比生产 ~15-25%，reference/map 各多 1 RT 的成本被其余 75+ wins 抵消。</li>`;
-    html += `</ul></div>`;
-  } else {
-    html += `<p><strong>${winnerName}</strong> 在 ${winnerWins}/${totalCells} cell 中胜出——出乎意料，需要复盘。</p></div>`;
-  }
+      function runCompareAll() {
+        const dist = document.getElementById("dist").value;
+        const count = parseInt(document.getElementById("count").value);
+        const sizes = genTaskSizes(dist, count, 42);
+        const allSchemes = ["tiered", "reference", "map-preview", "map-strict"];
+        const results = allSchemes.map((s) => [SCHEME_NAMES[s], s, computeScheme(s, sizes)]);
+        let html = `<h3>${DIST_NAMES[dist]} — ${count} tasks — 4 schemes head-to-head</h3>`;
+        html += renderComparison(results, DIST_NAMES[dist], count);
+        document.getElementById("result-free").innerHTML = html;
+      }
 
-  // Secondary recommendation
-  const runnerUp = Object.entries(winsByScheme).sort((a, b) => b[1] - a[1])[1];
-  if (runnerUp) {
-    html += `<h3>次优: ${SCHEME_NAMES[runnerUp[0]]}</h3>`;
-    html += `<p>${runnerUp[1]}/${totalCells} cells. Avg ${fmtBytes(avgBytes[runnerUp[0]])} / cell, ${avgRT[runnerUp[0]].toFixed(1)} RT / cell。</p>`;
-  }
-  document.getElementById('verdict-content').innerHTML = html;
-}
+      document.getElementById("run").addEventListener("click", runFree);
+      document.getElementById("compare-all").addEventListener("click", runCompareAll);
 
-// Initial run
-runFree();
-</script>
+      document.querySelectorAll(".scenarios button").forEach((btn) => {
+        btn.addEventListener("click", () => runGuidedScenario(btn.dataset.scenario));
+      });
 
-</body>
+      function runGuidedScenario(name) {
+        let dist,
+          count,
+          html = "";
+        const allSchemes = ["tiered", "reference", "map-preview", "map-strict"];
+
+        if (name === "scaling") {
+          dist = "realistic";
+          const counts = [10, 50, 100, 200, 500];
+          html = `<h3>Scaling — realistic dist, varying task count</h3>`;
+          html += `<table><thead><tr><th>Tasks</th>`;
+          for (const s of allSchemes)
+            html += `<th class="num">${SCHEME_NAMES[s].split(" ")[0]}<br>bytes</th>`;
+          html += `<th class="num">B vs C<br>ratio</th>`;
+          html += `<th class="num">A vs C<br>ratio</th>`;
+          html += `</tr></thead><tbody>`;
+          for (const c of counts) {
+            const sizes = genTaskSizes(dist, c, 42);
+            const results = allSchemes.map((s) => computeScheme(s, sizes));
+            const [a, b, c2, d] = results;
+            html += `<tr>`;
+            html += `<td><strong>${c}</strong></td>`;
+            html += `<td class="num">${fmtBytes(a.totalBytes)}</td>`;
+            html += `<td class="num">${fmtBytes(b.totalBytes)}</td>`;
+            html += `<td class="num" style="background:#e8f5e9;"><strong>${fmtBytes(c2.totalBytes)}</strong></td>`;
+            html += `<td class="num">${fmtBytes(d.totalBytes)}</td>`;
+            html += `<td class="num">${(b.totalBytes / c2.totalBytes).toFixed(2)}x</td>`;
+            html += `<td class="num">${(a.totalBytes / c2.totalBytes).toFixed(2)}x</td>`;
+            html += `</tr>`;
+          }
+          html += `</tbody></table>`;
+          html += `<p style="font-size:11px; color:#555;">C = Map+smart preview (推荐候选)。"B vs C" / "A vs C" = B (reference) 和 A (tiered) 相对 C 的倍数。</p>`;
+          document.getElementById("result-guided").innerHTML = html;
+          return;
+        }
+
+        if (name === "head-to-head") {
+          const dists = ["small", "small-medium", "realistic", "large", "burst"];
+          const counts = [20, 60, 100, 200, 500];
+          html = `<h3>Head-to-head: ${dists.length} dists × ${counts.length} counts × ${allSchemes.length} schemes</h3>`;
+          html += `<p style="font-size:12px; color:#555;">聚合每个 (dist, count) cell 内的方案对比；列 = 方案，行 = (dist, count)。★ 标记 wins。</p>`;
+          html += `<table><thead><tr><th>(dist, count)</th>`;
+          for (const s of allSchemes)
+            html += `<th class="num">${SCHEME_NAMES[s].split(" ")[0]}<br>bytes</th>`;
+          html += `<th class="num">RT total</th><th class="num">winner bytes</th></tr></thead><tbody>`;
+          for (const d of dists) {
+            for (const c of counts) {
+              const sizes = genTaskSizes(d, c, 42);
+              const results = allSchemes.map((s) => computeScheme(s, sizes));
+              const minB = Math.min(...results.map((r) => r.totalBytes));
+              const totalRT = results.reduce((a, r) => a + r.totalRoundTrips, 0);
+              const winnerKey = allSchemes[results.findIndex((r) => r.totalBytes === minB)];
+              const winnerName = SCHEME_NAMES[winnerKey].split(" ")[0];
+              html += `<tr>`;
+              html += `<td>${DIST_NAMES[d]}<br><small>${c} tasks</small></td>`;
+              for (const r of results) {
+                const isWin = r.totalBytes === minB;
+                html += `<td class="num" ${isWin ? 'style="background:#e8f5e9; font-weight:600;"' : ""}>${fmtBytes(r.totalBytes)}</td>`;
+              }
+              html += `<td class="num">${totalRT}</td>`;
+              html += `<td>${winnerName}</td>`;
+              html += `</tr>`;
+            }
+          }
+          html += `</tbody></table>`;
+          document.getElementById("result-guided").innerHTML = html;
+          populateVerdict();
+          return;
+        }
+
+        switch (name) {
+          case "daily":
+            dist = "realistic";
+            count = 60;
+            break;
+          case "bulk":
+            dist = "large";
+            count = 100;
+            break;
+          case "sprint":
+            dist = "realistic";
+            count = 200;
+            break;
+          case "extreme":
+            dist = "large";
+            count = 500;
+            break;
+        }
+        const sizes = genTaskSizes(dist, count, 42);
+        const results = allSchemes.map((s) => [SCHEME_NAMES[s], s, computeScheme(s, sizes)]);
+        html = `<h3>Scenario: ${name} (${DIST_NAMES[dist]}, ${count} tasks)</h3>`;
+        html += renderComparison(results, DIST_NAMES[dist], count);
+        for (const [name2, key, res] of results) {
+          html += `<details><summary>${name2} — full breakdown</summary>${renderResult(res, name2, DIST_NAMES[dist], count, 250)}</details>`;
+        }
+        document.getElementById("result-guided").innerHTML = html;
+      }
+
+      // ============================================================
+      // Verdict aggregator
+      // ============================================================
+      function populateVerdict() {
+        const dists = ["small", "small-medium", "realistic", "large", "burst"];
+        const counts = [20, 60, 100, 200, 500];
+        const allSchemes = ["tiered", "reference", "map-preview", "map-strict"];
+        const winsByScheme = { tiered: 0, reference: 0, "map-preview": 0, "map-strict": 0 };
+        const totalCells = dists.length * counts.length;
+        let avgBytes = { tiered: 0, reference: 0, "map-preview": 0, "map-strict": 0 };
+        let avgRT = { tiered: 0, reference: 0, "map-preview": 0, "map-strict": 0 };
+
+        for (const d of dists) {
+          for (const c of counts) {
+            const sizes = genTaskSizes(d, c, 42);
+            const results = allSchemes.map((s) => computeScheme(s, sizes));
+            const minB = Math.min(...results.map((r) => r.totalBytes));
+            const winIdx = results.findIndex((r) => r.totalBytes === minB);
+            winsByScheme[allSchemes[winIdx]]++;
+            results.forEach((r, i) => {
+              avgBytes[allSchemes[i]] += r.totalBytes;
+              avgRT[allSchemes[i]] += r.totalRoundTrips;
+            });
+          }
+        }
+        for (const s of allSchemes) {
+          avgBytes[s] /= totalCells;
+          avgRT[s] /= totalCells;
+        }
+
+        const winner = Object.entries(winsByScheme).sort((a, b) => b[1] - a[1])[0];
+        const winnerName = SCHEME_NAMES[winner[0]];
+        const winnerWins = winner[1];
+
+        let html = `<h3>Verdict (over ${totalCells} head-to-head cells)</h3>`;
+        html += `<table><thead><tr><th>方案</th><th class="num">wins</th><th class="num">%</th><th class="num">avg bytes/cell</th><th class="num">avg RT/cell</th></tr></thead><tbody>`;
+        for (const s of allSchemes) {
+          const isWinner = s === winner[0];
+          html += `<tr class="${isWinner ? "winner" : ""}"><td>${SCHEME_NAMES[s]}</td><td class="num">${winsByScheme[s]}</td><td class="num">${((winsByScheme[s] / totalCells) * 100).toFixed(0)}%</td><td class="num">${fmtBytes(avgBytes[s])}</td><td class="num">${avgRT[s].toFixed(1)}</td></tr>`;
+        }
+        html += `</tbody></table>`;
+        html += `<div class="verdict"><h3>${winnerWins}/${totalCells} cells win → ${winnerName}</h3>`;
+
+        // Verdict text
+        if (winner[0] === "map-preview") {
+          html += `<p><strong>Map + smart preview (≤2KB inline)</strong> 优于其余三方案。理由:</p>`;
+          html += `<ul>`;
+          html += `<li><strong>Context window cost</strong>: 在所有 (dist, count) cell 里字节最低或与最优持平；与 reference 比省 ~50 B/notif 的 ref 字符串。</li>`;
+          html += `<li><strong>Round-trip 数</strong>: 小结果 (≤2KB) 0 RT（preview=full），大结果 1 RT——与 reference 平手。</li>`;
+          html += `<li><strong>架构</strong>: 通知不再携带 file path，所有状态由 TaskRegistry 单源持有；notification payload uniform shape——TUI 渲染器分支减半。</li>`;
+          html += `<li><strong>唯一 trade-off</strong>: 3-8 KB 中间档无 inline preview（预览阈值 2 KB），模型必调 ptc_task_output 拉全文；A/B 方案在此档可 0 RT。这档占比生产 ~15-25%，reference/map 各多 1 RT 的成本被其余 75+ wins 抵消。</li>`;
+          html += `</ul></div>`;
+        } else {
+          html += `<p><strong>${winnerName}</strong> 在 ${winnerWins}/${totalCells} cell 中胜出——出乎意料，需要复盘。</p></div>`;
+        }
+
+        // Secondary recommendation
+        const runnerUp = Object.entries(winsByScheme).sort((a, b) => b[1] - a[1])[1];
+        if (runnerUp) {
+          html += `<h3>次优: ${SCHEME_NAMES[runnerUp[0]]}</h3>`;
+          html += `<p>${runnerUp[1]}/${totalCells} cells. Avg ${fmtBytes(avgBytes[runnerUp[0]])} / cell, ${avgRT[runnerUp[0]].toFixed(1)} RT / cell。</p>`;
+        }
+        document.getElementById("verdict-content").innerHTML = html;
+      }
+
+      // Initial run
+      runFree();
+    </script>
+  </body>
 </html>
