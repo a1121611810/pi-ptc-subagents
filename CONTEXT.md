@@ -275,6 +275,27 @@ block), `stderr?`, `errorMessage?`. Shape matches `Promise.allSettled`
 settled records, so PTC programs compose without `try/catch`. See
 ADR-0016.
 
+**child report** — the structured value a dispatched child produces and
+the host hands back, carrying exactly four things: `summary` (one line, the
+child's own words), `findings` (each with `what` and independent `evidence`),
+`files_touched`, and `usage`. It arrives over one of two channels — a report
+**tool** the child calls (preferred) or a fenced JSON block in the child's
+final text (the fallback) — and the result **always names which channel
+delivered it**, including when none did. Prose is preserved alongside it, never
+replaced. On by default; an agent's frontmatter opts out with one yes/no.
+Bounded at 20 findings for a model-facing render, withheld count stated in-band
+like the value tree. ADR-0032.
+
+_NOT the same as_ **structured result** (that is `structuredContent`, defined
+above as never reaching the model), and the two point in opposite directions:
+`structured result` is machine-only and model-blind, a child report is
+model-facing and is *also* what a program reads. Reusing the older term for
+this would invert its meaning. _Avoid_: "subagent report" (the word
+_subagent_ is reserved for the top-level _subagent surface_, `CONTEXT.md`
+§subagent surface), "structured output" (pi has no such concept — see
+ADR-0032 §What pi 1.0.0 actually offers), "child result" (the child report is
+one field of a _DispatchResult_, not the whole of it).
+
 **dispatch concurrency** — the hard cap on concurrently in-flight
 dispatch in one pi session. Default 8, configurable via
 `PtcConfig.dispatchConcurrency`; the live control is the
