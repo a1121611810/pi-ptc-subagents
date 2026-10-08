@@ -62,12 +62,19 @@ dist.default(fakePi);
 // (ADR-0022) -- that is the `full` surface, pinned above. An exact-set assertion is deliberate: a
 // tool silently disappearing from the built dist is exactly the regression this gate exists to
 // catch, and a set that grows without this line moving is a surface change nobody reviewed.
+//
+// `ptc_child_report` (ADR-0032) is registered in EVERY surface including this one, but is
+// `defaultActive: ptcDepth > 0`, so at depth 0 it is registered-and-inactive: the gate collects
+// `registerTool` calls, not the active set, so it belongs here even though a parent session can
+// never call it. That is deliberate — a child MUST be able to find it, and "registered only when
+// we are already the child" would mean the tool is absent exactly where it is needed.
 const EXPECTED_TOOLS = [
   "ptc_run_code",
   "ptc_workflow",
   "ptc_task_list",
   "ptc_task_output",
   "ptc_task_stop",
+  "ptc_child_report",
 ];
 {
   const missing = EXPECTED_TOOLS.filter((name) => !registered.has(name));

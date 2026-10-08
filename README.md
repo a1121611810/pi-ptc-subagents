@@ -80,6 +80,23 @@ const [read, scoutA, scoutB] = await Promise.all([
 ]);
 ```
 
+**The child report.** A dispatched child returns more than prose. Under the report contract ([ADR-0032](./docs/adr/0032-child-report.md)) a child hands back a **child report** — a `summary` in its own words, `findings` each carrying the independent thing that supports the claim, the `files_touched` it is sure about, and the token usage **the host measured** (never a number the child made up). The child's prose is kept alongside the report, never replaced by it.
+
+The report travels one of two channels. It prefers a declared `ptc_child_report` tool, whose payload the host reads back as JSON. If that tool is not available to the child, the host still reads a fenced JSON block from its final message. Either way the result **names the channel that delivered it**:
+
+```ts
+const r = await tools["pi.dispatch"]({ agent: "scout", task: "survey the auth code" });
+if (r.reportChannel === "none") {
+  // The child ran and did not comply. r.text is its prose; treat it as unbacked.
+} else {
+  for (const f of r.report?.findings ?? []) console.log(f.what, "←", f.evidence);
+}
+```
+
+`reportChannel` is **always present** — `"tool"`, `"prompt-json"` or `"none"` — because a degradation a caller cannot see is a silent failure, and "ran but did not comply" must not read as "returned nothing". `ptc_subagent` renders the same report into the text the model reads, bounded at 20 findings with the withheld count stated in-band.
+
+The contract is **on by default**. An agent opts out with one line of frontmatter, `childReport: false`, and then its channel reads `"opted-out"` — nobody was asked, which is a different claim from having been asked and ignored.
+
 **Bounded.** Three knobs keep fan-out from running away:
 
 - `PtcConfig.dispatchConcurrency` (default **8**) — hard cap on concurrently in-flight dispatch **in one pi session**. It is one counter, not one per run: foreground `pi.dispatch`, the top-level `ptc_subagent` front, and live background children all spend it, and a background child holds its slot for its whole lifetime. The N+1th concurrent call resolves immediately with `{ status: "rejected", errorMessage: "dispatch concurrency limit reached" }` instead of queuing or spawning — so a call over the cap is not made to wait for a slot to come back.

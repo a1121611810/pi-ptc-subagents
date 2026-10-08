@@ -87,12 +87,26 @@ status) a silent fallback to prose is a defect, not a graceful default.
 resolves **fulfilled with its prose intact**, because discarding a completed child's answer over a
 formatting failure is worse than handing the answer over marked as untrusted.
 
-### The contract has exactly one home
+### The contract has exactly one home — and it is the PROMPT
 
-The tool's description, snippet and guidelines **are** the contract. The prompt carries one clause
-requiring the child to call it. There is deliberately no second copy of the shape text: this repo
-has already paid for that twice — `parseAgentMarkdown` versus pi's own frontmatter parser, and
-tool descriptions versus the binding-contract module.
+The child's appended system prompt states the shape. The report tool's description describes the
+tool and points at the prompt rather than repeating the shape. There is deliberately no second copy:
+this repo has already paid for that twice — `parseAgentMarkdown` versus pi's own frontmatter parser,
+and tool descriptions versus the binding-contract module.
+
+**Amendment (2026-10-08, #101) — this decision was made the other way round first, and building
+#101 is what proved it wrong.** The tool's description was originally the one home, on the reasoning
+that a tool's description is where pi expects a contract to live. But the tool exists in the child
+only when this package loads there — `src/index.ts` returns early on `surfaceMode: "off"`, and pi's
+`-ne` removes extensions entirely. With the shape in the tool and a one-sentence prompt, a child
+without the tool had **nothing to comply with**: the prompt channel stopped being a fallback and
+became dead code that still had tests.
+
+The distinction that was missing: the tool is the channel that is **reliable when present**; the
+prompt is the one that is **always present**. Those are different virtues, and putting the shape in
+the tool quietly traded the second for the first. The host writes the prompt unconditionally, so
+the prompt is the home. The rule was never "prompt versus tool" — it was "exactly one", and the
+shape now has exactly one home that survives the install where the tool is missing.
 
 ### Activation is load-bearing
 

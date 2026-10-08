@@ -183,9 +183,20 @@ usage: input=900 output=260 cost=0.0123 turns=1
 I read the dispatch gates and here is what I found. …
 ```
 
-`channel` says **which** channel delivered it — `tool`, `prompt-json`, or `none` — and is the
-same total field a foreground `DispatchResult` carries. A child that ignored the contract is
-reported as having ignored it:
+`channel` says **which** channel delivered it, and is the same total field a foreground
+`DispatchResult` carries:
+
+- **`tool`** — the child called `ptc_child_report`, whose payload the host reads back as JSON
+  against a declared schema. This is the reliable channel, and it is preferred.
+- **`prompt-json`** — the child ended its reply with a fenced JSON block instead. This is the
+  fallback, and it is a real one: `ptc_child_report` only exists in the child when this package
+  loads there (`surfaceMode: "off"` skips registration, and pi's `-ne` removes extensions), so an
+  install without it has nothing but the prompt channel.
+- **`none`** — the child ran and did not comply.
+- **`opted-out`** — the agent's frontmatter set `childReport: false`, so nobody was asked. A
+  different claim from `none`, and the two are not merged.
+
+A child that ignored the contract is reported as having ignored it:
 
 ```text
 <child-report channel="none">the child produced no report; it did not comply with the report contract. What follows is its prose, unbacked by a report.</child-report>

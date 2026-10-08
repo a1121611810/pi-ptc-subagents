@@ -36,11 +36,28 @@
  */
 
 import { defineTool } from "@earendil-works/pi-coding-agent";
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { TArray, TObject, TString } from "typebox";
 
 import { CHILD_REPORT_TOOL_NAME } from "../runtime/child-report.ts";
+// Reused rather than re-declared: `task-panel-render.ts` reaches only pi, `text.ts` and a
+// TYPE-only import of the task storage, so this edge cannot close the `bindings <-> dispatch`
+// cycle. It is the same row component the `ptc_task_*` rows are built from.
+import { TaskPanelRow } from "./task-panel-render.ts";
+
+/**
+ * One hand-rolled truncation, so the call row stays bounded without this module importing
+ * `tools/render.ts`. That edge reaches `common.ts` -> `bindings.ts` -> `dispatch.ts`, and
+ * `bindings.ts` imports `dispatch.ts` back as a VALUE, so the pair is a cycle — the same one
+ * that already cost `tools/ptc-task.ts` seven integration tests. A cycle is not worth carrying to
+ * save a slice; if the report row ever needs the full renderer, the cycle goes first.
+ */
+const MAX_ROW_CHARS = 200;
+
+function truncateForRow(value: string): string {
+  return value.length <= MAX_ROW_CHARS ? value : "…" + value.slice(-(MAX_ROW_CHARS - 1));
+}
 
 /** Mirrors `AnyTool` in `tools/subagent.ts`; written out here rather than imported from there. */
 export type AnyTool = ToolDefinition<any, any, any>;
@@ -141,6 +158,24 @@ export function createChildReportTool(activeByDefault: boolean): AnyTool {
     // activates a `direct` tool on registration unless this says otherwise
     // (`ToolDefinition.defaultActive`), and registering is all a parent ever does.
     defaultActive: activeByDefault,
+    // The release gate (`scripts/verify-dist-render.mjs`) requires every REGISTERED tool to carry
+    // a render pair, and that is right for a reason beyond the gate: a tool with no renderer is
+    // invisible in the transcript. This one is only ever called by a child, so a parent session
+    // should never see this row — but "should never" is not "cannot", and a row that renders
+    // nothing when it does appear is worse than one that says what happened.
+    renderCall(args: unknown, theme: Theme): TaskPanelRow {
+      const params = args as Partial<ChildReportEcho> | undefined;
+      const summary = typeof params?.summary === "string" ? params.summary : "";
+      const label = theme.fg("toolTitle", theme.bold("Child report"));
+      const suffix = summary === "" ? "" : " " + theme.fg("dim", truncateForRow(summary));
+      return new TaskPanelRow([{ left: label + suffix }]);
+    },
+    renderResult(): TaskPanelRow {
+      // The tool never fails: pi has already validated the arguments against the declared schema,
+      // and the host re-validates what comes back. An error row here would describe a condition
+      // the tool cannot reach.
+      return new TaskPanelRow([{ left: "child report recorded" }]);
+    },
     async execute(_toolCallId, params) {
       // Projection, not rebuild: pi has already checked these against
       // `CHILD_REPORT_PAYLOAD_SCHEMA`, and the HOST validates what comes back through
