@@ -9,6 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 (nothing yet)
 
+## [1.6.0] - 2026-10-08
+
+### Fixed
+
+- **On pi 1.0, a session with MCP servers was offered two orchestration tools at once.** pi's MCP
+  extension activates pi's own `codemode` tool by itself — MCP tools default to `codemode`
+  exposure so that they are reachable only from scripts — and it does that with a
+  `pi.setActiveTools` call that no settings file records. This package's surface detection
+  ([ADR-0025](./docs/adr/0025-extension-surface-is-a-setting.md)) asked whether `codemode` would
+  be _active_ by mirroring pi's loadout resolution alone ([ADR-0029](./docs/adr/0029-surface-follows-codemode-activation.md)),
+  so on exactly the sessions pi 1.0 is built around it answered _not active_, registered
+  `ptc_run_code` + `ptc_workflow` as well, and handed the model two ways to compose tools. Detection
+  now reads pi's MCP configuration (`<agentDir>/mcp.json`, then `<cwd>/.pi/mcp.json`) as a second
+  evidence source and unions the two, so those sessions resolve `subagents`: `codemode` for
+  orchestration, `ptc_subagent` and the task lifecycle for fan-out.
+  [ADR-0033](./docs/adr/0033-mcp-auto-enable-evidence.md) records the mirror, what it deliberately
+  does not mirror, and the one under-report path that stays open (a server registered through
+  `pi.registerMcpServer()`, which no file records — the drift notice below is what covers it).
+
+### Added
+
+- **A session start warning for an active `codemode` the probes did not predict.** Once per
+  session, and only on a detected surface: if nothing in `settings.json` or a readable `mcp.json`
+  said codemode would be active, the surface defaulted to `full`, and pi's real tool loadout
+  contains `codemode` anyway, the session is now told it is carrying two orchestration surfaces and
+  which `surfaceMode` key picks one. Checked at session start and again on the first turn, because
+  pi's MCP extension may activate codemode after this package's own `session_start` runs. It is
+  `TUI`-only, like every other notice in this package.
+- **A named report for an `mcp.json` this package could not read.** A file that is absent is
+  silent, matching pi; a file that exists and cannot be parsed or read is named at session start
+  with its path, and when both files are broken both are named in the one line.
+
+### Changed
+
+- **`CONTEXT.md` gains a `codemode activation` entry** defining the question surface detection asks
+  and its two evidence classes, so "is codemode active" no longer has to be reconstructed from an
+  ADR.
+- ADR-0029 carries an amendment: its under-reporting bound still holds, but the premise it rested
+  on — that the loadout is the only way pi activates codemode — did not.
+
 ## [1.5.1] - 2026-10-08
 
 ### Fixed
