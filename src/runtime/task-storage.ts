@@ -13,7 +13,9 @@
  * - **Spec source of truth** for TaskRecord's 19 pre-ownership fields is ADR-0022 §3 (Decision
  *   §3, whose code block lists 19 — its "21 fields" heading is an authoring miscount); ADR-0023
  *   adds two optional owner-identity fields (`ownerPid` / `ownerBootMs`) on top, absent on
- *   pre-upgrade legacy records, making 21 in the interface today. For Subscription it is §5.
+ *   pre-upgrade legacy records, making 21 in the interface today; ADR-0032 adds two more optional
+ *   report fields (`report` / `reportChannel`), written only on a `succeeded` record. For
+ *   Subscription it is §5.
  *   The field set is locked at the
  *   interface — adapters may add private
  *   indexing, but the persisted shape is exactly the schema in the ADR. This is what makes
@@ -46,6 +48,7 @@
 
 import { ok as assertPresent } from "node:assert/strict";
 
+import type { ChildReport, ChildReportChannel } from "./child-report.ts";
 import type { ULID } from "./ulid.ts";
 
 /**
@@ -113,6 +116,26 @@ export interface TaskRecord {
   ownerPid?: number;
   /** ADR-0023: wall-clock ms when the owning runtime instance started; pairs with `ownerPid`. */
   ownerBootMs?: number;
+  /**
+   * ADR-0032: the child report a background child produced, read off its final message by the
+   * same extraction the foreground loop runs and stamped onto the record at the terminal
+   * transition — so `ptc_task_output` can hand a background child back with the same shape a
+   * foreground `DispatchResult` carries.
+   *
+   * **Both report fields are ABSENT unless the record reached `succeeded`** (the registry writes
+   * them; see `resolve-exit` in `task-registry.ts`). Absent is a claim in its own right: a child
+   * that is still running has not reported *yet*, and a child that failed did not report at all.
+   * Neither is the same claim as "ran and complied with nothing to say", which is what a
+   * `succeeded` record carrying `reportChannel: "none"` states.
+   */
+  report?: ChildReport;
+  /**
+   * ADR-0032 "The channel is always stated": which channel delivered `report`, and — when there
+   * is no `report` — the explicit marker that the child ignored the contract. Written with
+   * `report` and only on a `succeeded` record, so `reportChannel === undefined` never has to be
+   * read as "none".
+   */
+  reportChannel?: ChildReportChannel;
 }
 
 /**

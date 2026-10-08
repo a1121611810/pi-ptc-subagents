@@ -468,6 +468,181 @@ describe("dispatch background gates", () => {
 });
 
 // ---------------------------------------------------------------------------
+//  detached pump: the child report lands on the persisted record (ADR-0032)
+// ---------------------------------------------------------------------------
+
+/**
+ * A child's final message carrying a compliant report: prose, a fenced JSON block (ADR-0032's
+ * prompt channel), prose. The report body is the same literal shape the pure-extraction suite
+ * asserts, so the two are the same value read by two paths rather than two shapes.
+ */
+const REPORT_TEXT =
+  "Two findings below.\n\n```json\n" +
+  JSON.stringify({
+    summary: "the depth gate is checked before the agent is discovered",
+    findings: [
+      { what: "depth precedes discovery", evidence: "the gate returns before discoverAgent" },
+    ],
+    files_touched: ["src/runtime/dispatch.ts"],
+  }) +
+  "\n```\n\nThat is all of it.";
+
+/** Host-measured usage: the usage block the child emitted, which is the only source for `usage`. */
+const REPORT_USAGE = {
+  input: 900,
+  output: 260,
+  cacheRead: 0,
+  cacheWrite: 0,
+  cost: { total: 0.0123 },
+};
+
+describe("dispatch background pump persists the child report", () => {
+  test("a compliant child leaves its report and channel on the record, with host-measured usage", async () => {
+    await withAgent(async (dir) => {
+      const h = createHarness({ start: 1000 });
+      const handle = asHandle(
+        await dispatch(
+          { agent: AGENT, task: "report", background: true, agentScope: "project" },
+          { callId: 30, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          h.deps,
+        ),
+      );
+
+      h.lifecycle.pushEvent(h.lifecycle.handleAt(0), {
+        type: "message_end",
+        message: {
+          role: "assistant",
+          stopReason: "stop",
+          content: [{ type: "text", text: REPORT_TEXT }],
+          usage: REPORT_USAGE,
+        },
+      });
+      h.clock.set(1500);
+      h.lifecycle.resolveExit(h.lifecycle.handleAt(0), 0, null);
+
+      const record = await waitForTerminal(h.storage, handle.taskId);
+      expect(record.status).toBe("succeeded");
+      expect(record.reportChannel).toBe("prompt-json");
+      expect(record.report?.summary).toBe(
+        "the depth gate is checked before the agent is discovered",
+      );
+      expect(record.report?.findings).toEqual([
+        { what: "depth precedes discovery", evidence: "the gate returns before discoverAgent" },
+      ]);
+      expect(record.report?.files_touched).toEqual(["src/runtime/dispatch.ts"]);
+      // The host's counter over the child's own usage block — the same numbers the foreground
+      // path accumulates, and the only admissible source (ADR-0032: usage is observed, never
+      // declared). `cacheRead`/`cacheWrite` are not part of the report's usage shape.
+      expect(record.report?.usage).toEqual({ input: 900, output: 260, cost: 0.0123, turns: 1 });
+      // The prose is still there beside it: the report is a sibling of the text, never a
+      // replacement for it (ADR-0032).
+      expect(record.outputPreview).toBe(REPORT_TEXT);
+    });
+  });
+
+  test("a child that ignored the contract is marked non-compliant in the persisted output", async () => {
+    await withAgent(async (dir) => {
+      const h = createHarness({ start: 1000 });
+      const handle = asHandle(
+        await dispatch(
+          { agent: AGENT, task: "prose only", background: true, agentScope: "project" },
+          { callId: 31, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          h.deps,
+        ),
+      );
+
+      h.lifecycle.pushEvent(h.lifecycle.handleAt(0), {
+        type: "message_end",
+        message: {
+          role: "assistant",
+          stopReason: "stop",
+          content: [{ type: "text", text: "Here is the answer, in prose only." }],
+        },
+      });
+      h.clock.set(1500);
+      h.lifecycle.resolveExit(h.lifecycle.handleAt(0), 0, null);
+
+      const record = await waitForTerminal(h.storage, handle.taskId);
+      expect(record.status).toBe("succeeded");
+      // The explicit marker, never a silent prose fallback (ADR-0032; testing-constraints #3).
+      expect(record.reportChannel).toBe("none");
+      expect(Object.hasOwn(record, "report")).toBe(false);
+      // The answer is still kept — a child is not discarded over a formatting failure.
+      expect(record.outputPreview).toBe("Here is the answer, in prose only.");
+    });
+  });
+
+  test("a running task has no report before the child closes", async () => {
+    await withAgent(async (dir) => {
+      const h = createHarness({ start: 1000 });
+      const handle = asHandle(
+        await dispatch(
+          { agent: AGENT, task: "long", background: true, agentScope: "project" },
+          { callId: 32, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          h.deps,
+        ),
+      );
+
+      // The child is mid-turn: it has emitted a message, but it has not finished, so nothing
+      // about the report has been decided yet.
+      h.lifecycle.pushEvent(h.lifecycle.handleAt(0), {
+        type: "message_end",
+        message: {
+          role: "assistant",
+          stopReason: "stop",
+          content: [{ type: "text", text: REPORT_TEXT }],
+          usage: REPORT_USAGE,
+        },
+      });
+      const record = await h.storage.loadTask(handle.taskId);
+      expect(record?.status).toBe("running");
+      // "Not yet" and "reported nothing" are different claims, so both keys are ABSENT rather
+      // than present-and-empty.
+      expect(Object.hasOwn(record as object, "report")).toBe(false);
+      expect(Object.hasOwn(record as object, "reportChannel")).toBe(false);
+    });
+  });
+
+  /**
+   * The failure this ticket exists to prevent, end to end through the real pump: a child whose
+   * final message DID carry a report and then exited non-zero persists no report at all.
+   *
+   * Counterfactual: writing the extraction unconditionally — the obvious implementation, since
+   * the pump has the report in hand either way — turns this red, as does writing an empty or
+   * `null` one. The registry's `to === "succeeded"` gate is what the assertion pins.
+   */
+  test("a failed child carries no report, even though its final message carried one", async () => {
+    await withAgent(async (dir) => {
+      const h = createHarness({ start: 1000 });
+      const handle = asHandle(
+        await dispatch(
+          { agent: AGENT, task: "dies after answering", background: true, agentScope: "project" },
+          { callId: 33, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          h.deps,
+        ),
+      );
+
+      h.lifecycle.pushEvent(h.lifecycle.handleAt(0), {
+        type: "message_end",
+        message: {
+          role: "assistant",
+          stopReason: "stop",
+          content: [{ type: "text", text: REPORT_TEXT }],
+          usage: REPORT_USAGE,
+        },
+      });
+      h.clock.set(1500);
+      h.lifecycle.resolveExit(h.lifecycle.handleAt(0), 1, null);
+
+      const record = await waitForTerminal(h.storage, handle.taskId);
+      expect(record.status).toBe("failed");
+      expect(Object.hasOwn(record, "report")).toBe(false);
+      expect(Object.hasOwn(record, "reportChannel")).toBe(false);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 //  detached pump: exit 0 -> succeeded, exit 1 -> failed (ADR-0022 §2/§3)
 // ---------------------------------------------------------------------------
 

@@ -114,7 +114,7 @@ interface RenderContext {
 }
 
 /** One row component that right-aligns an optional meta segment per line (render.ts: `PtcRow`). */
-class TaskPanelRow {
+export class TaskPanelRow {
   private readonly items: readonly RowLine[];
 
   constructor(items: readonly RowLine[]) {

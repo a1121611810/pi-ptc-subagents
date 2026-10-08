@@ -20,17 +20,23 @@
  * orchestration to pi's `codemode` can start a subagent at all, and without the second channel a
  * script has to regex the ULID out of `"Started background task 01JABC..."`. See
  * {@link SUBAGENT_OUTPUT_SCHEMA} for why that projection is not a mirror of `details`.
+ *
+ * A dispatched child also produces a **child report** (ADR-0032). On THIS surface there is no
+ * `codemode`, so `structuredContent` reaches nobody (ADR-0025 + ADR-0028) and the report is
+ * rendered into the text the model reads instead -- see `renderChildReportText`, and the report
+ * key in {@link SUBAGENT_OUTPUT_SCHEMA} for the callers that do have a structured channel.
  */
 
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import type { TNumber, TObject, TOptional, TString } from "typebox";
+import type { TArray, TNumber, TObject, TOptional, TString } from "typebox";
 import { DISPATCH_PARAMETERS } from "../runtime/bindings.ts";
 import type { DispatchDeps, DispatchInput, DispatchResult } from "../runtime/dispatch.ts";
 import { dispatch } from "../runtime/dispatch.ts";
 import type { DispatchHandle } from "../runtime/task-registry.ts";
 import type { ULID } from "../runtime/task-storage.ts";
+import { renderChildReportText } from "./render.ts";
 
 /** Anything this module returns is one of the two dispatch shapes. */
 export type SubagentOutcome = DispatchResult | DispatchHandle;
@@ -66,6 +72,41 @@ type SubagentOutputSchema = TObject<{
   task_id: TOptional<TString>;
   status: TString;
   exit_code: TOptional<TNumber>;
+  report_channel: TString;
+  report: TOptional<SubagentReportSchema>;
+}>;
+
+/**
+ * The child report as the projection carries it (ADR-0032 §`child report`).
+ *
+ * Structurally identical to `ChildReport` — `summary` / `findings[{what,evidence}]` /
+ * `files_touched` / `usage` — and named apart from it so the two can be held together in one
+ * direction only. Nothing rebuilds a report here: the value is `DispatchResult.report` verbatim,
+ * host-stamped `usage` and all, because a child cannot measure its own tokens (see
+ * `ChildReportPayload`).
+ *
+ * A `type` alias rather than an `interface`: `structuredContent` has to satisfy
+ * `JsonObject`'s `[key: string]: JsonValue` index signature, and only an object TYPE gets the
+ * implicit one an interface never has.
+ */
+type SubagentReportProjection = {
+  summary: string;
+  findings: { what: string; evidence: string }[];
+  files_touched: string[];
+  usage: { input: number; output: number; cost: number; turns: number };
+};
+
+/** The report half of the declared schema; see `SUBAGENT_OUTPUT_SCHEMA`. */
+type SubagentReportSchema = TObject<{
+  summary: TString;
+  findings: TArray<TObject<{ what: TString; evidence: TString }>>;
+  files_touched: TArray<TString>;
+  usage: TObject<{
+    input: TNumber;
+    output: TNumber;
+    cost: TNumber;
+    turns: TNumber;
+  }>;
 }>;
 
 /**
@@ -83,11 +124,21 @@ type SubagentOutputSchema = TObject<{
  * foreground outcome always carries one. `SubagentDetails.exitCode` is not required, and this
  * projection reads the details rather than the outcome, so the no-exit-code case is spelled out
  * rather than assumed away.
+ *
+ * `report` is a fourth branch rather than a key on the other three for the same reason: the key is
+ * ABSENT whenever the child produced no report, and a background handle has not finished yet, so
+ * neither of those outcomes has a report to carry.
  */
 type SubagentStructuredContent =
-  | { task_id: string; status: string }
-  | { status: string; exit_code: number }
-  | { status: string };
+  | { task_id: string; status: string; report_channel: string }
+  | { status: string; exit_code: number; report_channel: string }
+  | { status: string; report_channel: string }
+  | {
+      status: string;
+      exit_code: number;
+      report_channel: string;
+      report: SubagentReportProjection;
+    };
 
 /**
  * The machine-readable result, declared as the tool's `outputSchema` so pi hands a codemode script
@@ -104,6 +155,18 @@ type SubagentStructuredContent =
  * snake_case, like pi's own builtin tools, so a script reading our declared schema does not have to
  * learn a second spelling for the same concept. `details` keeps its camelCase: it is a different
  * channel with its own consumers.
+ *
+ * `report` is the child report (ADR-0032) at FULL length, not the rendered view: a program is not a
+ * display surface, and the 20-finding bound is a rendering bound, applied in the text block by
+ * `renderChildReportText`. Absent when no report arrived -- including on a background handle, which
+ * has not finished and therefore has nothing to report yet.
+ *
+ * `report_channel` is projected, and it is present on EVERY branch rather than alongside `report`.
+ * Without it a caller reading this channel cannot tell a child that ignored the contract from a
+ * handle that has not finished yet -- both arrive as "no `report` key" -- and that is exactly the
+ * invisible degradation ADR-0032 forbids. The channel is the total field; `report` is the optional
+ * one, and the pair is what makes the pair readable. ("A second spelling of `reportChannel`" is not
+ * an objection: `exit_code` and `task_id` are already snake_case projections, per ADR-0028.)
  */
 export const SUBAGENT_OUTPUT_SCHEMA: SubagentOutputSchema = Type.Object({
   task_id: Type.Optional(
@@ -116,9 +179,37 @@ export const SUBAGENT_OUTPUT_SCHEMA: SubagentOutputSchema = Type.Object({
     description:
       '"background" when this call returned a handle to poll, otherwise the dispatcher\'s own outcome status ("fulfilled").',
   }),
+  report_channel: Type.String({
+    description:
+      'Which channel delivered the child report: "prompt-json" (a fenced JSON block on the child\'s final message), "tool" (the child called the report tool), "none" (no report arrived — either the child did not comply with the contract, or this is a background handle that has not finished), or "opted-out" (the agent\'s frontmatter set `childReport: false`, so it was never asked). ALWAYS present, so an absent `report` key is never ambiguous — "none" and "opted-out" are different claims about the child.',
+  }),
   exit_code: Type.Optional(
     Type.Number({
       description: "The child's exit code. Present ONLY for a call that already finished.",
+    }),
+  ),
+  report: Type.Optional(
+    Type.Object({
+      summary: Type.String({
+        description: "One line, in the child's own words, of what it concluded.",
+      }),
+      findings: Type.Array(
+        Type.Object({
+          what: Type.String({ description: "The claim this finding makes." }),
+          evidence: Type.String({
+            description: "The independent thing that supports the claim.",
+          }),
+        }),
+      ),
+      files_touched: Type.Array(
+        Type.String({ description: "A path the child created or modified." }),
+      ),
+      usage: Type.Object({
+        input: Type.Number({ description: "Input tokens, counted by the host." }),
+        output: Type.Number({ description: "Output tokens, counted by the host." }),
+        cost: Type.Number({ description: "Total cost, counted by the host." }),
+        turns: Type.Number({ description: "Assistant turns, counted by the host." }),
+      }),
     }),
   ),
 });
@@ -171,6 +262,13 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
         const structured: SubagentStructuredContent = {
           task_id: taskId,
           status: details.status,
+          // A handle has not finished, so it has nothing to report YET -- and a handle is a
+          // `DispatchHandle`, not a `DispatchResult`, so it carries no `reportChannel` to read.
+          // The literal "none" is the claim: nothing was reported, because nothing could be yet.
+          // It must be a STRING and not `undefined`: `structuredContent` crosses a JSON boundary,
+          // and an undefined-valued key vanishes there, leaving a script a projection its own
+          // schema does not describe.
+          report_channel: "none",
         };
         return {
           content: [{ type: "text" as const, text: HANDLE_TEXT + taskId }],
@@ -181,12 +279,34 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
       if (outcome.status === "rejected") {
         throw new Error("ptc_subagent refused the call: " + outcome.errorMessage);
       }
+      // The report is projected verbatim, never rebuilt: `usage` in it was stamped by the host
+      // at settle, and a value this tool could recompute would be a second, unauthoritative
+      // reading of the same number.
+      const report: SubagentReportProjection | undefined = outcome.report;
       const structured: SubagentStructuredContent =
         details.exitCode === undefined
-          ? { status: details.status }
-          : { status: details.status, exit_code: details.exitCode };
+          ? { status: details.status, report_channel: outcome.reportChannel }
+          : report === undefined
+            ? {
+                status: details.status,
+                exit_code: details.exitCode,
+                report_channel: outcome.reportChannel,
+              }
+            : {
+                status: details.status,
+                exit_code: details.exitCode,
+                report_channel: outcome.reportChannel,
+                report,
+              };
+      // ADR-0032 §Rendering: on this surface there is no `codemode`, so nothing reads
+      // `structuredContent` and the report has to be IN the text. The rendered block goes first
+      // and the child's prose after it, so the model reads the conclusion before the reasoning --
+      // and the block is emitted whether or not a report arrived, because an unmarked gap reads as
+      // an empty result.
+      const reportBlock = renderChildReportText(report, outcome.reportChannel);
+      const text = [reportBlock, outcome.text].filter((part) => part.length > 0).join("\n\n");
       return {
-        content: [{ type: "text" as const, text: outcome.text }],
+        content: [{ type: "text" as const, text }],
         details,
         structuredContent: structured,
       };

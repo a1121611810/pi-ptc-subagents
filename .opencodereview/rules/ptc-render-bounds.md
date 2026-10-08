@@ -66,6 +66,23 @@ render.ts 的那八个已闭环:ADR-0013 §6 补上了数值表,并在同节显�
 - `MAX_LINE_CHARS = 200` 与 `INLINE_MAX_CHARS = 100` 管送给模型的文本块,服务模型可读性;来源是 ADR-0012,**不是** ADR-0015——ADR-0015 管的是文本块尾截断(50 KB / 2000 lines),那是另一个轴。
 - 三个数字互不联动:把 200 调到 120 属于行为变更,需要 ADR,不是在表格里改个数字。
 
+### render.ts 的 child report 渲染上限(ADR-0032)
+
+`renderChildReportText` 把 child report 画成模型读的文本块,与上面几张表是**另一条轴**:它不
+服务 PTC 行的人眼可读性,服务 subagent surface 上没有 `codemode` 时的唯一读者(ADR-0025 +
+ADR-0028)。连接符 / `Array(n)` / 标签槽沿用 value tree 的形状,行宽沿用 `MAX_LINE_CHARS`。
+
+| 常量                              | 值  | 作用                                                                    | 来源                |
+| --------------------------------- | --- | ----------------------------------------------------------------------- | ------------------- |
+| `CHILD_REPORT_MAX_FINDINGS`       | 20  | 模型可见的 child report 渲染的 findings 条数上限,超出部分计数后按行注明 | ADR-0032 §Rendering |
+| `CHILD_REPORT_MAX_FILES`          | 20  | 同一块里 `files_touched` 的条数上限,同样在行内注明被扣留的条数          | ADR-0032 §Rendering |
+| `CHILD_REPORT_MAX_EVIDENCE_CHARS` | 150 | 单条 finding 的 evidence 字符上限,截断时在该行注明被截断                | ADR-0032 §Rendering |
+
+`CHILD_REPORT_MAX_EVIDENCE_CHARS = 150` 不是自由取值:它由 `MAX_LINE_CHARS = 200` 反推——
+3 列连接符 + 5 列 finding 下标缩进 + `evidence: ` + 截断提示本身,留出空间让**提示不被同一行的行宽
+截断**。调大它会让「此处被截断」这句话自己被截掉,那正是这条约束要挡的失败。算式是
+3 + 5 + 10 + 150 + 2 + 25 = 195 ≤ 200。
+
 ### task-panel-render.ts 的面板渲染上限
 
 | 常量                       | 值  | 作用                                                                | 来源         |

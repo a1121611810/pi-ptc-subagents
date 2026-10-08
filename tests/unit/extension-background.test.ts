@@ -55,8 +55,10 @@ const TASK_TOOLS = ["ptc_task_list", "ptc_task_output", "ptc_task_stop"] as cons
 const PTC_TOOLS = ["ptc_run_code", "ptc_workflow"] as const;
 /** What a real session has active: pi's four defaults plus all five extension tools. */
 const ACTIVE = [...DEFAULT_SESSION_TOOLS, ...TASK_TOOLS, ...PTC_TOOLS];
-/** The full five-tool registration set. */
-const REGISTERED = [...PTC_TOOLS, ...TASK_TOOLS];
+/** ADR-0032 / #101: the report tool. Registered in every surface; active only in a child. */
+const REPORT_TOOL = "ptc_child_report" as const;
+/** The full registration set. */
+const REGISTERED = [...PTC_TOOLS, ...TASK_TOOLS, REPORT_TOOL];
 /** The active list passed to the stub; the helper appends the two PTC surfaces itself. */
 const STUB_ACTIVE = [...DEFAULT_SESSION_TOOLS, ...TASK_TOOLS];
 
@@ -200,7 +202,7 @@ function wiredStub(): {
 // ---------------------------------------------------------------------------
 
 describe("always-on registration", () => {
-  test("the factory registers the two PTC tools and the three background-task tools", () => {
+  test("the factory registers the two PTC tools, the three task tools and the report tool", () => {
     const stub = makeExtensionStub();
     expect([...stub.tools.keys()]).toEqual(REGISTERED);
     for (const name of TASK_TOOLS) {

@@ -35,6 +35,7 @@ ADRs for pi-ptc-subagents, per `docs/agents/domain.md` (single-context repo).
 | [0029](./0029-surface-follows-codemode-activation.md)      | The detected surface follows whether codemode will be ACTIVE, not only whether it ships or loads | accepted |
 | [0030](./0030-surface-switch-reloads.md)                   | The surface is switched by writing the file and reloading, not by mutating the loadout           | accepted |
 | [0031](./0031-open-source-and-publish-authority.md)        | Open source: public repository, owner-only write and publish authority, verified attribution     | accepted |
+| [0032](./0032-child-report.md)                             | A dispatched child returns a child report, over one of two channels, and always says which       | accepted |
 
 Numbering gaps are deliberate: 0001/0006 were reserved while wayfinder map #7 was charting and dropped when G1 resolved; keeping their slots means every cross-reference in the map and its tickets stays valid.
 

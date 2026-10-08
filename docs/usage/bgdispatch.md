@@ -162,6 +162,55 @@ ptc_task_list({ status: ["running"], limit: 20 });
 ptc_task_output({ taskId: "01JBZ000000000000000000002", sinceBytes: 1024 });
 ```
 
+#### The child report
+
+A background child's [child report](../adr/0032-child-report.md) is as inspectable as a
+foreground child's: the pump reads it off the child's final message with the same extraction the
+foreground loop runs, and the registry persists it on the `TaskRecord`, so it survives a restart
+exactly as the rest of the record does. `ptc_task_output` renders it above the child's prose —
+conclusion first, reasoning second — bounded at 20 findings with the withheld count stated in
+band.
+
+```text
+<child-report channel="prompt-json">
+summary: the depth gate is checked before the agent is discovered
+findings (2):
+  1. depth precedes discovery — evidence: the gate returns before discoverAgent
+  2. the refusal names the next step — evidence: the message ends with next_step:
+files_touched: src/runtime/dispatch.ts, docs/usage/bgdispatch.md
+usage: input=900 output=260 cost=0.0123 turns=1
+</child-report>
+I read the dispatch gates and here is what I found. …
+```
+
+`channel` says **which** channel delivered it, and is the same total field a foreground
+`DispatchResult` carries:
+
+- **`tool`** — the child called `ptc_child_report`, whose payload the host reads back as JSON
+  against a declared schema. This is the reliable channel, and it is preferred.
+- **`prompt-json`** — the child ended its reply with a fenced JSON block instead. This is the
+  fallback, and it is a real one: `ptc_child_report` only exists in the child when this package
+  loads there (`surfaceMode: "off"` skips registration, and pi's `-ne` removes extensions), so an
+  install without it has nothing but the prompt channel.
+- **`none`** — the child ran and did not comply.
+- **`opted-out`** — the agent's frontmatter set `childReport: false`, so nobody was asked. A
+  different claim from `none`, and the two are not merged.
+
+A child that ignored the contract is reported as having ignored it:
+
+```text
+<child-report channel="none">the child produced no report; it did not comply with the report contract. What follows is its prose, unbacked by a report.</child-report>
+```
+
+`usage` is measured by the host from the child's own `message_end` blocks. A child is never asked
+for its token count and a child-declared `usage` is discarded, because a model cannot know it.
+
+**When there is no report block at all** — a task that is still `running`, `stopping`, `failed`,
+`canceled` or `lost` — that is a claim, not a gap. Those records carry neither `report` nor
+`reportChannel`: a child that has not finished has not reported _yet_, and "has not reported yet"
+is a different claim from "ran and complied with nothing to say" (`reportChannel: "none"`). The
+record's status and `errorMessage` are what describe those tasks.
+
 **`ptc_task_stop`** — ask a running task to stop.
 
 | parameter | type     | default        | notes                                 |
@@ -343,7 +392,7 @@ The task state goes through the `TaskStorage` seam. There are two adapters: an i
 under the session directory so a restart can reconcile:
 
 ```text
-<sessionDir>/tasks/<taskId>.json                                 # the TaskRecord: 19 ADR-0022 §3 fields + 2 optional ADR-0023 owner fields = 21 today (atomic temp+rename)
+<sessionDir>/tasks/<taskId>.json                                 # the TaskRecord: 19 ADR-0022 §3 fields + 2 optional ADR-0023 owner fields = 21 today, plus 2 optional ADR-0032 report fields on a succeeded record (atomic temp+rename)
 <sessionDir>/subscriptions/<subscriberId>-<taskId>.json          # the per-subscriber cursor (atomic temp+rename)
 <sessionDir>/events/<subscriberId>-<taskId>.jsonl                # append-only newline-delimited events
 <sessionDir>/tasks/<taskId>/output.log                           # the captured output

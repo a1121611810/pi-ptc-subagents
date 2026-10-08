@@ -247,6 +247,23 @@ async function dispatchBackground(dir: string): Promise<{ result: ObservedResult
  * for exit 0 WITH final text, and a `rejected` outcome never reaches either success return.
  */
 async function dispatchForeground(dir: string): Promise<ObservedResult> {
+  return dispatchForegroundSaying(dir, FOREGROUND_ANSWER);
+}
+
+/**
+ * The same call, with the child's final assistant text supplied and the host's usage counters
+ * supplied alongside it.
+ *
+ * Both are real inputs to the foreground path: the LAST text part becomes both `text` and the
+ * report source (`extractChildReportFromText`), and `usage` is accumulated off `message_end` and
+ * stamped onto the report at settle. Driving them together is what lets the report tests read a
+ * report that went through extraction rather than one handed to the renderer directly.
+ */
+async function dispatchForegroundSaying(
+  dir: string,
+  text: string,
+  usage?: { input: number; output: number; cost: number },
+): Promise<ObservedResult> {
   const h = createHarness();
   const tool = createPtcSubagentTool(baseOptions(dir, h.deps));
   const settled = run(tool, { agent: AGENT, agentScope: "project", task: "answer, then stop" });
@@ -254,11 +271,44 @@ async function dispatchForeground(dir: string): Promise<ObservedResult> {
   const child = h.lifecycle.handleAt(0);
   h.lifecycle.pushEvent(child, {
     type: "message_end",
-    message: { role: "assistant", content: [{ type: "text", text: FOREGROUND_ANSWER }] },
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text }],
+      // `cost.total` is the shape pi's assistant usage block actually carries (dispatch.ts reads
+      // `m.usage.cost?.total`), so this is the real message, not a convenient one.
+      ...(usage === undefined ? {} : { usage: { ...usage, cost: { total: usage.cost } } }),
+    },
   });
   h.lifecycle.resolveExit(child, FOREGROUND_EXIT_CODE, null);
   return observed(await settled);
 }
+
+/**
+ * A compliant child's final message: its prose, then the fenced ```json block the prompt channel
+ * reads (ADR-0032). The fence is the contract's whole trigger — `extractChildReportFromText` takes
+ * the LAST fenced block and nothing else, so this is the shape the fallback channel is specified
+ * against, not prose that happens to contain JSON.
+ */
+function childSaying(prose: string, report: unknown): string {
+  return `${prose}\n\n\`\`\`json\n${JSON.stringify(report, null, 2)}\n\`\`\``;
+}
+
+/** The declared report a compliant child emits: a literal over ADR-0032's three declared fields. */
+const CHILD_REPORT_LITERAL = {
+  summary: "The concurrency gate precedes agent discovery, so nothing is spawned.",
+  findings: [
+    {
+      what: "the slot acquire happens before discoverAgent",
+      evidence:
+        "dispatchConcurrencyLimitReached() returns from the acquire branch, above discovery",
+    },
+    {
+      what: "the background refusal reuses the foreground wording",
+      evidence: "backgroundDispatchConcurrencyLimitReached() spreads the foreground error object",
+    },
+  ],
+  files_touched: ["src/runtime/dispatch.ts", "tests/unit/ptc-subagent.test.ts"],
+} as const;
 
 describe("ptc_subagent", () => {
   test("a background call spawns a child and hands back a task id the model can use", async () => {
@@ -664,14 +714,18 @@ describe("ptc_subagent structuredContent", () => {
       // The property the change exists for. A codemode script gets this object INSTEAD of the text
       // block, so its routing decision has to be readable from here -- with key sets, because
       // `exit_code: 0` and "no exit_code" are the same observation to any truthiness test.
-      expect(Object.keys(handle).sort(), "a handle is {task_id, status}").toEqual([
+      // `report_channel` is on BOTH, and that is the point: it is the total field, present even
+      // where nothing was reported, so a script can tell "ignored the contract" from "still
+      // running" without a text block. It is on neither branch's DISCRIMINATING key.
+      expect(Object.keys(handle).sort(), "a handle is {task_id, status, report_channel}").toEqual([
+        "report_channel",
         "status",
         "task_id",
       ]);
-      expect(Object.keys(finished).sort(), "a finished call is {status, exit_code}").toEqual([
-        "exit_code",
-        "status",
-      ]);
+      expect(
+        Object.keys(finished).sort(),
+        "a finished call is {status, exit_code, report_channel}",
+      ).toEqual(["exit_code", "report_channel", "status"]);
       expect("task_id" in handle, "so a script branches on task_id for 'poll me'").toBe(true);
       expect("task_id" in finished, "and on its absence for 'already done'").toBe(false);
       // Not on `status`, which would also discriminate. The two branches differ in WHICH key they
@@ -688,17 +742,28 @@ describe("ptc_subagent structuredContent", () => {
     await withAgent(async (dir) => {
       // A Set, because the two outcomes legitimately share `status` -- comparing two concatenated
       // lists would make this test fail on the shared key alone and hide a real drift.
+      //
+      // The third outcome is a child that COMPLIED: only its projection carries `report`, so a
+      // sweep over the other two would never see that key emitted and could not catch it going
+      // undeclared.
       const emitted = [
         ...new Set([
           ...Object.keys(structuredOf((await dispatchBackground(dir)).result)),
           ...Object.keys(structuredOf(await dispatchForeground(dir))),
+          ...Object.keys(
+            structuredOf(
+              await dispatchForegroundSaying(dir, childSaying("done", CHILD_REPORT_LITERAL)),
+            ),
+          ),
         ]),
       ].sort();
       const declared = Object.keys(SUBAGENT_OUTPUT_SCHEMA.properties ?? {}).sort();
       expect(emitted, "every emitted key is a declared one").toEqual(declared);
-      // And the projection stays LEAN -- three keys, none of them the `details` spelling, and no
-      // field that exists only to say "this does not apply".
-      expect(declared).toEqual(["exit_code", "status", "task_id"]);
+      // And the projection stays LEAN -- five keys, none of them the `details` spelling, and no
+      // field that exists only to say "this does not apply". `report_channel` is the exception
+      // that proves the rule: it exists ONLY to say that `report` does not apply, and it is here
+      // because ADR-0032 makes an unstated degradation a defect.
+      expect(declared).toEqual(["exit_code", "report", "report_channel", "status", "task_id"]);
       expect(declared, "snake_case, like pi's own builtins").not.toContain("taskId");
       expect(declared).not.toContain("exitCode");
     });
@@ -716,8 +781,8 @@ describe("ptc_subagent structuredContent", () => {
       expect(JSON.parse(JSON.stringify(finished))).toStrictEqual(finished);
       // The key sets, again by length and by hasOwn: the round trip above compares VALUES, and a
       // dropped key is a shape change a value comparison can report as equal.
-      expect(Object.keys(JSON.parse(JSON.stringify(handle)))).toHaveLength(2);
-      expect(Object.keys(JSON.parse(JSON.stringify(finished)))).toHaveLength(2);
+      expect(Object.keys(JSON.parse(JSON.stringify(handle)))).toHaveLength(3);
+      expect(Object.keys(JSON.parse(JSON.stringify(finished)))).toHaveLength(3);
     });
   });
 
@@ -744,6 +809,191 @@ describe("ptc_subagent structuredContent", () => {
       // would look like an improvement. A script would then see a THIRD shape -- a status with
       // neither task_id nor exit_code -- that the two-branch discrimination above never sees.
       expect(result, "no result object escaped the throw").toBeUndefined();
+    });
+  });
+});
+
+/**
+ * ADR-0032 §Rendering on the surface that actually has a reader.
+ *
+ * `surface mode: subagents` registers no `codemode`, so nothing reads `structuredContent` and the
+ * report's only reader is the text block. These tests go through `execute()` rather than calling
+ * the renderer directly, because the claim is about what the MODEL gets: the rendered block first,
+ * the child's own prose after it, and -- on the other path -- a visibly marked gap rather than a
+ * report-shaped silence.
+ *
+ * Both directions of the IO boundary are covered (#1): a child that complies with the contract and
+ * a child that does not. `docs/testing-constraints.md` #3 says the second must not be silent, and
+ * an unmarked gap is exactly that.
+ */
+describe("ptc_subagent renders the child report into the text the model reads", () => {
+  test("a compliant child's report is rendered above its prose, which survives intact", async () => {
+    await withAgent(async (dir) => {
+      const prose = "I read the dispatcher and traced the gate; here is what I found.";
+      const result = await dispatchForegroundSaying(dir, childSaying(prose, CHILD_REPORT_LITERAL), {
+        input: 1200,
+        output: 340,
+        cost: 0.0123,
+      });
+      const text = result.content[0]?.text ?? "";
+
+      // Conclusion first, reasoning second (ADR-0032 §Rendering): the block opens the text.
+      expect(text.startsWith("child report"), "the block comes before the prose").toBe(true);
+      expect(text, "and the child's own words are still there").toContain(prose);
+      expect(
+        text.indexOf("child report"),
+        "the report is not appended after the prose it summarises",
+      ).toBeLessThan(text.indexOf(prose));
+
+      // The four sections, in the order the ADR fixes them.
+      expect(text).toContain("summary");
+      expect(text).toContain("findings");
+      expect(text).toContain("files");
+      expect(text).toContain("usage");
+      expect(text.indexOf("summary")).toBeLessThan(text.indexOf("findings"));
+      expect(text.indexOf("findings")).toBeLessThan(text.indexOf("files"));
+      expect(text.indexOf("files")).toBeLessThan(text.indexOf("usage"));
+
+      // Every finding with its own evidence -- the claim AND the thing supporting it, which is
+      // the part a summary-only render would drop.
+      for (const finding of CHILD_REPORT_LITERAL.findings) {
+        expect(text, "the claim is in the rendered text").toContain(finding.what);
+        expect(text, "and so is the evidence it rested on").toContain(finding.evidence);
+      }
+      for (const file of CHILD_REPORT_LITERAL.files_touched) {
+        expect(text, "and the paths the child touched").toContain(file);
+      }
+      // The summary is the child's own sentence, not a truncation of something longer.
+      expect(text).toContain(CHILD_REPORT_LITERAL.summary);
+    });
+  });
+
+  test("the rendered usage is the host's measurement, never a child-declared one", async () => {
+    // `ChildReportPayload` is what the child declares and `ChildReport.usage` is what the host
+    // observed; the split exists because a model cannot know its own token count. So the fixture
+    // CHILD_REPORT_LITERAL deliberately carries NO usage key -- and the rendered row still shows
+    // one, with the numbers this file fed to the host's own `message_end` accumulation.
+    expect(
+      Object.hasOwn(CHILD_REPORT_LITERAL, "usage"),
+      "the child's declared payload has no usage field at all",
+    ).toBe(false);
+    await withAgent(async (dir) => {
+      const text =
+        (
+          await dispatchForegroundSaying(dir, childSaying("done", CHILD_REPORT_LITERAL), {
+            input: 1200,
+            output: 340,
+            cost: 0.0123,
+          })
+        ).content[0]?.text ?? "";
+      expect(text).toContain("in 1200");
+      expect(text).toContain("out 340");
+      expect(text).toContain("cost 0.0123");
+      expect(text, "one message_end is one turn").toContain("1 turn");
+    });
+  });
+
+  test("a child that ignored the contract is marked as such, not rendered as an empty report", async () => {
+    // COUNTERFACTUAL (constraint 5). Render `report: undefined` as an empty report -- sections
+    // with `Array(0)` findings, a zeroed usage row -- and this test goes red on every assertion
+    // below, because none of those words says the report is missing. The model would read "the
+    // child found nothing", which is a completely different claim from "the child told us
+    // nothing", and the difference is the whole point of the surface.
+    await withAgent(async (dir) => {
+      const prose = "I looked at the file and it seems fine to me.";
+      const text = (await dispatchForegroundSaying(dir, prose)).content[0]?.text ?? "";
+
+      expect(text, "the child's prose is still handed over intact").toContain(prose);
+      expect(text, "the gap is visible").toContain("child report");
+      expect(text, "and names the channel that delivered nothing").toContain("channel: none");
+      expect(text, "and says so in words").toContain("no child report was returned");
+      expect(text, "no summary row — that is what an empty report would print").not.toContain(
+        "summary",
+      );
+      expect(text, "no findings row").not.toContain("findings");
+      expect(text, "no files row").not.toContain("files");
+      expect(text, "no usage row").not.toContain("usage");
+    });
+  });
+
+  test("the structured channel carries the report whole, alongside the same text", async () => {
+    // The two channels are declared to agree on KEYS (ADR-0028 "Keys agree; values are raw"), and
+    // nothing in pi checks that they do -- so the one place it can be checked is here. The
+    // projection's report keys are the four section labels the rendered block draws, and vice
+    // versa: a fifth key in the projection, or a fifth section in the text, is drift.
+    await withAgent(async (dir) => {
+      const result = await dispatchForegroundSaying(
+        dir,
+        childSaying("done", CHILD_REPORT_LITERAL),
+        { input: 1200, output: 340, cost: 0.0123 },
+      );
+      const structured = structuredOf(result);
+      const report = structured.report as
+        | { summary: string; findings: unknown[]; files_touched: string[]; usage: unknown }
+        | undefined;
+      const text = result.content[0]?.text ?? "";
+
+      expect(report, "a compliant child's report reaches the machine channel").toBeDefined();
+      // FULL length, not the rendered view: the 20-finding bound is a rendering bound and a
+      // program is not a display surface (ADR-0032 §Rendering). Asserting the count here is what
+      // stops that decision from quietly becoming a lossy projection.
+      expect(report?.findings, "every finding, not the rendered twenty").toHaveLength(
+        CHILD_REPORT_LITERAL.findings.length,
+      );
+      expect(report?.summary).toBe(CHILD_REPORT_LITERAL.summary);
+      expect(report?.files_touched).toEqual([...CHILD_REPORT_LITERAL.files_touched]);
+
+      // Keys agree: every projection key is a section the model was shown.
+      for (const key of Object.keys(report ?? {})) {
+        expect(text, "section " + key + " is drawn in the text").toContain(key);
+      }
+      // And the host's usage, not the child's: `usage` came from this file's `message_end`.
+      expect(report?.usage).toEqual({ input: 1200, output: 340, cost: 0.0123, turns: 1 });
+    });
+  });
+
+  test("a non-compliant child gets no `report` key rather than an empty one", async () => {
+    // `JsonValue` has no `undefined`, so a key set to `undefined` would compile in spirit and
+    // vanish at `JSON.stringify` on the far side of the sandbox boundary. Absence is asserted
+    // with `hasOwn` for exactly that reason -- the same discipline the handle/finished pair above.
+    await withAgent(async (dir) => {
+      const structured = structuredOf(await dispatchForegroundSaying(dir, "no report here"));
+      expect(
+        Object.hasOwn(structured, "report"),
+        "no report means the key is ABSENT, not present-and-empty",
+      ).toBe(false);
+      // The other two keys are untouched by this, so "absent" is about the report and not about
+      // the whole projection having vanished.
+      expect(structured.status).toBe("fulfilled");
+      expect(structured.exit_code).toBe(FOREGROUND_EXIT_CODE);
+      // ...and the channel is what says WHY it is absent. Without this key the two ways a
+      // `report` can be missing -- the child ignored the contract, or a handle has not finished --
+      // are the same value, which is the silent degradation ADR-0032 exists to prevent.
+      expect(structured.report_channel).toBe("none");
+    });
+  });
+
+  test("report_channel says why a report is absent, on every branch that can omit it", async () => {
+    // Three outcomes, one of them compliant. Two of them omit `report`, and without the channel
+    // they are the same value to a caller -- which is the silent degradation ADR-0032 forbids.
+    // Counterfactual: dropping `report_channel`, or leaving it off the handle branch, turns this
+    // red; so does an implementation that claims a channel it did not use.
+    await withAgent(async (dir) => {
+      const nonCompliant = structuredOf(await dispatchForegroundSaying(dir, "no report here"));
+      expect(Object.hasOwn(nonCompliant, "report")).toBe(false);
+      expect(nonCompliant.report_channel).toBe("none");
+
+      const handleStructured = structuredOf((await dispatchBackground(dir)).result);
+      expect(Object.hasOwn(handleStructured, "report")).toBe(false);
+      expect(handleStructured.report_channel).toBe("none");
+      // What IS different between the two non-compliant outcomes, so this pair is not vacuous.
+      expect(Object.hasOwn(handleStructured, "task_id")).toBe(true);
+
+      const compliant = structuredOf(
+        await dispatchForegroundSaying(dir, childSaying("done", CHILD_REPORT_LITERAL)),
+      );
+      expect(Object.hasOwn(compliant, "report")).toBe(true);
+      expect(compliant.report_channel).toBe("prompt-json");
     });
   });
 });

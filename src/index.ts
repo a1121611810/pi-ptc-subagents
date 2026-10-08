@@ -71,6 +71,7 @@ import type {
 } from "./mode/ptc-mode.ts";
 import { buildPtcSkillsSection, skillsSectionDropped } from "./mode/skills-section.ts";
 import { createPtcSubagentTool } from "./tools/subagent.ts";
+import { createChildReportTool } from "./tools/child-report-tool.ts";
 
 export {
   bindingSource,
@@ -442,6 +443,24 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
   pi.registerTool(
     createPtcTaskStopTool(background.registry, background.lifecycle, { clock: background.clock }),
   );
+
+  /*
+   * ADR-0032's report tool (ticket #101). Registered here, after the `off` early return, so it
+   * exists in every surface that has one — but ACTIVE only where it has a caller.
+   *
+   * `defaultActive` is `ptcDepth > 0`, and `ptcDepth` is this process's own depth baseline read
+   * from `PI_PTC_DEPTH`: 0 in a parent session, 1+ inside a `pi.dispatch` child. A parent has no
+   * child to report, so the tool is registered there and never offered to its model — which is
+   * the whole of "the tool is not active in the parent's ordinary surface" (`ToolDefinition.
+   * defaultActive`: pi activates a `direct` tool on registration unless this says otherwise).
+   *
+   * The other half of activation is in `buildArgv`, which merges this tool's name into the child's
+   * `--tools` list. Both halves are needed and neither covers the other's case: pi reads
+   * `--tools` as an allowlist, so an agent that declares its own tools would filter the report
+   * tool straight back out without the merge, while an agent that declares none gets no flag at
+   * all and depends on `defaultActive`. See `childToolList`.
+   */
+  pi.registerTool(createChildReportTool(ptcDepth > 0));
 
   pi.on("turn_start", async () => {
     turnActive = true;

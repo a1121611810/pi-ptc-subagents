@@ -412,6 +412,30 @@ const EXTERNAL_VOCABULARY: ReadonlyMap<string, string> = new Map([
   ["TextShimmer", "DSH 渲染层的 shimmer 组件类"],
   ["ToolCallTree", "DSH 渲染层的子调用树组件类"],
   ["UserConfig", "pi 宿主配置文件里的用户配置类型"],
+  // ADR-0032 §What pi 1.0.0 actually offers 逐层点名 pi 1.0.0 的 flag / session 面来论证
+  // 「结构化输出在 assistant message 这一层不存在」。这五个符号全部来自已安装的 pi 产物
+  // （dist/core/sdk.d.ts、dist/core/agent-session.d.ts、@earendil-works/pi-ai/dist/types.d.ts），
+  // 本仓只在 ADR 里引用其名，从不声明也从不调用；结论正是它们各自都没有 schema / format 字段。
+  [
+    "CreateAgentSessionOptions",
+    "pi 1.0.0 SDK 的建会选项类型（dist/core/sdk.d.ts）；ADR-0032 引用它是为了证明它没有 schema 字段（ADR-0032）",
+  ],
+  [
+    "AgentSessionConfig",
+    "pi 1.0.0 的会话配置类型（dist/core/agent-session.d.ts）；ADR-0032 引用它是为了证明它没有 schema / format 字段（ADR-0032）",
+  ],
+  [
+    "StreamOptions",
+    "@earendil-works/pi-ai 的流选项类型；ADR-0032 引用它是为了证明它没有 schema / format 字段（ADR-0032）",
+  ],
+  [
+    "agent_end",
+    "pi 宿主的事件名（dist/core/agent-session.d.ts）；ADR-0032 引用它是为了说明它只带 messages、不带结果对象（ADR-0032）",
+  ],
+  [
+    "createAgentSession",
+    "pi 1.0.0 SDK 的建会函数；ADR-0032 §Rejected 明确**否决**了进程内子方案，所以本仓不调用它（ADR-0032）",
+  ],
   ["_baseSystemPromptOptions", "pi 宿主内部字段（下划线前缀即私有）"],
   [
     "_refreshToolRegistry",
@@ -1163,6 +1187,33 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       // 解析器不收，因此不进这份基线——它们由 ADR 正文里的表格自带出处。
       "docs/adr/0030-surface-switch-reloads.md:68 -> ptc-mode.ts:27",
       "docs/adr/0031-open-source-and-publish-authority.md:105 -> src/runtime/limits.ts:4",
+      // 2026-10-08 **第六次**复核：ADR-0032 的 7 条全部重新逐行核对，且这次是按**内容**核对的。
+      //
+      // 前五次里有一次是空行漂移（index.ts 280 → 279），已被本仓抓出。但第六次复核发现的更糟：
+      // 第五次记录在案的这批行号，在 #101 之后**没有一条还对得上内容**，而断言四一直是绿的——
+      // 它只校验行号能解析到目标文件，不校验该行写了什么。所以「第五次已逐行核对过」这句话在
+      // 第六次复核时是**假的**。这正是 docs/testing-constraints.md「What the gate does not check」
+      // 说的那一类：门能看见形状，看不见引用指向的东西。
+      //
+      // 逐条内容（写在这里，是为了让下一个复核者不必重跑一遍就能知道每条该是什么）：
+      //   11 → dispatch.ts:1149 = `function assistantText(event: ParsedAgentEvent)`
+      //   20 → subagent.ts:171  = `export const SUBAGENT_OUTPUT_SCHEMA: SubagentOutputSchema`
+      //   27 → dispatch.ts:1172 = `function accumulateUsage(`（usage 的累加点，前景后台共用）
+      //   49 → subagent.ts:288  = structuredContent 分支里读 `outcome.reportChannel` 的那一行
+      //   49 → ptc-task.ts:229/459/618 = 三处 `outputSchema:` 声明
+      //   70 → index.ts:280     = `if (surface.surfaceMode === "off") return;`
+      //  117 → dispatch.ts:1031 = `export function childToolList(`，即合并进子进程 --tools 的那个函数
+      //
+      // 注意 117 这一条**换了目标而不是只移行号**：#101 之前的实现是一句
+      // `if (agent.tools && agent.tools.length > 0)` 的 guard，那行现在已经不在分支上了，
+      // 替换它的是 childToolList。只把行号从 101 挪到 117 会把一个假的引用钉得更牢。
+      "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1149",
+      "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:171",
+      "docs/adr/0032-child-report.md:27 -> src/runtime/dispatch.ts:1172",
+      "docs/adr/0032-child-report.md:49 -> src/tools/subagent.ts:288",
+      "docs/adr/0032-child-report.md:49 -> src/tools/ptc-task.ts:229",
+      "docs/adr/0032-child-report.md:70 -> src/index.ts:280",
+      "docs/adr/0032-child-report.md:117 -> src/runtime/dispatch.ts:1031",
     ]);
   });
 

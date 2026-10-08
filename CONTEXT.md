@@ -275,6 +275,30 @@ block), `stderr?`, `errorMessage?`. Shape matches `Promise.allSettled`
 settled records, so PTC programs compose without `try/catch`. See
 ADR-0016.
 
+**child report** — the structured value a dispatched child produces and
+the host hands back, carrying exactly four things: `summary` (one line, the
+child's own words), `findings` (each with `what` and independent `evidence`),
+`files_touched`, and `usage`. It arrives over one of two channels — a report
+**tool** the child calls (preferred) or a fenced JSON block in the child's
+final text (the fallback) — and the result **always names which channel
+delivered it**, including when none did: `tool`, `prompt-json`, `none` (the
+contract was on and the child did not comply), or `opted-out` (the agent's
+frontmatter set `childReport: false`, so nobody asked). Prose is preserved
+alongside it, never
+replaced. On by default; an agent's frontmatter opts out with one yes/no.
+Bounded at 20 findings for a model-facing render, withheld count stated in-band
+like the value tree. ADR-0032.
+
+_NOT the same as_ **structured result** (that is `structuredContent`, defined
+above as never reaching the model), and the two point in opposite directions:
+`structured result` is machine-only and model-blind, a child report is
+model-facing and is _also_ what a program reads. Reusing the older term for
+this would invert its meaning. _Avoid_: "subagent report" (the word
+_subagent_ is reserved for the top-level _subagent surface_, `CONTEXT.md`
+§subagent surface), "structured output" (pi has no such concept — see
+ADR-0032 §What pi 1.0.0 actually offers), "child result" (the child report is
+one field of a _DispatchResult_, not the whole of it).
+
 **dispatch concurrency** — the hard cap on concurrently in-flight
 dispatch in one pi session. Default 8, configurable via
 `PtcConfig.dispatchConcurrency`; the live control is the
@@ -465,8 +489,12 @@ completion (`lost_on_session_restart`). See ADR-0022 + ADR-0023.
 lifecycle of one background child. 19-field schema (ADR-0022 §3's code block;
 its "21 fields" heading is an authoring miscount) plus two
 optional owner-identity fields (`ownerPid`, `ownerBootMs`, ADR-0023)
-stamped at spawn, persisted to `<sessionDir>/tasks/<taskId>.json` per R1.
-Independent of `DispatchResult` and `SubCallRecord`. See ADR-0022 + ADR-0023.
+stamped at spawn, persisted to `<sessionDir>/tasks/<taskId>.json` per R1,
+plus two optional _child report_ fields (`report`, `reportChannel`,
+ADR-0032) written only when the record reaches `succeeded` — so a
+still-running or failed task carries neither, because "has not reported
+yet" is not "reported nothing". Independent of `DispatchResult` and
+`SubCallRecord`. See ADR-0022 + ADR-0023 + ADR-0032.
 
 **TaskStatus** — the 6-state enum for `TaskRecord.status`:
 `running / stopping / succeeded / failed / canceled / lost`. The `queued`
@@ -502,8 +530,9 @@ deferred to v2. See ADR-0022.
 on (not gated by `/ptc off`, per ADR-0022 + map Notes clause 5):
 `ptc_task_list({ status?, limit? })` returns matching TaskRecords
 (newest first, default limit 100); `ptc_task_output({ taskId, sinceBytes? })`
-dereferences `outputRef` and applies ADR-0015 truncateTail;
-`ptc_task_stop({ taskId, reason? })` triggers
+dereferences `outputRef`, applies ADR-0015 truncateTail, and renders the
+persisted _child report_ ahead of the prose when the record reached
+`succeeded` (ADR-0032); `ptc_task_stop({ taskId, reason? })` triggers
 `running → stopping → canceled` (the dispatcher delivers the signal).
 See ADR-0022.
 

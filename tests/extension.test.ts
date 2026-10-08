@@ -34,15 +34,18 @@ test("the default export is the extension factory and runs without touching pi",
   expect(ptcSubagents(makeExtensionStub().api)).toBe(undefined);
 });
 
-test("the factory registers the two PTC tools and the three background-task tools", () => {
+test("the factory registers the two PTC tools, the three background-task tools and the report tool", () => {
   const tools = captureRegisteredTools();
   // BG-14: the three ptc_task_* tools are always-on, registered at factory time outside /ptc mode.
+  // ADR-0032 / #101 adds `ptc_child_report` to the always-on group: it is registered in every
+  // surface that reaches this line, and activated only in a dispatched child.
   expect([...tools.keys()]).toEqual([
     "ptc_run_code",
     "ptc_workflow",
     "ptc_task_list",
     "ptc_task_output",
     "ptc_task_stop",
+    "ptc_child_report",
   ]);
   for (const tool of tools.values()) {
     expect(typeof tool.execute).toBe("function");
@@ -67,11 +70,16 @@ test("the factory module re-exports the machinery T4/T5 build on", () => {
 
 const PTC_TOOLS = ["ptc_run_code", "ptc_workflow"] as const;
 const TASK_TOOLS = ["ptc_task_list", "ptc_task_output", "ptc_task_stop"] as const;
+// ADR-0032 / #101: registered in every surface that gets as far as the lifecycle face, because a
+// dispatched CHILD is the only thing that ever calls it. It is registered inactive in a parent
+// (`defaultActive: false`), so it belongs to neither the orchestration group nor the task group --
+// it is here as its own constant so a reader can see that distinction rather than infer it.
+const REPORT_TOOL = "ptc_child_report" as const;
 
 test("full mode registers the orchestration tools and the lifecycle face", () => {
   // The literal set, not a length: a tool dropped from one group has to turn this red.
   const tools = makeExtensionStub({ surfaceMode: "full" }).tools;
-  expect([...tools.keys()]).toEqual([...PTC_TOOLS, ...TASK_TOOLS]);
+  expect([...tools.keys()]).toEqual([...PTC_TOOLS, ...TASK_TOOLS, REPORT_TOOL]);
 });
 
 test("subagents mode drops the orchestration tools and keeps the lifecycle face", () => {
@@ -79,6 +87,7 @@ test("subagents mode drops the orchestration tools and keeps the lifecycle face"
   expect([...tools.keys()], "pi codemode does the orchestrating here").toEqual([
     "ptc_subagent",
     ...TASK_TOOLS,
+    REPORT_TOOL,
   ]);
   for (const name of PTC_TOOLS) {
     expect(tools.has(name), name + " must not exist in this mode").toBe(false);
@@ -103,8 +112,10 @@ test("the surface mode is read once, before anything is registered", () => {
   const off = makeExtensionStub({ surfaceMode: "off" });
   const sub = makeExtensionStub({ surfaceMode: "subagents" });
   expect(off.tools.size).toBe(0);
-  expect(sub.tools.size, "the subagent tool plus the lifecycle face").toBe(TASK_TOOLS.length + 1);
-  expect(makeExtensionStub({ surfaceMode: "full" }).tools.size).toBe(5);
+  expect(sub.tools.size, "the subagent tool plus the lifecycle face plus the report tool").toBe(
+    TASK_TOOLS.length + 2,
+  );
+  expect(makeExtensionStub({ surfaceMode: "full" }).tools.size).toBe(PTC_TOOLS.length + 4);
 });
 
 test("each surface registers a distinct set, and no mode keeps both orchestrators", () => {
@@ -207,8 +218,8 @@ test("the factory's own config read is what decides the surface, not the test se
   // "full" left the entire suite green.
   for (const [contents, expected] of [
     [{ surfaceMode: "off" }, []],
-    [{ surfaceMode: "subagents" }, ["ptc_subagent", ...TASK_TOOLS]],
-    [{ surfaceMode: "full" }, [...PTC_TOOLS, ...TASK_TOOLS]],
+    [{ surfaceMode: "subagents" }, ["ptc_subagent", ...TASK_TOOLS, REPORT_TOOL]],
+    [{ surfaceMode: "full" }, [...PTC_TOOLS, ...TASK_TOOLS, REPORT_TOOL]],
   ] as const) {
     const { stub, dir } = await stubFromAgentDir(contents);
     try {
@@ -235,25 +246,25 @@ test("with no preference from the user, the surface is decided by the pi (ADR-00
       where: "codemode present, nothing configured",
       codemode: { present: true, how: "found" },
       settings: undefined,
-      expected: [...PTC_TOOLS, ...TASK_TOOLS],
+      expected: [...PTC_TOOLS, ...TASK_TOOLS, REPORT_TOOL],
     },
     {
       where: "codemode present and configured active",
       codemode: { present: true, how: "found" },
       settings: ACTIVE_CODEMODE_SETTINGS,
-      expected: ["ptc_subagent", ...TASK_TOOLS],
+      expected: ["ptc_subagent", ...TASK_TOOLS, REPORT_TOOL],
     },
     {
       where: "codemode absent, nothing configured",
       codemode: { present: false, how: "not-found" },
       settings: undefined,
-      expected: [...PTC_TOOLS, ...TASK_TOOLS],
+      expected: [...PTC_TOOLS, ...TASK_TOOLS, REPORT_TOOL],
     },
     {
       where: "codemode absent even though a loadout names it",
       codemode: { present: false, how: "not-found" },
       settings: ACTIVE_CODEMODE_SETTINGS,
-      expected: [...PTC_TOOLS, ...TASK_TOOLS],
+      expected: [...PTC_TOOLS, ...TASK_TOOLS, REPORT_TOOL],
     },
   ] as const;
   for (const contents of [null, { defaultMode: false }]) {
@@ -281,6 +292,7 @@ test("an explicit surfaceMode wins over the probe, whichever way the probe came 
       expect([...stub.tools.keys()], `explicit full, codemode ${codemode.how}`).toEqual([
         ...PTC_TOOLS,
         ...TASK_TOOLS,
+        REPORT_TOOL,
       ]);
     } finally {
       await removeTempDir(dir);
@@ -298,8 +310,8 @@ test("a malformed file still gives the detected surface, and the problem is repo
   // the only reason the full surface was expected -- the assertion would have passed just as
   // happily on a pi that does ship codemode.
   for (const [codemode, expected] of [
-    [{ present: true, how: "found" }, ["ptc_subagent", ...TASK_TOOLS]],
-    [{ present: false, how: "not-found" }, [...PTC_TOOLS, ...TASK_TOOLS]],
+    [{ present: true, how: "found" }, ["ptc_subagent", ...TASK_TOOLS, REPORT_TOOL]],
+    [{ present: false, how: "not-found" }, [...PTC_TOOLS, ...TASK_TOOLS, REPORT_TOOL]],
   ] as const) {
     const dir = await makeTempDir();
     const previous = process.env.PI_CODING_AGENT_DIR;
@@ -365,6 +377,7 @@ test("a detected subagents surface on a pi that does not register codemode says 
     expect([...stub.tools.keys()], "and the session really is holding a subagent face").toEqual([
       "ptc_subagent",
       ...TASK_TOOLS,
+      REPORT_TOOL,
     ]);
   } finally {
     if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
@@ -392,7 +405,7 @@ test("a detected subagents surface on a pi that DOES register codemode stays qui
     expect(
       [...stub.tools.keys()],
       "a healthy session is the subagents face beside an active codemode",
-    ).toEqual(["ptc_subagent", ...TASK_TOOLS]);
+    ).toEqual(["ptc_subagent", ...TASK_TOOLS, REPORT_TOOL]);
     // Scoped the same way: the PTC-mode announcement is this file's pre-existing noise and says
     // nothing about detection.
     expect(
