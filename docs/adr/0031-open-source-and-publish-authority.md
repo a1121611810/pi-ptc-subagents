@@ -42,20 +42,16 @@ rule, and the `prepublishOnly` duplication argument all remain as specified ther
 
 ## §A — The repository is public, and `main` is owner-writable
 
-> **NOT EXECUTED as of 2026-10-08.** Everything in §A through §C below is a _decision that was
-> never carried out_. Measured: the repository is still private (`.visibility` = `private`;
-> unauthenticated API access returns `403`), and the ruleset the next paragraph describes **does
-> not exist** — `GET /repos/{owner}/{repo}/rulesets` returns `403` with GitHub's own message,
-> _"Upgrade to GitHub Pro or make this repository public to enable this feature."_
+> **EXECUTED 2026-10-08, hours after the gap above was measured.** The repository was flipped to
+> public, and the ruleset below was created the same day — GitHub enables rulesets on public
+> repositories without Pro. It is active (ruleset id 24698892, `enforcement: "active"`, targeting
+> `refs/heads/main` only), with the table's rules as specified and `a1121611810` (user id 26902911)
+> as the sole bypass actor at `bypass_mode: always`. The 1.5.0 release happened in the window
+> BEFORE this ruleset existed; 1.5.1 is the first release where every step above evaluated.
 >
-> So the consequence that follows from this section — that `main` is enforced owner-writable and
-> that release authority is gated — **is not in effect**. 1.5.0 was merged into `main` directly
-> and its `v1.5.0` tag pushed without any rule object having evaluated either. The tag was a
-> plain capability check, nothing more.
->
-> The decision itself is unchanged and still the right one; only its execution is missing. Treat
-> every claim below this line as _planned_, not _done_, until `.visibility` reads `public` and the
-> ruleset endpoint returns the table above.
+> The `§7 provenance` correction above stands: 1.5.0 has no attestation because the flip came
+> after it. 1.5.1, published after the flip, is the first version whose provenance precondition
+> held — see its `dist.attestations` on the registry.
 
 The repository moves from private to public. The source, the ADRs, `CONTEXT.md`, the tests and
 the research notes all become readable, and the npm `homepage` stops being a dead link.

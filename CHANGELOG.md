@@ -7,34 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+(nothing yet)
+
+## [1.5.1] - 2026-10-08
+
 ### Fixed
 
-- **Two claims this changelog and ADR-0031 made about 1.5.0 were false, and were measured after
-  the fact.** Both said the same root thing — that the repository had been made public:
+- **Two claims 1.5.0's changelog made about this repository were false, and are now corrected in
+  the repository itself.** 1.5.0's tarball still carries the original wording — published tarballs
+  are immutable — so the correction lives here, in `main`, and in
+  [ADR-0031](./docs/adr/0031-open-source-and-publish-authority.md)'s amendment blocks:
+  - _"The repository is public … release authority is enforced by a `refs/tags/v*` ruleset."_ The
+    repository was still private at 1.5.0's release, and no ruleset existed. Both were done
+    2026-10-08, hours after the gap was measured: the flip, then an active ruleset (id 24698892)
+    on `refs/heads/main` — no pushes, no merges, no deletions, no force-pushes except by
+    `a1121611810` as sole bypass actor, with one approving review and green `format` / `oxlint` /
+    `test` checks required for everyone else.
+  - _"The next version published from here carries an npm provenance attestation."_ No published
+    version through 1.5.0 has one, because the provenance precondition (a public source
+    repository) only became true with the flip above. **1.5.1 is the first version whose
+    precondition held** — see `dist.attestations` on the registry.
 
-  - _"The repository is public, and `main` is writable only by the maintainer… Release authority
-    is enforced by a `refs/tags/v*` ruleset"_ — the repository is still **private**
-    (`.visibility` = `private`, unauthenticated API access returns `403`) and **no ruleset
-    exists**: `GET /repos/{owner}/{repo}/rulesets` returns `403` with GitHub's own _"Upgrade to
-    GitHub Pro or make this repository public to enable this feature."_ 1.5.0 was merged to `main`
-    and its tag pushed with no rule object having evaluated either.
-  - _"The next version published from here carries an npm provenance attestation"_ — it does not,
-    and never has. `dist.attestations` is empty for **every** published version (1.1.1, 1.2.1,
-    1.3.0, 1.4.0, 1.5.0). Provenance requires a public source repository under trusted publishing,
-    and the precondition was never met. ADR-0018 §7 — which said no attestation would appear while
-    the repository is private — was therefore never falsified and stands unchanged.
+  How the false claims shipped: they were written as decisions in an earlier session
+  (`c1dda59`), recorded as facts, and every gate in this repository checks the shape of a claim —
+  that a `file:line` resolves, that a constant matches a rule — not whether the thing a sentence
+  describes exists. Five review rounds and a green release gate passed them. The same class of
+  gap is recorded in `docs/testing-constraints.md` §"What the gate does not check".
 
-  These were written as decisions in a previous session, recorded as facts in `c1dda59`, carried
-  through five review rounds and a green release gate, and then shipped inside the 1.5.0 tarball
-  because `CHANGELOG.md` is in `files`. Every gate in this repo checks the SHAPE of a claim —
-  that a `file:line` resolves, that a constant matches a rule — and none of them reads prose to
-  ask whether the thing it describes still exists. A document gate that could would have caught
-  this at `c1dda59`; see ADR-0031's correction block and `docs/testing-constraints.md` §"What the
-  gate does not check".
+### Added
 
-  **The OIDC mechanism is not implicated.** 1.5.0's publish log reads `oidc Successfully retrieved
-and set token`, `PUT 202`, `+ pi-ptc-subagents@1.5.0`. Trusted publishing worked; its precondition
-  is what was missing.
+- **`docs/prototypes/` — the bgdispatch design records, recovered from research branches.** The
+  ten research branches deleted in the run-up to going public carried twelve verdict /
+  measurement / prototype files that had never been merged to `main`: the records of _why_ the
+  background-dispatch design is what it is. They were recovered before the branches were deleted;
+  `AGENTS.md` treats records as load-bearing.
+- **`.mailmap`**, so the public commit history displays `a1121611810` instead of the 224-character
+  padded name that authored 309 commits. No history rewrite.
+
+### Changed
+
+- **`.gitignore` gains `.zcode/` and `.scratch/`.** `.zcode/` was previously protected only by two
+  nested self-ignoring `.gitignore` files that are themselves untracked. `.scratch/` (local ticket
+  drafts, content duplicated on GitHub Issues) is removed from tracking.
+- **Twelve research / feature branches and two `backup/undo-*` tags deleted from the remote.**
+  They carried the developer's machine-local paths (`/Users/lilianda`) that `main` had already
+  scrubbed; GitHub publishes every ref, not just `main`, so a public reader could have clicked
+  into them. Content was verified present in `main` (or recovered above) before each deletion.
+  Four routine `dependabot/*` bumps remain as open branches for the maintainer to review.
+- **`docs/prototypes/**` excluded from oxlint.** The recovered files are measurement scripts and
+  were never part of the linted source; they are records, not production code.
+- **The npm mirror noted during the audit turned out to be local configuration, not the
+  lockfile** — `pnpm-lock.yaml` carries no registry URLs at all.
 
 ## [1.5.0] - 2026-10-08
 
