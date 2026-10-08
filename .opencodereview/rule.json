@@ -71,6 +71,11 @@
       "merge_system_rule": false
     },
     {
+      "path": "src/tools/subagent.ts",
+      "rule": ".opencodereview/rules/ptc-bgdispatch-contract.md",
+      "merge_system_rule": true
+    },
+    {
       "path": "src/tools/common.ts",
       "rule": ".opencodereview/rules/ptc-bgdispatch-contract.md",
       "merge_system_rule": true

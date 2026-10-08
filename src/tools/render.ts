@@ -1,5 +1,6 @@
 /**
- * Shared TUI renderer for `ptc_run_code` and `ptc_workflow`.
+ * Shared TUI renderer for `ptc_run_code` and `ptc_workflow`, plus the model-facing child-report
+ * block at the bottom (`renderChildReportText`, ADR-0032 §Rendering).
  *
  * Both tools produce the same `PtcToolDetails` shape (see `common.ts`), so one pair of helpers
  * drives both `renderCall` and `renderResult`.
@@ -37,7 +38,10 @@ import type {
   SubCallRecord,
   SubCallStatus,
 } from "../runtime/protocol.ts";
-import { renderModelValue, sanitizeText } from "./text.ts";
+// Type-only, so the worker's module graph gains no edge to the dispatcher: a `ChildReport` and a
+// `ChildReportChannel` are read off a `DispatchResult` by the tool, never constructed here.
+import type { ChildReport, ChildReportChannel, ChildReportFinding } from "../runtime/dispatch.ts";
+import { MAX_LINE_CHARS, renderModelValue, sanitizeText } from "./text.ts";
 import { DEFAULT_SHIMMER_INTERVAL_MS, type ShimmerState, withShimmer } from "./shimmer.ts";
 
 /** Call-row label per surface; `ptc_workflow` gets its own so the two rows stay tellable apart. */
@@ -581,6 +585,206 @@ export function renderValueTree(
     out.push((moreAfter ? "├─ " : "└─ ") + "…+" + (total - limit) + " more keys");
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Child report rendering (ADR-0032 §Rendering)
+//
+// The model-facing surface. On `surface mode: subagents` there is no `codemode`, so nothing reads
+// `structuredContent` and the report has to be RENDERED into the text the model actually reads
+// (ADR-0025 + ADR-0028). So this block is drawn with the same vocabulary as the value tree above:
+// `├─` / `└─` / `│` connectors, `Array(n)` heads, labels in the same `LABEL_WIDTH` gutter, every
+// cap stated in-band rather than applied silently.
+//
+// Two rules the shape exists to keep:
+//
+//  - A missing report is VISIBLY MARKED. An unmarked gap between "the tool returned" and "the
+//    child said" reads as an empty result — a child that found nothing — which is a different
+//    claim from a child that ignored the contract.
+//  - A child-declared value is never authoritative. `usage` is stamped by the host at settle, so
+//    this renderer only ever prints what it was handed (`ChildReport` vs `ChildReportPayload`).
+//
+// The order is fixed — summary, findings, files touched, usage — and the child's prose is
+// appended AFTER this block, so the model reads the conclusion first and the reasoning second.
+// ---------------------------------------------------------------------------
+
+/** Section label of the rendered block; the header the model is told to look for. */
+export const CHILD_REPORT_HEADER = "child report";
+
+/** ADR-0032 §Rendering commits to 20; the withheld count is stated on the last findings row. */
+export const CHILD_REPORT_MAX_FINDINGS = 20;
+
+/** `files_touched` is bounded for the reason every other list here is: an unbounded one is noise. */
+export const CHILD_REPORT_MAX_FILES = 20;
+
+/**
+ * Evidence supports a claim; past this the row stops being a row. Stated per finding, because a
+ * reader who has been cut off mid-sentence cannot otherwise tell a cut from the child's ending.
+ *
+ * Sized so the WHOLE row including that notice survives `MAX_LINE_CHARS`: 3 columns of connector,
+ * 5 of finding-index padding, `evidence: `, then the notice. Raise this and the notice itself gets
+ * truncated, which would state the cut and hide it in the same row.
+ */
+export const CHILD_REPORT_MAX_EVIDENCE_CHARS = 150;
+
+/**
+ * One section: a label in the gutter, its head on the label row, and any rows hanging off it at
+ * the section's own column (`rows` already carry their own connectors).
+ */
+interface ReportSection {
+  readonly label: string;
+  readonly head: string;
+  readonly rows: readonly string[];
+}
+
+/** An empty container is `[]` and a non-empty one is `Array(n)`, as the value tree renders both. */
+function countHead(count: number): string {
+  return count === 0 ? "[]" : `Array(${count})`;
+}
+
+/**
+ * The summary is one line by contract. A child that sent several is cut to its first non-blank
+ * line, and `truncateChars` marks the cut with `…` — the model has to be able to tell a trimmed
+ * summary from a complete one.
+ */
+function summaryText(summary: string): string {
+  const line =
+    sanitizeText(summary)
+      .split("\n")
+      .find((candidate) => candidate.trim().length > 0)
+      ?.trim() ?? "";
+  if (line.length === 0) return '""';
+  return truncateChars(line, MAX_LINE_CHARS);
+}
+
+/**
+ * The child's cost as a number a reader can act on: four decimals, trailing zeros dropped so the
+ * row is not mostly padding. `Number` rather than `toFixed` because `"0.1200"` reads as a
+ * measurement the host did not make.
+ */
+function reportUsageText(usage: ChildReport["usage"]): string {
+  const cost = Number(usage.cost.toFixed(4));
+  return `in ${usage.input} · out ${usage.output} · cost ${cost} · ${plural(usage.turns, "turn")}`;
+}
+
+/** One finding's evidence row, folded to a single line and capped with the cap stated in-band. */
+function evidenceRow(continuation: string, pad: string, evidence: string): string {
+  const flat = sanitizeText(evidence).replace(/\n/g, " ").trim();
+  if (flat.length <= CHILD_REPORT_MAX_EVIDENCE_CHARS)
+    return `${continuation}${pad}evidence: ${flat}`;
+  return (
+    `${continuation}${pad}evidence: ${flat.slice(0, CHILD_REPORT_MAX_EVIDENCE_CHARS)}… ` +
+    `(truncated at ${CHILD_REPORT_MAX_EVIDENCE_CHARS} chars)`
+  );
+}
+
+/**
+ * One row per finding, each with its evidence on a continuation row at the finding's own column,
+ * then the withheld tail when the report carried more than {@link CHILD_REPORT_MAX_FINDINGS}.
+ * The tail names the COUNT (`…+3 more findings withheld`), which is the difference between
+ * "reporting what it withheld" and a bare ellipsis.
+ */
+function findingRows(findings: readonly ChildReportFinding[], withheld: number): string[] {
+  const rows: string[] = [];
+  findings.forEach((finding, index) => {
+    const isLast = index === findings.length - 1 && withheld === 0;
+    const tag = `[${index}]`;
+    rows.push(`${isLast ? "└─ " : "├─ "}${tag}  ${sanitizeText(finding.what).trim()}`.trimEnd());
+    rows.push(evidenceRow(isLast ? "   " : "│  ", " ".repeat(tag.length + 2), finding.evidence));
+  });
+  if (withheld > 0) {
+    rows.push(
+      `└─ …+${withheld} more findings withheld ` +
+        `(a report renders at most ${CHILD_REPORT_MAX_FINDINGS})`,
+    );
+  }
+  return rows;
+}
+
+/** `files_touched`, same bounded-list shape as the findings block. */
+function fileRows(files: readonly string[], withheld: number): string[] {
+  const rows = files.map(
+    (file, index) =>
+      `${index === files.length - 1 && withheld === 0 ? "└─ " : "├─ "}[${index}]  ` +
+      `${sanitizeText(file).trim()}`.trimEnd(),
+  );
+  if (withheld > 0) {
+    rows.push(
+      `└─ …+${withheld} more files withheld (a report renders at most ${CHILD_REPORT_MAX_FILES})`,
+    );
+  }
+  return rows;
+}
+
+/**
+ * The block a caller gets instead of a report: the header, the channel, and ONE row saying the
+ * report did not arrive. It is deliberately NOT an empty report — no summary, no `Array(0)`
+ * findings, no usage — because an empty report reads as "the child found nothing" rather than
+ * "the child told us nothing", and those are different facts.
+ */
+function noReportBlock(channel: ChildReportChannel): string {
+  const row =
+    channel === "none"
+      ? "no child report was returned — the child's prose below is everything it produced"
+      : `the ${channel} channel was announced but no report reached the host; ` +
+        "the child's prose below is everything it produced";
+  return `${CHILD_REPORT_HEADER} (channel: ${channel})\n${TREE_LAST}${row}`;
+}
+
+/**
+ * Render a child report as the fixed-shape text block the model reads (ADR-0032 §Rendering).
+ *
+ * Returns a self-contained string with no trailing newline, so a caller can place it above the
+ * child's prose with a blank line between. `report` and `channel` are the two fields the tool
+ * reads off `DispatchResult`; passing a `report` with `channel: "none"` is a caller error and
+ * renders as a report anyway — the value is the more specific statement, and the channel in the
+ * header still says where it came from.
+ */
+export function renderChildReportText(
+  report: ChildReport | undefined,
+  channel: ChildReportChannel,
+): string {
+  if (report === undefined) return noReportBlock(channel);
+  const shownFindings = report.findings.slice(0, CHILD_REPORT_MAX_FINDINGS);
+  const withheldFindings = report.findings.length - shownFindings.length;
+  const shownFiles = report.files_touched.slice(0, CHILD_REPORT_MAX_FILES);
+  const withheldFiles = report.files_touched.length - shownFiles.length;
+  const sections: ReportSection[] = [
+    { label: "summary", head: summaryText(report.summary), rows: [] },
+    {
+      label: "findings",
+      head: countHead(report.findings.length),
+      rows: findingRows(shownFindings, withheldFindings),
+    },
+    {
+      label: "files",
+      head: countHead(report.files_touched.length),
+      rows: fileRows(shownFiles, withheldFiles),
+    },
+    { label: "usage", head: reportUsageText(report.usage), rows: [] },
+  ];
+
+  const rows: string[] = [`${CHILD_REPORT_HEADER} (channel: ${channel})`];
+  sections.forEach((section, index) => {
+    const isLast = index === sections.length - 1;
+    // `padEnd` alone glues an exactly-LABEL_WIDTH label to its content (`findingsArray(2)`);
+    // the extra space is the separator `subRowsFor` already learned the same way.
+    const gutter =
+      section.label.length >= LABEL_WIDTH ? `${section.label} ` : section.label.padEnd(LABEL_WIDTH);
+    rows.push(
+      treeTruncateIndent(
+        `${isLast ? TREE_LAST : TREE_FIRST}${gutter}${section.head}`,
+        MAX_LINE_CHARS,
+      ),
+    );
+    // Rows below a section hang at the section's own column, carrying the connector chain's
+    // continuation bar — the same `TREE_CONT_FIRST` / `TREE_CONT_LAST` the value tree passes down.
+    const continuation = isLast ? TREE_CONT_LAST : TREE_CONT_FIRST;
+    for (const row of section.rows) {
+      rows.push(treeTruncateIndent(`${continuation}${row}`, MAX_LINE_CHARS));
+    }
+  });
+  return rows.join("\n");
 }
 
 // ---------------------------------------------------------------------------
