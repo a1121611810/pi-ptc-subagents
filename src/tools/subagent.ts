@@ -181,7 +181,7 @@ export const SUBAGENT_OUTPUT_SCHEMA: SubagentOutputSchema = Type.Object({
   }),
   report_channel: Type.String({
     description:
-      'Which channel delivered the child report: "prompt-json" (a fenced JSON block on the child\'s final message), "tool" (the child called the report tool), or "none" (no report arrived — the child did not comply with the contract, or this is a background handle that has not finished). ALWAYS present, so an absent `report` key is never ambiguous.',
+      'Which channel delivered the child report: "prompt-json" (a fenced JSON block on the child\'s final message), "tool" (the child called the report tool), "none" (no report arrived — either the child did not comply with the contract, or this is a background handle that has not finished), or "opted-out" (the agent\'s frontmatter set `childReport: false`, so it was never asked). ALWAYS present, so an absent `report` key is never ambiguous — "none" and "opted-out" are different claims about the child.',
   }),
   exit_code: Type.Optional(
     Type.Number({

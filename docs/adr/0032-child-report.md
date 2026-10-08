@@ -128,6 +128,27 @@ Agent frontmatter carries one switch, **defaulting to on**. It names a yes/no; i
 schema, because a per-agent schema reopens the two-copies problem and buys flexibility nobody has
 asked for.
 
+Amendment (2026-10-08, #102): the switch is `childReport: false` (also `no`), read by
+`parseAgentMarkdown` and threaded through `discoverAgent`. Only `false`/`no` opts out — a typo
+leaves the contract ON, because the two failure modes are not symmetric: a contract nobody expected
+is a visible extra field, while a child marked non-compliant for a contract it was never given is
+not recoverable by the reader.
+
+An opted-out agent is never asked (no prompt clause, no tool in its argv) and never marked. That
+last half needed a **fourth** channel value, `opted-out`, and it is the amendment's substantive
+change: with only `tool` / `prompt-json` / `none`, an agent that opted out and a child that ignored
+the contract produced the same string, and §"The channel is always stated" has already defined
+`none` as the latter. `docs/testing-constraints.md` #3 treats a value that cannot distinguish those
+two as a silent failure, so the union grew rather than the guarantee weakening.
+
+Known gap, stated rather than hidden: `tools/render.ts`'s no-report block has two branches, keyed
+on `"none"` and on "anything else", so an `opted-out` result currently renders through the second
+and says "the opted-out channel was announced but no report reached the host". That is inaccurate
+(it was never announced) though not non-compliance, and the renderers were explicitly out of scope
+for this ticket — `tools/ptc-task.ts` degrades correctly without a change, because its fallback
+branch only reports the channel value and the absence. The third branch belongs with the renderer
+work in #105.
+
 ### Rendering
 
 The model-facing surface does not hand over raw JSON: the host renders the report into a fixed

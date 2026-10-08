@@ -32,8 +32,14 @@ export interface ChildReportFinding {
  * is the fenced block in the child's final assistant message, which is the channel that still
  * works when this package does not load in the child at all; `none` means the contract was on and
  * the child did not comply.
+ *
+ * `opted-out` is the fourth value, added by ticket #102, and it is the one that keeps `none`
+ * honest. Without it, an agent that opted out and a child that ignored the contract would produce
+ * the same string, and ADR-0032 has already said which of those two is a defect — so a reader
+ * could not tell "nobody asked" from "it did not comply". A field whose value cannot distinguish
+ * those is the silent failure `docs/testing-constraints.md` #3 forbids.
  */
-export type ChildReportChannel = "tool" | "prompt-json" | "none";
+export type ChildReportChannel = "tool" | "prompt-json" | "none" | "opted-out";
 
 /**
  * What the child DECLARES. `files_touched` is snake_case on purpose: this object is produced by a
@@ -66,6 +72,11 @@ export interface ChildReport extends ChildReportPayload {
  */
 export interface ChildReportExtraction {
   report?: ChildReportPayload;
+  /**
+   * Total. `opted-out` is not something an extraction can produce — it is what `dispatch()`
+   * substitutes for a whole scan when the agent is not under the contract at all, because at that
+   * point there is no channel to have extracted anything over.
+   */
   reportChannel: ChildReportChannel;
 }
 

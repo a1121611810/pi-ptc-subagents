@@ -281,7 +281,10 @@ child's own words), `findings` (each with `what` and independent `evidence`),
 `files_touched`, and `usage`. It arrives over one of two channels — a report
 **tool** the child calls (preferred) or a fenced JSON block in the child's
 final text (the fallback) — and the result **always names which channel
-delivered it**, including when none did. Prose is preserved alongside it, never
+delivered it**, including when none did: `tool`, `prompt-json`, `none` (the
+contract was on and the child did not comply), or `opted-out` (the agent's
+frontmatter set `childReport: false`, so nobody asked). Prose is preserved
+alongside it, never
 replaced. On by default; an agent's frontmatter opts out with one yes/no.
 Bounded at 20 findings for a model-facing render, withheld count stated in-band
 like the value tree. ADR-0032.

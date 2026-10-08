@@ -277,6 +277,13 @@ export interface AgentConfigLike {
   readonly model?: string;
   readonly systemPrompt: string;
   readonly tools?: readonly string[];
+  /**
+   * ADR-0032 §The opt-out. `false` opts the agent out of the child report contract; `undefined`
+   * is the DEFAULT and means on. Optional rather than required so every existing construction
+   * site keeps compiling, and read through {@link isReportContractOn} so none of them can read it
+   * the wrong way round.
+   */
+  readonly childReport?: boolean;
 }
 
 /** Per-run context handed to a dispatch binding; same shape as BindingContext. */
@@ -535,15 +542,61 @@ function extractYamlList(yaml: string, key: string): string[] | undefined {
 }
 
 /**
- * Parse an agent markdown file: YAML frontmatter (name / description / model / tools)
- * plus the body, returned as the system prompt. Tolerates a missing or partial
+ * The frontmatter key that opts an agent out of the child report contract, and the only one
+ * (ADR-0032 §The opt-out, ticket #102).
+ *
+ * A yes/no and deliberately not a schema: a per-agent schema would reopen the two-copies problem
+ * ADR-0032 closes and would buy flexibility nobody has asked for.
+ */
+export const AGENT_CHILD_REPORT_KEY = "childReport";
+
+/**
+ * Read the opt-out switch. Absent means ON — the contract is the default and an agent that says
+ * nothing about it gets it.
+ *
+ * Only the literal `false` / `no` opts out. Everything else (including a typo like `flase`, and
+ * including a value this parser cannot make sense of) leaves the contract on, because the failure
+ * mode of guessing wrong here is a report nobody expected on a result that still carries one, and
+ * the failure mode of guessing the other way is a child marked for non-compliance that was never
+ * asked. Neither is recoverable by the reader; the first is at least visible.
+ *
+ * This is deliberately NOT pi's `parseFrontmatter`. This module has always parsed the keys it
+ * needs with two small regexes, and switching parsers here would change how every OTHER key is
+ * read (quoting, nesting, error reporting) as a side effect of adding one. That is a separate
+ * change with its own tests, not something to smuggle in with an opt-out flag.
+ */
+function readChildReportSwitch(frontmatter: string): boolean | undefined {
+  const raw = extractYamlString(frontmatter, AGENT_CHILD_REPORT_KEY);
+  if (raw === undefined) return undefined;
+  return raw.toLowerCase() === "false" || raw.toLowerCase() === "no" ? false : true;
+}
+
+/**
+ * Whether this agent is under the report contract (ADR-0032 §The opt-out).
+ *
+ * Total and one-valued on purpose: every caller asks the same question, so an opted-out agent is
+ * never asked for a report by ANY of them — not in the prompt, not in the argv — and the answer
+ * cannot disagree with itself between the two call sites.
+ */
+export function isReportContractOn(agent: Pick<AgentConfigLike, "childReport">): boolean {
+  return agent.childReport !== false;
+}
+
+/**
+ * Parse an agent markdown file: YAML frontmatter (name / description / model / tools /
+ * childReport) plus the body, returned as the system prompt. Tolerates a missing or partial
  * frontmatter; the caller falls back to defaults when this returns null.
+ *
+ * `childReport` is present ONLY when the frontmatter names it. Absent is meaningful — it is how
+ * "the contract is on" is spelled, and {@link isReportContractOn} is what reads it, so no call
+ * site has to remember which way round the default goes.
  */
 export function parseAgentMarkdown(content: string): {
   name: string;
   description?: string;
   model?: string;
   tools?: readonly string[];
+  childReport?: boolean;
   systemPrompt: string;
 } | null {
   const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
@@ -555,11 +608,13 @@ export function parseAgentMarkdown(content: string): {
   const description = extractYamlString(frontmatter, "description") ?? "";
   const model = extractYamlString(frontmatter, "model") ?? "";
   const tools = extractYamlList(frontmatter, "tools");
+  const childReport = readChildReportSwitch(frontmatter);
   const out: {
     name: string;
     description?: string;
     model?: string;
     tools?: readonly string[];
+    childReport?: boolean;
     systemPrompt: string;
   } = {
     name,
@@ -568,6 +623,7 @@ export function parseAgentMarkdown(content: string): {
   if (description !== undefined) out.description = description;
   if (model !== undefined) out.model = model;
   if (tools !== undefined) out.tools = tools;
+  if (childReport !== undefined) out.childReport = childReport;
   return out;
 }
 
@@ -612,6 +668,9 @@ export function discoverAgent(
       };
       if (parsed.model !== undefined) (out as { model?: string }).model = parsed.model;
       if (parsed.tools !== undefined) (out as { tools?: readonly string[] }).tools = parsed.tools;
+      if (parsed.childReport !== undefined) {
+        (out as { childReport?: boolean }).childReport = parsed.childReport;
+      }
       return out;
     }
   }
@@ -945,22 +1004,27 @@ export function unknownAgentResult(
  * Returns `undefined` when there is nothing to say, which is the case `buildArgv` turns into "no
  * `--tools` flag at all" — pi's own defaults, unchanged.
  *
- * The report tool is merged rather than appended so an agent that DID restrict its child keeps
- * exactly the restriction it asked for, plus the one tool the contract needs. That direction
+ * The report tool is MERGED rather than appended, so an agent that restricted its child keeps
+ * exactly the restriction it asked for plus the one tool the contract needs. That direction
  * matters: pi reads `--tools` as an ALLOWLIST (`sdk.js` → `allowedToolNames`, filtered by
  * `AgentSession._isAllowedTool`), so naming the report tool alongside an agent's own list
  * activates it, while leaving it out would filter it away again — the silent failure this merge
  * exists to prevent.
  *
- * An agent that declares NO tools gets no flag, and is activated by the other half of the pair:
- * the report tool registers with `defaultActive` set from `PI_PTC_DEPTH`, so it is live in every
- * dispatched child. Neither half covers the other's case, which is why both exist — see
+ * An opted-out agent gets its declared list and nothing else: never asked means never activated,
+ * and a tool the model may call but was never asked for is exactly the "registered, documented,
+ * never called" state this whole mechanism is built to avoid.
+ *
+ * An agent that declares NO tools gets no flag at all, and is activated by the other half of the
+ * pair: the report tool registers with `defaultActive` set from `PI_PTC_DEPTH`, so it is live in
+ * every dispatched child. Neither half covers the other's case, which is why both exist — see
  * `src/tools/child-report-tool.ts`.
  */
 export function childToolList(
-  agent: Pick<AgentConfigLike, "tools">,
+  agent: Pick<AgentConfigLike, "tools" | "childReport">,
 ): readonly string[] | undefined {
   const declared = agent.tools ?? [];
+  if (!isReportContractOn(agent)) return declared.length > 0 ? declared : undefined;
   if (declared.length === 0) return undefined;
   return declared.includes(CHILD_REPORT_TOOL_NAME)
     ? declared
@@ -1404,7 +1468,10 @@ async function dispatchBackground(
     // The registry adopts the already-minted id as the TaskRecord id, so the handle the
     // program carries, the persisted record and the slot token all agree at creation.
     const label = input.label ?? input.task.slice(0, 64);
-    const fullPrompt = appendDepthHint(agent.systemPrompt, childDepth, ctx.maxDispatchDepth);
+    const reportContract = isReportContractOn(agent);
+    const fullPrompt = appendDepthHint(agent.systemPrompt, childDepth, ctx.maxDispatchDepth, {
+      reportContract,
+    });
     const written = await promptFileWriter(agent.name, fullPrompt);
     tmp = written;
     const argv = buildArgv(input, agent, written.filePath);
@@ -1541,7 +1608,12 @@ async function dispatchBackground(
         // read-then-write race in the pump. `childError` is the reason the child itself gave
         // (issue #70): an exit-0 child that reported `stopReason: "error"` and no assistant
         // text is a failure, and the record has to say why.
-        const extraction = finishChildReportScan(scan);
+        // Same substitution as the foreground `finalize`: an opted-out agent is not marked for
+        // a report it was never asked for. ADR-0032 parity is a claim about the CHANNEL value,
+        // and the two fronts have to state it identically.
+        const extraction: ChildReportExtraction = reportContract
+          ? finishChildReportScan(scan)
+          : { reportChannel: "opted-out" };
         await registry.transition(
           {
             kind: "resolve-exit",
@@ -1699,7 +1771,13 @@ export async function dispatch(
     return unknownAgentResult(input.agent, agentScope, cwd, Date.now() - start);
   }
 
-  const fullPrompt = appendDepthHint(agent.systemPrompt, childDepth, ctx.maxDispatchDepth);
+  // ADR-0032 §The opt-out: one read, used by every place that would otherwise ask the child for
+  // a report. An opted-out agent is not asked in the prompt, is not given the tool in its argv,
+  // and is not marked below for having produced no report.
+  const reportContract = isReportContractOn(agent);
+  const fullPrompt = appendDepthHint(agent.systemPrompt, childDepth, ctx.maxDispatchDepth, {
+    reportContract,
+  });
 
   // Between the acquire above and the Promise whose `finalize` is the one release, there is an
   // await and a call that can both throw -- a TMPDIR that is a file makes mkdtemp ENOTDIR, and
@@ -1782,7 +1860,12 @@ export async function dispatch(
       cancelKillEscalation?.();
       if (ctx.signal) ctx.signal.removeEventListener("abort", onAbort);
       cleanupTmp(tmp);
-      const extraction = finishChildReportScan(scan);
+      // An opted-out agent never had the contract offered, so there is no channel to report over
+      // and `none` would read as the non-compliance ADR-0032 defines it as. `opted-out` is the
+      // statement that is actually true; see ChildReportChannel.
+      const extraction: ChildReportExtraction = reportContract
+        ? finishChildReportScan(scan)
+        : { reportChannel: "opted-out" };
       const out: DispatchResult = {
         text: finalText,
         status,

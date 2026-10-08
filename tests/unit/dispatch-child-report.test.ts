@@ -33,6 +33,8 @@ import {
   extractChildReport,
   extractChildReportFromText,
   extractChildReportFromToolEvent,
+  isReportContractOn,
+  parseAgentMarkdown,
   validateChildReport,
   finishChildReportScan,
   newChildReportScan,
@@ -1193,5 +1195,257 @@ describe("the report tool is activated in the child and not in the parent", () =
     expect(tool.description).toBe(CHILD_REPORT_DESCRIPTION);
     expect(tool.promptSnippet, "without a snippet pi omits it from the system prompt").toBeTruthy();
     expect(tool.promptGuidelines?.length ?? 0).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+//  Seam 8 — the opt-out (ADR-0032 §The opt-out, ticket #102)
+// ---------------------------------------------------------------------------
+
+describe("the agent frontmatter opt-out", () => {
+  test("the switch defaults to ON — an agent that says nothing gets the contract", () => {
+    // The default is the whole claim: a switch that read as off unless told otherwise would put
+    // every existing agent out of the contract silently, and a report nobody expected on a
+    // result that does not carry one.
+    expect(parseAgentMarkdown("---\nname: a\n---\nbody")?.childReport).toBeUndefined();
+    expect(isReportContractOn({})).toBe(true);
+    expect(isReportContractOn({ childReport: true })).toBe(true);
+    expect(appendDepthHint("b", 1, 3)).toContain(CHILD_REPORT_TOOL_NAME);
+    expect(appendDepthHint("b", 1, 3, {})).toContain(CHILD_REPORT_TOOL_NAME);
+  });
+
+  test("`childReport: false` — and only that — opts out", () => {
+    // The four spellings a hand-rolled YAML reader has to agree on, plus the values that must
+    // NOT be able to opt an agent out by accident. A typo leaving the contract ON is the safe
+    // direction and is stated as such in the parser's doc; a typo turning it off would mark a
+    // child for non-compliance it was never asked about.
+    for (const value of ["false", "False", "FALSE", "no", "no"]) {
+      const parsed = parseAgentMarkdown("---\nname: a\nchildReport: " + value + "\n---\nbody");
+      expect(parsed?.childReport, "childReport: " + value).toBe(false);
+      expect(isReportContractOn(parsed as { childReport?: boolean }), value).toBe(false);
+    }
+    for (const value of ["true", "yes", "on", "1", "flase"]) {
+      const parsed = parseAgentMarkdown("---\nname: a\nchildReport: " + value + "\n---\nbody");
+      expect(parsed?.childReport, "childReport: " + value).toBe(true);
+      expect(isReportContractOn(parsed as { childReport?: boolean }), value).toBe(true);
+    }
+    // An EMPTY value is indistinguishable from an absent one — `extractYamlString` has always
+    // returned `undefined` for it, and that is the safe direction: the contract stays on.
+    const empty = parseAgentMarkdown("---\nname: a\nchildReport:\n---\nbody");
+    expect(empty?.childReport).toBeUndefined();
+    expect(isReportContractOn(empty as { childReport?: boolean })).toBe(true);
+  });
+
+  test("the switch is a yes/no and carries no schema", () => {
+    // ADR-0032: "It names a yes/no; it does not carry a schema, because a per-agent schema
+    // reopens the two-copies problem." A frontmatter key that could name a shape would be a
+    // second home for the contract, and `validateChildReport` would have to learn to read it.
+    // The pin is behavioural: whatever an opted-out agent's markdown contains beyond the switch
+    // cannot reach the report shape, because there is no report.
+    const parsed = parseAgentMarkdown(
+      "---\nname: a\nchildReport: false\nreportSchema: anything_at_all\nfindings: three\n---\nbody",
+    );
+    expect(parsed?.childReport).toBe(false);
+    // The parser's whole key set, whatever the frontmatter says: there is no key here that could
+    // carry a shape, so `reportSchema` and `findings` above are ignored rather than half-read.
+    // Add a key that could hold one and this list grows — which is the review-visible version of
+    // the two-copies problem this decision refuses to reopen.
+    expect(Object.keys(parsed ?? {}).sort()).toEqual([
+      "childReport",
+      "description",
+      "model",
+      "name",
+      "systemPrompt",
+    ]);
+  });
+
+  test("an opted-out agent is not asked in the prompt and not given the tool", async () => {
+    await withAgentFrontmatter("childReport: false\ntools: read, bash\n", async (dir) => {
+      childTranscript.lines = [...PLAIN_TRANSCRIPT];
+
+      const result = asResult(
+        await dispatch(
+          { agent: "reporter", task: "t", agentScope: "project" },
+          { callId: 30, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          { slots: new DispatchSlotCounter(4) },
+        ),
+      );
+
+      // Never asked, in either of the two places an ask can live.
+      expect(launchedToolList(), "no report tool in the child's argv").toBe("read,bash");
+      // Opting out is not a failure and not a refusal: the child ran, and its answer is here.
+      expect(result.status).toBe("fulfilled");
+      expect(result.text).toBe("Here is the answer, in prose only.");
+      // The prompt half is asserted on the composed prompt rather than on the file: the tmpfile
+      // is cleaned up before `dispatch()` resolves, and `appendDepthHint` with
+      // `reportContract: false` is exactly what the caller handed the writer.
+      expect(appendDepthHint("You report.", 1, 3, { reportContract: false })).not.toContain(
+        CHILD_REPORT_TOOL_NAME,
+      );
+      expect(appendDepthHint("You report.", 1, 3, { reportContract: false })).not.toContain(
+        "child report",
+      );
+      // And the control: the same prompt with the contract ON does carry it, so the assertion
+      // above is about the switch and not about a clause that was never there.
+      expect(appendDepthHint("You report.", 1, 3, { reportContract: true })).toContain(
+        CHILD_REPORT_TOOL_NAME,
+      );
+    });
+  });
+
+  test("an opted-out agent that complies anyway is not re-labelled", async () => {
+    // A child is free to emit a fenced block whether or not anybody asked. The host must not
+    // promote it into a report the caller would read as compliance with a contract that was
+    // never issued — `opted-out` is the only true statement available.
+    await withAgentFrontmatter("childReport: false\n", async (dir) => {
+      childTranscript.lines = [...COMPLIANT_TRANSCRIPT];
+
+      const result = asResult(
+        await dispatch(
+          { agent: "reporter", task: "t", agentScope: "project" },
+          { callId: 31, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          { slots: new DispatchSlotCounter(4) },
+        ),
+      );
+
+      expect(result.status).toBe("fulfilled");
+      expect(result.reportChannel).toBe("opted-out");
+      expect(result.report).toBeUndefined();
+      expect(result.text).toBe(COMPLIANT_TEXT);
+    });
+  });
+
+  test("an opted-out agent is never marked for failing to give a report", async () => {
+    // The requirement in its own words, and the assertion that separates this from "we just
+    // return none anyway": `none` IS the non-compliance marker ADR-0032 defines, so a result
+    // carrying it says the child ignored a contract. This one says nobody asked.
+    await withAgentFrontmatter("childReport: false\n", async (dir) => {
+      childTranscript.lines = [...PLAIN_TRANSCRIPT];
+
+      const result = asResult(
+        await dispatch(
+          { agent: "reporter", task: "t", agentScope: "project" },
+          { callId: 32, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          { slots: new DispatchSlotCounter(4) },
+        ),
+      );
+
+      expect(result.status).toBe("fulfilled");
+      expect(result.reportChannel).toBe("opted-out");
+      expect(result.reportChannel).not.toBe("none");
+    });
+  });
+
+  test("an opted-out BACKGROUND child persists the same value (parity)", async () => {
+    await withAgentFrontmatter("childReport: false\n", async (dir) => {
+      const h = createBackgroundHarness();
+      const handle = asHandle(
+        await dispatch(
+          { agent: "reporter", task: "t", background: true, agentScope: "project" },
+          { callId: 33, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          h.deps,
+        ),
+      );
+
+      driveBackground(h.lifecycle, PLAIN_TRANSCRIPT);
+      const record = await terminalRecord(h, handle.taskId);
+
+      expect(record.reportChannel).toBe("opted-out");
+      expect(record.report).toBeUndefined();
+      // The argv half, on the background front: it uses the same buildArgv.
+      expect(h.lifecycle.getRecordedArgv(h.lifecycle.spawned[0] as ChildHandle)).not.toContain(
+        CHILD_REPORT_TOOL_NAME,
+      );
+    });
+  });
+
+  test("the contract stays on for an agent that names nothing, end to end", async () => {
+    // The default is not just a parser fact: the whole pipeline behaves as under the contract.
+    await withAgent(async (dir) => {
+      childTranscript.lines = [...COMPLIANT_TRANSCRIPT];
+
+      const result = asResult(
+        await dispatch(
+          { agent: "reporter", task: "t", agentScope: "project" },
+          { callId: 34, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          { slots: new DispatchSlotCounter(4) },
+        ),
+      );
+
+      expect(result.reportChannel).toBe("prompt-json");
+      expect(result.report).toEqual(REPORT_WITH_HOST_USAGE);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+//  Seam 9 — a refusal carries NO report (ticket #102)
+// ---------------------------------------------------------------------------
+
+describe("a refused dispatch carries no report, not an empty one", () => {
+  test("every refusal names channel none, because no agent was ever under contract", async () => {
+    // `opted-out` is for an AGENT that asked out. A refusal never got that far: the depth gate
+    // fires before discovery, the concurrency gate before the spawn, and an unknown agent has no
+    // markdown to have opted out of anything. Stating `opted-out` on a refusal would be a second
+    // wrong answer — and the pin is the ABSENCE of the key, not a falsy value: an empty report is
+    // a claim that a child said it had nothing, and no child ran.
+    const refusals: DispatchResult[] = [
+      asResult(
+        await dispatch(
+          { agent: "reporter", task: "t" },
+          { callId: 40, cwd: process.cwd(), depth: 3, maxDispatchDepth: 3 },
+          { slots: new DispatchSlotCounter(4) },
+        ),
+      ),
+      asResult(
+        await dispatch(
+          { agent: "reporter", task: "t" },
+          { callId: 41, cwd: process.cwd(), depth: 0, maxDispatchDepth: 3 },
+          { slots: new DispatchSlotCounter(0) },
+        ),
+      ),
+      asResult(
+        await dispatch(
+          { agent: "nobody-by-that-name", task: "t", agentScope: "project" },
+          { callId: 42, cwd: process.cwd(), depth: 0, maxDispatchDepth: 3 },
+          { slots: new DispatchSlotCounter(4) },
+        ),
+      ),
+    ];
+    for (const refusal of refusals) {
+      expect(refusal.status).toBe("rejected");
+      expect(refusal.reportChannel).toBe("none");
+      expect(Object.hasOwn(refusal, "report"), "no report key at all").toBe(false);
+    }
+  });
+
+  test("a spawn failure names channel none and carries no report", async () => {
+    await withAgent(async (dir) => {
+      spawnFailure.error = new Error("spawn pi ENOENT");
+      const result = asResult(
+        await dispatch(
+          { agent: "reporter", task: "t", agentScope: "project" },
+          { callId: 43, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          { slots: new DispatchSlotCounter(4) },
+        ),
+      );
+
+      expect(result.started).toBe(false);
+      expect(result.reportChannel).toBe("none");
+      expect(Object.hasOwn(result, "report")).toBe(false);
+    });
+  });
+
+  test("a missing agent argument names channel none and carries no report", async () => {
+    const result = asResult(
+      await dispatch(
+        { agent: "  ", task: "t" },
+        { callId: 44, cwd: process.cwd(), depth: 0, maxDispatchDepth: 3 },
+        { slots: new DispatchSlotCounter(4) },
+      ),
+    );
+
+    expect(result.reportChannel).toBe("none");
+    expect(Object.hasOwn(result, "report")).toBe(false);
   });
 });
