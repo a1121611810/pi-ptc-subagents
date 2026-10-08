@@ -5,7 +5,10 @@
  * this declaration is what makes the child's return value a value, and its `structuredContent` is
  * what the host reads off the child's `tool_execution_end` event.
  *
- * **This description is the contract's only home.** `CHILD_REPORT_SHAPE` lives in
+ * **The contract's shape is NOT here.** It lives in `CHILD_REPORT_SHAPE`, which the child's
+ * appended system prompt renders -- see the note on `CHILD_REPORT_PROMPT_CLAUSE` for why the
+ * prompt is that home and not this description. Restating it here would be a second copy.
+ * `CHILD_REPORT_SHAPE` lives in
  * `runtime/child-report.ts` so this module and `dispatch.ts` can share it without either
  * importing the other, and it is stated HERE and nowhere else: the child's appended system prompt
  * carries one sentence requiring the child to call this tool, and no shape at all. Ticket #100's
@@ -37,7 +40,7 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { TArray, TObject, TString } from "typebox";
 
-import { CHILD_REPORT_SHAPE, CHILD_REPORT_TOOL_NAME } from "../runtime/child-report.ts";
+import { CHILD_REPORT_TOOL_NAME } from "../runtime/child-report.ts";
 
 /** Mirrors `AnyTool` in `tools/subagent.ts`; written out here rather than imported from there. */
 export type AnyTool = ToolDefinition<any, any, any>;
@@ -92,7 +95,7 @@ export const CHILD_REPORT_PAYLOAD_SCHEMA: ChildReportPayloadSchema = Type.Object
  */
 export const CHILD_REPORT_DESCRIPTION: string = [
   "Hand the host a child report: what you did in this run, in the shape it can read without parsing English.",
-  "Call it once, at the end, with " + CHILD_REPORT_SHAPE + ".",
+  "Call it once, at the end. The exact shape is stated in your instructions, which also tell you what to do if this tool is unavailable to you.",
   "Evidence is the point of a finding. Put in the independent thing you read, ran or checked — the claim restated is not evidence, and a finding with none is worse than no finding.",
   "files_touched lists only paths you actually created or modified; leave it empty rather than guessing.",
   "Your prose answer is kept alongside this report and is never replaced by it, so still answer in words.",

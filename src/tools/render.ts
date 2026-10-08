@@ -724,11 +724,19 @@ function fileRows(files: readonly string[], withheld: number): string[] {
  * "the child told us nothing", and those are different facts.
  */
 function noReportBlock(channel: ChildReportChannel): string {
+  // Three channels, three DIFFERENT claims, and conflating any two of them is the failure this
+  // function exists to avoid. A two-branch version read "opted-out" as "announced but never
+  // arrived", which is worse than silence: it tells the model a contract was broken when the
+  // agent's frontmatter deliberately switched the contract off and nobody was ever asked.
   const row =
     channel === "none"
-      ? "no child report was returned — the child's prose below is everything it produced"
-      : `the ${channel} channel was announced but no report reached the host; ` +
-        "the child's prose below is everything it produced";
+      ? "no child report was returned — the child did not comply with the contract, so its " +
+        "prose below is unbacked by a report"
+      : channel === "opted-out"
+        ? "this agent opts out of the report contract, so none was asked for — the prose below " +
+          "is the whole of what it produced, and nothing is missing"
+        : `the ${channel} channel was announced but no report reached the host; ` +
+          "the child's prose below is everything it produced";
   return `${CHILD_REPORT_HEADER} (channel: ${channel})\n${TREE_LAST}${row}`;
 }
 

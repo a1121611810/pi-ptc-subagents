@@ -346,3 +346,37 @@ describe("the two report renderers share one bound (ADR-0032)", () => {
     expect(storedOver).toContain("+3");
   });
 });
+
+describe("the no-report block names each channel's actual claim (ADR-0032)", () => {
+  // Regression: `noReportBlock` had two branches keyed on "none" vs everything else, so
+  // `opted-out` rendered as "the opted-out channel was announced but no report reached the
+  // host". That is not imprecise, it is FALSE — an opted-out agent was never asked, so no
+  // contract was broken and nothing was announced.
+  //
+  // Counterfactual: fold the three branches back to two and this goes red.
+  test("opted-out says nobody was asked, rather than that a report went missing", () => {
+    const rendered = renderChildReportText(undefined, "opted-out");
+
+    expect(rendered).toContain("opts out of the report contract");
+    expect(rendered).toContain("none was asked for");
+    expect(rendered).not.toContain("announced but no report reached the host");
+  });
+
+  test("none says the child did not comply, and does not borrow opted-out's wording", () => {
+    const rendered = renderChildReportText(undefined, "none");
+
+    expect(rendered).toContain("did not comply");
+    expect(rendered).not.toContain("opts out of the report contract");
+    expect(rendered).not.toContain("announced but no report reached the host");
+  });
+
+  test("a named channel that delivered nothing still says the announcement went unmet", () => {
+    // The third branch earns its place by being the only one that fits "tool" or "prompt-json"
+    // arriving without a report — an anomaly, not a policy.
+    const rendered = renderChildReportText(undefined, "tool");
+
+    expect(rendered).toContain("the tool channel was announced but no report reached the host");
+    expect(rendered).not.toContain("did not comply");
+    expect(rendered).not.toContain("opts out");
+  });
+});

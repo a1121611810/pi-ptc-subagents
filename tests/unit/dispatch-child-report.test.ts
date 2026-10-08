@@ -459,7 +459,7 @@ describe("dispatch() foreground carries the child report", () => {
     });
   });
 
-  test("the child prompt names the report tool and no longer restates the shape", async () => {
+  test("the child prompt states the shape; the tool description points at it instead", async () => {
     await withAgent(async (dir) => {
       childTranscript.lines = [...COMPLIANT_TRANSCRIPT];
 
@@ -470,22 +470,23 @@ describe("dispatch() foreground carries the child report", () => {
       );
 
       const prompt = appendDepthHint("You report.", 1, 3);
-      // The clause still exists, because the tool is not always there — but it is ONE sentence
-      // that requires the child to call it, and it says nothing about the shape.
-      expect(prompt).toContain("call the `" + CHILD_REPORT_TOOL_NAME + "` tool");
 
-      // THE MIGRATION, asserted in both directions (ADR-0032 "the contract has exactly one
-      // home"). This is the assertion ticket #100 wrote to be the thing that fails when the
-      // deletion happens, and #101 is the deletion: the shape is out of the prompt, and the same
-      // text is now in the tool's description. Put the shape back in the prompt and the first
-      // assertion goes red; take it out of the description and the second does.
-      expect(prompt).not.toContain(CHILD_REPORT_SHAPE);
-      expect(prompt).not.toContain("files_touched");
-      expect(CHILD_REPORT_DESCRIPTION).toContain(CHILD_REPORT_SHAPE);
+      // The tool is named first, because it is the channel we PREFER...
+      expect(prompt).toContain(CHILD_REPORT_TOOL_NAME);
+      // ...and the shape is stated here, because the prompt is the home that survives an install
+      // where this package does not load in the child (`surfaceMode: "off"`, or pi's `-ne`). The
+      // tool exists only in the child; the prompt is written by the host, unconditionally. Move
+      // the shape back into the tool description and the fallback stops being a fallback.
+      expect(prompt).toContain(CHILD_REPORT_SHAPE);
+      expect(prompt).toContain("files_touched");
+      expect(prompt).toMatch(/If that tool is not available to you/);
+      // And the description does NOT repeat it — that would be the second copy.
+      expect(CHILD_REPORT_DESCRIPTION).not.toContain(CHILD_REPORT_SHAPE);
 
-      // What must never appear, in any state: an ask for usage. The host measures that, and a
-      // child asked for it invents a number. See ChildReportPayload.
-      expect(prompt).not.toContain("Do not report usage or token counts");
+      // What must never appear, in any state: a request for usage. The host measures that, and a
+      // child asked for it invents a number. See ChildReportPayload. It must be stated in BOTH
+      // places, because a child that takes either route has to be told.
+      expect(prompt).toContain("must not report usage or token counts");
       expect(CHILD_REPORT_DESCRIPTION).toContain("Do not report usage or token counts");
     });
   });
@@ -796,8 +797,10 @@ describe("the contract text lives in exactly one place in src/", () => {
       if (stripComments(text).includes("CHILD_REPORT_SHAPE")) referenceHits.push(name);
     }
     expect(literalHits).toEqual(["runtime/child-report.ts"]);
-    // Declared in the vocabulary module, read by exactly one consumer: the tool description.
-    expect(referenceHits.sort()).toEqual(["runtime/child-report.ts", "tools/child-report-tool.ts"]);
+    // Declared in the vocabulary module, read by exactly one consumer: the PROMPT clause. It was
+    // the tool description for one commit; see the note on `CHILD_REPORT_PROMPT_CLAUSE` for the
+    // measurement that moved it back — the tool is not always in the child, the prompt is.
+    expect(referenceHits.sort()).toEqual(["runtime/child-report.ts", "runtime/dispatch.ts"]);
   });
 
   test("the shape the tool declares is the shape the host validates", async () => {

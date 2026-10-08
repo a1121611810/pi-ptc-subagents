@@ -39,10 +39,11 @@ import type {
   ChildReportFinding,
   ChildReportPayload,
 } from "./child-report.ts";
-// The report tool's NAME is a value, not a type: `buildArgv` has to put it in the child's tool
-// list. It comes from the same import-free vocabulary module the types do, so this edge pulls in
-// nothing that could cycle (see the note at the head of `child-report.ts`).
-import { CHILD_REPORT_TOOL_NAME } from "./child-report.ts";
+// The report tool's NAME and the contract's SHAPE are values, not types: `buildArgv` has to
+// put the name in the child's tool list, and the prompt has to state the shape. Both come from
+// the same import-free vocabulary module the types do, so this edge pulls in nothing that could
+// cycle (see the note at the head of `child-report.ts`).
+import { CHILD_REPORT_SHAPE, CHILD_REPORT_TOOL_NAME } from "./child-report.ts";
 import { DEFAULT_CONFIG } from "./limits.ts";
 import {
   DefaultTaskRegistry,
@@ -317,21 +318,28 @@ export interface DispatchContext {
 /**
  * The child report clause of the child's appended system prompt (ADR-0032).
  *
- * ONE sentence, and it names no shape. The shape lives in the report tool's own description
- * ({@link CHILD_REPORT_SHAPE}, rendered by `src/tools/child-report-tool.ts`) — this clause used to
- * carry a second copy, and deleting that copy is exactly what ticket #101 was for. The clause
- * survives at all because the tool is not always there: it exists in the child only when this
- * package loads there, and `src/index.ts` returns early on `surfaceMode === "off"`.
+ * The shape lives HERE, and the report tool's description points at it rather than repeating it.
  *
- * Stated honestly: with the shape gone from here, a child that cannot call the tool has nothing
- * left to comply with. The HOST still reads a compliant fenced block if one arrives
- * ({@link extractChildReportFromText}) — that is what the prompt channel is for — but a child in
- * an installation without this package has to volunteer a shape it was never shown. ADR-0032
- * records the two channels as both implemented; this is the seam between that decision and the
- * one-home rule, and it is a real one.
+ * Ticket #101 moved the shape into the tool description, on the one-home rule. That was wrong,
+ * and building #101 is what proved it. The tool exists in the child only when this package loads
+ * there — `src/index.ts` returns early on `surfaceMode === "off"`, and pi's `-ne` removes
+ * extensions — so a child without the tool had nothing left to comply with. The prompt channel
+ * stopped being a fallback and became dead code that still had tests.
+ *
+ * The prompt is the home that survives that, because the HOST controls it unconditionally. The
+ * tool is the channel that is RELIABLE when present, not the one that is always present; those
+ * are different virtues and conflating them loses the fallback. So: shape here, tool description
+ * describes the tool and refers here. Still one copy — the rule was never "prompt vs tool", it
+ * was "exactly one".
  */
 const CHILD_REPORT_PROMPT_CLAUSE =
-  "Before you finish, call the `" + CHILD_REPORT_TOOL_NAME + "` tool once, with your child report.";
+  "Before you finish, hand the host a child report. Prefer calling the `" +
+  CHILD_REPORT_TOOL_NAME +
+  "` tool once with it. If that tool is not available to you, end your reply with a fenced " +
+  "```json block containing " +
+  CHILD_REPORT_SHAPE +
+  ". Either way your prose answer is kept alongside the report and never replaced by it, and " +
+  "you must not report usage or token counts — those are measured by the host.";
 
 /**
  * Compose the system prompt handed to the child subprocess.
