@@ -143,7 +143,10 @@ never has to mean two different things in one sentence.
 system, no network and no timers. Orchestration, batching and output
 filtering; `searchTools` / `describeTool` (BM25) reach nested tools, and
 `store` / `load` persist across calls. It cannot spawn a process, which is
-the whole reason _parallel binding_ is not replaceable by it. ADR-0025.
+the whole reason _parallel binding_ is not replaceable by it. Its designed
+centre of gravity is the MCP catalog: MCP tools default to `codemode`
+exposure, so the extension activates this tool to make them reachable from
+scripts (see _MCP auto-enable evidence_). ADR-0025, ADR-0033.
 _Avoid_: "pi's PTC" (it is one implementation of PTC, and "PTC mode"
 below already names ours), "code mode" (the pre-August-2026 DSH name).
 
@@ -152,21 +155,63 @@ tools this package registers, independent of _PTC mode_ (which decides
 which of the registered tools are _active_). Read from the agent-dir
 `ptc.json` beside `defaultMode`. Three values, in increasing order of what
 this package takes responsibility for: `off`, `subagents`, `full`.
-With no key set it is **detected**, and the detection asks two questions, not one.
-Does this pi ship a `codemode` extension directory, and will pi actually load
-it? The second one is not redundant: since pi 0.99.0 a user can disable a
+With no key set it is **detected**, and the detection asks three questions,
+not one. Does this pi ship a `codemode` extension directory, will pi
+actually load it, and will `codemode` be **active** for the model? The
+second one is not redundant: since pi 0.99.0 a user can disable a
 built-in extension, so a pi can ship `codemode` and be told not to run it.
-Shipped **and** loading resolves to `subagents`; shipped but not loading, or
-not shipped at all, resolves to `full` -- and a probe that cannot answer also
-resolves to `full` in the safe direction. The session names that outcome at
-startup rather than defaulting in silence, because a detection that cannot be
-seen is indistinguishable from a pi that moved its `dist`. ADR-0025,
-ADR-0026, ADR-0027. _Avoid_: "PTC mode" (that is the hide-the-built-ins
+The third is not redundant either: pi registers `codemode` inactive, and
+since pi 1.0.0 the MCP extension may activate it at runtime (see
+_MCP auto-enable evidence_). Shipped **and** loading **and** active
+resolves to `subagents`; any other combination resolves to `full` -- and a
+probe that cannot answer also resolves to `full` in the safe direction. The
+session names that outcome at startup rather than defaulting in silence,
+because a detection that cannot be seen is indistinguishable from a pi that
+moved its `dist`. ADR-0025, ADR-0026, ADR-0027, ADR-0029, ADR-0033.
+_Avoid_: "PTC mode" (that is the hide-the-built-ins
 toggle; the
 two are separate and both exist), "mode" unqualified (ambiguous in this
 repository), "enable" (a surface mode of `off` leaves the package
 installed and doing nothing, which "disabled" would hide), "default"
 (the default is a function of the pi, so call it the detected default).
+
+**codemode activation** — the third question surface-mode detection asks: will
+`codemode` be **active**, i.e. callable by the model? It is distinct from the
+_codemode switch_ (whether the extension loads) and from presence on disk, and
+it has two evidence classes that answer independently, because pi activates
+`codemode` by two mechanisms:
+
+- **loadout mirror** — the settings-side answer: the `--tools` allowlist, then
+  the merged `defaultTools` (`<cwd>/.pi/settings.json` over `<agentDir>`), then
+  pi's own default, which does not name it.
+- _MCP auto-enable evidence_ — the file-side answer: pi's MCP extension calls
+  `pi.setActiveTools` to activate `codemode` whenever an enabled MCP server's
+  tools are only reachable from scripts, which no settings file records.
+
+Either one being positive means the model can call it, so the probe
+**unions** them; the loadout's provenance is reported when both agree, and
+`"mcp"` names the case where the loadout said inactive and the evidence said
+otherwise. Both classes resolve to `inactive` by default, deliberately: pi
+registers `codemode` with `defaultActive: false`, so "nobody configured
+anything" is a decision and lands on the safe surface (`full`). ADR-0029,
+ADR-0033. _Avoid_: "the activation probe" (the probe is the whole question;
+this term is the question), "codemode enabled" (that is the switch, a different
+question), "codemode loaded" (that is presence plus the switch).
+
+**MCP auto-enable evidence** — the file-side answer to _codemode activation_,
+computed from `<agentDir>/mcp.json` and `<cwd>/.pi/mcp.json` in that order:
+true when `autoEnableCodemode` is not `false` and some **enabled** server's
+exposure set -- its own `exposure` (default `codemode`) union the per-tool
+`toolExposure` values -- contains `codemode`. pi computes it _from the config,
+before the servers connect_, so whether a server connects is not part of the
+question and this evidence is a pure function of the two files. What it cannot
+see: a server an extension registered through `pi.registerMcpServer()`, which
+activates `codemode` with no `mcp.json` at all -- that case is caught by the
+session's real tool loadout instead (the drift notice), and only when the
+surface was detected rather than pinned. ADR-0033.
+_Avoid_: "the activation probe" (see _codemode activation_), "MCP settings"
+(the same file also configures transports; only the auto-enable decision is
+read).
 
 **codemode switch** — whether the pi that loaded us will actually load its own
 `codemode` extension, as distinct from the **codemode probe** (whether the

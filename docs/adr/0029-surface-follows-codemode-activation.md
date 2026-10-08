@@ -176,3 +176,33 @@ the same trap ADR-0027 recorded for its own test.
 
 The fifth cell of the table — no codemode on disk — is not reachable on a machine that has 1.0
 installed, and is covered by unit tests only. That asymmetry is stated rather than papered over.
+
+## Amendment (2026-10-08, ADR-0033): the bound held; its premise did not
+
+The "Under-reporting activation" bound above is unchanged — saying `inactive` when pi activates
+afterwards still costs the delegation, not the capability, and nothing shipped breaks. What was
+wrong is the premise underneath it. Every activation path this record mirrors is a **config
+path** — the `--tools` allowlist, the merged `defaultTools`, pi's own default — and the bound's
+safety argument reads as though that list were complete.
+
+It is not. pi's MCP extension activates `codemode` with a `pi.setActiveTools` call
+(`dist/extensions/mcp/index.js:352-389`), because MCP tools default to `codemode` exposure and are
+therefore reachable only from scripts (`dist/extensions/mcp/index.d.ts:9-14`). No settings file
+records that call. So on a pi 1.0.0 with an MCP server and no other configuration, this record's
+default cell is not the default: the probe says `inactive`, the surface defaults to `full`, pi
+activates `codemode` anyway, and the session carries two orchestration surfaces — the defect
+ADR-0025 set out to remove, arriving by a door this record's mirror does not watch.
+
+Two things follow for this record's design rather than its conclusion:
+
+- **The absence-of-evidence default still points the safe way, and it is still what carries the
+  weight.** `full` is not broken; it is just not delegated. ADR-0033 removes the common cause of
+  that non-delegation rather than reclassifying the cell.
+- **"Absence of evidence" now has two sources, and they are named differently.** The loadout
+  mirror's default and the MCP evidence's default are both `inactive`, but for different reasons:
+  nobody configured a loadout, versus no readable `mcp.json` asks for codemode. A probe input that
+  vanished is a failure and is reported; a genuinely unconfigured session is a decision and is
+  silent.
+
+The repair and the new notice are in ADR-0033. Nothing in this record's table, its mirror, or its
+over-report bound changes.
