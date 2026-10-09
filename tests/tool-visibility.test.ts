@@ -137,6 +137,10 @@ interface ProbeRecord {
   prompt: string;
 }
 
+/** The `ptc_*` tools a real pi declared to the model, as the request payload carries them. */
+const declaredPtcTools = (record: ProbeRecord): readonly string[] =>
+  record.tools.filter((name) => name.startsWith("ptc_"));
+
 /**
  * The two surfaces ADR-0026 decision 1 chooses between, as literals.
  *
@@ -144,7 +148,14 @@ interface ProbeRecord {
  * orchestrator face is the only thing detection decides. Written out rather than derived from a
  * constant in `src/`, so a change to what the factory registers has to be made here on purpose.
  */
-const SUBAGENTS_SURFACE = ["ptc_subagent", "ptc_task_list", "ptc_task_output", "ptc_task_stop"];
+const SUBAGENTS_SURFACE = [
+  "ptc_run_code",
+  "ptc_subagent",
+  "ptc_task_list",
+  "ptc_task_output",
+  "ptc_task_stop",
+  "ptc_workflow",
+];
 const FULL_SURFACE = [
   "ptc_run_code",
   "ptc_task_list",
@@ -203,6 +214,20 @@ async function capturePayload(options: {
    * value pi parses.
    */
   tools?: string;
+  /**
+   * ADR-0029: a `defaultTools` list written into the probe's agent-dir `settings.json`, which is
+   * the OTHER way a real session gets `codemode` into the model's tool list.
+   *
+   * **This exists because `--tools` cannot answer the question the exposure assertions ask.** An
+   * allowlist is a filter on registry membership (`_isAllowedTool`, applied at
+   * `agent-session.js:2785,2787`), so a `--tools` list that omits a tool removes it before
+   * anything asks about its exposure. `defaultTools` has no such filter: the tools stay
+   * registered and the question becomes what pi declares. Naming the tools explicitly either way
+   * declares them — `defaultTools` works because pi only activates what the list names, not
+   * because it changes reach — so the list below names `codemode` and the stock tools and
+   * nothing of ours.
+   */
+  defaultTools?: readonly string[];
 }): Promise<ProbeRecord> {
   const dir = await makeTempDir("pi-ptc-probe-");
   const out = join(dir, "payload.json");
@@ -239,6 +264,16 @@ async function capturePayload(options: {
     await writeFile(
       join(dir, "ptc.json"),
       JSON.stringify({ surfaceMode: options.surfaceMode ?? "full" }),
+      "utf8",
+    );
+  }
+  if (options.defaultTools !== undefined) {
+    // Written as its own file beside ptc.json, never merged: pi reads `defaultTools` from
+    // `<agentDir>/settings.json` (ADR-0029 decision 2), so this is the same channel the package's
+    // own codemode-switch probe reads, and the "detected" case above writes no key at all.
+    await writeFile(
+      join(dir, "settings.json"),
+      JSON.stringify({ defaultTools: [...options.defaultTools] }),
       "utf8",
     );
   }
@@ -472,7 +507,7 @@ test.skipIf(CODEMODE_PI.bin === undefined)(
         "the subagents half was reached with no codemode pi: " + NO_CODEMODE_PI_REASON,
       );
     }
-    const [registryHasCodemode, plain, delegatedPtc] = await Promise.all([
+    const [registryHasCodemode, plain, delegatedPtc, delegated] = await Promise.all([
       codemodeSupport(bin),
       capturePayload({ withDist: true, surfaceMode: "detected", bin }),
       captureRegisteredPtcTools({
@@ -493,6 +528,26 @@ test.skipIf(CODEMODE_PI.bin === undefined)(
           ]),
         ].join(","),
       }),
+      // **No `--tools` at all here, and that is the whole point of this cell.**
+      //
+      // An allowlist is not a way to keep a tool out of the loadout: `_isAllowedTool` gates
+      // registry membership at `agent-session.js:2785,2787`, BEFORE `_getToolExposure` is ever
+      // consulted at `:1102`. An earlier version of this cell named the subagent face in
+      // `--tools` and left the pair out, and its `not.toContain` assertions then passed for a
+      // factory that had simply never registered them — a green assertion measuring absence
+      // rather than reach.
+      //
+      // `codemode` is activated through the agent-dir `defaultTools` the helper writes instead
+      // (the same path ADR-0029 names), so the session is genuinely on `subagents`, the pair IS
+      // in the registry, and the only thing that can keep it out of the request payload is its
+      // exposure. `tests/unit/codemode-switch.test.ts` covers the activation mechanism; this
+      // covers what the model ends up being offered on a real pi.
+      capturePayload({
+        withDist: true,
+        surfaceMode: "detected",
+        bin,
+        defaultTools: ["read", "bash", "edit", "write", "codemode"],
+      }),
     ]);
     expect(
       registryHasCodemode,
@@ -511,24 +566,50 @@ test.skipIf(CODEMODE_PI.bin === undefined)(
     ).toEqual(FULL_SURFACE);
 
     // The delegated cell, same binary, same everything but the loadout. Asked of the REGISTRY, so
-    // the absence of the run-code front is "never registered" rather than "filtered out of the
-    // allowlist" — which is the distinction `--tools` would otherwise erase.
+    // the registration set is what is asserted here rather than what a loadout filtered out of an
+    // allowlist — which is the distinction `--tools` would otherwise erase.
     expect(
       delegatedPtc,
-      "and with codemode in the tool list the same pi registers the subagent face and nothing else",
+      "and with codemode in the tool list the same pi registers the subagent face plus the program " +
+        "pair underneath it",
     ).toEqual(SUBAGENTS_SURFACE);
 
-    // The two orchestrators, named one at a time so a failure says which half moved. This pair is
-    // what the neutered-probe mutation breaks: with CODEMODE_PROBE_PATHS emptied this pi still
-    // ships codemode, so the expectation above turns red.
+    // **The model is still offered exactly one orchestrator**, and on a real pi that is now
+    // checked the way it actually reaches the model — by what the request payload carries, not
+    // by what the registry holds. A `codemode`-reach tool is callable from a codemode script and
+    // is NOT declared to the model, so it must be absent from the tool list pi sends. Asserting
+    // the absence of `ptc_run_code` in the REGISTRY (which is what this used to do) would now
+    // go red on a factory doing exactly the right thing, and it would have passed for a factory
+    // that simply stopped registering the pair — so the claim moved to the surface that settles it.
     expect(
       delegatedPtc.includes("ptc_subagent"),
       "a pi whose loadout names codemode is handed the subagent face",
     ).toBe(true);
+
+    // **The precondition that makes the two assertions below mean anything.** Without it, "the
+    // payload does not carry ptc_run_code" is satisfied just as well by a factory that never
+    // registered it — which is exactly the failure an earlier version of this cell had. The
+    // registry cell above uses an explicit `--tools` allowlist; this one launches with none, and
+    // pi keeps every registered tool in `_toolDefinitions` regardless (`_isAllowedTool` passes
+    // when `_allowedToolNames` is unset, `agent-session.js:1100`).
     expect(
-      delegatedPtc.includes("ptc_run_code"),
-      "and never both orchestrators at once — the thing this setting exists to prevent",
-    ).toBe(false);
+      delegatedPtc,
+      "the pair really is registered on this session — otherwise the payload check below would " +
+        "measure absence rather than reach",
+    ).toEqual(expect.arrayContaining(["ptc_run_code", "ptc_workflow"]));
+
+    expect(
+      declaredPtcTools(delegated),
+      "and the pair is NOT among the tools declared to the model — pi's codemode is the one " +
+        "orchestrator it is offered",
+    ).not.toContain("ptc_run_code");
+    expect(declaredPtcTools(delegated), "and likewise for the workflow front").not.toContain(
+      "ptc_workflow",
+    );
+    expect(
+      declaredPtcTools(plain),
+      "while the plain launch declares ptc_run_code outright, because nothing orchestrates there",
+    ).toContain("ptc_run_code");
   },
   120_000,
 );

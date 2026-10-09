@@ -240,23 +240,32 @@ allowed to drift), "the result" (ambiguous between `content`, `details` and this
 say which).
 
 **orchestration surface** — the tool a model uses to compose many tool
-calls into one program. Two exist and they are alternatives, never both:
-`ptc_run_code` / `ptc_workflow` (this package, Node worker, real
-`tools.<name>(args)` bindings) or `codemode` (pi, QuickJS). Whichever is
-the _surface mode_'s choice, the model is told about exactly one. Having
-both live in a request is a measured defect, not a feature: it is two
-programming models to choose between.
-ADR-0025. _Avoid_: "the PTC tool" (there are two, and which one is a
-mode decision), "code execution" (both are that; the word says nothing
-about the shape).
+calls into one program. Two exist: `ptc_run_code` / `ptc_workflow` (this
+package, Node worker, real `tools.<name>(args)` bindings) or `codemode` (pi,
+QuickJS). The _surface mode_ picks which one the **model** is offered, and
+that is what this term means: having both live in a request is a measured
+defect, not a feature — it is two programming models to choose between.
+
+**Registration is not the same question as being offered.** On the `subagents`
+line the PTC pair IS registered, at `codemode` reach, which makes it callable
+from a pi `codemode` script without declaring it to the model. So the pairing
+there is an orchestrator plus its execution layer, not two orchestrators, and
+it is what makes `pi.dispatch` — which a QuickJS sandbox cannot reach at all —
+available underneath `codemode`. `full` declares the pair instead. The mode
+decides which; exposure is how. ADR-0025 §3 as amended 2026-10-09. _Avoid_:
+"the PTC tool" (there are two, and which one is a mode decision), "code
+execution" (both are that; the word says nothing about the shape).
 
 **subagent surface** — the top-level tool the model calls directly to
 start a fresh pi subprocess, without writing a program. This is what
 `surface mode: subagents` keeps, and it is the reason that mode exists: the
 _parallel binding_ `pi.dispatch` can only be reached from inside a program,
-so hiding `ptc_run_code` without adding a top-level entry point would
-delete the subagent capability rather than hand it to `codemode`.
-ADR-0025. _Avoid_: "dispatch tool" (that is the _parallel binding_ inside
+so a line that handed the program face to `codemode` needs a top-level entry
+point or the subagent capability would be deleted rather than handed over.
+It stays at `direct` reach on that line, and that asymmetry is deliberate —
+the pair underneath is for scripts, this one is for the model itself.
+ADR-0025 §3 as amended 2026-10-09. _Avoid_: "dispatch tool" (that is the
+_parallel binding_ inside
 a program), "subagent" (see Out-of-glossary: DSH's subagent is a
 different thing), "background task" (that is the `ptc_task_*` lifecycle
 face, which can inspect and stop tasks but cannot start one).

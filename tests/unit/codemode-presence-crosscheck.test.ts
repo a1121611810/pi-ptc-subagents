@@ -54,6 +54,13 @@ async function sessionStartNotices(options: {
   active: readonly string[];
   /** Tools pi's registry knows about that the active loadout does not name. */
   registeredInactive?: readonly string[];
+  /**
+   * ADR-0025 (amended): what this session DECLARES to the model. These tests are all about the
+   * `subagents` shape, where the pair is `codemode`-reach and absent from `getActiveTools()`; the
+   * stub's default is `full`'s, which would make the decision-4 warning withhold itself for a
+   * reason that has nothing to do with what is under test.
+   */
+  declaredProgrammingTools?: readonly string[];
 }): Promise<{ notices: { message: string; type?: string }[]; tools: string[] }> {
   const dir = await makeTempDir();
   const previous = process.env.PI_CODING_AGENT_DIR;
@@ -73,6 +80,9 @@ async function sessionStartNotices(options: {
       ...(options.registeredInactive === undefined
         ? {}
         : { registeredInactive: options.registeredInactive }),
+      ...(options.declaredProgrammingTools === undefined
+        ? {}
+        : { declaredProgrammingTools: options.declaredProgrammingTools }),
     });
     await stub.emit("session_start", stubContext(stub, { mode: "tui" }));
     return { notices: [...stub.notifications], tools: [...stub.tools.keys()] };
@@ -102,6 +112,11 @@ test("a detected subagents surface on a pi that KNOWS codemode but did not activ
   const { notices, tools } = await sessionStartNotices({
     active: ["read", "bash", "edit", "write"],
     registeredInactive: ["codemode"],
+    // This session resolved `subagents`, where the pair is `codemode`-reach and pi declares
+    // neither. Saying so is what makes the decision-4 warning's premise true — its gate asks what
+    // the model is offered before telling it it has no orchestration tool, and a stub carrying
+    // the `full` shape here would suppress a warning this test is asserting exists.
+    declaredProgrammingTools: [],
   });
   expect(
     notices.filter((n) => n.message.includes(REGISTRY_CROSSCHECK)),
@@ -112,8 +127,14 @@ test("a detected subagents surface on a pi that KNOWS codemode but did not activ
     "but the model still cannot call it, which the decision-4 warning is for",
   ).toHaveLength(1);
   // The surface itself is the one the detection picked: ptc_subagent beside the task tools, and
-  // no run-code orchestrator beside a live codemode.
-  expect(tools).toEqual(["ptc_subagent", ...TASK_TOOLS, "ptc_child_report"]);
+  // the program pair reachable from pi's live codemode without being declared to the model.
+  expect(tools).toEqual([
+    "ptc_run_code",
+    "ptc_workflow",
+    "ptc_subagent",
+    ...TASK_TOOLS,
+    "ptc_child_report",
+  ]);
 });
 
 test("the same pi with codemode ABSENT from the registry does get the cross-check warning", async () => {
@@ -123,6 +144,7 @@ test("the same pi with codemode ABSENT from the registry does get the cross-chec
   // because `getAllTools()` was built out of the active list.
   const { notices } = await sessionStartNotices({
     active: ["read", "bash", "edit", "write"],
+    declaredProgrammingTools: [],
   });
   const crosschecks = notices.filter((n) => n.message.includes(REGISTRY_CROSSCHECK));
   expect(crosschecks, "a pi that does not register codemode is reported once").toHaveLength(1);
@@ -144,5 +166,11 @@ test("a pi that knows AND activates codemode raises neither warning", async () =
     ),
     "healthy means silent: known and active is the one state with nothing to report",
   ).toEqual([]);
-  expect(tools).toEqual(["ptc_subagent", ...TASK_TOOLS, "ptc_child_report"]);
+  expect(tools).toEqual([
+    "ptc_run_code",
+    "ptc_workflow",
+    "ptc_subagent",
+    ...TASK_TOOLS,
+    "ptc_child_report",
+  ]);
 });

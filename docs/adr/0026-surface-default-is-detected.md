@@ -1,6 +1,6 @@
 # The surface default is detected from the pi that loaded us
 
-status: accepted (2026-09-30)
+status: accepted (2026-09-30). §"What this costs" amended 2026-10-09: the pair registers on `subagents`, at `codemode` reach.
 
 ## Context
 
@@ -127,7 +127,7 @@ ADR-0025's story 3 -- an upgrade must change nobody's behaviour -- is **false fo
 change, and the record should not pretend otherwise. A user on pi 0.99.1+ who has never set
 `surfaceMode` moves from `full` to `subagents` on upgrade. Concretely, on a stock 0.99.1:
 
-- they lose `ptc_run_code` and `ptc_workflow` until they set `"surfaceMode": "full"`;
+- ~~they lose `ptc_run_code` and `ptc_workflow` until they set `"surfaceMode": "full"`~~; **amended 2026-10-09** — still registered, at `codemode` reach
 - because `codemode` is `defaultActive: false`, they also have no active orchestrator until they
   add it to their tool list, so the session-start warning fires.
 
@@ -248,3 +248,13 @@ accept this for now", which is a decision and should not live only in a review l
 
 See also: ADR-0025 (the setting itself), ADR-0016 (the binding contract `ptc_subagent`
 forwards to), `docs/research/codemode-vs-ptc-capability-20260930.md` (the comparison).
+
+## Amendment (2026-10-09, ADR-0025 §3 as amended): the cost is reach, not absence
+
+The first bullet of "What this costs, stated plainly" described an absence; since 2026-10-09 it is a
+reach. `subagents` registers `ptc_run_code` and `ptc_workflow` as well, at `exposure: "codemode"` rather
+than `"direct"`, so they are callable from a `codemode` script and never declared to the model —
+`AgentSession._isDeclarable` admits `direct` and `model-only` only. Nothing else here changes: the
+upgrade cost and its one line of JSON stand, and the second bullet — no active orchestrator until
+`codemode` is active — is now the whole of it, because with no script running nothing reaches a
+registered pair.

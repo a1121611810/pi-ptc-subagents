@@ -22,7 +22,7 @@
  *   structured clone on its way to the worker.
  */
 import { defineTool } from "@earendil-works/pi-coding-agent";
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { ToolDefinition, ToolExposure } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { Static, TArray, TObject, TOptional, TRecord, TString, TUnknown } from "typebox";
 import { createBuiltinBindings } from "../runtime/bindings.ts";
@@ -215,6 +215,12 @@ export function unlistedPhaseWarnings(
  */
 export interface PtcWorkflowToolOptions extends PtcToolOptions {
   getPool?: () => WorkerPool | undefined;
+  /**
+   * How the model reaches this tool. Defaults to `"direct"`, and takes `"codemode"` on the line
+   * where pi's own `codemode` orchestrates — see `PtcRunCodeToolOptions.exposure` for the
+   * measurement and for why a pi older than 0.99.0 needs no branch here.
+   */
+  exposure?: ToolExposure;
 }
 
 /**
@@ -230,6 +236,7 @@ export function createPtcWorkflowTool(
   return defineTool({
     name: "ptc_workflow",
     label: "PTC Workflow",
+    exposure: options.exposure,
     description: DESCRIPTION,
     promptSnippet: PTC_WORKFLOW_SNIPPET,
     promptGuidelines: [...PTC_TOOL_GUIDELINES],

@@ -1,6 +1,7 @@
 ---
 
-status: accepted (2026-09-30)
+status: accepted (2026-09-30). §3 and decision 3 amended 2026-10-09: `subagents` now also
+registers `ptc_run_code` / `ptc_workflow`, at `codemode` reach.
 
 # The model-facing surface is a setting, not a fixed set
 
@@ -51,8 +52,9 @@ values, the _orchestration surface_ it chooses between, and the _subagent surfac
    registration** so the decision is available to the `registerTool` calls rather than
    arriving a turn later.
 3. **Registration becomes conditional.** `off` registers nothing and injects no briefing;
-   `subagents` registers `ptc_subagent` plus the lifecycle face; `full` -- today's set --
-   stays the default, so installing an upgrade changes nobody's behaviour.
+   `subagents` registers `ptc_subagent`, the lifecycle face, and — since 2026-10-09 — the
+   programming pair at `codemode` reach; `full` -- today's set -- stays the default, so
+   installing an upgrade changes nobody's behaviour.
 
 ## What we deliberately don't add
 
@@ -74,8 +76,21 @@ values, the _orchestration surface_ it chooses between, and the _subagent surfac
 1. Three values, `off` / `subagents` / `full`, default `full`.
 2. The key is read before `registerTool` runs; the read is a pure function over the file so a
    malformed value warns and falls back rather than changing the surface silently.
-3. `subagents` never registers `ptc_run_code` / `ptc_workflow`, and `full` never registers
-   `ptc_subagent`: the model is told about exactly one orchestration surface in either case.
+3. ~~`subagents` never registers `ptc_run_code` / `ptc_workflow`, and `full` never registers
+   `ptc_subagent`: the model is told about exactly one orchestration surface in either case.~~
+   **Amended 2026-10-09.** The first half is withdrawn and the second half stands. `full` still
+   never registers `ptc_subagent`, and the model is still told about exactly one orchestration
+   surface — but the two lines separate by REACH rather than by presence. `subagents` now
+   registers the pair at `codemode` reach: callable from a `codemode` script, and **not declared
+   to the model**, because `AgentSession._isDeclarable` admits `direct` and `model-only` only.
+   Measured on a real pi 1.1.0 session: with `codemode` in the loadout, a `codemode` script
+   enumerates all six `ptc_*` tools in `ALL_TOOLS` and successfully calls
+   `await tools.ptc_run_code({ code: … })`, while the request payload pi sends does not carry
+   the pair. The withdrawal is what makes the pairing worth having: `codemode`'s sandbox has no
+   module loader and cannot spawn a process, so `pi.dispatch`, background tasks and the frozen
+   environment all remain reachable only through the PTC worker underneath it. What the old rule
+   forbade — two orchestrators the model chooses between — is still forbidden; it is now
+   enforced by exposure rather than by an absent tool.
 4. `subagents` without `codemode` active warns at entry and still registers -- removing the
    user's subagents would be a worse answer than a warning.
 5. The lifecycle face registers in every mode except `off`, and stays outside the PTC mode

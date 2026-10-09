@@ -7,7 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(nothing yet)
+### Added
+
+- **`ptc_run_code` and `ptc_workflow` reach the line where pi's `codemode` orchestrates.** A
+  session on the `subagents` surface used to hold `ptc_subagent` and the lifecycle face with no
+  program behind them: pi's `codemode` was composing tool calls, and the one capability its
+  QuickJS sandbox cannot provide — spawning a process — was unreachable, because `pi.dispatch`,
+  background tasks and the frozen six-name environment all live inside the PTC worker. Both tools
+  are now registered there at `codemode` reach, which makes them **callable from a `codemode`
+  script without being declared to the model**: `AgentSession._isDeclarable` admits `direct` and
+  `model-only` only, so the request pi sends still carries exactly one orchestrator and it is
+  pi's. Verified end to end on a real pi 1.1.0 session — a `codemode` script enumerates all six
+  `ptc_*` tools in `ALL_TOOLS` and successfully calls `await tools.ptc_run_code({ code: … })`,
+  while the payload carries only the subagent face
+  ([ADR-0025](./docs/adr/0025-extension-surface-is-a-setting.md) §3 as amended).
+
+  **A pi older than 0.99.0 is unaffected.** `ToolExposure` does not exist there — `grep -r
+exposure` over `pi-coding-agent@0.86.1`'s `dist/` returns nothing, and so does
+  `AgentSession._getCallableTools` — so the field is ignored and the tools are declared to the
+  model, which is correct: such a pi ships no `codemode`, resolves to `full` anyway, and has
+  nothing that could call a `codemode`-reach tool. Measured across 0.86.1 / 0.87.1 / 0.99.0 /
+  0.99.1 / 0.99.2 / 1.0.0 / 1.0.4 / 1.1.0.
+
+  **Naming either tool in `--tools` or `defaultTools` overrides this.** A tool named there is
+  recorded in pi's `toolsAdded`, which the prompt projection filters only against `hidden` and
+  never against `codemode` — so it is declared to the model regardless of its exposure. That is
+  a user's explicit choice and is left alone; it is recorded here because the exposure field does
+  not survive it.
+
+### Changed
+
+- **ADR-0025 decision 3 is amended.** `subagents` does register the programming pair now. What
+  the decision protected — the model being offered one orchestration surface, not two — is
+  unchanged and is now enforced by exposure rather than by an absent tool. `CONTEXT.md`'s
+  _orchestration surface_ and _subagent surface_ entries and the README's surface list say so
+  too.
 
 ## [1.6.0] - 2026-10-08
 

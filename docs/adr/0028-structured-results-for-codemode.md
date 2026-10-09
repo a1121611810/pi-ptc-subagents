@@ -1,6 +1,6 @@
 ---
 
-status: accepted (2026-10-02)
+status: accepted (2026-10-02). §Context amended 2026-10-09: `ptc_subagent` is no longer the only way a `subagents` session starts one.
 
 # The model-facing tools declare a structured result for codemode, and it is a projection rather than a mirror
 
@@ -20,11 +20,14 @@ Every tool this package registers hands back a **text string** to a codemode scr
 | `ptc_task_output` | up to 50 KB of prose                                               |
 | `ptc_task_stop`   | `"<id>  <status>  reason=…"`                                       |
 
-`ptc_subagent` is the acute case. It is the ONLY way a `subagents`-surface session can start a
-subagent at all, because the QuickJS sandbox has no file system, no network and no `child_process` —
-ADR-0025 kept this tool precisely for that. So a script that wants to fan out to five subagents and
-collect their ids has to string-parse five times to get data the host already had in a structured
-form.
+`ptc_subagent` is the acute case. ~~It is the ONLY way a `subagents`-surface session can start a
+subagent at all, because the QuickJS sandbox has no file system, no network and no `child_process`.~~
+**Amended 2026-10-09:** the sandbox half still stands — it is why ADR-0025 kept this tool, and why a
+script cannot fan out by itself — but the ONLY-way claim is withdrawn. Since 2026-10-09 `subagents`
+also registers `ptc_run_code` at `codemode` reach, so a script can run a program that calls
+`pi.dispatch` and start a subagent through the PTC worker rather than the sandbox. The parse is
+unchanged, and is what this record fixes: fanning out to five subagents through `ptc_subagent`
+means string-parsing five times to get data the host already held in a structured form.
 
 ## What pi actually offers
 

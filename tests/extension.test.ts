@@ -76,22 +76,40 @@ const TASK_TOOLS = ["ptc_task_list", "ptc_task_output", "ptc_task_stop"] as cons
 // it is here as its own constant so a reader can see that distinction rather than infer it.
 const REPORT_TOOL = "ptc_child_report" as const;
 
+/**
+ * What the `subagents` line registers, in registration order.
+ *
+ * The program pair is here at `codemode` reach — registered, callable from a pi `codemode` script,
+ * and NOT declared to the model — so this list is the same length as `full`'s minus `ptc_subagent`,
+ * and what tells the two lines apart is exposure rather than presence. Asserted literally, in order,
+ * because a tool dropped from one group has to turn these red.
+ */
+const SUBAGENT_SURFACE_TOOLS = [...PTC_TOOLS, "ptc_subagent", ...TASK_TOOLS, REPORT_TOOL] as const;
+
 test("full mode registers the orchestration tools and the lifecycle face", () => {
   // The literal set, not a length: a tool dropped from one group has to turn this red.
   const tools = makeExtensionStub({ surfaceMode: "full" }).tools;
   expect([...tools.keys()]).toEqual([...PTC_TOOLS, ...TASK_TOOLS, REPORT_TOOL]);
 });
 
-test("subagents mode drops the orchestration tools and keeps the lifecycle face", () => {
-  const tools = makeExtensionStub({ surfaceMode: "subagents" }).tools;
-  expect([...tools.keys()], "pi codemode does the orchestrating here").toEqual([
-    "ptc_subagent",
-    ...TASK_TOOLS,
-    REPORT_TOOL,
+test("subagents mode keeps the subagent face and the lifecycle face, and offers the program underneath codemode", () => {
+  const stub = makeExtensionStub({ surfaceMode: "subagents" });
+  const tools = stub.tools;
+  // The literal set, not a length: a tool dropped from one group has to turn this red.
+  expect([...tools.keys()], "pi codemode orchestrates here; PTC is its execution layer").toEqual([
+    ...SUBAGENT_SURFACE_TOOLS,
   ]);
+  // **Reach is what keeps this from being the duplicate surface ADR-0025 removed.** The pair is
+  // registered, but at `codemode` reach, which does not declare a tool to the model — so the
+  // model is still told about exactly one way to compose tool calls, and that one is pi's.
   for (const name of PTC_TOOLS) {
-    expect(tools.has(name), name + " must not exist in this mode").toBe(false);
+    const definition = tools.get(name) as { exposure?: string } | undefined;
+    expect(definition?.exposure ?? "direct", `${name} reach on subagents`).toBe("codemode");
   }
+  // `ptc_subagent` is the exception and stays `direct`: it exists to be callable with no
+  // orchestrator at all, which is the reason this line exists.
+  const subagent = tools.get("ptc_subagent") as { exposure?: string } | undefined;
+  expect(subagent?.exposure ?? "direct", "subagent reach on subagents").toBe("direct");
 });
 
 test("off mode registers no tool, no command and no handler at all", () => {
@@ -112,28 +130,56 @@ test("the surface mode is read once, before anything is registered", () => {
   const off = makeExtensionStub({ surfaceMode: "off" });
   const sub = makeExtensionStub({ surfaceMode: "subagents" });
   expect(off.tools.size).toBe(0);
-  expect(sub.tools.size, "the subagent tool plus the lifecycle face plus the report tool").toBe(
-    TASK_TOOLS.length + 2,
-  );
+  expect(
+    sub.tools.size,
+    "the program pair plus the subagent tool, lifecycle face and report tool",
+  ).toBe(PTC_TOOLS.length + TASK_TOOLS.length + 2);
   expect(makeExtensionStub({ surfaceMode: "full" }).tools.size).toBe(PTC_TOOLS.length + 4);
 });
 
-test("each surface registers a distinct set, and no mode keeps both orchestrators", () => {
+test("each surface registers a distinct set, and `subagents` differs from `full` by REACH not by presence", () => {
   const sets = (["off", "subagents", "full"] as const).map((surfaceMode) =>
     [...makeExtensionStub({ surfaceMode }).tools.keys()].join(","),
   );
-  expect(new Set(sets).size, "three modes, three distinct surfaces: " + sets.join(" | ")).toBe(3);
-  for (const surfaceMode of ["off", "subagents"] as const) {
-    const keys = [...makeExtensionStub({ surfaceMode }).tools.keys()];
-    expect(keys.includes("ptc_run_code"), surfaceMode).toBe(false);
-    expect(keys.includes("ptc_workflow"), surfaceMode).toBe(false);
-  }
+  // `off` stays empty, and it is the only line that drops a tool outright. `subagents` and `full`
+  // differ from each other by exactly one name — `ptc_subagent`, which exists so a subagent can be
+  // started with no orchestrator at all — so the name sets are still three distinct sets.
+  expect([...makeExtensionStub({ surfaceMode: "off" }).tools.keys()]).toEqual([]);
+  expect(new Set(sets).size, "three name sets: " + sets.join(" | ")).toBe(3);
+
+  // The rest of the old claim — "no mode keeps both orchestrators" — was about the model being
+  // offered two ways to compose tool calls. That is now a claim about REACH, and it is stated
+  // that way: the same two tools exist on both lines, and only their reach differs. A mutation
+  // that put `direct` on `subagents` would leave every count above correct and would hand the
+  // model a second orchestrator, which is why this asserts the exposure rather than the set.
+  const reachOf = (surfaceMode: "full" | "subagents", name: string): string => {
+    const tool = makeExtensionStub({ surfaceMode }).tools.get(name) as
+      | { exposure?: string }
+      | undefined;
+    return tool?.exposure ?? "direct";
+  };
+  expect(reachOf("full", "ptc_run_code"), "full: this package orchestrates").toBe("direct");
+  expect(reachOf("subagents", "ptc_run_code"), "subagents: pi's codemode orchestrates").toBe(
+    "codemode",
+  );
+  expect(reachOf("full", "ptc_workflow")).toBe("direct");
+  expect(reachOf("subagents", "ptc_workflow")).toBe("codemode");
 });
 
 test("subagents mode without codemode warns once, and says what to do about it", async () => {
   // Constraint 3: the failure path is visible. A mode that quietly leaves the model with a
   // subagent tool and no orchestrator is the bug this warning exists to prevent.
-  const stub = makeExtensionStub({ surfaceMode: "subagents" });
+  //
+  // **The shape is named because it is the whole subject.** On `subagents` the pair is
+  // `codemode`-reach and pi declares neither, so a session that named `codemode` but got no
+  // orchestrator is exactly the state this notice exists for. The stub used to append the pair to
+  // every session's active list — the `full` shape — which made this test describe a cell it was
+  // not in.
+  const stub = makeExtensionStub({
+    surfaceMode: "subagents",
+    active: ["read", "bash", "edit", "write", "ptc_subagent"],
+    declaredProgrammingTools: [],
+  });
   await stub.emit("session_start", stubContext(stub, { mode: "tui" }));
   const warnings = stub.notifications.filter((n) => n.type === "warning");
   expect(warnings.length, "one warning, not a stream of them").toBe(1);
@@ -150,6 +196,24 @@ test("the warning does not fire when codemode is active", async () => {
   expect(
     stub.notifications.filter((n) => n.type === "warning"),
     "no false alarm",
+  ).toEqual([]);
+});
+
+test("the warning is withheld when the program tools ARE declared — the 0.86 cell", async () => {
+  // A pi older than 0.99.0 has no `ToolExposure`, so the pair it registered is declared to the
+  // model rather than held at `codemode` reach. This session therefore HAS an orchestration tool,
+  // and the notice's two remedies are both wrong there: "add codemode" names a tool that pi does
+  // not ship, and "use ptc_run_code instead" names the tool already in front of it. Simulated by
+  // listing the pair as active, which is what pi does with a tool it has no exposure concept for.
+  const stub = makeExtensionStub({
+    surfaceMode: "subagents",
+    active: ["read", "bash", "edit", "write", "ptc_subagent"],
+    declaredProgrammingTools: ["ptc_run_code", "ptc_workflow"],
+  });
+  await stub.emit("session_start", stubContext(stub, { mode: "tui" }));
+  expect(
+    stub.notifications.filter((n) => n.message.includes("no orchestration tool")),
+    "a session that HAS an orchestration tool is not told it has none",
   ).toEqual([]);
 });
 
@@ -218,7 +282,7 @@ test("the factory's own config read is what decides the surface, not the test se
   // "full" left the entire suite green.
   for (const [contents, expected] of [
     [{ surfaceMode: "off" }, []],
-    [{ surfaceMode: "subagents" }, ["ptc_subagent", ...TASK_TOOLS, REPORT_TOOL]],
+    [{ surfaceMode: "subagents" }, [...SUBAGENT_SURFACE_TOOLS]],
     [{ surfaceMode: "full" }, [...PTC_TOOLS, ...TASK_TOOLS, REPORT_TOOL]],
   ] as const) {
     const { stub, dir } = await stubFromAgentDir(contents);
@@ -252,7 +316,7 @@ test("with no preference from the user, the surface is decided by the pi (ADR-00
       where: "codemode present and configured active",
       codemode: { present: true, how: "found" },
       settings: ACTIVE_CODEMODE_SETTINGS,
-      expected: ["ptc_subagent", ...TASK_TOOLS, REPORT_TOOL],
+      expected: [...SUBAGENT_SURFACE_TOOLS],
     },
     {
       where: "codemode absent, nothing configured",
@@ -310,7 +374,7 @@ test("a malformed file still gives the detected surface, and the problem is repo
   // the only reason the full surface was expected -- the assertion would have passed just as
   // happily on a pi that does ship codemode.
   for (const [codemode, expected] of [
-    [{ present: true, how: "found" }, ["ptc_subagent", ...TASK_TOOLS, REPORT_TOOL]],
+    [{ present: true, how: "found" }, [...SUBAGENT_SURFACE_TOOLS]],
     [{ present: false, how: "not-found" }, [...PTC_TOOLS, ...TASK_TOOLS, REPORT_TOOL]],
   ] as const) {
     const dir = await makeTempDir();
@@ -363,6 +427,11 @@ test("a detected subagents surface on a pi that does not register codemode says 
       surfaceMode: "from-file",
       codemode: { present: true, how: "found" },
       active: ["read", "bash", "edit", "write"],
+      // This resolves `subagents`, where the pair is `codemode`-reach and pi declares NEITHER.
+      // Without this the stub carries `full`'s default and reports both tools as declared, which
+      // makes the decision-4 warning withhold itself — so the comment below would describe a
+      // notice that is not in the list.
+      declaredProgrammingTools: [],
     });
     await stub.emit("session_start", stubContext(stub, { mode: "tui" }));
     // Scoped to this notice: the decision-4 warning fires too, and it SHOULD -- a detected
@@ -375,9 +444,7 @@ test("a detected subagents surface on a pi that does not register codemode says 
     // The surface this warning is about. Without it the test also passes on a `full` session,
     // where the cross-check cannot fire at all -- the notice is then vacuously absent.
     expect([...stub.tools.keys()], "and the session really is holding a subagent face").toEqual([
-      "ptc_subagent",
-      ...TASK_TOOLS,
-      REPORT_TOOL,
+      ...SUBAGENT_SURFACE_TOOLS,
     ]);
   } finally {
     if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
@@ -397,6 +464,10 @@ test("a detected subagents surface on a pi that DOES register codemode stays qui
       surfaceMode: "from-file",
       codemode: { present: true, how: "found" },
       active: ["read", "bash", "edit", "write", "codemode"],
+      // Same reason as the sibling above: `subagents` declares neither half of the pair, and this
+      // test's silence has to come from `codemode` being ACTIVE, not from the stub reporting an
+      // orchestrator the model already has.
+      declaredProgrammingTools: [],
     });
     await stub.emit("session_start", stubContext(stub, { mode: "tui" }));
     // The surface, before the silence. Without this the test also passes on a `full` session --
@@ -405,7 +476,7 @@ test("a detected subagents surface on a pi that DOES register codemode stays qui
     expect(
       [...stub.tools.keys()],
       "a healthy session is the subagents face beside an active codemode",
-    ).toEqual(["ptc_subagent", ...TASK_TOOLS, REPORT_TOOL]);
+    ).toEqual([...SUBAGENT_SURFACE_TOOLS]);
     // Scoped the same way: the PTC-mode announcement is this file's pre-existing noise and says
     // nothing about detection.
     expect(

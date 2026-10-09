@@ -210,6 +210,13 @@ export function makeExtensionStub(
      * active-codemode case was reachable.
      */
     registeredInactive?: readonly string[];
+    /**
+     * ADR-0025 (amended): which of `ptc_run_code` / `ptc_workflow` this stubbed session DECLARES
+     * to the model. They are `direct` on `full` and `codemode`-reach on `subagents`, and only the
+     * former appears in `getActiveTools()`. Pass `[]` for the `subagents` shape; omit for the
+     * historical default, which is `full`'s.
+     */
+    declaredProgrammingTools?: readonly string[];
   } = {},
 ): ExtensionStub {
   const tools = new Map<string, ToolDefinition>();
@@ -225,7 +232,16 @@ export function makeExtensionStub(
   const reloads: number[] = [];
   const sentMessages: ExtensionStub["sentMessages"] = [];
   const sentUserMessages: ExtensionStub["sentUserMessages"] = [];
-  const active = [...(options.active ?? DEFAULT_SESSION_TOOLS), "ptc_run_code", "ptc_workflow"];
+  // The stub used to append the pair unconditionally, which was the `full` line's shape: there the
+  // tools are `direct` and therefore declared. On `subagents` they are `codemode`-reach and pi
+  // does NOT declare them, so a caller naming that surface has to be able to say so — otherwise
+  // every stubbed session looks like it hands the model an orchestrator, which is the one thing
+  // that line is built not to do. `declaredProgrammingTools` defaults to the old behaviour so the
+  // tests that never thought about this keep their meaning.
+  const active = [
+    ...(options.active ?? DEFAULT_SESSION_TOOLS),
+    ...(options.declaredProgrammingTools ?? ["ptc_run_code", "ptc_workflow"]),
+  ];
   const registeredInactive = options.registeredInactive ?? [];
 
   const stub: ExtensionStub = {

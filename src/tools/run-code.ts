@@ -18,7 +18,7 @@
  *   exactly as DSH's resolver does (R1 §3). The description names the default and the ceiling.
  */
 import { defineTool } from "@earendil-works/pi-coding-agent";
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { ToolDefinition, ToolExposure } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { TNumber, TOptional, TObject, TString } from "typebox";
 import { createBuiltinBindings } from "../runtime/bindings.ts";
@@ -122,6 +122,25 @@ const PARAMETERS: RunCodeParameters = Type.Object({
  */
 export interface PtcRunCodeToolOptions extends PtcToolOptions {
   getPool?: () => WorkerPool | undefined;
+  /**
+   * How the model reaches this tool. Defaults to `"direct"`.
+   *
+   * **`"codemode"` on the line where pi's own `codemode` orchestrates.** On that line the model
+   * is already given an orchestrator, and declaring this tool beside it would be the duplicate
+   * composition surface ADR-0025 exists to remove — but `codemode` reach is not "hidden": it
+   * makes the tool **callable from a `codemode` script**, which is what turns PTC into that
+   * script's execution layer. Measured on pi 0.99.0 / 0.99.1 / 0.99.2 / 1.0.0 / 1.0.4 / 1.1.0:
+   * `AgentSession._getCallableTools` admits `exposure === "codemode"`, and codemode's own filter
+   * (`codemode/tool.js` `getCodemodeCallableTools`) drops only the `codemode` tool itself.
+   *
+   * **A pi older than 0.99.0 ignores the field.** `ToolExposure` does not exist there — `grep -r
+   * exposure` over `@earendil-works/pi-coding-agent@0.86.1`'s `dist/` returns nothing, and neither
+   * does `AgentSession._getCallableTools`. Such a pi ships no `codemode` at all, so nothing can
+   * call a `codemode`-reach tool and the tools there fall back to being declared to the model,
+   * which is the behaviour that line wants anyway. **The low end therefore needs no probe**: the
+   * field is inert exactly where the fallback is correct.
+   */
+  exposure?: ToolExposure;
 }
 
 /**
@@ -137,6 +156,7 @@ export function createPtcRunCodeTool(
   return defineTool({
     name: "ptc_run_code",
     label: "PTC Run Code",
+    exposure: options.exposure,
     description: DESCRIPTION,
     promptSnippet: PTC_RUN_CODE_SNIPPET,
     promptGuidelines: [...PTC_TOOL_GUIDELINES],

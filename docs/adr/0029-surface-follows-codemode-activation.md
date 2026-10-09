@@ -1,6 +1,6 @@
 ---
 
-status: accepted (2026-10-03)
+status: accepted (2026-10-03). §Context and §Verification amended 2026-10-09: the pair registers on `subagents`, at `codemode` reach.
 
 # The detected surface follows whether codemode will be ACTIVE, not only whether it ships or loads
 
@@ -29,12 +29,12 @@ chain runs:
 | ⇒ surface  | `subagents`                                                    | `detectedSurfaceMode` (`ptc-mode.ts:628-637`) |
 | activation | `codemode` registers with **`defaultActive: false`**           | `dist/extensions/codemode/index.js:26`        |
 | ⇒ loadout  | pi's default active names are `["read","bash","edit","write"]` | `settings-manager.js:35`                      |
-| ⇒ warning  | `getActiveTools()` has no `codemode`                           | `src/index.ts:771`                            |
+| ⇒ warning  | `getActiveTools()` has no `codemode`                           | `src/index.ts:962`                            |
 
-So `subagents` hands orchestration to a tool that is loaded, registered, and not callable — and
-because `subagents` deliberately does not register `ptc_run_code`, the session is left with
-nothing to orchestrate with. **Every default session on a 1.0.0 install hits this.** It is the
-default cell, and the table does not have it.
+So `subagents` hands orchestration to a tool that is loaded, registered, and not callable, and the
+session is left with nothing to orchestrate with ~~because `subagents` deliberately does not
+register `ptc_run_code`~~ — **amended 2026-10-09**: by reach, not by absence (see below). **Every
+default session on a 1.0.0 install hits this.** It is the default cell, and the table does not have it.
 
 pi's own documentation is unambiguous that this is intended behaviour, not a bug on the user's
 side (`dist/extensions/codemode/index.d.ts`):
@@ -102,7 +102,7 @@ are not symmetric:
 
 - **Over-reporting activation** — we say `active`, pi does not activate it. The surface is
   `subagents` with no orchestrator, which is the bug this ADR exists to remove. It is caught, and
-  caught by measurement rather than by this probe: the decision-4 warning at `src/index.ts:771`
+  caught by measurement rather than by this probe: the decision-4 warning at `src/index.ts:962`
   asks `pi.getActiveTools()` at `session_start`, where the answer is the real one. The failure
   degrades to exactly the behaviour that exists today, loudly.
 - **Under-reporting activation** — we say `inactive`, pi would have activated it. The surface is
@@ -151,7 +151,7 @@ would be a third place for the three to drift apart.
   are paid on the explicit-key path too, for the same reason ADR-0027 pays its two: the
   disagreement notice needs the table's own answer.
 - **A message that could now lie.** The `detected.present && !known` notice at
-  `src/index.ts:729` hard-codes the string `"subagents"` as the detected surface. With a fifth
+  `src/index.ts:920` hard-codes the string `"subagents"` as the detected surface. With a fifth
   cell, `detected` can be `full` while `present && !known` still holds (activation predicted
   `active` from a project `defaultTools`, and the project turned out to be untrusted —
   `settings-manager.js:327` drops project settings in that case, which this probe cannot observe).
@@ -161,14 +161,20 @@ would be a third place for the three to drift apart.
 ## Verification
 
 The four reachable cells, each on a real 1.0.0 install, each confirmed by the tool set a model
-would actually see rather than by the probe's own answer:
+would actually see rather than by the probe's own answer (**amended 2026-10-09**, see the note
+below):
 
-| scenario                                       | activation | surface     | this package registers                       |
-| ---------------------------------------------- | ---------- | ----------- | -------------------------------------------- |
-| no config at all (the default)                 | `inactive` | `full`      | `ptc_run_code`, `ptc_workflow`, `ptc_task_*` |
-| user settings `defaultTools: ["+codemode"]`    | `active`   | `subagents` | `ptc_subagent`, `ptc_task_*`                 |
-| `pi --tools read,write,codemode`               | `active`   | `subagents` | `ptc_subagent`, `ptc_task_*`                 |
-| user settings `defaultTools: ["read","write"]` | `inactive` | `full`      | `ptc_run_code`, `ptc_workflow`, `ptc_task_*` |
+| scenario                                       | activation | surface     | this package registers                                       |
+| ---------------------------------------------- | ---------- | ----------- | ------------------------------------------------------------ |
+| `no config at all (the default)`               | `inactive` | `full`      | `ptc_run_code`, `ptc_workflow`, `ptc_task_*`                 |
+| user settings `defaultTools: ["+codemode"]`    | `active`   | `subagents` | `ptc_subagent`, `ptc_task_*`, `ptc_run_code`, `ptc_workflow` |
+| `pi --tools read,write,codemode`               | `active`   | `subagents` | `ptc_subagent`, `ptc_task_*`, `ptc_run_code`, `ptc_workflow` |
+| user settings `defaultTools: ["read","write"]` | `inactive` | `full`      | `ptc_run_code`, `ptc_workflow`, `ptc_task_*`                 |
+
+**Amended 2026-10-09.** On the two `subagents` rows the last two tools are registered at `codemode`
+reach: a script can call them, and the model is not told they exist (ADR-0025 §3 as amended). What
+the table confirmed is unchanged — the surface each cell resolves to — and the model-facing set is
+still one orchestration surface. Only the registered set grew.
 
 The regression test asserts on the **registered tool set**, not on `detectedSurfaceMode`: the
 latter would stay green if the factory stopped consulting the activation probe at all, which is
@@ -206,3 +212,17 @@ Two things follow for this record's design rather than its conclusion:
 
 The repair and the new notice are in ADR-0033. Nothing in this record's table, its mirror, or its
 over-report bound changes.
+
+## Amendment (2026-10-09, ADR-0025 §3 as amended): the same outcome, by reach rather than by absence
+
+Two claims in this record broke when `subagents` began registering `ptc_run_code` / `ptc_workflow`;
+both are corrected in place above. The table, the mirror and the over-report bound are untouched,
+and so is the cell: `codemode` inactive still resolves `full`.
+
+- The Context's reason — "`subagents` deliberately does not register `ptc_run_code`" — is
+  withdrawn. The outcome it explained is not: a `subagents` session with no active `codemode` still
+  has nothing to orchestrate with, because the pair now registers at `codemode` reach and no script
+  runs to reach it. Reach, not absence.
+- The Verification table's "this package registers" column now lists the pair on both `subagents`
+  rows. A `codemode` script can reach them and the model cannot see them, so the model-facing set
+  those rows describe is unchanged.

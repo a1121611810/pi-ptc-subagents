@@ -384,17 +384,37 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
   });
 
   /*
-   * ADR-0025: the orchestration surface. In `off` and `subagents` these two do not exist,
-   * so the model is told about exactly one way to compose tool calls -- ours, or pi's
-   * `codemode`. Registering both and letting the model choose per request is the duplicate
-   * surface this setting exists to remove.
+   * ADR-0025: the orchestration surface. `off` returns above, so it never reaches here.
+   *
+   * **These two are registered on `subagents` too, and that is not the duplicate surface this
+   * comment used to describe.** The claim was that two orchestrators beside each other makes the
+   * model choose per request, and that is true of two `direct` tools. It is not what happens here:
+   * on `subagents` the pair is registered at `codemode` reach, which does **not** declare them to
+   * the model (`AgentSession._isDeclarable` admits only `direct` and `model-only`, measured on
+   * 0.99.0 through 1.1.0). What it does is make them **callable from a `codemode` script**.
+   *
+   * So the two lines are not two orchestrators competing. `full` is this package as the thing
+   * that composes tool calls; `subagents` is pi's `codemode` composing tool calls, with this
+   * package's program reachable underneath it as the execution layer. The capability that makes
+   * the second worth having is the one `codemode` cannot provide at all: its sandbox has no
+   * module loader, so a script there cannot spawn a process — `pi.dispatch`, background tasks
+   * with a six-state lifecycle, and the frozen six-name environment all live in the PTC worker.
+   *
+   * **A pi older than 0.99.0 is unaffected.** `ToolExposure` does not exist there, so the field
+   * is ignored and both tools are declared to the model — which is right, because such a pi
+   * ships no `codemode` and resolves to `full` anyway. Measured across
+   * 0.86.1 / 0.87.1 / 0.99.0 / 0.99.1 / 0.99.2 / 1.0.0 / 1.0.4 / 1.1.0.
    */
-  if (surface.surfaceMode === "full") {
+  if (surface.surfaceMode === "full" || surface.surfaceMode === "subagents") {
+    // `full` orchestrates itself and declares the tools; `subagents` hands composition to pi's
+    // `codemode` and offers these as its execution layer.
+    const programmingToolExposure = surface.surfaceMode === "full" ? "direct" : "codemode";
     pi.registerTool(
       createPtcRunCodeTool({
         getBindingSourceNames,
         getPool: () => turnPools.get("run_code"),
         depth: ptcDepth,
+        exposure: programmingToolExposure,
         ...(parentTaskId === undefined ? {} : { parentTaskId }),
         getDispatchDeps: () => background.dispatchDeps,
       }),
@@ -404,6 +424,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
         getBindingSourceNames,
         getPool: () => turnPools.get("workflow"),
         depth: ptcDepth,
+        exposure: programmingToolExposure,
         ...(parentTaskId === undefined ? {} : { parentTaskId }),
         getDispatchDeps: () => background.dispatchDeps,
       }),
@@ -412,8 +433,14 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
 
   /*
    * ADR-0025 `subagents`: the top-level subagent face, registered only here. It is the reason
-   * this mode exists -- `pi.dispatch` lives inside a program, so without it a session that
-   * hands orchestration to `codemode` would have no way to start a subagent at all.
+   * this mode exists -- `pi.dispatch` lives inside a program, so dispatching needs a program
+   * underneath pi's `codemode`; this face is the one that does not.
+   *
+   * **It stays `direct` beside the pair above, and that asymmetry is the point.** The pair reach
+   * a `codemode` script, which is where a model composing tool calls already is; this one is
+   * declared to the model so that starting a subagent needs no script at all. `subagent` is the
+   * capability whose whole purpose is being callable without an orchestrator — a `codemode`
+   * reach would make it callable only by the thing that cannot use it.
    */
   if (surface.surfaceMode === "subagents") {
     pi.registerTool(
@@ -933,13 +960,28 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
      * this state gets no warning. ADR-0025 lists it as a known limitation.
      */
     if (surface.surfaceMode === "subagents" && !pi.getActiveTools().includes("codemode")) {
-      ctx.ui.notify(
-        "pi-ptc-subagents: surfaceMode is subagents, but codemode is not active in this " +
-          "session, so there is no orchestration tool. Add codemode to your pi tool list " +
-          '(the --tools flag or the default tools setting), or set surfaceMode to "full" to ' +
-          "use ptc_run_code instead.",
-        "warning",
-      );
+      // The warning's premise is "this session has no orchestration tool", so the question is what
+      // the MODEL is offered, and `getActiveTools()` is exactly that set — pi's own docstring:
+      // "Get the names of the active tools, which are the tools declared to the model."
+      // `getAllTools()` would answer a different question (what is registered).
+      const declaredToModel = pi.getActiveTools();
+      const hasDeclaredProgrammingTool =
+        declaredToModel.includes("ptc_run_code") || declaredToModel.includes("ptc_workflow");
+      // **A pi older than 0.99.0 never reaches the warning, and that is the point.** There
+      // `ToolExposure` does not exist, so the pair registered above is declared to the model
+      // rather than held at `codemode` reach — the session HAS an orchestration tool, it is
+      // `ptc_run_code`, and telling that user to "add codemode" would name a tool their pi does
+      // not ship, while "use ptc_run_code instead" names the tool they already have. Both halves
+      // of the sentence would be wrong, so the whole notice is withheld rather than reworded.
+      if (!hasDeclaredProgrammingTool) {
+        ctx.ui.notify(
+          "pi-ptc-subagents: surfaceMode is subagents, but codemode is not active in this " +
+            "session, so there is no orchestration tool. Add codemode to your pi tool list " +
+            '(the --tools flag or the default tools setting), or set surfaceMode to "full" to ' +
+            "use ptc_run_code instead.",
+          "warning",
+        );
+      }
     }
 
     // ADR-0033: the probe answered, then pi's real loadout gets the last word — here and on the

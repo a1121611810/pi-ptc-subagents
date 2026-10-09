@@ -2,8 +2,9 @@
  * `ptc_subagent` (ADR-0025): the top-level face for spawning a fresh pi subprocess.
  *
  * Why it exists: the parallel binding `pi.dispatch` can only be reached from *inside* a PTC
- * program, so a session that hands orchestration to pi's `codemode` -- and therefore has no
- * `ptc_run_code` -- would have no way to start a subagent at all. This is that way in.
+ * program. A session that hands orchestration to pi's `codemode` can dispatch -- the pair sits at
+ * `codemode` reach underneath that script -- but it has to write the script first. This is that
+ * way in with no script at all, which is the whole of the difference.
  *
  * Layering, per spec decision 9: this tool is a front and owns no lifecycle. It builds the
  * same DispatchContext the binding builds and calls the same `dispatch()`. Depth, concurrency,
@@ -16,15 +17,17 @@
  * A test pins the two key sets equal.
  *
  * The RESULT is declared twice, on purpose: `content` is what a model reads, `structuredContent`
- * is what a codemode script reads. This tool is the only way a session that has handed
- * orchestration to pi's `codemode` can start a subagent at all, and without the second channel a
- * script has to regex the ULID out of `"Started background task 01JABC..."`. See
+ * is what a codemode script reads. A script dispatching through `ptc_run_code` reads its own result
+ * over there instead, so this second channel is for the direct call -- and without it that caller
+ * has to regex the ULID out of `"Started background task 01JABC..."`. See
  * {@link SUBAGENT_OUTPUT_SCHEMA} for why that projection is not a mirror of `details`.
  *
- * A dispatched child also produces a **child report** (ADR-0032). On THIS surface there is no
- * `codemode`, so `structuredContent` reaches nobody (ADR-0025 + ADR-0028) and the report is
- * rendered into the text the model reads instead -- see `renderChildReportText`, and the report
- * key in {@link SUBAGENT_OUTPUT_SCHEMA} for the callers that do have a structured channel.
+ * A dispatched child also produces a **child report** (ADR-0032). It is rendered into the text the
+ * model reads -- see `renderChildReportText` -- with the report key in {@link SUBAGENT_OUTPUT_SCHEMA}
+ * for callers that have a structured channel. (ADR-0032 once argued this surface had no
+ * `codemode` and therefore no reader for `structuredContent`; as of 2026-10-09 `subagents` ships
+ * `codemode` and this tool is `direct`, so a script reaches the structured side through
+ * `ctx.executeTool()`. The rendering below is unchanged and is what the model reads either way.)
  */
 
 import { defineTool } from "@earendil-works/pi-coding-agent";
@@ -298,8 +301,11 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
                 report_channel: outcome.reportChannel,
                 report,
               };
-      // ADR-0032 §Rendering: on this surface there is no `codemode`, so nothing reads
-      // `structuredContent` and the report has to be IN the text. The rendered block goes first
+      // ADR-0032 §Rendering: the report has to be IN the text, not only in `structuredContent`. That
+      // reason was once stated as "on this surface there is no `codemode`", which stopped being true
+      // on 2026-10-09 — but the conclusion is unchanged and does not depend on it: this tool is
+      // `direct`, so a model reading the text is the primary channel whatever a script does with
+      // the structured half. The rendered block goes first
       // and the child's prose after it, so the model reads the conclusion before the reasoning --
       // and the block is emitted whether or not a report arrived, because an unmarked gap reads as
       // an empty result.

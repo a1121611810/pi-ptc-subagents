@@ -415,7 +415,14 @@ describe("the registration the switch actually produces", () => {
       try {
         const names = [...stub.tools.keys()];
         expect(names, sw).toContain("ptc_subagent");
-        expect(names, sw).not.toContain("ptc_run_code");
+        // The program pair IS registered on this line, at `codemode` reach — callable from a
+        // pi `codemode` script, which is what a loaded-and-enabled codemode provides. What must
+        // NOT hold is the pair being declared to the model, which is the duplicate surface this
+        // line exists to avoid; that is asserted by reach, not by presence.
+        for (const name of ["ptc_run_code", "ptc_workflow"] as const) {
+          const definition = stub.tools.get(name) as { exposure?: string } | undefined;
+          expect(definition?.exposure ?? "direct", `${name} reach, ${sw}`).toBe("codemode");
+        }
       } finally {
         await removeTempDir(dir);
       }

@@ -71,11 +71,12 @@ async function startAndTurn(options: {
   }
 }
 
-test("an mcp.json the evidence reads resolves subagents, and registers no run-code orchestrator", async () => {
+test("an mcp.json the evidence reads resolves subagents, with the run-code pair beneath it", async () => {
   // The session ADR-0029 could not resolve: the activation probe said `inactive`, the surface was
   // `full`, and pi's MCP extension activated codemode on top — both surfaces live. With the
-  // evidence folded in, the prediction and pi agree, so the delegation happens and
-  // `ptc_run_code` is not registered beside a live codemode.
+  // evidence folded in, the prediction and pi agree, so the delegation happens and the surface is
+  // `subagents` — which registers `ptc_run_code` / `ptc_workflow` at `codemode` reach (callable
+  // from a script, not declared to the model) alongside the `direct` `ptc_subagent`.
   //
   // The assertion is on the registered tools rather than on `surface.codemodeActivation`: the
   // probe could report `mcp` while the factory quietly built `full` anyway, and only the tool set
@@ -84,7 +85,13 @@ test("an mcp.json the evidence reads resolves subagents, and registers no run-co
     active: ["read", "bash", "edit", "write", "codemode"],
     mcpJson: MCP_JSON,
   });
-  expect(tools).toEqual(["ptc_subagent", ...TASK_TOOLS, "ptc_child_report"]);
+  expect(tools).toEqual([
+    "ptc_run_code",
+    "ptc_workflow",
+    "ptc_subagent",
+    ...TASK_TOOLS,
+    "ptc_child_report",
+  ]);
   expect(
     notices.filter((n) => n.message.includes(DRIFT)),
     "a predicted session has no drift to report",
