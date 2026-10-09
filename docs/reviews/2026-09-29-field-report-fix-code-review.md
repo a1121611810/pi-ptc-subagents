@@ -14,6 +14,14 @@ landed on a branch during the cycle. Snapshots are `git stash create` objects:
 | 3     | `1e06db9`                                      | Round-2 fixes (8 files)                                                            |
 | 4     | closing round                                  | Round-3 fixes                                                                      |
 
+**The three snapshots no longer resolve, and that is the expected end of their life.** A
+`git stash create` object is unreachable the moment the command returns — nothing references it,
+`git stash list` was empty throughout, and the batch it recorded was never landed on a branch.
+A `git gc --prune=now` on 2026-10-10 collected them, which is what a snapshot is for. The SHAs
+below are kept because this ledger is the record of *what was reviewed*, not a handle on the
+content: none of the three rounds' diffs is retrievable, and no claim in this file depends on
+resolving them. See `tests/doc-integrity.test.ts`'s `SNAPSHOT_SHAS` for how the gate treats them.
+
 Closure discipline applied throughout (AGENTS.md): a finding counts as closed only when a
 **named test goes red if the fix is reverted** — the round-2 and round-3 agents each executed
 the relevant mutation in a throwaway copy of the tree and quoted the failure. "The code

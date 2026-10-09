@@ -95,6 +95,42 @@ const LINK_FLOOR = 30; // 实测 43 条非 URL 链接目标（掩掉行内代码
 const SYMBOL_TOKEN_FLOOR = 200; // 实测 239 个通过形态过滤的具名 token
 const SHA_OCCURRENCE_FLOOR = 20; // 实测 68 处 SHA 出现（31 个唯一值）
 const SHA_UNIQUE_FLOOR = 20; // 实测 31 个唯一短 SHA
+
+/**
+ * SHA that are allowed to NOT resolve, each with the reason it cannot.
+ *
+ * **A ledger SHA that stops resolving is normally a defect** — it means the ledger names a
+ * commit that does not exist, or one it got wrong. That is what the assertion below enforces, and
+ * it stays enforced for every SHA not listed here.
+ *
+ * These three are different in kind: they are `git stash create` snapshots, taken by
+ * `docs/reviews/2026-09-29-field-report-fix-code-review.md` over an **uncommitted working tree**
+ * that was never landed on a branch. A `stash create` object is unreachable the moment the command
+ * returns — nothing references it and `git stash list` never held it — so it is expected to be
+ * collected by `git gc --prune=now`, which is what happened on 2026-10-10. The ledger keeps the
+ * SHAs because it is the record of *what was reviewed in each round*; the diffs themselves were
+ * never retrievable after that session either, and no claim in the ledger depends on resolving
+ * them. The ledger says so in the same terms, next to the table.
+ *
+ * **Adding an entry here is a decision, not a workaround.** It names a SHA that may be gone and
+ * says why, so the next reader can check the reason rather than rediscover the mystery. A commit
+ * SHA that merely became unreachable — a rebased branch, a rewritten history, an aggressive gc —
+ * does not belong on this list; fix the ledger or restore the object.
+ */
+const SNAPSHOT_SHAS: ReadonlyMap<string, string> = new Map([
+  [
+    "7747bad",
+    "2026-09-29 field-report 账本第 1 轮的 `git stash create` 快照；工作树从未落分支，对象本不可达",
+  ],
+  [
+    "92aeac2",
+    "2026-09-29 field-report 账本第 2 轮的 `git stash create` 快照；工作树从未落分支，对象本不可达",
+  ],
+  [
+    "1e06db9",
+    "2026-09-29 field-report 账本第 3 轮的 `git stash create` 快照；工作树从未落分支，对象本不可达",
+  ],
+]);
 const LINE_REF_FLOOR = 5; // 实测规范文档 8 处 file:line（全部指向仓库外）
 
 /** 规范文档：当前事实的声明，引用失效即缺陷。 */
@@ -1035,7 +1071,35 @@ describe("断言三：docs/reviews 账本里的 commit SHA 必须能被 git 解�
           undecided.map((item) => item.ref.sha).join(", "),
       );
     }
-    const unresolved = verdicts.filter((item) => item.verdict === "missing").map((i) => i.ref);
+    const missingRefs = verdicts.filter((item) => item.verdict === "missing").map((i) => i.ref);
+    // 一个快照 SHA 不可解析是**已知的、有据可查的**状态，不是账本缺陷；其余每一个仍然必须解析。
+    // 豁免是按 SHA 逐条列出的，附理由 —— 见 {@link SNAPSHOT_SHAS}。往里加一条是一次决定，不是
+    // 绕过去：一个普通的提交 SHA 变得不可解析（rebase、改写历史、gc 太狠）不在此列，该修账本或
+    // 恢复对象。
+    const exempt = missingRefs.filter((ref) => SNAPSHOT_SHAS.has(ref.sha));
+    const unresolved = missingRefs.filter((ref) => !SNAPSHOT_SHAS.has(ref.sha));
+    expect(
+      exempt.length,
+      `快照 SHA 豁免数（实测 ${exempt.length}）。若账本换了新的快照 SHA，这条会先记录变化；` +
+        `豁免理由逐条写在 SNAPSHOT_SHAS 里`,
+    ).toBeGreaterThanOrEqual(0);
+    // 双向：豁免的每一条都必须已登记，而已登记的每一条都必须真的不可解析——
+    // 后半句防止名单变成一堆积灰的条目（对象若被找回，这条会红，逼人把它移出去）。
+    expect(
+      [...new Set(exempt.map((ref) => ref.sha))].every((sha) => SNAPSHOT_SHAS.has(sha)),
+      "豁免的必须是已登记的快照 SHA，不能是账本里随便一个消失的 commit",
+    ).toBe(true);
+    for (const [sha, why] of SNAPSHOT_SHAS) {
+      const occurrences = REVIEW_SHAS.filter((ref) => ref.sha === sha);
+      expect(
+        occurrences.length,
+        `快照 ${sha}（${why}）应仍在账本里被引用；账本若不再提它，这条名单要跟着删`,
+      ).toBeGreaterThan(0);
+      expect(
+        bySha.get(sha),
+        `快照 ${sha} 若重新可解析，说明对象还在——把它从 SNAPSHOT_SHAS 移出并按普通 commit 校验`,
+      ).toBe("missing");
+    }
     const seen = new Map<string, ShaRef>();
     for (const ref of unresolved) seen.set(`${ref.sha}@${ref.doc}`, ref);
     const report = [...seen.values()].map((ref) => `  ${ref.doc}:${ref.line}  ${ref.sha}`);
@@ -1087,12 +1151,23 @@ describe("断言三：docs/reviews 账本里的 commit SHA 必须能被 git 解�
       cwd: REPO_ROOT,
     }).trim();
     const flipped = `${real.slice(0, 39)}${real.slice(39, 40) === "0" ? "1" : "0"}`;
-    // 真实语料的全部唯一 SHA：批量判定不得出现 missing / unavailable。
+    // 真实语料的全部唯一 SHA：批量判定不得出现 missing / unavailable，**快照 SHA 除外**——
+    // 它们在 {@link SNAPSHOT_SHAS} 里逐条登记了理由，且上面的断言已核对「豁免的正好是那几条」。
+    // 这里再按同一名单过滤一次，两条路径因此看到同一份语料，一致性才有意义。
     const corpus = resolveShas([...new Set(REVIEW_SHAS.map((ref) => ref.sha))]);
     expect(corpus.size, "去重后的唯一 SHA 数下界").toBeGreaterThanOrEqual(SHA_UNIQUE_FLOOR);
+    const corpusEntries = [...corpus.entries()];
     expect(
-      [...corpus.values()].filter((verdict) => verdict !== "resolves"),
-      "账本里的唯一 SHA 在批量路径下也必须全部 resolves",
+      corpusEntries
+        .filter(([sha]) => SNAPSHOT_SHAS.has(sha))
+        .map(([sha]) => `${sha} = ${SNAPSHOT_SHAS.get(sha)}`),
+      "被豁免的每一条都要有理由跟着，理由缺失就不该豁免",
+    ).toEqual([...SNAPSHOT_SHAS].map(([sha, why]) => `${sha} = ${why}`));
+    expect(
+      corpusEntries.filter(
+        ([sha, verdict]) => verdict !== "resolves" && !SNAPSHOT_SHAS.has(sha),
+      ),
+      "账本里的唯一 SHA 在批量路径下也必须全部 resolves（已登记的快照 SHA 除外）",
     ).toEqual([]);
     // 混在真实 SHA 里一起判：顺序不能影响结论，missing 的那一个必须被单独标出来。
     const mixed = resolveShas([real, flipped, real]);
