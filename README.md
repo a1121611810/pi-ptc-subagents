@@ -35,6 +35,10 @@ From a local checkout: `pnpm install && pnpm run build && pi install /abs/path/t
 pi reads the `pi.extensions` manifest field — install it and the extension is on for the next
 pi startup, no extra setup.
 
+**What that command actually writes is in [docs/how-to-install.md](./docs/how-to-install.md)** — worth reading before you install, if you would rather know where the settings entry goes.
+
+Documentation site: **[pi-ptc-subagents on GitHub Pages](https://a1121611810.github.io/pi-ptc-subagents/)**. Every page under its Documentation section is projected at build time from the files in `docs/`, so it never says anything this README does not.
+
 ## Tools
 
 - `ptc_subagent` — the top-level subagent face: dispatch a fresh `pi` subprocess for a task

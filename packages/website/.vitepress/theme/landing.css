@@ -422,3 +422,29 @@
     padding: 48px 20px;
   }
 }
+
+/* ── the projected-from banner (markdown pages, not the landing page) ──── */
+
+.lp-generated {
+  border: 1px solid var(--lp-line);
+  border-left: 3px solid var(--lp-accent);
+  background: var(--lp-alt-bg);
+  border-radius: 0 10px 10px 0;
+  padding: 14px 18px;
+  margin: 20px 0 32px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--lp-dim);
+}
+
+.lp-generated strong {
+  display: block;
+  color: var(--lp-fg);
+  margin-bottom: 3px;
+}
+
+.lp-generated a {
+  color: var(--lp-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
