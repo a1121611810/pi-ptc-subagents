@@ -1,0 +1,69 @@
+# Publish the project site to GitHub Pages.
+#
+# Trigger is every push to `main`, not the `v*` tags that trigger
+# `publish.yml`. The site is a usage site: its content is the repository's
+# documentation, which changes far more often than releases do. A site that
+# only redeployed on a tag would answer "how do I use this" with instructions
+# from weeks ago — for a documentation site that is the one failure that
+# matters.
+#
+# The build IS the gate. `pnpm --filter website run build` must succeed before
+# anything is uploaded. That is the site's entire quality gate, and it is
+# load-bearing: VitePress fails the build on a dead link, so a broken link in a
+# projected document can never reach a published page. Do not add
+# `ignoreDeadLinks` — ticket #147's counterfactual test exists to catch exactly
+# that.
+
+name: Deploy website
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# `pages: write` + `id-token: write` are what let Actions mint the OIDC token
+# Pages deployment trusts. Neither is implied by the default token permissions.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time, and never cancel a running one — a cancelled
+# deploy-pages leaves the environment pointed at a half-published state.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # Frozen-lockfile is the same install every other workflow in this
+      # repository runs, so a website change that was not committed together
+      # with its regenerated lockfile fails here exactly as it fails there.
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm --filter website run build
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: packages/website/.vitepress/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
