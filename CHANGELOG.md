@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-10-10
+
+### Changed
+
+- **The package introduction copy now describes the package the code ships.**
+  The `description` field — the hero line of the
+  [pi.dev package page](https://pi.dev/packages/pi-ptc-subagents) — named two
+  tools (`ptc_run_code` + `ptc_workflow`) while the package registers six
+  model-facing tools plus the `pi.dispatch` binding, and said nothing about
+  the subagent fan-out the package name advertises. It now centres on both
+  capabilities the package is — programmable tool calling and subagent
+  fan-out — with no tool names hardcoded (the tool set is detected, not
+  configured; see [ADR-0034](./docs/adr/0034-surface-is-detected-not-set.md)).
+  The README's Tools section gains the missing `ptc_subagent` bullet. Docs
+  only; no code change.
+
+[2.0.1]: https://github.com/a1121611810/pi-ptc-subagents/compare/v2.0.0...v2.0.1
+
 ## [2.0.0] - 2026-10-10
 
 ### Added

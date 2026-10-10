@@ -1,7 +1,7 @@
 {
   "name": "pi-ptc-subagents",
-  "version": "2.0.0",
-  "description": "DSH PTC mode (ptc_run_code + ptc_workflow) for pi",
+  "version": "2.0.1",
+  "description": "Programmable tool calling (PTC) and subagent fan-out for pi — the model writes JS/TS programs that call pi's tools, or fans out to a fresh pi subprocess per subagent task",
   "keywords": [
     "pi",
     "pi-package",

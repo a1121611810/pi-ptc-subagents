@@ -40,6 +40,12 @@ required — install it and the extension is on for the next pi startup.
 - `ptc_workflow` — structured variant with `meta` + plain-JSON `args`, plus the
   workflow helpers (`log`, `phase`, `parallel`, `pipeline`). There is no
   `agent()` helper on either surface.
+- `ptc_subagent` — the top-level subagent face: dispatch a fresh `pi`
+  subprocess for a task without writing a program. Registered only when the
+  detected surface is `subagents`
+  ([ADR-0025](./docs/adr/0025-extension-surface-is-a-setting.md)); on `full`
+  the same capability is the `pi.dispatch` binding inside a program (see
+  [Dispatch](#dispatch-fan-out-to-per-call-pi-subprocesses)).
 - `ptc_task_list` / `ptc_task_output` / `ptc_task_stop` — manage background
   dispatches (see [Background dispatch](#background-dispatch)). They stay
   available when PTC mode is off.
