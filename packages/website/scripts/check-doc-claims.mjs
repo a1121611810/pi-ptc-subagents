@@ -275,7 +275,15 @@ function main() {
   const sourceCache = new Map();
   const readSource = (rel) => {
     if (!sourceCache.has(rel)) {
-      sourceCache.set(rel, normalize(readFileSync(join(REPO_ROOT, rel), 'utf8')));
+      // A missing or unreadable document is a gate failure, not an exception. Without this,
+      // a typo in a binding's path or a deleted document escapes as an ENOENT stack trace —
+      // the one failure shape a gate must never produce, because it tells the reader nothing
+      // about what to do next.
+      try {
+        sourceCache.set(rel, normalize(readFileSync(join(REPO_ROOT, rel), 'utf8')));
+      } catch (error) {
+        throw new Error(`cannot read ${rel} — ${error.code ?? error.message}`);
+      }
     }
     return sourceCache.get(rel);
   };
@@ -286,17 +294,19 @@ function main() {
   for (const binding of BINDINGS) {
     checked += 1;
     let value;
+    let text;
     try {
       value = binding.source();
+      text = readSource(binding.doc);
     } catch (error) {
       failures.push({
         id: binding.id,
-        why: `the source anchor no longer resolves — ${error.message}`,
+        why: `${error.message} — the binding's source or document is not where it says it is`,
       });
       continue;
     }
     const documented = binding.anchor + binding.render(value);
-    if (!readSource(binding.doc).includes(documented)) {
+    if (!text.includes(documented)) {
       failures.push({
         id: binding.id,
         why: `${binding.doc} does not say ${JSON.stringify(documented)} (looked for it after ` +
