@@ -48,13 +48,26 @@ export default function codemodeRegistryProbe(pi: ExtensionAPI): void {
   writeFileSync(out, JSON.stringify({ stage: "factory", argv: [...process.argv] }), "utf8");
 
   pi.on("session_start", () => {
-    const tools = pi.getAllTools().map((tool) => tool.name);
-    const record: RegistryRecord = {
-      stage: "session_start",
-      argv: [...process.argv],
-      hasCodemode: tools.includes("codemode"),
-      tools,
-    };
-    writeFileSync(out, JSON.stringify(record), "utf8");
+    // **Deferred one turn of the event loop, and that is load-bearing.** This package registers its
+    // tools from its own `session_start` handler (ADR-0035 moved registration there so the surface
+    // could be read rather than reconstructed). pi dispatches `session_start` per extension in
+    // load order, and that order is not ours to choose — so a synchronous read here sees whatever
+    // had been registered when this handler happened to run, which is the difference between
+    // "the package registered nothing" and "the package registered after me". Neither is the
+    // answer this fixture exists to give.
+    //
+    // `setImmediate` runs after the synchronous dispatch completes, so every `session_start`
+    // handler has returned and the registry is settled. The print session this runs in makes a
+    // provider request afterwards, so the loop does turn.
+    setImmediate(() => {
+      const tools = pi.getAllTools().map((tool) => tool.name);
+      const record: RegistryRecord = {
+        stage: "session_start",
+        argv: [...process.argv],
+        hasCodemode: tools.includes("codemode"),
+        tools,
+      };
+      writeFileSync(out, JSON.stringify(record), "utf8");
+    });
   });
 }

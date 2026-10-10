@@ -13,6 +13,10 @@
 | 5   | 反事实判据:把实现改成显然错误但符合该断言的版本,测试必须红                               | 改坏实现测试还绿                |
 | 6   | characterization vs specification 区分:防回归 ≠ 防错误;snapshot / 实现输出抄写只能防回归 | 用 snapshot 断言 '实现正确'     |
 
+> **变异执行的现场约束不在上表里,因为它不是第 7 条测试约束。** 第 5 条要求把实现改坏,「改坏在哪里发生」
+> 有它自己的硬约束:变异跑在一次性 checkout 上,不在被验证的工作树里。详见文末《A mutation run edits a
+> throwaway checkout, never the tree it verifies》。
+
 ## 各条详细
 
 ### 1. IO 边界成功/失败双路径都有单测
@@ -340,3 +344,77 @@ preconditions rather than about platforms:
 Corollary for reviews: a per-file or per-round test run inherits this. Running the five new tests
 locally said nothing about whether they would run on Linux; the fix surfaced only because a release
 pipeline disagreed.
+
+## A mutation run edits a throwaway checkout, never the tree it verifies
+
+This repository does not believe a fix until it has been mutated back into its defect and watched to
+fail. That makes the mutation run the only check in this file that **writes to the source tree**, and
+therefore the only one that can quietly break the thing it is checking. So the rule is stated flatly:
+
+> **A mutation run happens in a throwaway checkout of the tree, never in the working tree it verifies.**
+
+`git worktree add` a temp path, or copy the tree, run the mutation there, read the result, throw the
+checkout away. The verified tree is never writable by the run.
+
+**"Remember to restore it" was never a rule.** The arrangement this replaces was: mutate in place,
+then afterwards run `git diff` and confirm the tree came back clean. That self-proof is a habit, and
+a habit is present only on the runs somebody remembers -- and the run nobody scripted is exactly the
+run nobody remembered. Containment is a different sort of thing: it is a property of _where_ the run
+happens, so a forgotten restore stops being discouraged and becomes impossible. A half-restored tree
+cannot produce a false clean bill of health, because there is no half-restored tree to have.
+
+**Both layers stay, because they fail differently and only one is on every run.**
+
+- the throwaway checkout fails **structurally** -- the verified tree was never writable by the run, so
+  its failure mode is not a dirty tree, it is no run at all;
+- the post-run self-proof fails **observably** -- and it is the only thing that also proves the
+  throwaway checkout was complete, i.e. that the run tested _this_ tree rather than a stale copy or a
+  partially-cloned one.
+
+Dropping either and calling the survivor enough is a claim about a layer that is only sometimes
+present. Both cost nothing; the second is four commands.
+
+The one thing the throwaway checkout does change: the mutation itself is discarded with the checkout,
+so the statement that was commented out has to be written down before the checkout is removed. The
+run's output is the red or the green; the record of _what was mutated_ is what makes "measured to
+exhaustion" mean anything.
+
+### What the verifier claims afterwards
+
+Not "I restored it" -- **the working tree was byte-identical before and after**. That is evidence
+rather than intent, so it gets produced by commands and quoted rather than asserted in prose:
+
+```
+git status --porcelain=v1 > /tmp/ptc-before.status
+git diff > /tmp/ptc-before.diff
+# ... the mutation run, in the throwaway checkout ...
+git status --porcelain=v1 | diff -u /tmp/ptc-before.status -
+git diff | diff -u /tmp/ptc-before.diff -
+```
+
+Empty output from both `diff` invocations _is_ the claim. Both snapshots are needed: `status` covers
+the index and the set of paths in the worktree, `diff` covers the content of tracked files, and
+neither one alone does both.
+
+**Known blind spot, written down rather than hidden.** This establishes tracked content and the path
+set. It cannot see an edit to the _contents_ of a file that was already untracked before the run --
+the path appears in both `status` snapshots, the diff is empty, and the file is not what it was. When
+the run touches a path in that state, `git add -N` it before the run, or compare that file
+explicitly.
+
+### What skipping it costs, and this repository has paid it twice
+
+This file already records one instance of its own rule being broken: a mutation driver script was
+killed mid-run and left a mutated source file behind, so the "restored" baseline came back with five
+failures. A half-restored tree produces a confident wrong answer, and its symptoms look exactly like
+"the change under review introduced a regression".
+
+The instance that cost a session is worse. During a large change a mutation was left behind in a
+config reader: an early return that silently ignored a setting the user had asked for. It shipped.
+The test covering that reader stayed **green**, because it exercised the other branch. It was found
+by reading the file, not by a failing test, and nothing noticed for the rest of the session.
+
+That is the whole shape this rule exists for. A green suite cannot distinguish a reader that honours
+the setting from one that ignores it -- so "the suite is green" is not evidence that the tree was
+restored, and the one signal that would have exposed it (a dirty working tree sitting in `git status`)
+only shows up to whoever looks, on the run they remember.

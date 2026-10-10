@@ -130,11 +130,11 @@ test("createSubCallUpdater coalesces rapid pushes and drops a pending one on can
   }
 });
 
-test("renderCall wires pi's isPartial and state through to the shimmer (ADR-0020)", () => {
+test("renderCall wires pi's isPartial and state through to the shimmer (ADR-0020)", async () => {
   // The production seam: `run-code.ts`'s `renderCall` must hand the decorator the two
   // `ToolRenderContext` fields the shimmer's lifecycle depends on. Without `isPartial` the band
   // never settles; without `state` it restarts every tick and freezes at position 0.
-  const tool = captureRegisteredTools().get("ptc_run_code");
+  const tool = (await captureRegisteredTools()).get("ptc_run_code");
   if (!tool?.renderCall) throw new Error("ptc_run_code must expose renderCall");
   const renderCall = tool.renderCall as unknown as (
     args: unknown,
@@ -167,8 +167,8 @@ test("renderCall wires pi's isPartial and state through to the shimmer (ADR-0020
   }
 });
 
-test("the extension factory registers ptc_run_code with the documented parameter surface", () => {
-  const tool = captureRegisteredTools().get("ptc_run_code");
+test("the extension factory registers ptc_run_code with the documented parameter surface", async () => {
+  const tool = (await captureRegisteredTools()).get("ptc_run_code");
   if (!tool) throw new Error("ptc_run_code must be registered");
   expect(tool.label).toBe("PTC Run Code");
 
@@ -183,8 +183,8 @@ test("the extension factory registers ptc_run_code with the documented parameter
   expect(parameters.properties ?? {}).not.toHaveProperty("justification");
 });
 
-test("the description tells the model how to reach tools and what comes back", () => {
-  const description = captureRegisteredTools().get("ptc_run_code")?.description ?? "";
+test("the description tells the model how to reach tools and what comes back", async () => {
+  const description = (await captureRegisteredTools()).get("ptc_run_code")?.description ?? "";
   expect(description, "names the required code argument").toMatch(/`code`/);
   expect(description, "names the required description argument").toMatch(/`description`/);
   expect(description, "shows the binding call form").toMatch(/tools\.<name>\(args\)/);
@@ -200,8 +200,8 @@ test("the description tells the model how to reach tools and what comes back", (
   expect(description).not.toMatch(/sandbox/i);
 });
 
-test("the description documents the always-bound pi.dispatch binding (pitfalls #1/#4/#5)", () => {
-  const description = captureRegisteredTools().get("ptc_run_code")?.description ?? "";
+test("the description documents the always-bound pi.dispatch binding (pitfalls #1/#4/#5)", async () => {
+  const description = (await captureRegisteredTools()).get("ptc_run_code")?.description ?? "";
   // Pitfall #1: the binding is registered under the literal dot name, so the description must
   // show string indexing — `tools.pi.dispatch` is a TypeError in the program.
   expect(description, "shows the string-indexed call form").toContain('tools["pi.dispatch"]');
@@ -216,8 +216,8 @@ test("the description documents the always-bound pi.dispatch binding (pitfalls #
   expect(description, "names the introspection global").toContain("`ptcBindings`");
 });
 
-test("the timeoutMs parameter description warns that the deadline kills in-flight dispatches", () => {
-  const tool = captureRegisteredTools().get("ptc_run_code");
+test("the timeoutMs parameter description warns that the deadline kills in-flight dispatches", async () => {
+  const tool = (await captureRegisteredTools()).get("ptc_run_code");
   if (!tool) throw new Error("ptc_run_code must be registered");
   const parameters = tool.parameters as unknown as {
     properties?: { timeoutMs?: { description?: string } };
@@ -235,7 +235,7 @@ test(
     const dir = await makeTempDir();
     try {
       await writeFile(join(dir, "fixture.txt"), "content through ptc_run_code\n");
-      const tool = captureRegisteredTools().get("ptc_run_code");
+      const tool = (await captureRegisteredTools()).get("ptc_run_code");
       if (!tool) throw new Error("ptc_run_code must be registered");
       const result = await call(
         tool,

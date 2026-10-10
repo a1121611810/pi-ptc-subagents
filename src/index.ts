@@ -62,6 +62,7 @@ import type {
   CodemodeActivationResolution,
   CodemodePresence,
   CodemodeSwitchResolution,
+  DetectedSurface,
   ModeHideStrategy,
   PersistedModeState,
 } from "./mode/ptc-mode.ts";
@@ -72,7 +73,6 @@ import { createChildReportTool } from "./tools/child-report-tool.ts";
 export {
   bindingSource,
   buildModeInstruction,
-  cliToolFlags,
   decideModeEntry,
   DEFAULT_HIDE_STRATEGY,
   detectExternalLoadoutChange,
@@ -228,18 +228,24 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
    * `surface.codemode !== undefined` no longer a test for "was this detected" -- it is always
    * defined. The reporting below reads each probe directly instead.
    */
-  // ADR-0026 reads the surface once, here, because registration has to happen in the factory and
-  // `cwd` only matters for the `!` bucket's globs. It is left at its `process.cwd()` default
-  // deliberately: that is the directory pi's own `DefaultPackageManager` resolves project-scope
-  // globs against for a session launched from a shell, and the one case where the two can differ —
-  // an SDK embedder passing an explicit `cwd` — is recorded in ADR-0027 as a known limit rather
-  // than papered over by threading a value an extension cannot observe.
-  const surface = detectSurfaceMode(
-    getAgentDir(),
-    options.codemode,
-    options.codemodeSwitch,
-    options.codemodeActivation,
-  );
+  /**
+   * The session's detected surface, assigned once by `session_start` before anything can reach it.
+   *
+   * It used to be a `const` computed here, on the grounds that registration happens in the factory
+   * and so the answer has to exist before the factory returns. That was true about the SEQUENCE and
+   * wrong about the CAUSE: the answer did not have to exist, it had to be *reconstructed*, because
+   * during extension load `ExtensionAPI`'s read methods are stubs that throw `Extension runtime not
+   * initialized`. Measured on every pi this package supports.
+   *
+   * At `session_start` the runtime is bound, the loadout is readable, and pi has already applied
+   * project trust to it — so the surface is read rather than mirrored. That is also what makes
+   * registration movable: the thing registration had to wait for no longer has to be guessed.
+   *
+   * The definite-assignment assertion is safe for one reason: a tool cannot execute, and the
+   * cross-checks cannot run, before the handler that registers them has been invoked.
+   */
+  let surface!: DetectedSurface;
+
   // Set on entry, cleared after the briefing has been injected, so the instruction lands once
   // per mode entry instead of on every turn.
   let briefingPending = false;
@@ -378,111 +384,126 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     });
   });
 
-  /*
-   * ADR-0025: the orchestration surface. `off` returns above, so it never reaches here.
+  /**
+   * Register everything this session offers, once, for the surface just detected.
    *
-   * **These two are registered on `subagents` too, and that is not the duplicate surface this
-   * comment used to describe.** The claim was that two orchestrators beside each other makes the
-   * model choose per request, and that is true of two `direct` tools. It is not what happens here:
-   * on `subagents` the pair is registered at `codemode` reach, which does **not** declare them to
-   * the model (`AgentSession._isDeclarable` admits only `direct` and `model-only`, measured on
-   * 0.99.0 through 1.1.0). What it does is make them **callable from a `codemode` script**.
+   * A function declaration rather than an inline block so `session_start` can call it from wherever
+   * the handler reads best, and so the registration body keeps the order it had when it was written
+   * straight into the factory — the comments in it are a narrative in that order, and re-ordering
+   * them would cost more than the indirection.
    *
-   * So the two lines are not two orchestrators competing. `full` is this package as the thing
-   * that composes tool calls; `subagents` is pi's `codemode` composing tool calls, with this
-   * package's program reachable underneath it as the execution layer. The capability that makes
-   * the second worth having is the one `codemode` cannot provide at all: its sandbox has no
-   * module loader, so a script there cannot spawn a process — `pi.dispatch`, background tasks
-   * with a six-state lifecycle, and the frozen six-name environment all live in the PTC worker.
-   *
-   * **A pi older than 0.99.0 is unaffected.** `ToolExposure` does not exist there, so the field
-   * is ignored and both tools are declared to the model — which is right, because such a pi
-   * ships no `codemode` and resolves to `full` anyway. Measured across
-   * 0.86.1 / 0.87.1 / 0.99.0 / 0.99.1 / 0.99.2 / 1.0.0 / 1.0.4 / 1.1.0.
+   * `detected` is a parameter rather than a read of the enclosing `surface`, so nothing in here can
+   * observe that variable before this call has assigned it.
    */
-  if (surface.surfaceMode === "full" || surface.surfaceMode === "subagents") {
-    // `full` orchestrates itself and declares the tools; `subagents` hands composition to pi's
-    // `codemode` and offers these as its execution layer.
-    const programmingToolExposure = surface.surfaceMode === "full" ? "direct" : "codemode";
+  function registerForSession(detected: DetectedSurface): void {
+    /*
+     * ADR-0025: the orchestration surface, as this session's detection resolved it. There is no
+     * value that skips this block — ADR-0034 removed the `off` value that used to return above,
+     * and ADR-0035 moved the decision into the `session_start` handler that calls this.
+     *
+     * **These two are registered on `subagents` too, and that is not the duplicate surface this
+     * comment used to describe.** The claim was that two orchestrators beside each other makes the
+     * model choose per request, and that is true of two `direct` tools. It is not what happens here:
+     * on `subagents` the pair is registered at `codemode` reach, which does **not** declare them to
+     * the model (`AgentSession._isDeclarable` admits only `direct` and `model-only`, measured on
+     * 0.99.0 through 1.1.0). What it does is make them **callable from a `codemode` script**.
+     *
+     * So the two lines are not two orchestrators competing. `full` is this package as the thing
+     * that composes tool calls; `subagents` is pi's `codemode` composing tool calls, with this
+     * package's program reachable underneath it as the execution layer. The capability that makes
+     * the second worth having is the one `codemode` cannot provide at all: its sandbox has no
+     * module loader, so a script there cannot spawn a process — `pi.dispatch`, background tasks
+     * with a six-state lifecycle, and the frozen six-name environment all live in the PTC worker.
+     *
+     * **A pi older than 0.99.0 is unaffected.** `ToolExposure` does not exist there, so the field
+     * is ignored and both tools are declared to the model — which is right, because such a pi
+     * ships no `codemode` and resolves to `full` anyway. Measured across
+     * 0.86.1 / 0.87.1 / 0.99.0 / 0.99.1 / 0.99.2 / 1.0.0 / 1.0.4 / 1.1.0.
+     */
+    if (detected.surfaceMode === "full" || detected.surfaceMode === "subagents") {
+      // `full` orchestrates itself and declares the tools; `subagents` hands composition to pi's
+      // `codemode` and offers these as its execution layer.
+      const programmingToolExposure = detected.surfaceMode === "full" ? "direct" : "codemode";
+      pi.registerTool(
+        createPtcRunCodeTool({
+          getBindingSourceNames,
+          getPool: () => turnPools.get("run_code"),
+          depth: ptcDepth,
+          exposure: programmingToolExposure,
+          ...(parentTaskId === undefined ? {} : { parentTaskId }),
+          getDispatchDeps: () => background.dispatchDeps,
+        }),
+      );
+      pi.registerTool(
+        createPtcWorkflowTool({
+          getBindingSourceNames,
+          getPool: () => turnPools.get("workflow"),
+          depth: ptcDepth,
+          exposure: programmingToolExposure,
+          ...(parentTaskId === undefined ? {} : { parentTaskId }),
+          getDispatchDeps: () => background.dispatchDeps,
+        }),
+      );
+    }
+
+    /*
+     * ADR-0025 `subagents`: the top-level subagent face, registered only here. It is the reason
+     * this mode exists -- `pi.dispatch` lives inside a program, so dispatching needs a program
+     * underneath pi's `codemode`; this face is the one that does not.
+     *
+     * **It stays `direct` beside the pair above, and that asymmetry is the point.** The pair reach
+     * a `codemode` script, which is where a model composing tool calls already is; this one is
+     * declared to the model so that starting a subagent needs no script at all. `subagent` is the
+     * capability whose whole purpose is being callable without an orchestrator — a `codemode`
+     * reach would make it callable only by the thing that cannot use it.
+     */
+    if (detected.surfaceMode === "subagents") {
+      pi.registerTool(
+        createPtcSubagentTool({
+          cwd: process.cwd(),
+          depth: ptcDepth,
+          maxDispatchDepth: DEFAULT_CONFIG.maxDispatchDepth,
+          ...(parentTaskId === undefined ? {} : { parentTaskId }),
+          getDispatchDeps: () => background.dispatchDeps,
+        }),
+      );
+    }
+
+    /*
+     * Always-on management tools (ADR-0022 "What we add" #6): registered at factory time, OUTSIDE
+     * the PTC mode loadout. `/ptc off` only gates new spawns; it must never hide the lifecycle face
+     * of in-flight tasks. The mode's `modeLoadout` keeps non-built-in names, so these survive both
+     * entry and exit (proved in tests/unit/extension-background.test.ts).
+     *
+     * ADR-0025: unconditional from here on. The one mode that would not keep this face, `off`,
+     * has already returned at the top of the factory, so "always-on" stays literally true for
+     * every mode that reaches this line -- including `subagents`, where a task spawned through
+     * the top-level subagent tool is inspectable exactly the same way.
+     */
+    pi.registerTool(createPtcTaskListTool(background.registry));
+    pi.registerTool(createPtcTaskOutputTool(background.registry, background.outputStorage));
     pi.registerTool(
-      createPtcRunCodeTool({
-        getBindingSourceNames,
-        getPool: () => turnPools.get("run_code"),
-        depth: ptcDepth,
-        exposure: programmingToolExposure,
-        ...(parentTaskId === undefined ? {} : { parentTaskId }),
-        getDispatchDeps: () => background.dispatchDeps,
-      }),
+      createPtcTaskStopTool(background.registry, background.lifecycle, { clock: background.clock }),
     );
-    pi.registerTool(
-      createPtcWorkflowTool({
-        getBindingSourceNames,
-        getPool: () => turnPools.get("workflow"),
-        depth: ptcDepth,
-        exposure: programmingToolExposure,
-        ...(parentTaskId === undefined ? {} : { parentTaskId }),
-        getDispatchDeps: () => background.dispatchDeps,
-      }),
-    );
+
+    /*
+     * ADR-0032's report tool (ticket #101). Registered here, after the `off` early return, so it
+     * exists in every surface that has one — but ACTIVE only where it has a caller.
+     *
+     * `defaultActive` is `ptcDepth > 0`, and `ptcDepth` is this process's own depth baseline read
+     * from `PI_PTC_DEPTH`: 0 in a parent session, 1+ inside a `pi.dispatch` child. A parent has no
+     * child to report, so the tool is registered there and never offered to its model — which is
+     * the whole of "the tool is not active in the parent's ordinary surface" (`ToolDefinition.
+     * defaultActive`: pi activates a `direct` tool on registration unless this says otherwise).
+     *
+     * The other half of activation is in `buildArgv`, which merges this tool's name into the child's
+     * `--tools` list. Both halves are needed and neither covers the other's case: pi reads
+     * `--tools` as an allowlist, so an agent that declares its own tools would filter the report
+     * tool straight back out without the merge, while an agent that declares none gets no flag at
+     * all and depends on `defaultActive`. See `childToolList`.
+     */
+    pi.registerTool(createChildReportTool(ptcDepth > 0));
   }
-
-  /*
-   * ADR-0025 `subagents`: the top-level subagent face, registered only here. It is the reason
-   * this mode exists -- `pi.dispatch` lives inside a program, so dispatching needs a program
-   * underneath pi's `codemode`; this face is the one that does not.
-   *
-   * **It stays `direct` beside the pair above, and that asymmetry is the point.** The pair reach
-   * a `codemode` script, which is where a model composing tool calls already is; this one is
-   * declared to the model so that starting a subagent needs no script at all. `subagent` is the
-   * capability whose whole purpose is being callable without an orchestrator — a `codemode`
-   * reach would make it callable only by the thing that cannot use it.
-   */
-  if (surface.surfaceMode === "subagents") {
-    pi.registerTool(
-      createPtcSubagentTool({
-        cwd: process.cwd(),
-        depth: ptcDepth,
-        maxDispatchDepth: DEFAULT_CONFIG.maxDispatchDepth,
-        ...(parentTaskId === undefined ? {} : { parentTaskId }),
-        getDispatchDeps: () => background.dispatchDeps,
-      }),
-    );
-  }
-
-  /*
-   * Always-on management tools (ADR-0022 "What we add" #6): registered at factory time, OUTSIDE
-   * the PTC mode loadout. `/ptc off` only gates new spawns; it must never hide the lifecycle face
-   * of in-flight tasks. The mode's `modeLoadout` keeps non-built-in names, so these survive both
-   * entry and exit (proved in tests/unit/extension-background.test.ts).
-   *
-   * ADR-0025: unconditional from here on. The one mode that would not keep this face, `off`,
-   * has already returned at the top of the factory, so "always-on" stays literally true for
-   * every mode that reaches this line -- including `subagents`, where a task spawned through
-   * the top-level subagent tool is inspectable exactly the same way.
-   */
-  pi.registerTool(createPtcTaskListTool(background.registry));
-  pi.registerTool(createPtcTaskOutputTool(background.registry, background.outputStorage));
-  pi.registerTool(
-    createPtcTaskStopTool(background.registry, background.lifecycle, { clock: background.clock }),
-  );
-
-  /*
-   * ADR-0032's report tool (ticket #101). Registered here, after the `off` early return, so it
-   * exists in every surface that has one — but ACTIVE only where it has a caller.
-   *
-   * `defaultActive` is `ptcDepth > 0`, and `ptcDepth` is this process's own depth baseline read
-   * from `PI_PTC_DEPTH`: 0 in a parent session, 1+ inside a `pi.dispatch` child. A parent has no
-   * child to report, so the tool is registered there and never offered to its model — which is
-   * the whole of "the tool is not active in the parent's ordinary surface" (`ToolDefinition.
-   * defaultActive`: pi activates a `direct` tool on registration unless this says otherwise).
-   *
-   * The other half of activation is in `buildArgv`, which merges this tool's name into the child's
-   * `--tools` list. Both halves are needed and neither covers the other's case: pi reads
-   * `--tools` as an allowlist, so an agent that declares its own tools would filter the report
-   * tool straight back out without the merge, while an agent that declares none gets no flag at
-   * all and depends on `defaultActive`. See `childToolList`.
-   */
-  pi.registerTool(createChildReportTool(ptcDepth > 0));
 
   /**
    * ADR-0033: the activation drift no config probe can see. pi's MCP extension activates `codemode`
@@ -670,6 +691,35 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
   });
 
   pi.on("session_start", async (_event, ctx) => {
+    /*
+     * Detect the surface and register, FIRST — before anything below can await.
+     *
+     * `session_start` is the first moment this extension has a bound runtime, and therefore the
+     * first moment `pi.getActiveTools()` answers instead of throwing. That call is where the
+     * surface comes from now: pi has already applied the command line, `defaultTools`, AND its
+     * project-trust decision, so the answer cannot disagree with what the model will actually be
+     * offered. See `readCodemodeActivation` for what was deleted along with it and why the
+     * MCP axis is still read off disk.
+     *
+     * Registration follows detection because that is the direction that works: pi can add a tool
+     * from here (it refreshes its own registry) but cannot remove one, so deciding what to register
+     * after the answer exists is the only order that does not have to guess. Both of these lines
+     * are deliberately ahead of the `await` below — anything after a suspension point could observe
+     * a session whose tools do not exist yet.
+     *
+     * `cwd` is left at its `process.cwd()` default, as before: it only matters for the `!` bucket's
+     * globs, and the one case where they can differ (an SDK embedder passing an explicit `cwd`) is
+     * recorded in ADR-0027 as a known limit rather than papered over.
+     */
+    surface = detectSurfaceMode(
+      getAgentDir(),
+      pi.getActiveTools(),
+      options.codemode,
+      options.codemodeSwitch,
+      options.codemodeActivation,
+    );
+    registerForSession(surface);
+
     // BG-14: bind the session-scoped background runtime before anything else. The records this
     // returns were reconciled to `lost`; delivering them through the one notification path is the
     // ADR-0022 §8 startup guarantee, not a bespoke message. A bind failure is surfaced as a

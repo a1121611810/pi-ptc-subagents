@@ -23,11 +23,24 @@ import type { CodemodePresence, CodemodeSwitch } from "../../src/mode/ptc-mode.t
 import { makeStubInAgentDir, makeTempDir, removeTempDir } from "../helpers/ptc.ts";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-
 const PRESENT: CodemodePresence = { present: true, how: "found" };
 const ABSENT: CodemodePresence = { present: false, how: "not-found" };
-/** ADR-0029's third axis, stated here because the switch is not enough on its own to reach `subagents`. */
-const ACTIVE = { activation: "active", source: "default" } as const;
+/**
+ * ADR-0029's third axis, stated here because the switch is not enough on its own to reach `subagents`.
+ *
+ * `source: "loadout"` is the only provenance a real session can produce: `session_start` reads
+ * activation from `pi.getActiveTools()`, so the user file, the project file and `argv` are no
+ * longer consulted and there is nothing left to name. `"cli"`, `"project"`, `"user"` and
+ * `"default"` were sources of the deleted settings/argv mirror.
+ */
+const ACTIVE = { activation: "active", source: "loadout" } as const;
+/**
+ * A loadout pi would report for the `ACTIVE` axis above.
+ *
+ * `detectSurfaceMode` takes it as its second argument now — that read is the ACTIVE third axis —
+ * so a call that pins `codemodeActivation` passes it for coherence rather than because it decides.
+ */
+const LOADOUT_WITH_CODEMODE = ["read", "bash", "edit", "write", "codemode"];
 
 /**
  * The SWITCH axis of the table, asserted as a table rather than case by case.
@@ -342,7 +355,9 @@ describe("the switch is what decides, over real files", () => {
       // `detectSurfaceMode` returns all four fields and nothing else: there is no `source` and no
       // `detected`, because nothing can override the answer and so nothing needs reporting as
       // overridden. `toEqual` on the whole object is what pins the absence.
-      expect(detectSurfaceMode(root, PRESENT, undefined, ACTIVE, root)).toEqual({
+      expect(
+        detectSurfaceMode(root, LOADOUT_WITH_CODEMODE, PRESENT, undefined, ACTIVE, root),
+      ).toEqual({
         surfaceMode: "full",
         codemode: PRESENT,
         codemodeSwitch: { switch: "disabled", source: "user" },
@@ -360,9 +375,10 @@ describe("the switch is what decides, over real files", () => {
         join(root, "settings.json"),
         JSON.stringify({ extensions: ["+builtin:codemode"] }),
       );
-      expect(detectSurfaceMode(root, PRESENT, undefined, ACTIVE, root).surfaceMode).toBe(
-        "subagents",
-      );
+      expect(
+        detectSurfaceMode(root, LOADOUT_WITH_CODEMODE, PRESENT, undefined, ACTIVE, root)
+          .surfaceMode,
+      ).toBe("subagents");
     } finally {
       await removeTempDir(root);
     }
@@ -380,9 +396,11 @@ describe("the switch is what decides, over real files", () => {
           join(root, "settings.json"),
           JSON.stringify({ extensions: ["-builtin:codemode"] }),
         );
-        expect(detectSurfaceMode(root, PRESENT, undefined, ACTIVE, root).surfaceMode, stale).toBe(
-          "full",
-        );
+        expect(
+          detectSurfaceMode(root, LOADOUT_WITH_CODEMODE, PRESENT, undefined, ACTIVE, root)
+            .surfaceMode,
+          stale,
+        ).toBe("full");
       } finally {
         await removeTempDir(root);
       }
@@ -417,10 +435,9 @@ describe("the registration the switch actually produces", () => {
 
   test("codemode on disk and loaded registers only the subagent face", async () => {
     // ADR-0029: "loaded" is no longer enough. These cells also need codemode in the LOADOUT, and
-    // that axis is now STATED rather than written into a settings file the stub would not read —
-    // `makeExtensionStub` always supplies `codemodeActivation`, so a `defaultTools` entry in the
-    // agent dir resolves to nothing here and would leave this passing for the wrong reason if it
-    // were left implicit.
+    // that axis is STATED rather than written into a settings file: the surface is read from
+    // `pi.getActiveTools()` at `session_start`, so a `defaultTools` entry in the agent dir no
+    // longer decides anything. `ACTIVE` below is that statement.
     for (const sw of ["absent", "enabled"] as const) {
       const { stub, dir } = await makeStubInAgentDir({
         codemode: PRESENT,

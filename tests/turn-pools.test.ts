@@ -190,7 +190,9 @@ describe("extension wiring", () => {
   test(
     "ptc_run_code uses the turn's pool, and turn_end retires it",
     async () => {
-      const stub: ExtensionStub = makeExtensionStub();
+      // The stub fires `session_start` itself (see `makeExtensionStub`), which is where the
+      // package registers now, so the tool below is the one a live session would be offered.
+      const stub: ExtensionStub = await makeExtensionStub();
       ptcSubagents(stub.api);
       const tool = stub.tools.get("ptc_run_code");
       if (tool === undefined) throw new Error("ptc_run_code was not registered");

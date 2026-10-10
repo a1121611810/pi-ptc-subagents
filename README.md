@@ -294,8 +294,11 @@ that overrides this, by design ([ADR-0034](./docs/adr/0034-surface-is-detected-n
 > detection asked only whether the extension directory exists, so a pi told not to load it still
 > counted as an orchestrator and you got `ptc_subagent` with nothing to compose with. The switch is
 > read from the same three places pi reads it — the command line, `<cwd>/.pi/settings.json`, and
-> `<agentDir>/settings.json` — in the same order, and the activation probe reads the first two plus
-> `--tools`, `--exclude-tools` and `--no-tools`.
+> `<agentDir>/settings.json` — in the same order. The activation probe does **not** read the
+> settings at all: it asks pi for its own tool loadout at session start, by which time pi has
+> already applied the command line _and_ its project-trust decision. That matters for a project
+> you have not approved — its `defaultTools` is not evidence of anything, because pi is not
+> reading it either ([ADR-0035](./docs/adr/0035-ask-pi-for-the-loadout.md)).
 
 **A detection you cannot see is the failure this design has**, so the result is reported. The
 outcome is issued through the TUI notification channel at session start — how the probe came out

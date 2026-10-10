@@ -43,21 +43,56 @@ process.on("exit", () => {
 process.env.PI_CODING_AGENT_DIR = agentDir;
 
 // --- fake pi that records tool registrations -------------------------------------------
+//
+// **It records from `session_start`, so it has to run that event.** Registration used to happen in
+// the factory; ADR-0035 moved it, because at `session_start` pi's runtime is bound and the surface
+// can be read rather than reconstructed. A fake that only called the factory would therefore
+// capture an empty set and report every tool as missing — which is exactly what it did the first
+// time this gate ran after that change.
+//
+// The event is dispatched through the handlers this same object collects, in registration order,
+// which is the order pi dispatches them in. The context is the minimum the handler touches:
+// `ui.notify` (TUI-only in production; recording it here so a notice can never crash the gate),
+// `sessionManager.getSessionDir`, and `mode`.
 const registered = new Map();
+const handlers = new Map();
 const fakePi = {
   registerTool(def) {
     registered.set(def.name, def);
   },
   registerCommand() {},
-  on() {
+  on(event, handler) {
+    const list = handlers.get(event) ?? [];
+    list.push(handler);
+    handlers.set(event, list);
     return () => {};
   },
   getActiveTools() {
     return ["read", "bash", "edit", "write"];
   },
+  getAllTools() {
+    // pi's own registry: the built-ins, plus whatever this package has registered so far. The
+    // shipped state of `codemode` is "known and inactive", so it is absent from both, which is
+    // what makes the `full` surface below the right expectation for this fake.
+    return ["read", "bash", "edit", "write", ...registered.keys()].map((name) => ({ name }));
+  },
   setActiveTools() {},
   appendEntry() {},
 };
+
+/** Run every `session_start` handler against a context with the fields the handler reads. */
+async function startSession() {
+  const ctx = {
+    mode: "tui",
+    cwd: process.cwd(),
+    ui: { notify() {}, setStatus() {} },
+    sessionManager: { getSessionDir: () => undefined, getEntries: () => [] },
+    isProjectTrusted: () => false,
+  };
+  for (const handler of handlers.get("session_start") ?? []) {
+    await handler({ type: "session_start" }, ctx);
+  }
+}
 // The `full` surface the tool list below names, stated rather than inferred: pi ships no
 // codemode, so pi would not load one, so the model would not get one. Naming all three axes is
 // what makes the expected set a property of the built artifact -- before ADR-0034 this line was
@@ -65,8 +100,10 @@ const fakePi = {
 dist.default(fakePi, {
   codemode: { present: false, how: "not-found" },
   codemodeSwitch: { switch: "disabled", source: "default" },
-  codemodeActivation: { activation: "inactive", source: "default" },
+  codemodeActivation: { activation: "inactive", source: "loadout" },
 });
+// Registration happens in the session, not in the factory (ADR-0035), so the gate has to open one.
+await startSession();
 
 // The extension registers the two PTC tools plus the three always-on background-task tools
 // (ADR-0022) -- that is the `full` surface, pinned above. An exact-set assertion is deliberate: a

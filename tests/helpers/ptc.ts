@@ -69,6 +69,8 @@ export async function makeStubInAgentDir(
     ptc?: unknown;
     agentSettings?: unknown;
     mcpJson?: string;
+    /** Forwarded to `makeExtensionStub`'s `mode`; see its note on TUI-only notices. */
+    mode?: "tui" | "print";
     codemode?: CodemodePresence;
     codemodeSwitch?: CodemodeSwitchResolution;
     /** `null` = let the real probe run; see the note on the same option in `makeExtensionStub`. */
@@ -76,7 +78,7 @@ export async function makeStubInAgentDir(
     active?: readonly string[];
     registeredInactive?: readonly string[];
   } = {},
-): Promise<{ stub: ReturnType<typeof makeExtensionStub>; dir: string }> {
+): Promise<{ stub: ExtensionStub; dir: string }> {
   const dir = await makeTempDir();
   const previous = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = dir;
@@ -91,13 +93,14 @@ export async function makeStubInAgentDir(
       await writeFile(join(dir, "mcp.json"), options.mcpJson, "utf8");
     }
     return {
-      stub: makeExtensionStub({
+      stub: await makeExtensionStub({
         ...(options.codemode === undefined ? {} : { codemode: options.codemode }),
         ...(options.codemodeSwitch === undefined ? {} : { codemodeSwitch: options.codemodeSwitch }),
         ...(options.codemodeActivation === undefined
           ? {}
           : { codemodeActivation: options.codemodeActivation }),
         ...(options.active === undefined ? {} : { active: options.active }),
+        ...(options.mode === undefined ? {} : { mode: options.mode }),
         ...(options.registeredInactive === undefined
           ? {}
           : { registeredInactive: options.registeredInactive }),
@@ -171,15 +174,34 @@ export interface ExtensionStub {
  */
 export const DEFAULT_SESSION_TOOLS: readonly string[] = ["read", "bash", "edit", "write"];
 
-/** Build the stub and run the extension factory against it. */
-export function makeExtensionStub(
+/**
+ * Build the stub and run the extension factory against it, then drive `session_start` so the tools
+ * exist.
+ *
+ * **Async, and that is the contract rather than an implementation detail.** This package registers
+ * its tools from the `session_start` handler, because that is the first moment pi's runtime is bound
+ * and the surface can be read instead of reconstructed. A stub that returned before that event would
+ * hand every caller an empty registry, and the failure would read as "the package registers nothing"
+ * rather than as "the test skipped the step that registers".
+ *
+ * The event is fired with this module's own context builder, so a test that wants to inspect what
+ * the session announced reads `stub.notifications` rather than threading its own callbacks.
+ */
+export async function makeExtensionStub(
   options: {
     active?: readonly string[];
     sessionDir?: string;
+    /**
+     * The mode the stubbed `session_start` runs in. `tui` by default, because `ctx.ui.notify` is
+     * TUI-only and a test asserting a notice's text needs a session where notices are emitted at
+     * all. Pass `print` for the sessions that assert the opposite — that a notice is withheld
+     * because the mode cannot carry it.
+     */
+    mode?: "tui" | "print";
     /** BG-14 test seam: use a pre-built background runtime instead of constructing one. */
     backgroundRuntime?: BackgroundTaskRuntime;
     /**
-     * ADR-0026: the codemode probe result the factory is told to believe. Omit it and the real
+     * ADR-0026: the codemode probe result the session is told to believe. Omit it and the real
      * filesystem probe runs, which under a test runner resolves `present: false` — the old
      * default surface, reached for the same reason.
      */
@@ -193,19 +215,15 @@ export function makeExtensionStub(
     /**
      * ADR-0029: whether `codemode` will be in the model's tool list.
      *
-     * This REPLACES the `surfaceMode: "from-file"` escape hatch the stub used to carry, and it has
-     * to: the activation probe reads `defaultTools` out of `~/.pi/agent/settings.json`, so a stub
-     * that pins nothing decides its own surface by however the machine running it is configured.
-     * The default below is `inactive`, which is what pi does on a session that configured nothing
-     * — so an unspecified stub is the ordinary one, and a test wanting `subagents` says so by
-     * naming all three axes rather than by naming a surface.
+     * The session now READS this from `pi.getActiveTools()` rather than mirroring the settings,
+     * so the natural way to say "codemode is active" is `active: [..., "codemode"]` — which is
+     * what a real pi reports. This pin still exists for the tests whose subject IS the axis, and
+     * for the ones that need to state an answer pi would not produce on its own.
      *
-     * **`null` means "run the real probe"**, and it is the only way to reach it. A pin cannot be
-     * undone by omission, so a test whose subject IS the probe — ADR-0033's evidence cases, which
-     * exist to show that a temp `mcp.json` really moves the answer — would otherwise silently
-     * exercise a pinned one and pass for the wrong reason. Naming `null` rather than a fourth
-     * sentinel keeps "the caller chose to run the probe" distinguishable from "the caller said
-     * nothing", which are different claims and must not share a spelling.
+     * `null` means "run the real probe", and it is the only way to reach it. A pin cannot be undone
+     * by omission, so a test whose subject IS the probe — ADR-0033's evidence cases, which exist to
+     * show that a temp `mcp.json` really moves the answer — would otherwise silently exercise a
+     * pinned one and pass for the wrong reason.
      */
     codemodeActivation?: CodemodeActivationResolution | null;
     /**
@@ -229,7 +247,7 @@ export function makeExtensionStub(
      */
     declaredProgrammingTools?: readonly string[];
   } = {},
-): ExtensionStub {
+): Promise<ExtensionStub> {
   const tools = new Map<string, ToolDefinition>();
   const commands = new Map<
     string,
@@ -331,8 +349,7 @@ export function makeExtensionStub(
       : { backgroundRuntime: options.backgroundRuntime }),
     // The surface is DETECTED, so a stub pins the three probes rather than the answer. Every seam
     // is optional; the activation one defaults to `inactive` because that is pi's own default on a
-    // session that configured nothing, and because it is the axis that reads the developer's
-    // `~/.pi/agent/settings.json` if left to run for real.
+    // session that configured nothing.
     ...(options.codemode === undefined ? {} : { codemode: options.codemode }),
     ...(options.codemodeSwitch === undefined ? {} : { codemodeSwitch: options.codemodeSwitch }),
     ...(options.codemodeActivation === null
@@ -340,10 +357,15 @@ export function makeExtensionStub(
       : {
           codemodeActivation: options.codemodeActivation ?? {
             activation: "inactive",
-            source: "default",
+            source: "loadout",
           },
         }),
   });
+  // The session is what registers. Everything the model could be offered exists only after this.
+  await stub.emit(
+    "session_start",
+    stubContext(stub, { sessionDir: options.sessionDir, mode: options.mode }),
+  );
   return stub;
 }
 
@@ -356,8 +378,8 @@ export function makeExtensionStub(
  * enablement-policy tests wire restricted `getBindingSourceNames` getters into the factories
  * directly instead.
  */
-export function captureRegisteredTools(): Map<string, ToolDefinition> {
-  return makeExtensionStub().tools;
+export async function captureRegisteredTools(): Promise<Map<string, ToolDefinition>> {
+  return (await makeExtensionStub()).tools;
 }
 
 /**

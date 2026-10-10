@@ -28,8 +28,12 @@ const PTC_SURFACES = ["ptc_run_code", "ptc_workflow"] as const;
  * assert on content read the module's text, because that is where the text
  * lives; the two are not the same claim and the file does not pretend they are.
  */
-function descriptionOf(toolName: string): string {
-  const tool = captureRegisteredTools().get(toolName);
+/**
+ * `async` because registration moved into `session_start`: the description this reads is not
+ * there until a session has started, so the call that produces it is a promise.
+ */
+async function descriptionOf(toolName: string): Promise<string> {
+  const tool = (await captureRegisteredTools()).get(toolName);
   if (!tool) throw new Error(toolName + " must be registered");
   return tool.description;
 }
@@ -205,8 +209,8 @@ function namesBinding(text: string, name: string): boolean {
 const CONTRACT_START = "Return value: every ";
 const CONTRACT_END = "read `status`.";
 
-function contractOf(surface: string, description?: string): string {
-  const text = description ?? descriptionOf(surface);
+async function contractOf(surface: string, description?: string): Promise<string> {
+  const text = description ?? (await descriptionOf(surface));
   const start = text.indexOf(CONTRACT_START);
   if (start < 0) throw new Error(surface + " does not open with the binding contract");
   const end = text.indexOf(CONTRACT_END, start);
@@ -215,30 +219,30 @@ function contractOf(surface: string, description?: string): string {
 }
 
 describe("the binding contract reaches the model", () => {
-  test("ptc_run_code states the contract verbatim", () => {
-    expect(descriptionOf("ptc_run_code")).toContain(contract.BINDING_CONTRACT);
+  test("ptc_run_code states the contract verbatim", async () => {
+    expect(await descriptionOf("ptc_run_code")).toContain(contract.BINDING_CONTRACT);
   });
 
-  test("every PTC surface carries the contract exactly once", () => {
+  test("every PTC surface carries the contract exactly once", async () => {
     for (const surface of PTC_SURFACES) {
-      const description = descriptionOf(surface);
+      const description = await descriptionOf(surface);
       const occurrences = description.split(contract.BINDING_CONTRACT).length - 1;
       expect(occurrences, surface + " splices the contract in once, not restated").toBe(1);
     }
   });
 
-  test("the two surfaces are byte-identical, so they cannot drift", () => {
+  test("the two surfaces are byte-identical, so they cannot drift", async () => {
     // Byte comparison of two independently sliced substrings, not regex
     // normalisation: a synonym, a re-wrap, or a dropped sentence on one side is
     // a drift, and this is what catches it.
-    expect(contractOf("ptc_workflow"), "the surfaces teach the same shape").toBe(
-      contractOf("ptc_run_code"),
+    expect(await contractOf("ptc_workflow"), "the surfaces teach the same shape").toBe(
+      await contractOf("ptc_run_code"),
     );
   });
 
-  test("both surfaces carry exactly the module-owned text", () => {
+  test("both surfaces carry exactly the module-owned text", async () => {
     for (const surface of PTC_SURFACES) {
-      expect(contractOf(surface), surface + " ships the module-owned text").toBe(
+      expect(await contractOf(surface), surface + " ships the module-owned text").toBe(
         contract.BINDING_CONTRACT,
       );
     }
@@ -246,14 +250,15 @@ describe("the binding contract reaches the model", () => {
 });
 
 describe("the contract names nothing the extension cannot bind", () => {
-  test("every name in backticks is a binding or known vocabulary", () => {
+  test("every name in backticks is a binding or known vocabulary", async () => {
     // The guard reads the contract's OWN tokens. An earlier version iterated the
     // already-bound names instead, which made an unbound name structurally
     // invisible: inserting one left the whole suite green.
     for (const surface of PTC_SURFACES) {
-      expect(unboundNamesNamed(contractOf(surface)), surface + " names nothing unbound").toEqual(
-        [],
-      );
+      expect(
+        unboundNamesNamed(await contractOf(surface)),
+        surface + " names nothing unbound",
+      ).toEqual([]);
     }
   });
 
@@ -327,9 +332,9 @@ describe("a note exists only where behaviour genuinely differs", () => {
     }
   });
 
-  test("every note reaches the model on both surfaces", () => {
+  test("every note reaches the model on both surfaces", async () => {
     for (const surface of PTC_SURFACES) {
-      const description = descriptionOf(surface);
+      const description = await descriptionOf(surface);
       for (const [name, note] of contract.BINDING_NOTES) {
         expect(description, surface + " states the " + name + " note").toContain(note);
       }
@@ -369,13 +374,13 @@ describe("the contract stays inside its budget", () => {
     expect(contract.BINDING_CONTRACT_TOKEN_FLOOR, "ADR-0024 section 5").toBe(200);
   });
 
-  test("the block declares no parameter, so the argument-table decision holds", () => {
+  test("the block declares no parameter, so the argument-table decision holds", async () => {
     // Read from the emitted text, not from the export names: an export-name scan
     // cannot see a text edit, and appending one re-declared signature to the block
     // left the whole suite green when the guard only looked at identifiers.
     for (const surface of PTC_SURFACES) {
       expect(
-        argumentShapedTokens(contractOf(surface)),
+        argumentShapedTokens(await contractOf(surface)),
         "pi declares arguments natively; the block must not restate them",
       ).toEqual([]);
     }
@@ -570,12 +575,14 @@ describe("counterfactual", () => {
     expect(unboundNamesNamed(wrong), "the guard fires on the original").not.toEqual([]);
   });
 
-  test("a reworded surface is caught by the byte-equality guard", () => {
-    const paraphrased = descriptionOf("ptc_workflow").replace(
+  test("a reworded surface is caught by the byte-equality guard", async () => {
+    const paraphrased = (await descriptionOf("ptc_workflow")).replace(
       "No binding result has a",
       "No result carries a",
     );
-    expect(contractOf("ptc_workflow", paraphrased)).not.toBe(contractOf("ptc_run_code"));
+    expect(await contractOf("ptc_workflow", paraphrased)).not.toBe(
+      await contractOf("ptc_run_code"),
+    );
   });
 
   test("a re-declared parameter is caught by the argument guard", () => {

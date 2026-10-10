@@ -40,7 +40,8 @@ import {
 } from "../../src/mode/ptc-mode.ts";
 import { makeTempDir, removeTempDir } from "../helpers/ptc.ts";
 
-const PI = ["node", "pi"];
+/** pi's default active tool names (`settings-manager.js:35`). None of them is `codemode`. */
+const DEFAULT_TOOLS: readonly string[] = ["read", "bash", "edit", "write"];
 const GLOBAL_PATH = "/agent/mcp.json";
 const PROJECT_PATH = "/project/.pi/mcp.json";
 
@@ -63,11 +64,18 @@ const stdioServer = {
   args: ["-y", "@modelcontextprotocol/server-filesystem", "."],
 };
 
-/** A loadout-mirror answer to union the evidence onto. */
+/**
+ * A loadout answer to union the evidence onto.
+ *
+ * The source is `"loadout"` rather than a settings provenance, because the loadout is now READ from
+ * pi at `session_start` rather than reconstructed from files — pi has already applied both the
+ * command line and its project-trust decision to what it reports, so there is no longer a file
+ * this package could name as the thing the user edited.
+ */
 function loadout(
   overrides: Partial<CodemodeActivationResolution> = {},
 ): CodemodeActivationResolution {
-  return { activation: "inactive", source: "default", ...overrides };
+  return { activation: "inactive", source: "loadout", ...overrides };
 }
 
 describe("the evidence matrix", () => {
@@ -294,10 +302,10 @@ describe("the union with the loadout mirror", () => {
     });
   });
 
-  test("an active loadout keeps its own provenance, which names the file the user edited", () => {
-    // `"mcp"` would point a notice at an mcp.json the user may not have touched; the loadout
-    // answer is the configured one, so it stays the source reported.
-    const configured = { activation: "active", source: "user" } as const;
+  test("an active loadout keeps its own provenance rather than being relabelled mcp", () => {
+    // The loadout answer is pi's own, so reporting it as `"mcp"` would name a mechanism that had
+    // nothing to do with the answer. The two sources stay distinguishable in a notice.
+    const configured = { activation: "active", source: "loadout" } as const;
     expect(applyMcpAutoEnableEvidence(configured, { autoEnablesCodemode: true })).toEqual(
       configured,
     );
@@ -337,7 +345,7 @@ describe("the union with the loadout mirror", () => {
       }),
     ).toEqual({
       activation: "inactive",
-      source: "default",
+      source: "loadout",
       mcpError: `${GLOBAL_PATH} is not valid JSON`,
     });
     expect(
@@ -366,7 +374,7 @@ describe("readCodemodeActivation over real files", () => {
         JSON.stringify({ mcpServers: { docs: { command: "npx", args: ["-y", "docs-mcp"] } } }),
         "utf8",
       );
-      const resolved = readCodemodeActivation(agentDir, agentDir, PI);
+      const resolved = readCodemodeActivation(agentDir, agentDir, DEFAULT_TOOLS);
       expect(resolved).toEqual({ activation: "active", source: "mcp" });
       expect(
         detectedSurfaceMode({ present: true, how: "found" }, "absent", resolved.activation),
@@ -385,11 +393,11 @@ describe("readCodemodeActivation over real files", () => {
     const cwd = await makeTempDir();
     try {
       expect(
-        readCodemodeActivation(agentDir, cwd, PI),
-        "nothing configured is still the default",
+        readCodemodeActivation(agentDir, cwd, DEFAULT_TOOLS),
+        "a loadout that names nothing and no evidence is still inactive",
       ).toEqual({
         activation: "inactive",
-        source: "default",
+        source: "loadout",
       });
       await mkdir(join(cwd, ".pi"), { recursive: true });
       await writeFile(
@@ -397,7 +405,7 @@ describe("readCodemodeActivation over real files", () => {
         JSON.stringify({ mcpServers: { docs: stdioServer } }),
         "utf8",
       );
-      expect(readCodemodeActivation(agentDir, cwd, PI)).toEqual({
+      expect(readCodemodeActivation(agentDir, cwd, DEFAULT_TOOLS)).toEqual({
         activation: "active",
         source: "mcp",
       });
@@ -407,20 +415,23 @@ describe("readCodemodeActivation over real files", () => {
     }
   });
 
-  test("a broken mcp.json is reported, and the activation still resolves on the settings alone", async () => {
-    // The failure path: no silent probe input, and no half-applied decision. The settings
-    // mirror's own verdict is unchanged — it is the evidence that is missing, not the answer.
+  test("a broken mcp.json is reported, and the loadout's own verdict is unchanged", async () => {
+    // The failure path: no silent probe input, and no half-applied decision. pi's loadout is
+    // still read and still decides — it is the evidence that is missing, not the answer.
     const agentDir = await makeTempDir();
     try {
       await writeFile(join(agentDir, "mcp.json"), "{ not json", "utf8");
-      const resolved = readCodemodeActivation(agentDir, agentDir, PI);
+      const resolved = readCodemodeActivation(agentDir, agentDir, DEFAULT_TOOLS);
       expect(resolved.activation).toBe("inactive");
-      expect(resolved.source, "the loadout mirror still decides the source").toBe("default");
+      expect(resolved.source, "the loadout still decides the source").toBe("loadout");
       expect(resolved.mcpError, "and the probe says which input it lost").toContain(
         "not valid JSON",
       );
       expect(resolved.mcpError).toContain("mcp.json");
-      expect(resolved.error, "distinct from a broken settings file").toBeUndefined();
+      expect(
+        resolved.error,
+        "and no settings file is involved any more, so there is no such error to carry",
+      ).toBeUndefined();
     } finally {
       await removeTempDir(agentDir);
     }
@@ -431,13 +442,16 @@ describe("readCodemodeActivation over real files", () => {
     // invisible to the answer, so ADR-0029's default cell is untouched.
     const agentDir = await makeTempDir();
     try {
-      expect(readCodemodeActivation(agentDir, agentDir, PI)).toEqual({
+      // No `mcp.json` at all, and a loadout that does not name codemode — which is pi's own
+      // default, since it registers `codemode` with `defaultActive: false`. The settings files are
+      // present and say nothing this probe reads any more.
+      expect(readCodemodeActivation(agentDir, agentDir, DEFAULT_TOOLS)).toEqual({
         activation: "inactive",
-        source: "default",
+        source: "loadout",
       });
-      expect(resolveCodemodeActivation(PI, undefined, undefined)).toEqual({
+      expect(resolveCodemodeActivation(DEFAULT_TOOLS)).toEqual({
         activation: "inactive",
-        source: "default",
+        source: "loadout",
       });
     } finally {
       await removeTempDir(agentDir);
@@ -456,7 +470,7 @@ describe("readCodemodeActivation over real files", () => {
     const agentDir = await makeTempDir();
     try {
       await mkdir(join(agentDir, "mcp.json"), { recursive: true });
-      const resolved = readCodemodeActivation(agentDir, agentDir, PI);
+      const resolved = readCodemodeActivation(agentDir, agentDir, DEFAULT_TOOLS);
       expect(resolved.activation, "an unreadable file decides nothing").toBe("inactive");
       expect(resolved.mcpError, "and says so instead of looking absent").toContain(
         "could not be read",

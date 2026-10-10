@@ -49,19 +49,23 @@ interface SurfaceAxes {
 const FULL_AXES: SurfaceAxes = {
   codemode: { present: true, how: "found" },
   codemodeSwitch: { switch: "enabled", source: "user" },
-  codemodeActivation: { activation: "inactive", source: "default" },
+  // "loadout" is the only provenance a real session_start can produce: activation is read
+  // from `pi.getActiveTools()`, so no settings file is left to name.
+  codemodeActivation: { activation: "inactive", source: "loadout" },
 };
 
 /** Row three — the same pi, but the model can call it. Differs from the above in one axis. */
 const SUBAGENTS_AXES: SurfaceAxes = {
   codemode: { present: true, how: "found" },
   codemodeSwitch: { switch: "enabled", source: "user" },
-  codemodeActivation: { activation: "active", source: "user" },
+  codemodeActivation: { activation: "active", source: "loadout" },
 };
 
 /** The reach each tool carries on a line, read off what the factory actually registered. */
-function reachOn(axes: SurfaceAxes): Record<string, string> {
-  const stub = makeExtensionStub(axes);
+async function reachOn(axes: SurfaceAxes): Promise<Record<string, string>> {
+  // `async` because registration moved into `session_start`: there is nothing in the registry
+  // until the helper has fired that event.
+  const stub = await makeExtensionStub(axes);
   const out: Record<string, string> = {};
   for (const [name, definition] of stub.tools) {
     // pi's default when no exposure is named, so a missing field reads as the value in force.
@@ -71,20 +75,20 @@ function reachOn(axes: SurfaceAxes): Record<string, string> {
 }
 
 describe("the programming tools' reach per line", () => {
-  test("`full` declares them to the model — this package is what orchestrates there", () => {
-    const reach = reachOn(FULL_AXES);
+  test("`full` declares them to the model — this package is what orchestrates there", async () => {
+    const reach = await reachOn(FULL_AXES);
     expect(reach.ptc_run_code, "ptc_run_code reach on the full line").toBe("direct");
     expect(reach.ptc_workflow, "ptc_workflow reach on the full line").toBe("direct");
   });
 
-  test("`subagents` puts them at codemode reach — callable from a script, not declared to the model", () => {
-    const reach = reachOn(SUBAGENTS_AXES);
+  test("`subagents` puts them at codemode reach — callable from a script, not declared to the model", async () => {
+    const reach = await reachOn(SUBAGENTS_AXES);
     expect(reach.ptc_run_code, "ptc_run_code reach on the subagents line").toBe("codemode");
     expect(reach.ptc_workflow, "ptc_workflow reach on the subagents line").toBe("codemode");
   });
 
-  test("the subagent tool stays `direct` there — it exists to need no orchestrator", () => {
-    const reach = reachOn(SUBAGENTS_AXES);
+  test("the subagent tool stays `direct` there — it exists to need no orchestrator", async () => {
+    const reach = await reachOn(SUBAGENTS_AXES);
     expect(reach.ptc_subagent, "subagent reach on the subagents line").toBe("direct");
     // A `codemode`-reach subagent tool would be callable only by the sandbox that cannot spawn.
   });

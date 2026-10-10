@@ -453,7 +453,11 @@ const EXTERNAL_VOCABULARY: ReadonlyMap<string, string> = new Map([
   ["ToolInfo", "pi ExtensionAPI.getAllTools 的返回类型，本仓只在 ADR-0026 里引用（ADR-0026）"],
   [
     "getSettings",
-    "pi 的 ExtensionAPI 方法，工厂时点为 notInitialized 桩；ADR-0026 不依赖它，ADR-0027 说明它也救不了工厂时点的判定（要等 bindCore，而那时已无法撤销注册）",
+    "pi 的 ExtensionAPI 方法，工厂时点为 notInitialized 桩；本包只在源码注释里以「read methods」指代它，不直接调用——ADR-0035 的测量确认它在 session_start 可用，但激活轴用的是 getActiveTools（ADR-0026 不依赖它，ADR-0027 说明它也救不了工厂时点的判定）",
+  ],
+  [
+    "parseArgs",
+    "pi 的命令行解析器，本包曾经逐字转写它并用 294 例差分守住；ADR-0035 记录该转写已删除，因为激活轴改为直接问 pi 的 loadout（ADR-0035）",
   ],
   [
     "unregisterProvider",
@@ -1345,7 +1349,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       // 2026-10-10 第七次复核：**1096 → 1501**。1096 是一段 JSDoc 的开头，不是本 ADR 声称的
       // `spawnOptions.sessionId = taskId;`（那行在 1501）——而后者正是「同 id 重试从正常路径
       // 不可达」这个论断的落点。**既有漂移**，dispatch.ts 本轮未改，HEAD 上 1096 同样不是它。
-      "docs/adr/0026-surface-default-is-detected.md:235 -> dispatch.ts:1501",
+      "docs/adr/0026-surface-default-is-detected.md:258 -> dispatch.ts:1503",
       // 2026-10-10 第七次复核：四条全部因本轮删除 surfaceMode 而位移，逐条核对内容后改正。
       //  29  → 628→1160 = `export function detectedSurfaceMode(`
       //  32  → 962→856  = decision-4 的 `if (surface.surfaceMode === "subagents" && !pi.getActiveTools()…`

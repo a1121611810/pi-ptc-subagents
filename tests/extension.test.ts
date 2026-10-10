@@ -16,25 +16,25 @@ import {
   makeExtensionStub,
   makeTempDir,
   removeTempDir,
-  stubContext,
   writeAgentSettings,
 } from "./helpers/ptc.ts";
 
 /**
  * The factory's contract with pi is "register the PTC tools and the mode hooks against the
  * ExtensionAPI it is handed" — which the parameter type checks against pi's real declaration at
- * compile time. `makeExtensionStub` supplies the same surface pi does.
+ * compile time. `makeExtensionStub` supplies the same surface pi does, and fires the
+ * `session_start` the registration now hangs off.
  */
 
-test("the default export is the extension factory and runs without touching pi", () => {
+test("the default export is the extension factory and runs without touching pi", async () => {
   expect(typeof ptcSubagents).toBe("function");
   expect(ptcSubagents.length).toBe(1);
-  expect(ptcSubagents(makeExtensionStub().api)).toBe(undefined);
+  expect(ptcSubagents((await makeExtensionStub()).api)).toBe(undefined);
 });
 
-test("the factory registers the two PTC tools, the three background-task tools and the report tool", () => {
-  const tools = captureRegisteredTools();
-  // BG-14: the three ptc_task_* tools are always-on, registered at factory time outside /ptc mode.
+test("session_start registers the two PTC tools, the three background-task tools and the report tool", async () => {
+  const tools = await captureRegisteredTools();
+  // BG-14: the three ptc_task_* tools are always-on, registered at session_start outside /ptc mode.
   // ADR-0032 / #101 adds `ptc_child_report` to the always-on group: it is registered in every
   // surface that reaches this line, and activated only in a dispatched child.
   expect([...tools.keys()]).toEqual([
@@ -111,12 +111,14 @@ const FOUND_CODEMODE = { present: true, how: "found" } as const;
 const SUBAGENTS_AXES = {
   codemode: FOUND_CODEMODE,
   codemodeSwitch: { switch: "enabled", source: "user" },
-  codemodeActivation: { activation: "active", source: "user" },
+  // "loadout" is the only provenance a real session_start can produce: the surface is read from
+  // `pi.getActiveTools()`, so there is no user file, project file or argv left to name.
+  codemodeActivation: { activation: "active", source: "loadout" },
 } as const;
 /** The same two axes with the switch left to `readCodemodeSwitch`, for the agent-dir tests. */
 const SUBAGENTS_AXES_FROM_DISK = {
   codemode: FOUND_CODEMODE,
-  codemodeActivation: { activation: "active", source: "user" },
+  codemodeActivation: { activation: "active", source: "loadout" },
 } as const;
 
 /**
@@ -140,8 +142,7 @@ async function emitSessionStartInAgentDir(
     if (ptc !== null) {
       await writeFile(join(dir, "ptc.json"), JSON.stringify(ptc), "utf8");
     }
-    const stub = makeExtensionStub(options);
-    await stub.emit("session_start", stubContext(stub, { mode: "tui" }));
+    const stub = await makeExtensionStub(options);
     return stub;
   } finally {
     if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
@@ -150,14 +151,14 @@ async function emitSessionStartInAgentDir(
   }
 }
 
-test("full mode registers the orchestration tools and the lifecycle face", () => {
+test("full mode registers the orchestration tools and the lifecycle face", async () => {
   // The literal set, not a length: a tool dropped from one group has to turn this red.
-  const tools = makeExtensionStub({ codemode: NO_CODEMODE }).tools;
+  const tools = (await makeExtensionStub({ codemode: NO_CODEMODE })).tools;
   expect([...tools.keys()]).toEqual([...FULL_SURFACE_TOOLS]);
 });
 
-test("subagents mode keeps the subagent face and the lifecycle face, and offers the program underneath codemode", () => {
-  const stub = makeExtensionStub({ ...SUBAGENTS_AXES });
+test("subagents mode keeps the subagent face and the lifecycle face, and offers the program underneath codemode", async () => {
+  const stub = await makeExtensionStub({ ...SUBAGENTS_AXES });
   const tools = stub.tools;
   // The literal set, not a length: a tool dropped from one group has to turn this red.
   expect([...tools.keys()], "pi codemode orchestrates here; PTC is its execution layer").toEqual([
@@ -226,16 +227,16 @@ test("no legacy notice when ptc.json carries no `surfaceMode` key", async () => 
   }
 });
 
-test("the surface is resolved before anything is registered", () => {
+test("the surface is resolved before anything is registered", async () => {
   // The claim the old "read once, before anything is registered" test made, restated for a
-  // package with no setting to read: pi has no `unregisterTool`, so the factory has to know the
-  // surface before the first `registerTool`. Both axes are stated here as the two possible
+  // package with no setting to read: pi has no `unregisterTool`, so `session_start` has to know
+  // the surface before its first `registerTool`. Both axes are stated here as the two possible
   // answers rather than as one expected set, because the invariant is that the registry reflects
-  // a DECIDED surface — a factory that registered `full` and could not correct itself would be
+  // a DECIDED surface — a session that registered `full` and could not correct itself would be
   // indistinguishable from a correct one at registration time, and only the pair of sets shows
   // that the decision actually happened.
-  const subagents = makeExtensionStub({ ...SUBAGENTS_AXES }).tools;
-  const full = makeExtensionStub({ codemode: NO_CODEMODE }).tools;
+  const subagents = (await makeExtensionStub({ ...SUBAGENTS_AXES })).tools;
+  const full = (await makeExtensionStub({ codemode: NO_CODEMODE })).tools;
   expect([...subagents.keys()]).toEqual([...SUBAGENT_SURFACE_TOOLS]);
   expect([...full.keys()]).toEqual([...FULL_SURFACE_TOOLS]);
   // `subagents` adds exactly one name. If a future axis change moved a tool between the groups
@@ -244,10 +245,10 @@ test("the surface is resolved before anything is registered", () => {
   expect(onlyOnSubagents).toEqual(["ptc_subagent"]);
 });
 
-test("each surface registers a distinct set, and `subagents` differs from `full` by REACH not by presence", () => {
+test("each surface registers a distinct set, and `subagents` differs from `full` by REACH not by presence", async () => {
   const sets = [
-    [...makeExtensionStub({ ...SUBAGENTS_AXES }).tools.keys()].join(","),
-    [...makeExtensionStub({ codemode: NO_CODEMODE }).tools.keys()].join(","),
+    [...(await makeExtensionStub({ ...SUBAGENTS_AXES })).tools.keys()].join(","),
+    [...(await makeExtensionStub({ codemode: NO_CODEMODE })).tools.keys()].join(","),
   ];
   expect(new Set(sets).size, "two name sets: " + sets.join(" | ")).toBe(2);
 
@@ -260,8 +261,8 @@ test("each surface registers a distinct set, and `subagents` differs from `full`
     const tool = tools.get(name) as { exposure?: string } | undefined;
     return tool?.exposure ?? "direct";
   };
-  const full = makeExtensionStub({ codemode: NO_CODEMODE }).tools;
-  const subagents = makeExtensionStub({ ...SUBAGENTS_AXES }).tools;
+  const full = (await makeExtensionStub({ codemode: NO_CODEMODE })).tools;
+  const subagents = (await makeExtensionStub({ ...SUBAGENTS_AXES })).tools;
   expect(reachOf(full, "ptc_run_code"), "full: this package orchestrates").toBe("direct");
   expect(reachOf(subagents, "ptc_run_code"), "subagents: pi's codemode orchestrates").toBe(
     "codemode",
@@ -279,12 +280,11 @@ test("subagents mode without codemode warns once, and says what to do about it",
   // orchestrator is exactly the state this notice exists for. The stub used to append the pair to
   // every session's active list — the `full` shape — which made this test describe a cell it was
   // not in.
-  const stub = makeExtensionStub({
+  const stub = await makeExtensionStub({
     ...SUBAGENTS_AXES,
     active: ["read", "bash", "edit", "write", "ptc_subagent"],
     declaredProgrammingTools: [],
   });
-  await stub.emit("session_start", stubContext(stub, { mode: "tui" }));
   // Scoped to THIS notice. A second, unrelated warning fires here and SHOULD: this stub also
   // models a pi that does not register codemode at all, which is the `--no-extensions` branch, and
   // counting every warning would make this test depend on that sibling rather than on its subject.
@@ -301,11 +301,10 @@ test("subagents mode without codemode warns once, and says what to do about it",
 });
 
 test("the warning does not fire when codemode is active", async () => {
-  const stub = makeExtensionStub({
+  const stub = await makeExtensionStub({
     ...SUBAGENTS_AXES,
     active: ["read", "bash", "edit", "write", "codemode", "ptc_subagent"],
   });
-  await stub.emit("session_start", stubContext(stub, { mode: "tui" }));
   expect(
     stub.notifications.filter((n) => n.type === "warning"),
     "no false alarm",
@@ -318,12 +317,11 @@ test("the warning is withheld when the program tools ARE declared — the 0.86 c
   // and the notice's two remedies are both wrong there: "add codemode" names a tool that pi does
   // not ship, and "use ptc_run_code instead" names the tool already in front of it. Simulated by
   // listing the pair as active, which is what pi does with a tool it has no exposure concept for.
-  const stub = makeExtensionStub({
+  const stub = await makeExtensionStub({
     ...SUBAGENTS_AXES,
     active: ["read", "bash", "edit", "write", "ptc_subagent"],
     declaredProgrammingTools: ["ptc_run_code", "ptc_workflow"],
   });
-  await stub.emit("session_start", stubContext(stub, { mode: "tui" }));
   expect(
     stub.notifications.filter((n) => n.message.includes("no orchestration tool")),
     "a session that HAS an orchestration tool is not told it has none",
@@ -341,8 +339,7 @@ test("full mode never warns that it has no orchestrator, present or not", async 
     ["read", "bash", "edit", "write"],
     ["read", "bash", "edit", "write", "codemode"],
   ]) {
-    const stub = makeExtensionStub({ codemode: NO_CODEMODE, active });
-    await stub.emit("session_start", stubContext(stub, { mode: "tui" }));
+    const stub = await makeExtensionStub({ codemode: NO_CODEMODE, active });
     expect(
       stub.notifications.filter((n) => n.message.includes("no orchestration tool")),
       "full mode orchestrates itself",
@@ -355,8 +352,7 @@ test("full mode never warns that it has no orchestrator, present or not", async 
   // healthy `full` session, and the notice says so in those words. The old version of this test
   // could not have drawn that line — a pinned surface left `detected` undefined, so the notice
   // never fired and the test asserted silence over a session nobody had asked the question of.
-  const absent = makeExtensionStub({ codemode: NO_CODEMODE });
-  await absent.emit("session_start", stubContext(absent, { mode: "tui" }));
+  const absent = await makeExtensionStub({ codemode: NO_CODEMODE });
   const probeNotes = absent.notifications.filter((n) => n.message.includes("codemode probe"));
   expect(probeNotes.length, "one probe note, and it is not a warning").toBe(1);
   expect(probeNotes[0]?.type).toBe("info");
@@ -378,10 +374,9 @@ test("full mode never warns that it has no orchestrator, present or not", async 
  *  - **`settings.json` — real.** `codemodeSwitch` is only forwarded when the caller names it, so
  *    an `extensions` entry in this file is resolved by the production `readCodemodeSwitch`.
  *  - **`codemodeActivation` — pinned.** `makeExtensionStub` always supplies it (an unspecified
- *    activation is `inactive`), so a `defaultTools` entry written here resolves to nothing. The
- *    tests below therefore state activation as an axis, and the one that writes `defaultTools`
- *    does so only alongside the matching axis — asserting the REGISTERED set, not that the file
- *    was read, because the file is not what decides it.
+ *    activation is `inactive`), so a `defaultTools` entry written here resolves to nothing. It
+ *    would anyway: the session reads activation from `pi.getActiveTools()`, not from this file, so
+ *    the tests below state activation as an axis rather than as a settings body.
  *  - **presence — stated.** Without it the real filesystem probe runs against vitest's argv,
  *    which is not a pi.
  *
@@ -403,7 +398,7 @@ async function stubFromAgentDir(
     if (settings !== undefined) {
       await writeAgentSettings(dir, settings);
     }
-    return { stub: makeExtensionStub(options), dir };
+    return { stub: await makeExtensionStub(options), dir };
   } finally {
     if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previous;
@@ -545,8 +540,7 @@ test("a malformed ptc.json still gives the detected surface, and the problem is 
     const where = "codemode " + options.codemode.how;
     try {
       await writeFile(join(dir, "ptc.json"), "{ not json", "utf8");
-      const stub = makeExtensionStub(options);
-      await stub.emit("session_start", stubContext(stub, { mode: "tui" }));
+      const stub = await makeExtensionStub(options);
       expect([...stub.tools.keys()], "a broken file must not half-apply: " + where).toEqual([
         ...expected,
       ]);
@@ -581,7 +575,7 @@ test("a detected subagents surface on a pi that does not register codemode says 
     // No ptc.json at all: the surface is DETECTED, and the probe is told pi has codemode. The
     // activation axis is what makes it a `subagents` surface at all (ADR-0029) — without it the
     // factory answers `full` and neither warning under test is reachable.
-    const stub = makeExtensionStub({
+    const stub = await makeExtensionStub({
       ...SUBAGENTS_AXES,
       active: ["read", "bash", "edit", "write"],
       // On `subagents` the pair is `codemode`-reach and pi declares NEITHER. Without this the stub
@@ -590,7 +584,6 @@ test("a detected subagents surface on a pi that does not register codemode says 
       // list.
       declaredProgrammingTools: [],
     });
-    await stub.emit("session_start", stubContext(stub, { mode: "tui" }));
     // Scoped to this notice: the decision-4 warning fires too, and it SHOULD -- a detected
     // subagents surface with no active codemode is exactly the state it exists to report. Two
     // warnings for one root cause is noisy, so the fix is in the message, not the count.
@@ -619,7 +612,7 @@ test("a detected subagents surface on a pi that DOES register codemode stays qui
   const previous = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = dir;
   try {
-    const stub = makeExtensionStub({
+    const stub = await makeExtensionStub({
       ...SUBAGENTS_AXES,
       active: ["read", "bash", "edit", "write", "codemode"],
       // Same reason as the sibling above: `subagents` declares neither half of the pair, and this
@@ -627,7 +620,6 @@ test("a detected subagents surface on a pi that DOES register codemode stays qui
       // orchestrator the model already has.
       declaredProgrammingTools: [],
     });
-    await stub.emit("session_start", stubContext(stub, { mode: "tui" }));
     // The surface, before the silence. Without this the test also passes on a `full` session --
     // where neither warning is reachable -- so "healthy" would be asserted about a session that
     // never had the problem. ADR-0029 made that reachable by default, which is why it is pinned.

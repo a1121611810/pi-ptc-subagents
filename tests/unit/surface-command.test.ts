@@ -31,6 +31,7 @@ import {
   PTC_MODE_ENTRY_TYPE,
   PTC_MODE_STATUS_KEY,
 } from "../../src/mode/ptc-mode.ts";
+import type { ExtensionStub } from "../helpers/ptc.ts";
 import { makeExtensionStub, makeTempDir, removeTempDir, stubContext } from "../helpers/ptc.ts";
 
 const FILE = PTC_MODE_CONFIG_FILE;
@@ -45,7 +46,9 @@ const FILE = PTC_MODE_CONFIG_FILE;
 const FULL_SURFACE_AXES = {
   codemode: { present: true, how: "found" },
   codemodeSwitch: { switch: "enabled", source: "user" },
-  codemodeActivation: { activation: "inactive", source: "default" },
+  // "loadout" is the only provenance a real session_start can produce: activation is read
+  // from `pi.getActiveTools()`, so no settings file is left to name.
+  codemodeActivation: { activation: "inactive", source: "loadout" },
 } as const;
 
 /**
@@ -79,8 +82,8 @@ const writeConfig = (dir: string, body: string) => writeFile(join(dir, FILE), bo
  * independent of it.
  */
 async function staleKeyNotices(): Promise<{ message: string; type?: string }[]> {
-  const stub = makeExtensionStub(FULL_SURFACE_AXES);
-  await stub.emit("session_start", stubContext(stub, { mode: "tui" }));
+  // The helper fires `session_start` itself, so this reads the notices that one raise.
+  const stub = await makeExtensionStub(FULL_SURFACE_AXES);
   return stub.notifications.filter((notice) => notice.message.includes(STALE_KEY));
 }
 
@@ -91,7 +94,7 @@ describe("the legacy surfaceMode key is inert", () => {
     // three disagree with the baseline, and the assertion is on the tool NAMES rather than on a
     // hand-written list, so it cannot be satisfied by a list that happens to still match.
     await withAgentDir(async (dir) => {
-      const baseline = [...makeExtensionStub(FULL_SURFACE_AXES).tools.keys()];
+      const baseline = [...(await makeExtensionStub(FULL_SURFACE_AXES)).tools.keys()];
       expect(baseline.length, "the baseline is a real surface, not an empty one").toBeGreaterThan(
         0,
       );
@@ -100,7 +103,7 @@ describe("the legacy surfaceMode key is inert", () => {
       // behaviour stopped being checked, so it would go unnoticed rather than turn red.
       for (const value of ["off", "subagents", "full"] as const) {
         await writeConfig(dir, JSON.stringify({ surfaceMode: value }));
-        const names = [...makeExtensionStub(FULL_SURFACE_AXES).tools.keys()];
+        const names = [...(await makeExtensionStub(FULL_SURFACE_AXES)).tools.keys()];
         expect(names, `surfaceMode: ${JSON.stringify(value)}`).toEqual(baseline);
       }
     });
@@ -112,8 +115,7 @@ describe("the legacy surfaceMode key is inert", () => {
     // the failure would be a session silently not entering the mode rather than a visible one.
     await withAgentDir(async (dir) => {
       await writeConfig(dir, JSON.stringify({ surfaceMode: "off", defaultMode: true }));
-      const stub = makeExtensionStub(FULL_SURFACE_AXES);
-      await stub.emit("session_start", stubContext(stub, { mode: "tui" }));
+      const stub = await makeExtensionStub(FULL_SURFACE_AXES);
 
       const status = stub.statuses.at(-1);
       expect(
@@ -182,8 +184,7 @@ describe("the legacy surfaceMode key is reported", () => {
     for (const body of ["{ not json", "[]", "null", '"subagents"'] as const) {
       await withAgentDir(async (dir) => {
         await writeConfig(dir, body);
-        const stub = makeExtensionStub(FULL_SURFACE_AXES);
-        await stub.emit("session_start", stubContext(stub, { mode: "tui" }));
+        const stub = await makeExtensionStub(FULL_SURFACE_AXES);
 
         expect(
           stub.notifications.filter((n) => n.message.includes(STALE_KEY)),
@@ -204,8 +205,7 @@ describe("the legacy surfaceMode key is reported", () => {
     await withAgentDir(async (dir) => {
       await writeConfig(dir, JSON.stringify({ surfaceMode: "off" }));
 
-      const stub = makeExtensionStub(FULL_SURFACE_AXES);
-      await stub.emit("session_start", stubContext(stub, { mode: "tui" }));
+      const stub = await makeExtensionStub(FULL_SURFACE_AXES);
 
       expect(stub.notifications.filter((n) => n.message.includes(STALE_KEY))).toHaveLength(1);
       expect(stub.reloads, "and the session is left standing").toEqual([]);
@@ -214,9 +214,8 @@ describe("the legacy surfaceMode key is reported", () => {
 });
 
 describe("the /ptc surface subcommand is gone", () => {
-  async function run(dir: string, args: string): Promise<ReturnType<typeof makeExtensionStub>> {
-    const stub = makeExtensionStub(FULL_SURFACE_AXES);
-    await stub.emit("session_start", stubContext(stub, { mode: "tui" }));
+  async function run(dir: string, args: string): Promise<ExtensionStub> {
+    const stub = await makeExtensionStub(FULL_SURFACE_AXES);
     const command = stub.commands.get("ptc");
     expect(command, "the /ptc command is registered").toBeDefined();
     if (command === undefined) throw new Error("unreachable");

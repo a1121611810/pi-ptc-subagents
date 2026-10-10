@@ -39,8 +39,8 @@ function call(
   ) as Promise<AgentToolResult<PtcToolDetails>>;
 }
 
-test("the extension factory registers ptc_workflow with the documented parameter surface", () => {
-  const tool = captureRegisteredTools().get("ptc_workflow");
+test("the extension factory registers ptc_workflow with the documented parameter surface", async () => {
+  const tool = (await captureRegisteredTools()).get("ptc_workflow");
   if (!tool) throw new Error("ptc_workflow must be registered");
   expect(tool.label).toBe("PTC Workflow");
 
@@ -58,8 +58,8 @@ test("the extension factory registers ptc_workflow with the documented parameter
   ]);
 });
 
-test("the description lists the four helpers and says there is no agent()", () => {
-  const description = captureRegisteredTools().get("ptc_workflow")?.description ?? "";
+test("the description lists the four helpers and says there is no agent()", async () => {
+  const description = (await captureRegisteredTools()).get("ptc_workflow")?.description ?? "";
   for (const helper of [
     "log(message)",
     "phase(title)",

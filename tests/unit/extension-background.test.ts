@@ -172,12 +172,12 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 }
 
 /** A stub with a controlled runtime, its storage and its mock child lifecycle. */
-function wiredStub(): {
+async function wiredStub(): Promise<{
   stub: ExtensionStub;
   runtime: BackgroundTaskRuntime;
   lifecycle: RecordingLifecycle;
   storage: InMemoryTaskStorage;
-} {
+}> {
   const storage = new InMemoryTaskStorage();
   const lifecycle = new RecordingLifecycle();
   const runtime = createBackgroundTaskRuntime({
@@ -189,7 +189,10 @@ function wiredStub(): {
     // cursor depend on a random sequence — a flaky test, not the production shape.
     clock: () => 2_000,
   });
-  const stub = makeExtensionStub({
+  // The helper fires `session_start` itself, which binds the runtime to the session dir and
+  // runs the startup reconcile. The tests below seed their records AFTER this and emit their own
+  // `session_start`, so the reconcile they are about is the one that follows the seed.
+  const stub = await makeExtensionStub({
     active: STUB_ACTIVE,
     sessionDir: "/sessions/wired",
     backgroundRuntime: runtime,
@@ -202,8 +205,8 @@ function wiredStub(): {
 // ---------------------------------------------------------------------------
 
 describe("always-on registration", () => {
-  test("the factory registers the two PTC tools, the three task tools and the report tool", () => {
-    const stub = makeExtensionStub();
+  test("session_start registers the two PTC tools, the three task tools and the report tool", async () => {
+    const stub = await makeExtensionStub();
     expect([...stub.tools.keys()]).toEqual(REGISTERED);
     for (const name of TASK_TOOLS) {
       const tool = stub.tools.get(name);
@@ -213,7 +216,7 @@ describe("always-on registration", () => {
   });
 
   test("/ptc on and /ptc off cannot remove the three tools from the loadout", async () => {
-    const { stub } = wiredStub();
+    const { stub } = await wiredStub();
     const ctx = stubContext(stub);
 
     // Registered before any session exists.
@@ -235,15 +238,19 @@ describe("always-on registration", () => {
     expect(stub.active).toEqual([...TASK_TOOLS, ...PTC_TOOLS]);
   });
 
-  test("the factory body never calls pi.* (R2): only registerTool / registerCommand / on", () => {
+  test("the factory body never calls pi.* (R2): it only subscribes handlers", () => {
     const registered: string[] = [];
     const calls: string[] = [];
+    const subscribed: string[] = [];
     const api = {
       registerTool: (tool: { name: string }) => {
         registered.push(tool.name);
       },
       registerCommand: () => undefined,
-      on: () => () => undefined,
+      on: (event: string) => {
+        subscribed.push(event);
+        return () => undefined;
+      },
       setActiveTools: () => calls.push("setActiveTools"),
       appendEntry: () => calls.push("appendEntry"),
       sendMessage: () => calls.push("sendMessage"),
@@ -261,11 +268,19 @@ describe("always-on registration", () => {
     ptcSubagents(api, {
       codemode: { present: true, how: "found" },
       codemodeSwitch: { switch: "enabled", source: "user" },
-      codemodeActivation: { activation: "inactive", source: "default" },
+      // "loadout" is the only provenance a real session_start produces: activation is read
+      // from `pi.getActiveTools()`, so no user file, project file or argv is left to name.
+      codemodeActivation: { activation: "inactive", source: "loadout" },
     });
 
     expect(calls).toEqual([]);
-    expect(registered).toEqual(REGISTERED);
+    // Registration moved into `session_start`, so the factory body registers NO tool — it only
+    // subscribes. The old version of this test asserted `registered` equalled `REGISTERED`,
+    // which pinned the factory-time registration that no longer exists; a body that went back to
+    // registering at load time (which is what pi's own loading window forbids, since
+    // `getActiveTools()` throws there) is what this now catches.
+    expect(registered, "the factory body registers nothing; session_start does").toEqual([]);
+    expect(subscribed, "and session_start is where it goes instead").toContain("session_start");
   });
 });
 
@@ -276,7 +291,7 @@ describe("always-on registration", () => {
 describe("registered ptc_task_list reads the dispatch-path registry", () => {
   test("a task spawned through the holder is returned by the registered tool", async () => {
     await withAgent(async (dir) => {
-      const { stub, runtime } = wiredStub();
+      const { stub, runtime } = await wiredStub();
       const ctx = stubContext(stub);
       await stub.emit("session_start", ctx);
       const handle = await spawnBackground(runtime, dir, 11);
@@ -306,7 +321,7 @@ describe("registered ptc_task_list reads the dispatch-path registry", () => {
 
 describe("startup reconcile is delivered through the notification path", () => {
   test("session_start marks a stale running task lost and sends the lost notification", async () => {
-    const { stub, runtime, storage } = wiredStub();
+    const { stub, runtime, storage } = await wiredStub();
     await seedRunningTask(storage, TASK_RUNNING, OWNER);
     const ctx = stubContext(stub);
 
@@ -327,7 +342,7 @@ describe("startup reconcile is delivered through the notification path", () => {
   });
 
   test("a clean startup sends nothing (an empty batch is never rendered or sent)", async () => {
-    const { stub } = wiredStub();
+    const { stub } = await wiredStub();
     await stub.emit("session_start", stubContext(stub));
     await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -336,7 +351,7 @@ describe("startup reconcile is delivered through the notification path", () => {
   });
 
   test("session_start leaves a foreign-owned record whose owner pid is alive running (ADR-0023)", async () => {
-    const { stub, runtime, storage } = wiredStub();
+    const { stub, runtime, storage } = await wiredStub();
     // A sibling pi process (here: an older runtime instance in this same pid, bootMs 1) wrote
     // this record into the shared dir. Its owner is alive, so the startup reconcile must skip
     // it — pre-ADR-0023 the dir-wide sweep flipped it to lost and sent a spurious notification
@@ -354,7 +369,7 @@ describe("startup reconcile is delivered through the notification path", () => {
   });
 
   test("a send failure leaves the cursor unadvanced so the next drain re-delivers", async () => {
-    const { stub, storage } = wiredStub();
+    const { stub, storage } = await wiredStub();
     await seedRunningTask(storage, TASK_RUNNING, OWNER);
     const ctx = stubContext(stub);
 
@@ -387,7 +402,7 @@ describe("startup reconcile is delivered through the notification path", () => {
 describe("terminal delivery channel follows turn activity", () => {
   test("an idle completion wakes through sendUserMessage", async () => {
     await withAgent(async (dir) => {
-      const { stub, runtime, lifecycle } = wiredStub();
+      const { stub, runtime, lifecycle } = await wiredStub();
       const ctx = stubContext(stub);
       await stub.emit("session_start", ctx);
       const handle = await spawnBackground(runtime, dir, 21);
@@ -411,7 +426,7 @@ describe("terminal delivery channel follows turn activity", () => {
 
   test("a completion that lands mid-turn steers through sendMessage", async () => {
     await withAgent(async (dir) => {
-      const { stub, runtime, lifecycle } = wiredStub();
+      const { stub, runtime, lifecycle } = await wiredStub();
       const ctx = stubContext(stub);
       await stub.emit("session_start", ctx);
       await stub.emit("turn_start", ctx);
@@ -430,7 +445,7 @@ describe("terminal delivery channel follows turn activity", () => {
 
   test("agent_settled drains anything a mid-turn delivery deferred", async () => {
     await withAgent(async (dir) => {
-      const { stub, runtime, lifecycle } = wiredStub();
+      const { stub, runtime, lifecycle } = await wiredStub();
       const ctx = stubContext(stub);
       await stub.emit("session_start", ctx);
       // turn_start then turn_end without settling: a completion delivered mid-turn is acked
@@ -461,7 +476,7 @@ describe("bind failures are visible", () => {
       },
       createLifecycle: () => new RecordingLifecycle(),
     });
-    const stub = makeExtensionStub({
+    const stub = await makeExtensionStub({
       active: STUB_ACTIVE,
       sessionDir: "/sessions/bad",
       backgroundRuntime: runtime,
@@ -491,7 +506,7 @@ describe("bind failures are visible", () => {
       createStorage: () => new CorruptStorage(),
       createLifecycle: () => new RecordingLifecycle(),
     });
-    const stub = makeExtensionStub({
+    const stub = await makeExtensionStub({
       active: STUB_ACTIVE,
       sessionDir: "/sessions/corrupt",
       backgroundRuntime: runtime,
@@ -513,7 +528,7 @@ describe("bind failures are visible", () => {
 
 describe("session_shutdown", () => {
   test("shuts the runtime down (marks tasks lost) and tolerates a repeated event", async () => {
-    const { stub, runtime, storage } = wiredStub();
+    const { stub, runtime, storage } = await wiredStub();
     await seedRunningTask(storage, TASK_RUNNING, OWNER);
     const ctx = stubContext(stub);
     await stub.emit("session_start", ctx);

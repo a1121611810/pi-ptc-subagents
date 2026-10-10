@@ -44,7 +44,18 @@ function record(): void {
 }
 
 export default function cannedProvider(pi: ExtensionAPI): void {
-  pi.on("session_start", () => {
+  // **Narrowed at `before_agent_start`, and that is load-bearing rather than tidy.** This package
+  // registers its tools from its own `session_start` handler (ADR-0035), and pi dispatches that
+  // event per extension in load order. A narrowing issued from a `session_start` handler could run
+  // BEFORE that registration, and pi's `_refreshToolRegistry` re-activates a tool it sees for the
+  // first time, so a default-active tool registered afterwards would be added straight back into
+  // the loadout this line had just narrowed.
+  //
+  // `before_agent_start` is the first event that is unambiguously after every `session_start`
+  // handler has returned and before the provider request is built, which is exactly the window this
+  // fixture is standing in for. Real PTC mode does not need the deferral — it narrows from within
+  // this package's own handler, after this package has registered.
+  pi.on("before_agent_start", () => {
     const narrow = process.env.PTC_PROBE_NARROW;
     if (narrow === undefined || narrow.length === 0) return;
     pi.setActiveTools(narrow.split(",").map((name) => name.trim()));

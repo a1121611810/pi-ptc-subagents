@@ -1,6 +1,6 @@
 # The surface default is detected from the pi that loaded us
 
-status: accepted (2026-09-30). §"What this costs" amended 2026-10-09: the pair registers on `subagents`, at `codemode` reach.
+status: accepted (2026-09-30). §"What this costs" amended 2026-10-09: the pair registers on `subagents`, at `codemode` reach. **§"The constraint that decides the design" amended 2026-10-10 by ADR-0035**, which withdraws its strong form and keeps its weak one.
 
 ## Context
 
@@ -16,6 +16,29 @@ per request (ADR-0025's motivation, measured in
 orchestration to `codemode` when it is there -- needs to know whether it is there.
 
 ## The constraint that decides the design
+
+**Amended 2026-10-10 by ADR-0035. The strong form of this section is withdrawn; the weak form
+stands.** Read this first before relying on anything below it.
+
+What is withdrawn is the first sentence's conclusion, not its observation: `getAllTools()` and
+`getActiveTools()` really are `notInitialized` stubs until `bindCore` runs, and calling one from a
+factory really does throw and drop the extension. Those measurements were correct and they still
+are. What does not follow is "therefore the default has to be knowable in the factory". It had to
+be knowable in the factory only because the default was being _reconstructed_ rather than read —
+and the reconstruction was forced by the order, not required by it.
+
+The weak form, which ADR-0035 keeps: **a wrong registration cannot be corrected, because pi has no
+unregister call.** That is still the reason this package reports a disagreement instead of
+silently keeping the wrong surface, and it is still why the surface is decided once per session
+rather than re-derived per turn.
+
+The mistake ADR-0035 names is the direction of the inference. From "you cannot unregister" it
+concluded "you must know the answer before you register", and from that it built a second
+implementation of pi's settings resolution so the answer could be had early. A host's inability to
+be asked is not a reason to reimplement the host; it is a reason to register later. What was lost
+in the translation was visible only later: a second implementation of a rule the host owns drifts
+when the host changes the rule, and one drift (#131) let a project file this package could read
+put a session on a surface whose tools nothing could reach.
 
 Registration has to happen in the extension factory, because pi has no unregister call. The
 default therefore has to be knowable in the factory. pi's own tool listing is not:
@@ -232,7 +255,7 @@ accept this for now", which is a decision and should not live only in a review l
      ("retry idempotence") is accurate, and it is now measured rather than asserted.
    - **No collision.** Two children with different task ids in one directory get two distinctly named
      files. Same id is the idempotence case above, and is unreachable from the normal path:
-     `sessionId` is the freshly minted `taskId` (`dispatch.ts:1501`) and one task id is one TaskRecord.
+     `sessionId` is the freshly minted `taskId` (`dispatch.ts:1503`) and one task id is one TaskRecord.
    - **Not established by that measurement, and closed by a different argument:** where the child's
      output is _routed_ on our side. That is a different sink — `OutputStorage` and the subscription
      pipeline, ours — from the child's session file. The two do not interact, and the round-8

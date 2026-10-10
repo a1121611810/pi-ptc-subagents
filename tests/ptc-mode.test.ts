@@ -35,6 +35,7 @@ import {
 import { PTC_SKILL_LOAD_INSTRUCTION } from "../src/mode/skills-section.ts";
 import { BUILTIN_BINDING_NAMES } from "../src/runtime/bindings.ts";
 import { resolveBindingNames } from "../src/tools/common.ts";
+import type { ExtensionStub } from "./helpers/ptc.ts";
 import {
   DEFAULT_SESSION_TOOLS,
   makeExtensionStub,
@@ -60,12 +61,19 @@ const ABSENT_SWITCH = { switch: "absent", source: "default" } as const;
  *
  * These tests predate the activation probe and are about the first two columns of the table, so
  * they pass the column that keeps their subject visible. Leaving the argument out instead would
- * run the real probe against a temp agent dir with no settings in it — which resolves to
- * `inactive`, and silently retargets every one of them at the new default cell.
+ * run the real probe against a temp agent dir with no settings in it — which resolves from the
+ * loadout pi is asked about, and so silently retargets every one of them at the `inactive` cell.
+ *
+ * `source: "loadout"` is now the ONLY provenance a real answer can carry: the surface is read
+ * from `pi.getActiveTools()` at `session_start`, so there is no user file, project file or argv
+ * left to name. `resolveCodemodeActivation` builds exactly this object.
  */
-const ACTIVE_CODEMODE = { activation: "active", source: "default" } as const;
+const ACTIVE_CODEMODE = { activation: "active", source: "loadout" } as const;
 /** The other half, for the tests that exist precisely to show the default cell. */
-const INACTIVE_CODEMODE = { activation: "inactive", source: "default" } as const;
+const INACTIVE_CODEMODE = { activation: "inactive", source: "loadout" } as const;
+/** A loadout pi would report with codemode active, and one without it. */
+const LOADOUT_WITH_CODEMODE = [...DEFAULT_SESSION_TOOLS, "codemode"];
+const LOADOUT_WITHOUT_CODEMODE = [...DEFAULT_SESSION_TOOLS];
 /** What a default session offers: pi's four defaults plus this package's two tools. */
 const FULL = [...DEFAULT_SESSION_TOOLS, ...PTC_TOOLS];
 /** Every name that could be bound, for tests that need a session with all of them enabled. */
@@ -116,14 +124,28 @@ test("detectSurfaceMode answers from the three axes, and reports every probe it 
   // hardcoded `subagents` can satisfy it.
   await withAgentDir(async (dir) => {
     expect(
-      detectSurfaceMode(dir, { present: false, how: "not-found" }, ABSENT_SWITCH, ACTIVE_CODEMODE),
+      detectSurfaceMode(
+        dir,
+        LOADOUT_WITH_CODEMODE,
+        { present: false, how: "not-found" },
+        ABSENT_SWITCH,
+        ACTIVE_CODEMODE,
+      ),
     ).toEqual({
       surfaceMode: "full",
       codemode: { present: false, how: "not-found" },
       codemodeSwitch: ABSENT_SWITCH,
       codemodeActivation: ACTIVE_CODEMODE,
     });
-    expect(detectSurfaceMode(dir, PRESENT_CODEMODE, ABSENT_SWITCH, ACTIVE_CODEMODE)).toEqual({
+    expect(
+      detectSurfaceMode(
+        dir,
+        LOADOUT_WITH_CODEMODE,
+        PRESENT_CODEMODE,
+        ABSENT_SWITCH,
+        ACTIVE_CODEMODE,
+      ),
+    ).toEqual({
       surfaceMode: "subagents",
       codemode: PRESENT_CODEMODE,
       codemodeSwitch: ABSENT_SWITCH,
@@ -140,24 +162,58 @@ test("a present, loadable codemode that the model cannot call resolves to full (
   // The activation argument is the ONLY difference from the `subagents` expectation above, so
   // dropping the third check from `detectedSurfaceMode` turns both of these red.
   await withAgentDir(async (dir) => {
-    const detected = detectSurfaceMode(dir, PRESENT_CODEMODE, ABSENT_SWITCH, INACTIVE_CODEMODE);
+    const detected = detectSurfaceMode(
+      dir,
+      LOADOUT_WITHOUT_CODEMODE,
+      PRESENT_CODEMODE,
+      ABSENT_SWITCH,
+      INACTIVE_CODEMODE,
+    );
     expect(detected.surfaceMode).toBe("full");
     expect(detected.codemodeActivation).toEqual(INACTIVE_CODEMODE);
   });
 });
 
-test("with no settings at all, activation is inactive and the surface is full", async () => {
-  // The end-to-end version of the cell above, through the real reader rather than a stated
-  // argument: a temp agent dir with no `settings.json` in either scope is what every default
-  // session looks like, and it must land on `full`.
+test("activation is read from the loadout pi reports, not from settings files", async () => {
+  // This replaces "with no settings at all, activation is inactive and the surface is full", whose
+  // subject was the settings-file reader that `session_start` no longer uses: a session with no
+  // `settings.json` in either scope used to be the DEFAULT cell, and it is now decided entirely
+  // by the tool names pi reports. What still needs a test is the reader that does the deciding,
+  // so this states both directions through it — the loadout alone moves the answer, and no
+  // settings file is consulted to move it.
   //
-  // `cwd` is the temp dir as well as `agentDir`, because the activation probe reads BOTH the
-  // project and the user file. Leaving it at `process.cwd()` would put this repo (and any
-  // `.pi/settings.json` a developer keeps there) into the answer.
+  // `cwd` is the temp dir as well as `agentDir`, because the MCP auto-enable evidence still reads
+  // a project-scope `mcp.json` from it. Leaving it at `process.cwd()` would put this repo into
+  // the answer.
   await withAgentDir(async (dir) => {
-    const detected = detectSurfaceMode(dir, PRESENT_CODEMODE, ABSENT_SWITCH, undefined, dir);
-    expect(detected.surfaceMode).toBe("full");
-    expect(detected.codemodeActivation).toEqual({ activation: "inactive", source: "default" });
+    const absent = detectSurfaceMode(
+      dir,
+      LOADOUT_WITHOUT_CODEMODE,
+      PRESENT_CODEMODE,
+      ABSENT_SWITCH,
+      undefined,
+      dir,
+    );
+    expect(absent.surfaceMode, "a loadout without codemode leaves the session to orchestrate").toBe(
+      "full",
+    );
+    expect(absent.codemodeActivation, "and the answer says where it was read from").toEqual({
+      activation: "inactive",
+      source: "loadout",
+    });
+
+    const present = detectSurfaceMode(
+      dir,
+      LOADOUT_WITH_CODEMODE,
+      PRESENT_CODEMODE,
+      ABSENT_SWITCH,
+      undefined,
+      dir,
+    );
+    expect(present.surfaceMode, "naming codemode in the loadout is the whole difference").toBe(
+      "subagents",
+    );
+    expect(present.codemodeActivation).toEqual({ activation: "active", source: "loadout" });
   });
 });
 
@@ -183,7 +239,13 @@ test("a ptc.json holding a stale surfaceMode does not reach the surface, whateve
     await withAgentDir(async (dir) => {
       await writeFile(join(dir, PTC_MODE_CONFIG_FILE), JSON.stringify(stale), "utf8");
       for (const [presence, expected] of DETECTED_SURFACE_CASES) {
-        const detected = detectSurfaceMode(dir, presence, ABSENT_SWITCH, ACTIVE_CODEMODE);
+        const detected = detectSurfaceMode(
+          dir,
+          LOADOUT_WITH_CODEMODE,
+          presence,
+          ABSENT_SWITCH,
+          ACTIVE_CODEMODE,
+        );
         expect(detected.surfaceMode, `${JSON.stringify(stale)} with codemode ${presence.how}`).toBe(
           expected,
         );
@@ -452,8 +514,9 @@ test("the injected briefing lists the bindings of this session, not a hardcoded 
 
 test("session_start narrows the loadout, persists the record, paints the status and announces", async () => {
   await withAgentDir(async () => {
-    const stub = makeExtensionStub();
-    await stub.emit("session_start", stubContext(stub));
+    // `makeExtensionStub` fires `session_start` itself, in tui mode, before it returns — so the
+    // mode entered here is the one a real session enters, not a second entry this test forced.
+    const stub = await makeExtensionStub();
 
     expect(stub.activeWrites).toHaveLength(1);
     expect(stub.activeWrites[0]).toEqual(modeLoadout(FULL, DEFAULT_HIDE_STRATEGY));
@@ -476,17 +539,28 @@ test("session_start narrows the loadout, persists the record, paints the status 
 
 test("print/json/rpc modes and opt-out leave the loadout alone", async () => {
   await withAgentDir(async () => {
-    const printStub = makeExtensionStub();
+    // **The helper cannot start a non-tui session.** `makeExtensionStub` fires `session_start`
+    // once, in tui mode, so a print session is only reachable as a SECOND event on a stub that
+    // already had one — which is what the two baselines below are for. The claim is still
+    // decidable: an implementation that read `ctx.mode` as anything but a gate would write the
+    // loadout again on this event, and both assertions turn red.
+    const printStub = await makeExtensionStub();
+    expect(
+      printStub.activeWrites,
+      "the construction-time tui session entered the mode",
+    ).toHaveLength(1);
+    const writesAtPrint = printStub.activeWrites.length;
     await printStub.emit("session_start", modeContext({ mode: "print" }));
-    expect(printStub.activeWrites).toEqual([]);
+    expect(printStub.activeWrites.length, "a print session_start writes no loadout").toBe(
+      writesAtPrint,
+    );
 
     await writeFile(
       join(getAgentDir(), PTC_MODE_CONFIG_FILE),
       JSON.stringify({ defaultMode: false }),
       "utf8",
     );
-    const optedOut = makeExtensionStub();
-    await optedOut.emit("session_start", stubContext(optedOut));
+    const optedOut = await makeExtensionStub();
     expect(optedOut.activeWrites).toEqual([]);
     expect(optedOut.statuses).toEqual([{ key: "ptc-mode", text: undefined }]);
   });
@@ -494,8 +568,9 @@ test("print/json/rpc modes and opt-out leave the loadout alone", async () => {
 
 test("a session launched with an explicit tool restriction is left as launched", async () => {
   await withAgentDir(async () => {
-    const stub = makeExtensionStub({ active: ["read", "bash", "ptc_run_code", "ptc_workflow"] });
-    await stub.emit("session_start", stubContext(stub));
+    const stub = await makeExtensionStub({
+      active: ["read", "bash", "ptc_run_code", "ptc_workflow"],
+    });
 
     expect(stub.activeWrites).toEqual([]);
     expect(stub.notifications.some((n) => n.message.includes("explicit tool restriction"))).toBe(
@@ -506,9 +581,8 @@ test("a session launched with an explicit tool restriction is left as launched",
 
 test("/ptc off restores the base loadout and /ptc on re-enters it", async () => {
   await withAgentDir(async () => {
-    const stub = makeExtensionStub();
+    const stub = await makeExtensionStub();
     const ctx = modeContext();
-    await stub.emit("session_start", ctx);
 
     const command = stub.commands.get("ptc");
     expect(command).toBeDefined();
@@ -529,20 +603,30 @@ test("/ptc off restores the base loadout and /ptc on re-enters it", async () => 
 
 test("a persisted off-state survives a resume even when the config still says default-on", async () => {
   await withAgentDir(async () => {
-    const stub = makeExtensionStub();
+    const stub = await makeExtensionStub();
+    // A resume is a SECOND `session_start` carrying the persisted record in its context, which
+    // the helper cannot build for itself — so the baseline is read after the tui session that
+    // construction already ran, and the claim is that this event adds nothing. It is decidable:
+    // without the persisted record honoured, the handler enters the mode and writes the loadout.
+    const writesBeforeResume = stub.activeWrites.length;
+    expect(writesBeforeResume, "the tui session this stub was built with did enter").toBe(1);
     const ctx = modeContext({
       entries: [{ type: "custom", customType: PTC_MODE_ENTRY_TYPE, data: { enabled: false } }],
     });
     await stub.emit("session_start", ctx);
-    expect(stub.activeWrites).toEqual([]);
+    expect(stub.activeWrites, "a persisted off-state keeps the loadout alone").toHaveLength(
+      writesBeforeResume,
+    );
+    // The painted status is NOT asserted here: it is the handler's own module state, which the
+    // construction-time session already switched on, so what a second event paints says more
+    // about the double emit than about a resume.
   });
 });
 
 test("the briefing is injected once per mode entry, not once per turn", async () => {
   await withAgentDir(async () => {
-    const stub = makeExtensionStub();
+    const stub = await makeExtensionStub();
     const ctx = modeContext();
-    await stub.emit("session_start", ctx);
 
     const first = await stub.emit("before_agent_start", ctx);
     const second = await stub.emit("before_agent_start", ctx);
@@ -555,9 +639,8 @@ test("the briefing is injected once per mode entry, not once per turn", async ()
 
 test("the mode yields the loadout when another extension changes it", async () => {
   await withAgentDir(async () => {
-    const stub = makeExtensionStub();
+    const stub = await makeExtensionStub();
     const ctx = stubContext(stub);
-    await stub.emit("session_start", ctx);
 
     // Simulate a peer extension (pi's own preset.ts / tools.ts do this).
     stub.api.setActiveTools([...FULL, "web_search"]);
@@ -581,8 +664,7 @@ test("the mode yields the loadout when another extension changes it", async () =
 
 test("/ptc with no argument reports the current state without changing anything", async () => {
   await withAgentDir(async () => {
-    const stub = makeExtensionStub();
-    await stub.emit("session_start", stubContext(stub));
+    const stub = await makeExtensionStub();
 
     const command = stub.commands.get("ptc");
     if (command === undefined) throw new Error("command missing");
@@ -618,7 +700,9 @@ function fakeSkill(name: string, overrides: Record<string, unknown> = {}): unkno
 }
 
 async function emitBeforeAgentStart(
-  stub: ReturnType<typeof makeExtensionStub>,
+  // `ExtensionStub` and not `ReturnType<typeof makeExtensionStub>`: the stub a session has started
+  // is the stub, and `ReturnType` of an async factory is its promise.
+  stub: ExtensionStub,
   ctx: ReturnType<typeof modeContext>,
   options: unknown,
 ): Promise<void> {
@@ -629,9 +713,8 @@ async function emitBeforeAgentStart(
 
 test("the skills pi hides are restored, with the PTC call form as the instruction", async () => {
   await withAgentDir(async () => {
-    const stub = makeExtensionStub();
+    const stub = await makeExtensionStub();
     const ctx = stubContext(stub);
-    await stub.emit("session_start", ctx);
     expect(stub.active).not.toContain("read");
 
     const options = promptOptions([fakeSkill("code-review"), fakeSkill("tdd")]);
@@ -647,9 +730,8 @@ test("the skills pi hides are restored, with the PTC call form as the instructio
 
 test("leaving the mode removes the injected section so pi's own can take over", async () => {
   await withAgentDir(async () => {
-    const stub = makeExtensionStub();
+    const stub = await makeExtensionStub();
     const ctx = stubContext(stub);
-    await stub.emit("session_start", ctx);
     const options = promptOptions([fakeSkill("tdd")]);
     await emitBeforeAgentStart(stub, ctx, options);
     expect(options.sections.skills).toBeDefined();
@@ -666,9 +748,8 @@ test("leaving the mode removes the injected section so pi's own can take over", 
 
 test("a session with nothing advertisable gets no section at all", async () => {
   await withAgentDir(async () => {
-    const stub = makeExtensionStub();
+    const stub = await makeExtensionStub();
     const ctx = stubContext(stub);
-    await stub.emit("session_start", ctx);
 
     const options = promptOptions([fakeSkill("grill-with-docs", { disableModelInvocation: true })]);
     await emitBeforeAgentStart(stub, ctx, options);

@@ -37,6 +37,32 @@ exposure` over `pi-coding-agent@0.86.1`'s `dist/` returns nothing, and so does
 
 ### Changed
 
+- **Surface detection asks pi for the loadout instead of reconstructing it.** The third question —
+  will `codemode` be **active**, i.e. callable by the model — used to be answered by parsing
+  `--tools` / `--exclude-tools` / `--no-tools` / `--no-builtin-tools` out of `process.argv`,
+  merging `defaultTools` across the user-scope and project-scope settings files, and replaying pi's
+  precedence over the result. That is deleted. At `session_start` — the first moment pi's runtime is
+  bound — `getActiveTools()` answers directly, and pi has already applied both the command line and
+  its project-trust decision to what it returns. Registration moves to the same event, where pi
+  adds a tool from it and refreshes its own registry; the command-line reader, the `defaultTools`
+  merge, the precedence replay and the differential test that held them honest all go with it
+  ([ADR-0035](./docs/adr/0035-ask-pi-for-the-loadout.md)).
+
+  **What this fixes.** A project's `defaultTools` was read off disk with no trust check, while pi
+  drops project settings for any project it has not been told to trust. An untrusted project could
+  therefore name `codemode` and put the session on the `subagents` surface — whose
+  `ptc_run_code` and `ptc_workflow` are registered at `codemode` reach, so with no `codemode`
+  running they are reachable from nowhere (#131). A trusted project that configures `codemode` that
+  way keeps the `subagents` surface, exactly as before.
+
+  **What does not change.** The MCP auto-enable evidence stays a file-side read, because pi
+  activates `codemode` from inside its own `session_start` handler and extension order is not ours
+  to choose — measured across pi 0.86.1 → 1.1.0, a read from ours is too early to see it, and the
+  existing cross-check catches it when it lands. The **codemode switch** axis also stays as it is;
+  it may also be collapsible into the live registry, but that loses the distinction between "not
+  shipped" and "not loaded", and it is a separate decision. Behaviour is otherwise unchanged on
+  every pi this package supports, verified from 0.86.1 upward under both trust decisions.
+
 - **BREAKING: the `surfaceMode` setting is removed, and the surface is detected only.** Which
   model-facing tools this package registers is now a pure function of what pi is — three probes
   (does this pi ship `codemode`, will pi load it, can the model call it), with `full` as the

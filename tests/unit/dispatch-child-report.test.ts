@@ -1061,13 +1061,15 @@ describe("the report tool channel", () => {
 const FULL_SURFACE_AXES = {
   codemode: { present: true, how: "found" },
   codemodeSwitch: { switch: "enabled", source: "user" },
-  codemodeActivation: { activation: "inactive", source: "default" },
+  // "loadout" is the only provenance a real session_start produces: activation is read from
+  // `pi.getActiveTools()`, so no user file, project file or argv is left to name.
+  codemodeActivation: { activation: "inactive", source: "loadout" },
 } as const;
 
 const SUBAGENTS_SURFACE_AXES = {
   codemode: { present: true, how: "found" },
   codemodeSwitch: { switch: "enabled", source: "user" },
-  codemodeActivation: { activation: "active", source: "user" },
+  codemodeActivation: { activation: "active", source: "loadout" },
 } as const;
 
 /** Write a project-scope agent whose frontmatter is exactly `frontmatter`, plus a body. */
@@ -1128,7 +1130,7 @@ describe("the report tool is activated in the child and not in the parent", () =
 
       // The other half, for the child process itself.
       process.env.PI_PTC_DEPTH = "1";
-      const childStub = makeExtensionStub(FULL_SURFACE_AXES);
+      const childStub = await makeExtensionStub(FULL_SURFACE_AXES);
       const childTool = childStub.tools.get(CHILD_REPORT_TOOL_NAME);
       expect(childTool, "the child registers the report tool").toBeDefined();
       expect(childTool?.defaultActive, "and activates it").toBe(true);
@@ -1177,12 +1179,12 @@ describe("the report tool is activated in the child and not in the parent", () =
     ]);
   });
 
-  test("the report tool is NOT active in the parent's ordinary surface", () => {
+  test("the report tool is NOT active in the parent's ordinary surface", async () => {
     // Requirement 4 of the ticket, and the reason `defaultActive` is a parameter at all. pi
     // activates a `direct` tool on registration unless this says otherwise, so a parent that
     // registered it plainly would offer every session a tool with no caller and a description
     // that instructs the model to hand over a report it has no way to send anywhere.
-    const parentStub = makeExtensionStub(FULL_SURFACE_AXES);
+    const parentStub = await makeExtensionStub(FULL_SURFACE_AXES);
     const tool = parentStub.tools.get(CHILD_REPORT_TOOL_NAME);
 
     // Registered — so a child pi can be told the name and find it — but never activated.
@@ -1193,7 +1195,7 @@ describe("the report tool is activated in the child and not in the parent", () =
     );
   });
 
-  test("the two activation halves are decided by PI_PTC_DEPTH and by nothing else", () => {
+  test("the two activation halves are decided by PI_PTC_DEPTH and by nothing else", async () => {
     // A counterfactual for the wiring rather than for the tool: hardcode `defaultActive: true`
     // in the factory and the parent test above goes red; hardcode `false` and the child test
     // above does. The env var is the only input, and it is the one ADR-0016 already stamps.
@@ -1205,7 +1207,7 @@ describe("the report tool is activated in the child and not in the parent", () =
     ] as const) {
       if (depth === undefined) delete process.env.PI_PTC_DEPTH;
       else process.env.PI_PTC_DEPTH = depth;
-      const stub = makeExtensionStub(SUBAGENTS_SURFACE_AXES);
+      const stub = await makeExtensionStub(SUBAGENTS_SURFACE_AXES);
       expect(
         stub.tools.get(CHILD_REPORT_TOOL_NAME)?.defaultActive,
         "PI_PTC_DEPTH=" + String(depth),

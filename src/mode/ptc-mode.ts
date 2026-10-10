@@ -477,10 +477,14 @@ export type CodemodeActivation = "active" | "inactive";
 
 /**
  * How the answer was decided, so a test can tell a configured answer from pi's default.
- * `"mcp"` is ADR-0033: the loadout mirror said `inactive` and the MCP auto-enable evidence
- * said pi will activate `codemode` anyway.
+ *
+ * `"loadout"` is pi's own live tool set — the answer is read, not reconstructed, so there is no
+ * provenance left to name: whatever put `codemode` there is pi's business and not something this
+ * package can see. `"mcp"` is ADR-0033: the live loadout said `inactive` and the MCP auto-enable
+ * evidence said pi will activate `codemode` anyway, because pi's MCP extension does that from its
+ * own `session_start` handler and a read from ours can be too early to see it.
  */
-export type CodemodeActivationSource = "cli" | "project" | "user" | "default" | "invalid" | "mcp";
+export type CodemodeActivationSource = "loadout" | "invalid" | "mcp";
 
 /** The answer plus enough provenance to explain it in a notice. */
 export interface CodemodeActivationResolution {
@@ -495,57 +499,20 @@ export interface CodemodeActivationResolution {
   mcpError?: string;
 }
 
-/** pi's default active tool names (`settings-manager.js:35`). None of them is `codemode`. */
-const PI_DEFAULT_TOOL_NAMES: readonly string[] = ["read", "bash", "edit", "write"];
-
-/** pi's `isToolModifier` (`settings-manager.js:36`) — a string opening with `+` or `-`. */
-function isToolModifier(entry: unknown): entry is string {
-  return typeof entry === "string" && (entry.startsWith("+") || entry.startsWith("-"));
-}
-
-/** pi's own `getDefaultTools` filter: a non-string in the array is dropped, not rejected. */
-function stringEntries(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.filter((entry): entry is string => typeof entry === "string")
-    : [];
-}
-
 /**
- * pi's `mergeDefaultTools` (`settings-manager.js:43`), with the direction fixed by
- * `deepMergeSettings(this.globalSettings, this.projectSettings)` (`:196`): the USER list is the
- * base and the PROJECT list the override.
+ * Everything the loadout side of this probe used to need, deleted with the probe.
  *
- * A project list made only of modifiers concatenates onto the base, so a project can add
- * `+codemode` without restating the user list. A project list containing any plain name replaces
- * the base outright, because plain names are what decide a list rather than edit one.
- */
-function mergeDefaultTools(base: unknown, overrides: unknown): unknown {
-  if (overrides === undefined) return base;
-  if (!Array.isArray(base) || !Array.isArray(overrides) || !overrides.every(isToolModifier)) {
-    return overrides;
-  }
-  return [...base, ...overrides];
-}
-
-/**
- * pi's `resolveDefaultTools` (`settings-manager.js:55`).
+ * `PI_DEFAULT_TOOL_NAMES`, `isToolModifier`, `stringEntries`, `mergeDefaultTools` and
+ * `resolveDefaultTools` were a second implementation of pi's `defaultTools` resolution — the merge
+ * direction, the modifier grammar, the "a list of only modifiers starts from pi's four defaults"
+ * rule. It existed because the factory had to know the answer before pi would let this package ask,
+ * and reimplementing the rule was the only way to know it in advance.
  *
- * Plain names ARE the list. When every entry is a modifier there is nothing to start from, so the
- * list starts as pi's four defaults instead — which is what makes `defaultTools: ["+codemode"]`
- * mean "the usual four, plus codemode" rather than "a list containing only codemode".
+ * The answer is now read from pi instead, so there is nothing left for these to be right about. A
+ * second implementation of a rule the host owns is a defect waiting for the host to change the rule,
+ * which is how #131 happened: a project's `defaultTools` was honoured here whether or not pi would
+ * ever read it.
  */
-function resolveDefaultTools(entries: readonly string[]): string[] {
-  const plain = entries.filter((entry) => !isToolModifier(entry));
-  const tools = plain.length > 0 || entries.length === 0 ? plain : [...PI_DEFAULT_TOOL_NAMES];
-  for (const entry of entries) {
-    if (!isToolModifier(entry)) continue;
-    const name = entry.slice(1);
-    const index = tools.indexOf(name);
-    if (entry.startsWith("+") && index === -1 && name) tools.push(name);
-    else if (entry.startsWith("-") && index !== -1) tools.splice(index, 1);
-  }
-  return tools;
-}
 
 /*
  * A note on every `file:line` in this region, because they are only true of one version.
@@ -562,279 +529,94 @@ function resolveDefaultTools(entries: readonly string[]): string[] {
  * and says so, on purpose.)
  */
 
-/** pi's comma-separated tool-list syntax (`args.js:110,116` on pi 1.0.0): split, trimmed, blanks dropped. */
-function splitCliToolList(value: string): string[] {
-  return value
-    .split(",")
-    .map((name) => name.trim())
-    .filter((name) => name.length > 0);
-}
-
 /**
- * Every flag pi's parser consumes a following argument for, so a value that LOOKS like a tool
- * flag is never re-read as one.
+ * The command-line reader is gone with the reconstruction it existed for.
  *
- * pi writes those branches `args[++i]` (`dist/cli/args.js:63-189`), which advances the cursor past
- * the value; `--mode` and `--use-theme` spell the same advance as a bare `i++` (`:46`, `:171`), and
- * `-p` guards its value before advancing (`:139`). The whole flag loop is `:21-251`.
+ * `splitCliToolList`, `PI_VALUE_CONSUMING_FLAGS`, `PI_CONDITIONALLY_CONSUMING_FLAGS`,
+ * `piPrintConsumesNext`, `CliToolFlags` and `cliToolFlags` parsed `process.argv` to work out
+ * which tools pi would activate: `--tools` as an allowlist, `--exclude-tools` as a denylist,
+ * `--no-tools` and `--no-builtin-tools` as the two ways of emptying the list, plus the value-
+ * consuming grammar those flags live in, because a value that looks like a flag must not be
+ * re-read as one.
  *
- * This reader originally used `args[index + 1]` and did not advance, so it saw flags pi
- * had already swallowed as values. That is not a cosmetic difference: `pi --exclude-tools --tools
- * codemode` gives this reader `allowlist: ["codemode"]` and therefore `active`, while pi sets
- * `excludeTools` to the literal `"--tools"` and never looks at `tools` at all — so pi decides from
- * `defaultTools`, and the session is wrong in the direction that costs the user both orchestration
- * tools.
+ * It was careful — a 294-case differential against pi's own parser found no disagreement once it
+ * was made to agree, and every divergence before that had been argued away as pointing in a safe
+ * direction. That argument is what this deletion is about rather than the code: it was wrong.
+ * Reading the command line correctly is not the same as knowing what pi will do with it, and the
+ * settings half had already shown how that goes wrong — #131 is this reader's sibling, with the
+ * same shape of mistake on the file side.
  *
- * The set is deliberately an OVER-approximation of pi's branches rather than a transcription of
- * them. A name listed here that pi happens to treat as valueless only makes this reader skip an
- * argument, which can only hide a tool flag and so pushes the answer toward `inactive` — the safe
- * direction, and the one ADR-0029's fallback exists for. A name MISSING here is the dangerous kind
- * of error, which is why the list errs long.
- *
- * `--` is not in this set because it is not a value-consuming flag; it ends flag parsing outright
- * (`args.js:23`, whose `break` is `:32`), which {@link cliToolFlags} handles separately.
+ * The reader's replacement is one call, and it is the host's own answer rather than a second
+ * opinion on it. See {@link readCodemodeActivation}.
  */
-const PI_VALUE_CONSUMING_FLAGS: ReadonlySet<string> = new Set([
-  "--api-key",
-  "--append-system-prompt",
-  "--exclude-tools",
-  "--export",
-  "--extension",
-  "--fork",
-  "--model",
-  "--models",
-  "--name",
-  "--prompt-template",
-  "--provider",
-  "--session",
-  "--session-dir",
-  "--session-id",
-  "--skill",
-  "--system-prompt",
-  "--thinking",
-  "--tools",
-  "-e",
-  "-n",
-  "-t",
-  "-xt",
-]);
 
 /**
- * The two flags pi only consumes a value from when that value does NOT look like a flag.
+ * Whether `codemode` is in pi's active tool set, as pi reports it.
  *
- * `--mode` (`args.js:40-46`), `--use-theme` (`:164-171`) and `--list-models` (`:186-189`) all
- * test `value === undefined || value.startsWith("-")` and skip the advance when it does.
- * They were originally listed in the unconditional set above with the claim that they "spell the
- * same advance as a bare `i++`", which is false in exactly the case that matters: `--mode -t
- * codemode` leaves `-t codemode` for pi's main loop, and treating that as consumed here would hide
- * a tool flag.
- */
-const PI_CONDITIONALLY_CONSUMING_FLAGS: ReadonlySet<string> = new Set([
-  "--mode",
-  "--use-theme",
-  "--list-models",
-]);
-
-/**
- * `-p` / `--print` has a THIRD rule, and it is the one that is easiest to get wrong.
+ * This is the ADR-0029 loadout mirror with the mirror taken out. It used to resolve the same
+ * question by parsing the command line and merging the two `defaultTools` files, replaying pi's
+ * precedence over them:
  *
- * pi's branch (`args.js:134-141`) consumes the next token only when it is not `@file` and either
- * does not start with `-` or starts with `---` — the last clause existing so `--print ---` still
- * reads a message that begins with dashes. So `-p -t` does NOT consume, and the `-t` behind it is
- * pi's own tool allowlist. Treating `-p` as an ordinary value-consuming flag hides that allowlist,
- * which is the wrong direction: with `defaultTools` naming codemode, the answer flips from
- * `subagents` to `full` and the model gets a second orchestration tool pi never offered.
- */
-function piPrintConsumesNext(args: readonly string[], index: number): boolean {
-  const value = args[index + 1];
-  if (value === undefined || value.startsWith("@")) return false;
-  return !value.startsWith("-") || value.startsWith("---");
-}
-
-/**
- * pi's `--`-style flags that swallow a following token that does not itself look like a flag.
+ * 1. `--tools` decides the list, and it beats `--no-tools`.
+ * 2. `--exclude-tools` vetoes whichever list won, because the denylist is a `.filter` over that
+ *    list rather than another source.
+ * 3. `--no-tools` and `--no-builtin-tools` with no allowlist empty the list, so `codemode` is not
+ *    active whatever `defaultTools` says.
+ * 4. Otherwise `defaultTools` decides, vetoed by the denylist exactly as in (2).
  *
- * `dist/cli/args.js:227,235-237`: the unknown-flag branch stores `--name` with its value when the next
- * token starts with neither `-` nor `@`, and advances `i` past it. pi then never treats that token
- * as a flag, so neither may this reader. Treating it as one is the same class of error as the `-e NAME` case above.
- */
-function piUnknownLongFlagEatsNext(args: readonly string[], index: number): boolean {
-  const next = args[index + 1];
-  return next !== undefined && !next.startsWith("-") && !next.startsWith("@");
-}
-
-/** The three CLI flags that decide which tools pi allows, and which of them are active. */
-export interface CliToolFlags {
-  /** `--tools` / `-t`, or `undefined` when the flag is absent or dangling. */
-  allowlist: string[] | undefined;
-  /** `--exclude-tools` / `-xt`, empty when absent or dangling. */
-  denylist: string[];
-  /**
-   * True when pi will start the session with an EMPTY active tool list. Set by BOTH
-   * `--no-tools` / `-nt` AND `--no-builtin-tools` / `-nbt`.
-   */
-  noTools: boolean;
-}
-
-/**
- * Every CLI switch that can remove `codemode`, read the way pi reads it.
+ * All four are still true, and none of them is restated here. pi has already applied them, along
+ * with the project-trust decision, by the time an extension can read its loadout at
+ * `session_start`; asking it is both shorter and correct in the case that a second implementation
+ * cannot be, which is when the two disagree about something pi changed.
  *
- * The previous version of this read only `--tools`, which was correct for as long as `--tools`
- * was the only flag that could take a tool away. It is not, and the two it missed both land on
- * the SAME side — they make this package hand its orchestration tools to a `codemode` that is not
- * there, and `subagents` reaches them at `exposure: "codemode"`, which means a `codemode` that
- * does not exist reaches them from nowhere. So both were read as `active` where pi would not
- * activate it:
- *
- * - **`-xt codemode`** filters the registry outright — `_isAllowedTool` is
- *   `(!allowed || allowed.has(name)) && !excluded?.has(name)` (`agent-session.js:1099-1100`) —
- *   so the tool is not merely inactive, it is absent.
- * - **`-t codemode -xt codemode`** is the order-sensitive one. pi builds the initial active set
- *   as `(tools ?? configured).filter(name => !excluded.has(name))` (`sdk.js:148`): the denylist
- *   is applied AFTER the list that contains the name, so exclusion beats inclusion. An old
- *   `allowlist.includes(codemode)` check cannot see that.
- *
- * `--no-tools` / `-nt` is read too, and it is NOT an empty allowlist. `-t ""` still *allows*
- * every name and activates none; `-nt` empties `_allowedToolNames`, so nothing is allowed to
- * register at all (`sdk.js:145`).
- *
- * `--no-builtin-tools` / `-nbt` sets this flag as well, and that one is worth the record because
- * it was written here as deliberately NOT read, on the reasoning that pi maps it to
- * `noTools: "builtin"` (`main.js:430`) which is not `"all"`, and that `codemode` is not one of the
- * eight built-in tools anyway. Both halves are true and the conclusion drawn from them was wrong.
- * `sdk.js:148` tests `options.noTools` for TRUTH, not for `"all"`:
- *
- * ```js
- * (options.tools ?? (options.noTools ? [] : (configuredDefaultToolNames ?? DEFAULT_TOOL_NAMES)))
- * ```
- *
- * so `"builtin"` empties the initial active list exactly as `"all"` does, and a user who has
- * `defaultTools: ["+codemode"]` and launches with `-nbt` gets an INACTIVE codemode. Measured on
- * pi 1.1.0 with this package's own `dist/index.js`: `-nbt` leaves `codemode` registered
- * (`allowedToolNames` stays undefined, so `_isAllowedTool` admits it) and inactive
- * (`initialActiveToolNames` is `[]`), which is a state the flag name does not suggest and which no
- * amount of reading `sdk.js:145` in isolation reveals. `tests/unit/cli-tool-flags.test.ts` pins it.
- */
-export function cliToolFlags(args: readonly string[]): CliToolFlags {
-  let allowlist: string[] | undefined;
-  let denylist: string[] = [];
-  let noTools = false;
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-    if (arg === undefined) continue;
-    // pi breaks out of the flag loop at `--` (`args.js:23`, `break` at `:32`), so nothing after it is a flag.
-    if (arg === "--") break;
-    if (arg === "--no-tools" || arg === "-nt" || arg === "--no-builtin-tools" || arg === "-nbt") {
-      noTools = true;
-      continue;
-    }
-    if (arg === "--tools" || arg === "-t") {
-      const value = args[index + 1];
-      if (value !== undefined) {
-        allowlist = splitCliToolList(value);
-        index += 1;
-      }
-      continue;
-    }
-    if (arg === "--exclude-tools" || arg === "-xt") {
-      const value = args[index + 1];
-      if (value !== undefined) {
-        denylist = splitCliToolList(value);
-        index += 1;
-      }
-      continue;
-    }
-    // Every other branch pi writes as `args[++i]` consumes its value. Skipping it here is what
-    // keeps a value that happens to spell `--tools` from being read as a tool flag.
-    if (PI_VALUE_CONSUMING_FLAGS.has(arg)) {
-      if (args[index + 1] !== undefined) index += 1;
-      continue;
-    }
-    if (PI_CONDITIONALLY_CONSUMING_FLAGS.has(arg)) {
-      const value = args[index + 1];
-      if (value !== undefined && !value.startsWith("-")) index += 1;
-      continue;
-    }
-    if (arg === "-p" || arg === "--print") {
-      if (piPrintConsumesNext(args, index)) index += 1;
-      continue;
-    }
-    if (arg.startsWith("--") && piUnknownLongFlagEatsNext(args, index)) index += 1;
-  }
-  return { allowlist, denylist, noTools };
-}
-
-/**
- * Resolve the LOADOUT half of whether `codemode` will be in the model's tool list: the
- * command-line switches, then the merged `defaultTools`, then pi's own default. This is the
- * ADR-0029 mirror; the MCP auto-enable evidence (ADR-0033) is unioned on top by
- * {@link applyMcpAutoEnableEvidence}, which {@link readCodemodeActivation} calls.
- *
- * The precedence below is pi's, in pi's order, and it is not the order the flags are written in:
- *
- * 1. **`-t`** decides the list, and it beats `-nt` — `options.tools ?? (options.noTools ? [] : …)`
- *    (`sdk.js:148`). `-nt -t codemode` activates `codemode`.
- * 2. **`-xt` vetoes whatever list won**, including the allowlist, because the denylist is the
- *    `.filter` applied to that list rather than another source (`sdk.js:147-148`). This is the
- *    check whose absence made `-t codemode -xt codemode` read as active.
- * 3. **`-nt` and `-nbt`** with no allowlist empty the initial active list (`sdk.js:148`), so
- *    `codemode` is not active whatever `defaultTools` says. Under `-nt` it is not even registered
- *    (`sdk.js:145`); under `-nbt` it is registered and inactive. Same answer, different states.
- * 4. Otherwise `defaultTools` decides, vetoed by `-xt` exactly as in (2), because the same
- *    `.filter` is applied to the configured list.
- *
- * The last of those is the load-bearing one and is what makes absence of evidence mean
- * `inactive`: pi registers `codemode` inactive, so a session that configured nothing does not get
- * it, and delegating orchestration to a tool the model cannot call is the failure this exists to
- * prevent.
+ * Absence still means `inactive`, and that is unchanged rather than defaulted: pi registers
+ * `codemode` with `defaultActive: false`, so a session that configured nothing does not get it, and
+ * delegating orchestration to a tool the model cannot call is the failure this whole probe exists
+ * to prevent.
  */
 export function resolveCodemodeActivation(
-  argv: readonly string[],
-  projectSettings: unknown,
-  userSettings: unknown,
+  activeToolNames: readonly string[],
 ): CodemodeActivationResolution {
-  const cli = cliToolFlags(argv.slice(1));
-  const denied = cli.denylist.includes(CODEMODE_TOOL_NAME);
-
-  if (cli.allowlist !== undefined) {
-    return {
-      activation: cli.allowlist.includes(CODEMODE_TOOL_NAME) && !denied ? "active" : "inactive",
-      source: "cli",
-    };
-  }
-  if (cli.noTools) return { activation: "inactive", source: "cli" };
-
-  const projectRaw = (projectSettings as { defaultTools?: unknown } | undefined)?.defaultTools;
-  const userRaw = (userSettings as { defaultTools?: unknown } | undefined)?.defaultTools;
-  const merged = mergeDefaultTools(userRaw, projectRaw);
-  if (merged === undefined) return { activation: "inactive", source: "default" };
-
-  const answer =
-    !denied && resolveDefaultTools(stringEntries(merged)).includes(CODEMODE_TOOL_NAME)
-      ? "active"
-      : "inactive";
-  return { activation: answer, source: projectRaw !== undefined ? "project" : "user" };
+  return {
+    activation: activeToolNames.includes(CODEMODE_TOOL_NAME) ? "active" : "inactive",
+    source: "loadout",
+  };
 }
 
 /**
- * Read pi's own settings files and resolve the activation, from the same two files and in the
- * same order as {@link readCodemodeSwitch}, and union the MCP auto-enable evidence on top
- * (ADR-0033) — the MCP extension activates `codemode` by calling `pi.setActiveTools`, which no
- * settings file records.
+ * Read pi's own tool loadout and resolve the activation from it, unioning the MCP auto-enable
+ * evidence on top (ADR-0033).
+ *
+ * `activeToolNames` is what pi reports through `ExtensionAPI.getActiveTools()`, read at
+ * `session_start` — the first moment the runtime is bound, because during extension load the same
+ * call throws `Extension runtime not initialized`. Three things follow from reading rather than
+ * reconstructing, and each is a defect the previous arrangement had:
+ *
+ * - **Project trust is already applied.** pi resolves project trust before it hands the loadout
+ *   over, so a project's `defaultTools` is absent from the answer when pi declined to read the
+ *   project. Reading the file off disk could not know that, which is #131.
+ * - **No second implementation of pi's precedence.** `--tools` beats `--no-tools`, the denylist
+ *   filters whichever list won, `defaultTools` merges project over user — none of it is restated
+ *   here, so none of it can drift from pi.
+ * - **The MCP axis stays a separate source, for a reason that is about ordering and not about
+ *   capability.** pi's MCP extension activates `codemode` from inside its own `session_start`
+ *   handler, and extension order is not ours to choose: measured, a synchronous read here, one
+ *   microtask later, and one on a zero-delay timer all saw it inactive, and it appeared roughly
+ *   250 ms afterwards. The file-side evidence answers a question the live read is too early to
+ *   have an answer to.
+ *
+ * Probe: `prototype/f2-live-registry-probe` (throwaway branch, not merged), across pi 0.86.1 /
+ * 0.87.1 / 0.99.0 / 0.99.1 / 0.99.2 / 1.0.0 / 1.0.4 / 1.1.0 under both trust decisions.
  */
 export function readCodemodeActivation(
   agentDir: string,
   cwd: string,
-  argv: readonly string[] = process.argv,
+  activeToolNames: readonly string[],
 ): CodemodeActivationResolution {
-  const project = readSettingsObject(join(cwd, ".pi", "settings.json"));
-  const user = readSettingsObject(join(agentDir, "settings.json"));
-  const resolved = applyMcpAutoEnableEvidence(
-    resolveCodemodeActivation(argv, project.value, user.value),
+  return applyMcpAutoEnableEvidence(
+    resolveCodemodeActivation(activeToolNames),
     readMcpAutoEnableEvidence(agentDir, cwd),
   );
-  const error = project.error ?? user.error;
-  return error === undefined ? resolved : { ...resolved, source: "invalid", error };
 }
 
 // --------------------------------------------------------------------------------------
@@ -1330,6 +1112,7 @@ export interface DetectedSurface {
  */
 export function detectSurfaceMode(
   agentDir: string,
+  activeToolNames: readonly string[],
   presence?: CodemodePresence,
   codemodeSwitch?: CodemodeSwitchResolution,
   codemodeActivation?: CodemodeActivationResolution,
@@ -1337,7 +1120,7 @@ export function detectSurfaceMode(
 ): DetectedSurface {
   const probed = presence ?? probeCodemodePresence();
   const sw = codemodeSwitch ?? readCodemodeSwitch(agentDir, cwd);
-  const act = codemodeActivation ?? readCodemodeActivation(agentDir, cwd);
+  const act = codemodeActivation ?? readCodemodeActivation(agentDir, cwd, activeToolNames);
   return {
     surfaceMode: detectedSurfaceMode(probed, sw.switch, act.activation),
     codemode: probed,

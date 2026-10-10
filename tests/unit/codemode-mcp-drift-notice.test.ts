@@ -1,51 +1,53 @@
 /**
- * ADR-0033, at the level the user sees it: the drift notice, and the MCP-evidence session that
- * never needs one.
+ * ADR-0033 — the activation drift no config probe can see, reported rather than prevented.
  *
- * The evidence probe (ADR-0033, `codemode-mcp-evidence.test.ts`) predicts activation from config.
- * Two things can still make the real loadout disagree, and they are different in kind:
+ * pi's MCP extension activates `codemode` by calling `pi.setActiveTools` at runtime, and it does it
+ * from inside **its own** `session_start` handler. Extension order is not ours to choose, and ours
+ * loses that race: measured on pi 1.1.0, a read from our handler saw the tool inactive
+ * synchronously, one microtask later, and on a zero-delay timer, and it appeared roughly 250 ms
+ * afterwards.
  *
- *   - pi activated codemode by a path no config records — the MCP extension is the one that
- *     exists today, but any extension calling `setActiveTools` does it too — or the evidence
- *     could not read the mcp.json that would have said so. The probe said `inactive`, the surface
- *     defaulted to `full`, and the model now sees two orchestration surfaces. ADR-0033's notice
- *     compares the probe's answer with `pi.getActiveTools()` and reports the difference, once.
- *   - the mcp.json DID say so, the probe followed it, and the session resolved `subagents`
- *     against a live codemode — the case ADR-0029 could not reach and the double surface cannot
- *     occur. Asserted here on the REGISTERED TOOL SET, not on the probe's answer: a probe that
- *     stopped consulting the evidence would keep `detectedSurfaceMode` green.
+ * So this file is about the window BETWEEN our `session_start` and the next turn. The activation
+ * probe snapshots at session start; `getActiveTools()` is live. Anything that activates `codemode`
+ * after the snapshot lands in that gap, and the drift notice is what names it.
  *
- * Both cases are built through `makeStubInAgentDir`, so the factory really reads a temp agent dir
- * and the real `settings.json` / `mcp.json` probes run — a test that pinned `surfaceMode` would
- * set `source: "file"` and could not reach either cell, which is the point of pinning nothing.
+ * **The shape of every case below changed, and the change is the point.** When activation was
+ * reconstructed from the settings, the probe and pi's real loadout could disagree the moment the
+ * session started — that was the ordinary case, and this file existed to catch it. Activation is
+ * now READ from the loadout, so on that axis they agree by construction and the disagreement has
+ * moved: the only reachable drift is a loadout that gains `codemode` after the snapshot, which is
+ * the MCP ordering above and an extension calling `setActiveTools` for its own reasons.
  */
 import { expect, test } from "vitest";
-import { makeStubInAgentDir, removeTempDir, stubContext } from "../helpers/ptc.ts";
+import { makeStubInAgentDir, stubContext } from "../helpers/ptc.ts";
 
 /** BG-14: the three always-on background-task tools, in registration order. */
 const TASK_TOOLS = ["ptc_task_list", "ptc_task_output", "ptc_task_stop"] as const;
 
-/** What the `full` surface registers, in registration order — asserted exactly, not by contains. */
-const FULL_TOOLS = ["ptc_run_code", "ptc_workflow", ...TASK_TOOLS, "ptc_child_report"];
+/** `full`: the pair declared to the model, the lifecycle face, and the report tool. No subagent. */
+const FULL_TOOLS = ["ptc_run_code", "ptc_workflow", ...TASK_TOOLS, "ptc_child_report"] as const;
+
+/** `subagents`: the pair at codemode reach plus the top-level subagent face. */
+const SUBAGENTS_TOOLS = ["ptc_run_code", "ptc_workflow", "ptc_subagent", ...TASK_TOOLS] as const;
 
 /** The message of the ADR-0033 drift notice. */
 const DRIFT = "codemode is active in this session";
 
-/** An agent-dir mcp.json naming one stdio server — pi's default-exposure, auto-enable case. */
-const MCP_JSON = JSON.stringify({
-  mcpServers: { docs: { command: "npx", args: ["-y", "docs-mcp"] } },
-});
+/** pi's default session loadout. `codemode` is NOT one of them — pi registers it inactive. */
+const DEFAULT_TOOLS: readonly string[] = ["read", "bash", "edit", "write"];
 
 /**
- * Emit `session_start` and then one turn against the stub, and return what the session produced.
+ * Start a session, optionally let pi activate `codemode` LATER, then run a turn.
  *
- * The turn is part of the contract rather than a second scenario: ADR-0033 checks the real loadout
- * at session start AND on the first turn, because the MCP extension's own `session_start` may run
- * after ours. A test that stopped at `session_start` would pass while that second chance was
- * removed.
+ * `activateAfterStart` is the whole subject of this file: it pushes `codemode` into the stub's loadout
+ * AFTER `session_start` has snapshotted it, which is what pi's MCP extension does to a real session.
+ * The turn is then the second chance ADR-0033 takes — a check that stopped at `session_start` would
+ * pass while that second chance was deleted.
  */
 async function startAndTurn(options: {
   active: readonly string[];
+  /** Add `codemode` to the loadout after `session_start` has snapshotted it. */
+  activateAfterStart?: boolean;
   mcpJson?: string;
   /** The `ptc.json` body; omitted means no file, so the surface is DETECTED rather than pinned. */
   ptc?: unknown;
@@ -55,24 +57,26 @@ async function startAndTurn(options: {
   const { stub, dir } = await makeStubInAgentDir({
     // No ptc.json, so the surface is DETECTED; the probe is told pi ships codemode.
     codemode: { present: true, how: "found" },
-    // `null` = let the REAL activation probe read this temp agent dir's settings.json / mcp.json.
-    // This file's entire subject is that probe, so pinning it would make every case below pass
-    // for the wrong reason: a pinned `inactive` answers `full` regardless of what mcp.json says.
+    // `null` = let the REAL activation probe run. This file's entire subject is that probe, so
+    // pinning it would make every case below pass for the wrong reason.
     codemodeActivation: null,
     active: options.active,
+    mode: options.mode ?? "tui",
     ...(options.mcpJson === undefined ? {} : { mcpJson: options.mcpJson }),
     ...(options.ptc === undefined ? {} : { ptc: options.ptc }),
   });
-  // `makeStubInAgentDir` restores `PI_CODING_AGENT_DIR` as soon as the factory returns, and the
-  // factory is where the probes run — but the legacy-key notice reads the agent dir from
-  // `session_start`, which is after that window closes. Production has the variable set for the
-  // whole process (measured on a real pi: the notice fires there), so holding it across the emit
-  // is what makes the test exercise the real path rather than the developer's own agent dir.
+  // `makeStubInAgentDir` restores `PI_CODING_AGENT_DIR` when it returns, and the probes now run in
+  // `session_start`, which the helper has already driven. The legacy-key notice reads the agent dir
+  // from that handler too, so holding the variable across the turns is what makes the test exercise
+  // the real path rather than the developer's own agent dir.
+  //
+  // The stub's own `session_start` is NOT emitted again here: it is the event that registers, so a
+  // second emit would register twice and raise every notice twice.
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = dir;
   try {
     const ctx = stubContext(stub, { mode: options.mode ?? "tui" });
-    await stub.emit("session_start", ctx);
+    if (options.activateAfterStart === true) stub.active.push("codemode");
     for (let turn = 0; turn < (options.turns ?? 1); turn += 1) {
       await stub.emit("turn_start", ctx);
     }
@@ -80,44 +84,27 @@ async function startAndTurn(options: {
   } finally {
     if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
-    await removeTempDir(dir);
   }
 }
 
-test("an mcp.json the evidence reads resolves subagents, with the run-code pair beneath it", async () => {
-  // The session ADR-0029 could not resolve: the activation probe said `inactive`, the surface was
-  // `full`, and pi's MCP extension activated codemode on top — both surfaces live. With the
-  // evidence folded in, the prediction and pi agree, so the delegation happens and the surface is
-  // `subagents` — which registers `ptc_run_code` / `ptc_workflow` at `codemode` reach (callable
-  // from a script, not declared to the model) alongside the `direct` `ptc_subagent`.
-  //
-  // The assertion is on the registered tools rather than on `surface.codemodeActivation`: the
-  // probe could report `mcp` while the factory quietly built `full` anyway, and only the tool set
-  // says what the model is being offered.
-  const { notices, tools } = await startAndTurn({
-    active: ["read", "bash", "edit", "write", "codemode"],
-    mcpJson: MCP_JSON,
-  });
-  expect(tools).toEqual([
-    "ptc_run_code",
-    "ptc_workflow",
-    "ptc_subagent",
-    ...TASK_TOOLS,
-    "ptc_child_report",
-  ]);
-  expect(
-    notices.filter((n) => n.message.includes(DRIFT)),
-    "a predicted session has no drift to report",
-  ).toEqual([]);
+test("a session whose loadout already had codemode at startup reports no drift", async () => {
+  // The healthy case, and the one that got quieter rather than different: activation is read from
+  // the loadout, so a session that arrived with `codemode` active is predicted correctly and there
+  // is nothing to reconcile. Asserted on the tool set too, because a probe that answered `inactive`
+  // here would still produce this notice-free surface — the pair would just be the wrong one.
+  const { notices, tools } = await startAndTurn({ active: [...DEFAULT_TOOLS, "codemode"] });
+  expect(tools).toEqual([...SUBAGENTS_TOOLS, "ptc_child_report"]);
+  expect(notices.filter((n) => n.message.includes(DRIFT))).toEqual([]);
 });
 
-test("a codemode the probe did not predict is reported once, as a warning naming the fix", async () => {
-  // The backstop: nothing in `settings.json` or `mcp.json` names codemode, the surface defaults
-  // to `full`, and pi's real loadout has codemode active anyway. The user is being offered two
-  // orchestration tools, which ADR-0025 calls a measured defect, so this is a warning rather
-  // than a note — the same level and the same one-line fix as the probe-missed notice.
+test("a codemode that appears AFTER startup is reported once, as a warning naming the fix", async () => {
+  // The backstop, and now the only reachable drift: nothing named `codemode` when the session
+  // started, the surface was built as `full`, and pi activated the tool anyway. The user is being
+  // offered two orchestration tools, which ADR-0025 calls a measured defect, so this is a warning
+  // rather than a note — the same level and the same one-line fix as the probe-missed notice.
   const { notices, tools } = await startAndTurn({
-    active: ["read", "bash", "edit", "write", "codemode"],
+    active: DEFAULT_TOOLS,
+    activateAfterStart: true,
     turns: 3,
   });
   const drift = notices.filter((n) => n.message.includes(DRIFT));
@@ -132,26 +119,28 @@ test("a codemode the probe did not predict is reported once, as a warning naming
   expect(drift[0]?.message, "and it names no setting this package no longer reads").not.toContain(
     "surfaceMode",
   );
-  expect(tools, "the surface it defaulted to is the full one").toContain("ptc_run_code");
-  expect(tools).not.toContain("ptc_subagent");
+  // The surface was decided before the tool appeared, and pi cannot unregister: this is the
+  // registered set the user is stuck with until the session restarts.
+  expect(tools, "the surface it decided is the full one").toEqual(FULL_TOOLS);
 });
 
 test("a session with no codemode at all is not told about a drift it does not have", async () => {
   // The crying-wolf guard, and the direction that matters: `full` with codemode inactive is the
   // DEFAULT cell after ADR-0029, and a notice on every ordinary session would be noise. Without
   // the `getActiveTools()` check this would fire on the whole user base.
-  const { notices, tools } = await startAndTurn({ active: ["read", "bash", "edit", "write"] });
+  const { notices, tools } = await startAndTurn({ active: DEFAULT_TOOLS });
   expect(notices.filter((n) => n.message.includes(DRIFT))).toEqual([]);
   expect(tools).toContain("ptc_run_code");
 });
 
 test("an mcp.json we could not read is reported once, and the drift notice still applies", async () => {
-  // Both halves of the failure path on one session: the broken file means the evidence cannot
-  // say `active` (so the surface is `full`), pi's loadout is then genuinely active, and the user
-  // hears about the file AND the drift. A probe that swallowed the parse error would report the
-  // drift alone and leave the broken file invisible.
+  // Both halves of the failure path on one session: the broken file means the evidence cannot say
+  // `active`, pi activates `codemode` after the snapshot anyway, and the user hears about the file
+  // AND the drift. A probe that swallowed the parse error would report the drift alone and leave
+  // the broken file invisible.
   const { notices } = await startAndTurn({
-    active: ["read", "bash", "edit", "write", "codemode"],
+    active: DEFAULT_TOOLS,
+    activateAfterStart: true,
     mcpJson: "{ not json",
   });
   // Matched on the parse failure itself, not on the file name: the drift notice names `mcp.json`
@@ -162,19 +151,20 @@ test("an mcp.json we could not read is reported once, and the drift notice still
 
 test("an mcp.json that keeps codemode off resolves full, exactly as ADR-0029's default does", async () => {
   // The row of ADR-0033's table the pure-function cases alone could not carry: the user who read
-  // pi's own docs and set `autoEnableCodemode: false` must get `full`, and the factory must
-  // register the full surface for it. Asserted on the whole registered list, because a mirror
-  // that answered `active` here would still pass every evidence case — this is the only place
-  // the negative decision is taken through the real factory.
+  // pi's own docs and set `autoEnableCodemode: false` must get `full`. Asserted on the whole
+  // registered list, because a probe that answered `active` here would still pass every evidence
+  // case — this is the only place the negative decision is taken through the real factory.
   const { notices, tools } = await startAndTurn({
-    active: ["read", "bash", "edit", "write", "codemode"],
+    active: DEFAULT_TOOLS,
+    activateAfterStart: true,
     mcpJson: JSON.stringify({
       autoEnableCodemode: false,
       mcpServers: { docs: { command: "npx" } },
     }),
   });
   expect(tools).toEqual(FULL_TOOLS);
-  // And with the tool really active, the drift notice is exactly what this session should hear.
+  // And with the tool really active afterwards, the drift notice is exactly what this session
+  // should hear — a setting that silenced the evidence does not silence the measurement.
   expect(notices.filter((n) => n.message.includes(DRIFT))).toHaveLength(1);
 });
 
@@ -183,12 +173,13 @@ test("a disabled server resolves full, and a session with no MCP at all resolves
   // means `ptc_run_code` and NOT `ptc_subagent` — the second is the assertion that carries, since
   // `ptc_run_code` alone could be registered beside a `subagents` decision that never happened.
   const disabled = await startAndTurn({
-    active: ["read", "bash", "edit", "write", "codemode"],
+    active: DEFAULT_TOOLS,
+    activateAfterStart: true,
     mcpJson: JSON.stringify({ mcpServers: { docs: { command: "npx", enabled: false } } }),
   });
   expect(disabled.tools).toEqual(FULL_TOOLS);
   expect(disabled.tools).not.toContain("ptc_subagent");
-  const none = await startAndTurn({ active: ["read", "bash", "edit", "write", "codemode"] });
+  const none = await startAndTurn({ active: DEFAULT_TOOLS, activateAfterStart: true });
   expect(none.tools).toEqual(FULL_TOOLS);
 });
 
@@ -199,11 +190,13 @@ test("a leftover surfaceMode key is inert: it neither pins the surface nor buys 
   // buy the user the exemption, or the package would be deciding the surface twice, once from a
   // key it ignores and once from the probes.
   //
-  // The scenario is deliberately the worst one for that: `full` would be pinned while a codemode
-  // is live, which is exactly the double surface the drift notice exists to report. If the key were
-  // still honoured the drift notice would stay silent AND the pair would register.
+  // The scenario is deliberately the worst one for that: `full` was decided while no codemode was
+  // live, and one appears afterwards — which is exactly the double surface the drift notice exists
+  // to report. If the key were still honoured the notice would stay silent AND the pair would
+  // register.
   const { notices, tools } = await startAndTurn({
-    active: ["read", "bash", "edit", "write", "codemode"],
+    active: DEFAULT_TOOLS,
+    activateAfterStart: true,
     ptc: { surfaceMode: "full" },
   });
   expect(
@@ -214,7 +207,7 @@ test("a leftover surfaceMode key is inert: it neither pins the surface nor buys 
     notices.filter((n) => n.message.includes("no longer read")),
     "and the user is told the key is being ignored, with the replacement",
   ).toHaveLength(1);
-  // The surface came from the probes, not the key: no live codemode was predicted, so `full`.
+  // The surface came from the probes, not the key: no codemode was live at startup, so `full`.
   expect(tools).toEqual(FULL_TOOLS);
 });
 
@@ -224,7 +217,8 @@ test("a --print session is told neither notice, because ctx.ui.notify is TUI-onl
   // test "assert" TUI-only silence by seeing the line and failing for the wrong reason, which is
   // how this acceptance criterion went untested in the first place.
   const { notices } = await startAndTurn({
-    active: ["read", "bash", "edit", "write", "codemode"],
+    active: DEFAULT_TOOLS,
+    activateAfterStart: true,
     mcpJson: "{ not json",
     mode: "print",
   });

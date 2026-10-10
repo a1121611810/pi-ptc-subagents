@@ -38,6 +38,7 @@ ADRs for pi-ptc-subagents, per `docs/agents/domain.md` (single-context repo).
 | [0032](./0032-child-report.md)                             | A dispatched child returns a child report, over one of two channels, and always says which                    | accepted              |
 | [0033](./0033-mcp-auto-enable-evidence.md)                 | The detected surface reads MCP auto-enable evidence, because pi's MCP extension activates codemode at runtime | accepted              |
 | [0034](./0034-surface-is-detected-not-set.md)              | The surface is detected only: the `surfaceMode` key and its `off` value are removed                           | accepted              |
+| [0035](./0035-ask-pi-for-the-loadout.md)                   | Surface detection asks pi for the loadout; only the MCP axis stays a file-side read                           | accepted              |
 
 Numbering gaps are deliberate: 0001/0006 were reserved while wayfinder map #7 was charting and dropped when G1 resolved; keeping their slots means every cross-reference in the map and its tickets stays valid.
 

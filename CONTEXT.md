@@ -184,27 +184,37 @@ _codemode switch_ (whether the extension loads) and from presence on disk, and
 it has two evidence classes that answer independently, because pi activates
 `codemode` by two mechanisms:
 
-- **loadout mirror** — the settings-side answer: the `--tools` allowlist, then
-  the merged `defaultTools` (`<cwd>/.pi/settings.json` over `<agentDir>`), then
-  pi's own default, which does not name it. Read in pi's own precedence:
-  `--tools` decides the list and beats `--no-tools`, while `--exclude-tools`
-  vetoes whichever list won, because pi applies the denylist as a filter over
-  that list rather than as another source — so **exclusion beats inclusion**
-  (`sdk.js:148`). `--no-builtin-tools` is deliberately not read: it maps to
-  `noTools: "builtin"` and `codemode` is not one of pi's built-in tools.
+- **loadout mirror** — _retired 2026-10-10, ADR-0035._ It used to be the
+  settings-side answer: the `--tools` allowlist, then the merged
+  `defaultTools` (`<cwd>/.pi/settings.json` over `<agentDir>`), then pi's own
+  default, replayed in pi's precedence. It is now a **live read**: pi's own
+  active tool set, asked at `session_start` with `getActiveTools()`. The
+  difference is not tidiness — a mirror could not know whether pi had been told
+  to trust the project, so a project pi declined to read could still name
+  `codemode` here and put the session on a surface whose orchestration tools
+  nothing could reach (#131). Reading cannot have that disagreement, because it
+  IS pi's answer. Do not reintroduce a mirror: a second implementation of a rule
+  the host owns is a defect waiting for the host to change the rule.
 - _MCP auto-enable evidence_ — the file-side answer: pi's MCP extension calls
   `pi.setActiveTools` to activate `codemode` whenever an enabled MCP server's
-  tools are only reachable from scripts, which no settings file records.
+  tools are only reachable from scripts, which no settings file records. This
+  one stays a file-side read, and it is not redundancy. pi performs that
+  activation from inside **its own** `session_start` handler, and extension
+  order is not ours to choose, so a live read from ours is too early to see it
+  — measured, not assumed: a synchronous read, a read one microtask later, and
+  one on a zero-delay timer all read it inactive, and it appeared ~250 ms later.
 
 Either one being positive means the model can call it, so the probe
-**unions** them; the loadout's provenance is reported when both agree, and
-`"mcp"` names the case where the loadout said inactive and the evidence said
-otherwise. Both classes resolve to `inactive` by default, deliberately: pi
+**unions** them; `"mcp"` names the case where the loadout said inactive and the
+evidence said otherwise, and that case is now reachable in a way it was not
+before — pi activates `codemode` from its own `session_start`, after ours has
+read. Both classes resolve to `inactive` by default, deliberately: pi
 registers `codemode` with `defaultActive: false`, so "nobody configured
 anything" is a decision and lands on the safe surface (`full`). ADR-0029,
-ADR-0033. _Avoid_: "the activation probe" (the probe is the whole question;
-this term is the question), "codemode enabled" (that is the switch, a different
-question), "codemode loaded" (that is presence plus the switch).
+ADR-0033, ADR-0035. _Avoid_: "the activation probe" (the probe is the whole
+question; this term is the question), "codemode enabled" (that is the switch, a
+different question), "codemode loaded" (that is presence plus the switch), "the
+loadout mirror" (retired — the loadout is read, not mirrored).
 
 **MCP auto-enable evidence** — the file-side answer to _codemode activation_,
 computed from `<agentDir>/mcp.json` and `<cwd>/.pi/mcp.json` in that order:
