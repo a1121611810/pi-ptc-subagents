@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.0.0] - 2026-10-10
 
 ### Added
 
@@ -109,6 +109,8 @@ exposure` over `pi-coding-agent@0.86.1`'s `dist/` returns nothing, and so does
   `--no-builtin-tools` is deliberately still not read: it maps to `noTools: "builtin"` and
   `codemode` is not one of pi's built-in tools, so reading it would be a guess about a flag that
   cannot move it.
+
+[2.0.0]: https://github.com/a1121611810/pi-ptc-subagents/compare/v1.6.0...v2.0.0
 
 ## [1.6.0] - 2026-10-08
 
