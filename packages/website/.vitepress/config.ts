@@ -42,10 +42,16 @@ export default defineConfig({
       { icon: "github", link: "https://github.com/a1121611810/pi-ptc-subagents" },
       { icon: "npm", link: "https://www.npmjs.com/package/pi-ptc-subagents" },
     ],
-    editLink: {
-      pattern: "https://github.com/a1121611810/pi-ptc-subagents/edit/main/docs/:path",
-      text: "Edit this document in the repository",
-    },
+    // No `editLink`. It is deliberately absent, and that is the fix rather than an
+    // omission: VitePress substitutes a page's **source path** into the pattern,
+    // and a projected page's source path is a file in the site's own generated
+    // tree — which is gitignored and holds nothing anyone can commit. Pointing
+    // there produced a dead link on every projected page (`docs/docs/install.md`).
+    //
+    // The affordance is not lost. Every projected page already renders a "generated
+    // from" banner linking to its **true** repository path, which is a more useful
+    // target than an edit link anyway: it names the file that is actually
+    // authoritative (ADR-0037).
     footer: {
       message:
         "Apache-2.0. Every page under Documentation is projected from a file in the repository.",

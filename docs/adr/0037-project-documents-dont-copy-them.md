@@ -65,6 +65,34 @@ That is wrong for exactly the case above: `../../CONTEXT.md` from `docs/usage/` 
 the build failed on correct content. The path arithmetic was replaced with real `resolve()` and
 `relative()` against the repository root, plus an explicit rejection of anything resolving outside it.
 
+### Amended 2026-10-10: there is no `editLink`, and that is the decision working
+
+This record originally left out one consequence of projecting rather than copying, and the omission
+shipped. The site configured VitePress's `editLink` so every page would offer "Edit this page". VitePress
+substitutes a page's **source path** into that pattern, and a projected page's source path is a file in
+the site's own generated tree. Every projected page therefore linked to `docs/docs/install.md` — a path
+that exists in neither the repository nor the site. All four were dead; the build was green throughout,
+because neither VitePress's dead-link check nor this record's rule was looking at an absolute URL.
+
+`editLink` is removed rather than corrected. Three alternatives were tried or considered:
+
+- **Write each projected file at its own repository path** and control the route with frontmatter
+  `slug`. Measured, not assumed: VitePress 1.6.4 **ignores the `slug` frontmatter here**, so routes
+  stayed at `/docs/usage/surface` and every curated route became a dead link. The build caught it.
+- **Keep it and fix the pattern's prefix.** Even corrected, `:path` yields `docs/install.md`, which is
+  not where the repository keeps the document.
+- **Accept repository-shaped URLs** (`/docs/how-to-install`, `/docs/usage/surface`). Rejected: that
+  makes a published URL depend on where a file happens to sit in the repository, so reorganising
+  `docs/` would silently move public URLs.
+
+Removing it is also the honest answer, not a workaround. An "edit this page" link on a projected page
+points at a file that **must not be edited**, because the repository copy is the only authoritative
+one (that is this record's whole point). The affordance is already served correctly by the
+"generated from" banner, which names the true repository path instead of a derived one.
+
+`check-internal-links.mjs` now resolves repository-absolute links (`blob|edit|tree/main/<path>`) against
+the working tree, so this class of defect fails the site's build rather than reaching a reader.
+
 ## What this does not decide
 
 - **Prose accuracy is not gated.** The projection guarantees a page mirrors its source file. It does

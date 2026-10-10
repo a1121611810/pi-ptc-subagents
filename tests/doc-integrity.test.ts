@@ -604,6 +604,10 @@ const EXTERNAL_VOCABULARY: ReadonlyMap<string, string> = new Map([
     "ignoreDeadLinks",
     "VitePress 的配置键，ADR-0038 明确禁止添加它（#147 的反事实测试就是为它设的）",
   ],
+  [
+    "editLink",
+    "VitePress 的 themeConfig 键；ADR-0037 的修订记录说明站点**删掉**了它——投影页在站点树里没有可编辑副本，该链接在四篇投影页上全是死链",
+  ],
   // C. ADR-0022 推迟到 v2 的宿主 PTC 方法（文档自己标注 out of scope）
   ["ptc_parent_query", "ADR-0022 v2 方法，v1 明确 out of scope"],
   ["ptc_query_response", "ADR-0022 v2 方法，v1 明确 out of scope"],
