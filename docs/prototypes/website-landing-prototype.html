@@ -1,0 +1,663 @@
+<!doctype html>
+<!--
+  ============================================================================
+  PROTOTYPE — THROWAWAY. DO NOT SHIP. DO NOT COPY INTO packages/website/.
+  ============================================================================
+  Four landing-page variants for the pi-ptc-subagents project website,
+  switchable via ?variant=A|B|C|D (URL is shareable; reload-stable).
+
+  The design question: **what should the front page of this package's site be?**
+
+  Every fact, tool name, code sample and sentence below is copied from the
+  repo — README.md, package.json:4, docs/usage/*. This prototype invents no
+  capability claims (that was grill decision Q1's hard constraint).
+
+  Structural families are borrowed from real sites researched 2026-10-10:
+    A  pi.dev              — narrative hero, giant wordmark, install switcher,
+                             and a contrarian "What we didn't build" grid
+    B  deepseekharness.wiki— comparison-table-first, dense, information-forward
+    C  (invented)          — terminal/code-forward, dark-only, monospace
+    D  VitePress default   — docs-first: the reader already knows what it is
+
+  Switch: bottom bar arrows, or ← / → keys.
+
+  ---------------------------------------------------------------------------
+  VERDICT (2026-10-10): **A wins.** Variant B / C / D are dead — do not
+  promote any of them. What the evaluation actually settled:
+
+    - A's "What pi deliberately doesn't build" section is the load-bearing
+      idea, not its layout. pi's own landing page lists "No sub-agents" among
+      the features it deliberately left out, and this package is that gap.
+      That is a fact, not a claim, and it does not need inventing copy.
+    - B's comparison table survives as a *section* inside A, not as its own
+      variant: it answers the real confusion (how this differs from pi's own
+      `codemode`), which a hero cannot.
+    - C's terminal aesthetic was not rejected on merit — it was outvoted as a
+      front page. It remains the right register for tool listings deeper in.
+    - D's GENERATED banner ("this page is rendered from docs/usage/X.md")
+      is kept as-is on every docs page; that was grill decision Q11 and the
+      prototype is where it got a visible form.
+
+  This file also produced a finding the plan depends on: oxfmt parses .html
+  and a `.html` file anywhere in the tree fails `fmt:check` outright, not
+  with a style warning. That is why `.oxfmtrc.json` now ignores
+  `packages/website/**` — see ADR for the website's gate exclusion.
+  ---------------------------------------------------------------------------
+  ============================================================================
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PROTOTYPE — pi-ptc-subagents landing variants</title>
+<style>
+  /* ---------- shared reset (only what the chrome needs) ---------- */
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+  a { color: inherit; }
+
+  /* ---------- the prototype switcher (obviously not part of any design) ---------- */
+  #pswitch {
+    position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+    z-index: 9999; display: flex; align-items: center; gap: 4px;
+    background: #111; color: #fff; border-radius: 999px;
+    padding: 5px 6px; box-shadow: 0 8px 28px rgba(0,0,0,.35);
+    font: 500 13px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  #pswitch button {
+    all: unset; cursor: pointer; width: 30px; height: 30px; border-radius: 999px;
+    display: grid; place-items: center; color: #fff; font-size: 15px;
+  }
+  #pswitch button:hover { background: rgba(255,255,255,.16); }
+  #pswitch button:focus-visible { outline: 2px solid #6cf; outline-offset: 2px; }
+  #pswitch .plabel { padding: 0 12px; white-space: nowrap; }
+  #pswitch .plabel b { font-weight: 700; }
+  #pswitch .ptag {
+    background: #e5484d; color: #fff; border-radius: 999px;
+    padding: 3px 8px; font-size: 10px; letter-spacing: .08em; margin-right: 4px;
+  }
+  .variant { display: none; }
+  .variant.is-on { display: block; }
+
+  .sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 28px; }
+  pre { overflow-x: auto; }
+</style>
+
+<!-- ==================================================================== -->
+<!-- VARIANT A — narrative hero (family: pi.dev)                            -->
+<!-- ==================================================================== -->
+<style>
+.v-a { --bg:#fbfbfd; --fg:#14151a; --dim:#5b6070; --line:#e3e5ec; --accent:#e5484d;
+       --code-bg:#f4f5f8; background:var(--bg); color:var(--fg);
+       font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif; }
+@media (prefers-color-scheme: dark) {
+  .v-a { --bg:#0e0f13; --fg:#eceef4; --dim:#949bb0; --line:#23262f; --accent:#ff6369;
+         --code-bg:#16181e; }
+}
+.v-a a { text-decoration: none; }
+.v-a .hero { text-align:center; padding: 92px 28px 72px; }
+.v-a .mark {
+  font-size: clamp(44px, 8.5vw, 96px); font-weight: 800; letter-spacing: -.045em;
+  line-height: .95; margin: 0 0 28px;
+}
+.v-a .mark em { font-style: normal; color: var(--accent); }
+.v-a .tag { font-size: clamp(19px, 2.5vw, 27px); font-weight: 500; letter-spacing: -.02em;
+            max-width: 21ch; margin: 0 auto 14px; line-height: 1.25; }
+.v-a .sub { color: var(--dim); max-width: 60ch; margin: 0 auto 34px; font-size: 16px; }
+.v-a .installbox {
+  display:inline-flex; align-items:center; gap:14px; background:var(--code-bg);
+  border:1px solid var(--line); border-radius:12px; padding:13px 13px 13px 20px;
+  font-size:15px; text-align:left;
+}
+.v-a .installbox code { color: var(--fg); }
+.v-a .copybtn { all:unset; cursor:pointer; background:var(--fg); color:var(--bg);
+  border-radius:8px; padding:7px 14px; font-size:13px; font-weight:600; }
+.v-a .installnote { color:var(--dim); font-size:13.5px; margin-top:16px; }
+.v-a .sec { padding: 68px 28px; border-top:1px solid var(--line); }
+.v-a .sec h2 { font-size:13px; letter-spacing:.1em; text-transform:uppercase; color:var(--dim);
+  font-weight:600; margin:0 0 8px; text-align:center; }
+.v-a .sec h3 { font-size:clamp(22px,3vw,30px); letter-spacing:-.025em; margin:0 0 14px; text-align:center; }
+.v-a .sec .lede { color:var(--dim); text-align:center; max-width:62ch; margin:0 auto 40px; }
+.v-a .two { display:grid; grid-template-columns:1fr 1fr; gap:26px; }
+@media (max-width:820px){ .v-a .two { grid-template-columns:1fr; } }
+.v-a .card { border:1px solid var(--line); border-radius:14px; padding:26px; }
+.v-a .card h4 { margin:0 0 4px; font-size:17px; letter-spacing:-.01em; }
+.v-a .card .k { color:var(--accent); font-weight:600; }
+.v-a .card p { color:var(--dim); margin:8px 0 16px; }
+.v-a pre.tui { background:var(--code-bg); border:1px solid var(--line); border-radius:10px;
+  padding:16px; font-size:12.5px; line-height:1.6; margin:0; }
+.v-a pre.tui .k{color:var(--accent)} .v-a pre.tui .d{color:var(--dim)}
+.v-a .notbuilt { display:grid; grid-template-columns:repeat(3,1fr); gap:20px; }
+@media (max-width:820px){ .v-a .notbuilt { grid-template-columns:1fr; } }
+.v-a .nb { border:1px solid var(--line); border-radius:12px; padding:20px; }
+.v-a .nb s { color:var(--dim); text-decoration-color:var(--accent); font-weight:600; }
+.v-a .nb h4 { margin:0 0 6px; font-size:15px; }
+.v-a .nb p { color:var(--dim); font-size:14px; margin:0; }
+.v-a .nb .here { color:var(--accent); font-weight:600; }
+.v-a .docs { display:grid; grid-template-columns:repeat(4,1fr); gap:18px; }
+@media (max-width:820px){ .v-a .docs { grid-template-columns:1fr 1fr; } }
+.v-a .docs a { border:1px solid var(--line); border-radius:12px; padding:18px; display:block; }
+.v-a .docs a:hover { border-color: var(--accent); }
+.v-a .docs strong { display:block; font-size:14.5px; margin-bottom:3px; }
+.v-a .docs span { color:var(--dim); font-size:13px; }
+.v-a footer { border-top:1px solid var(--line); padding:34px 28px; text-align:center;
+  color:var(--dim); font-size:13.5px; }
+.v-a footer a { text-decoration: underline; text-underline-offset:3px; }
+</style>
+
+<section class="variant v-a" id="variant-A">
+  <div class="hero">
+    <h1 class="mark">pi&#8209;ptc<em>&#8209;subagents</em></h1>
+    <p class="tag">pi ships no sub&#8209;agents. This is the package that adds them.</p>
+    <p class="sub">
+      Programmable tool calling and subagent fan&#8209;out for <a href="https://pi.dev" style="text-decoration:underline">pi</a>.
+      The model writes a JS/TS program that composes pi's tools, or fans out to a
+      fresh pi subprocess per task &mdash; one round trip instead of many.
+    </p>
+    <div class="installbox">
+      <code>pi install npm:pi-ptc-subagents</code>
+      <button class="copybtn" data-copy="pi install npm:pi-ptc-subagents">Copy</button>
+    </div>
+    <p class="installnote">pi reads the <code>pi.extensions</code> manifest &mdash; installed and on for the next startup. No postinstall hook, no extra setup.</p>
+  </div>
+
+  <div class="sec">
+    <div class="wrap">
+      <h2>One package, two capabilities</h2>
+      <div class="two">
+        <div class="card">
+          <h4><span class="k">01</span> &nbsp;Programmable tool calling</h4>
+          <p><code>ptc_run_code</code> / <code>ptc_workflow</code> run a JS/TS program in a worker. It reaches the session's tools as <code>tools.&lt;name&gt;(args)</code>. Only the program's return value and its logs come back to the model.</p>
+<pre class="tui"><span class="k">PTC</span>  Find AssistantMessageComponent instantiations
+  ├─ file: "chat-viewport.ts"        <span class="d">• 1 output line · 1.42s</span>
+  ├─ instantiations: Array(3)
+  │  ├─ [0] {file: "chat-viewport.ts", line: 23}
+  │  ├─ [1] {file: "chat-viewport.ts", line: 47}
+  │  └─ [2] {file: "chat-viewport.ts", line: 91}
+  └─ totalLines: 47</pre>
+        </div>
+        <div class="card">
+          <h4><span class="k">02</span> &nbsp;Subagent fan&#8209;out</h4>
+          <p>The <code>pi.dispatch</code> binding spawns a fresh <code>pi</code> subprocess per call, so each task gets its own context. Foreground await, or background with a lifecycle you can list, read and stop.</p>
+<pre class="tui"><span class="k">ptc_task_list</span>
+  ├─ t-3  audit the render path    <span class="d">running · 41s</span>
+  ├─ t-4  check the ADR links      <span class="d">running · 12s</span>
+  └─ t-2  verify-dist gate         <span class="d">done · exit 1</span></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="wrap">
+      <h2>What pi deliberately doesn't build</h2>
+      <h3>pi's core stays minimal. This is the package that fills the gaps.</h3>
+      <p class="lede">pi's own landing page lists what it left out. Three of those gaps are what this package is for &mdash; the other three it composes with rather than replaces.</p>
+      <div class="notbuilt">
+        <div class="nb"><s>No sub&#8209;agents</s><h4 class="here">→ fan&#8209;out, in&#8209;process or background</h4><p><code>pi.dispatch</code> plus <code>ptc_task_*</code>. Session&#8209;level isolation without inventing a task state machine.</p></div>
+        <div class="nb"><s>No plan mode</s><h4 class="here">→ program the plan instead</h4><p>Loops, branches and fan&#8209;out live in JavaScript, where the model can express them &mdash; not in a second tool protocol.</p></div>
+        <div class="nb"><s>No background bash</s><h4 class="here">→ long&#8209;lived, inspectable</h4><p>Background dispatch hands back a handle, not a tmux pane. List it, read it, stop it.</p></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="wrap">
+      <h2>Read the deep dives</h2>
+      <h3>Rendered from the repository's own docs</h3>
+      <p class="lede">Every page below is generated from a file in <code>docs/</code>. Edit the file, and the site follows &mdash; there is no second copy to drift.</p>
+      <div class="docs">
+        <a href="#"><strong>Install</strong><span>What <code>pi install</code> writes, and where</span></a>
+        <a href="#"><strong>Surface detection</strong><span>Which tools you get, and why</span></a>
+        <a href="#"><strong>Background dispatch</strong><span>Handles, status, limits, on&#8209;disk layout</span></a>
+        <a href="#"><strong>Structured results</strong><span>content / details / structuredContent</span></a>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <p style="margin:0 0 6px">
+      <a href="https://github.com/a1121611810/pi-ptc-subagents">Source on GitHub</a> ·
+      <a href="https://www.npmjs.com/package/pi-ptc-subagents">npm</a> ·
+      <a href="#">Issues</a>
+    </p>
+    <p style="margin:0">Apache&#8209;2.0 · one maintainer · <code>dist/</code> on npm is the compiled form of the source you read here</p>
+  </footer>
+</section>
+
+<!-- ==================================================================== -->
+<!-- VARIANT B — comparison&#8209;first (family: deepseekharness.wiki)        -->
+<!-- ==================================================================== -->
+<style>
+.v-b { --bg:#fff; --fg:#101319; --dim:#5a6274; --line:#e6e9f0; --accent:#1f6feb;
+       --tint:#f6f8fc; background:var(--bg); color:var(--fg);
+       font:15px/1.62 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif; }
+@media (prefers-color-scheme: dark) {
+  .v-b { --bg:#0d1017; --fg:#e8ecf4; --dim:#929bb0; --line:#21262f; --accent:#5aa2ff; --tint:#141924; }
+}
+.v-b .top { border-bottom:1px solid var(--line); }
+.v-b .top .wrap { display:flex; align-items:center; justify-content:space-between; height:60px; }
+.v-b .brand { font-weight:800; letter-spacing:-.03em; font-size:16px; }
+.v-b nav a { margin-left:22px; color:var(--dim); text-decoration:none; font-size:14px; }
+.v-b nav a:hover { color:var(--fg); }
+.v-b .lead { padding:64px 28px 46px; text-align:center; }
+.v-b .lead h1 { font-size:clamp(28px,4.4vw,46px); letter-spacing:-.035em; margin:0 0 14px; line-height:1.1; }
+.v-b .lead p { color:var(--dim); max-width:64ch; margin:0 auto 26px; font-size:17px; }
+.v-b .lead code.install { background:var(--tint); border:1px solid var(--line); border-radius:8px;
+  padding:12px 18px; font-size:14.5px; display:inline-block; }
+.v-b table { width:100%; border-collapse:collapse; font-size:14.5px; }
+.v-b th, .v-b td { text-align:left; padding:13px 16px; border-bottom:1px solid var(--line); vertical-align:top; }
+.v-b thead th { font-size:12px; letter-spacing:.07em; text-transform:uppercase; color:var(--dim);
+  border-bottom:1.5px solid var(--line); }
+.v-b td.yes { color:var(--accent); font-weight:700; text-align:center; width:96px; }
+.v-b td.no { color:#b9bfcc; text-align:center; width:96px; }
+.v-b td.cap { font-weight:600; width:31%; }
+.v-b td.cap small { display:block; font-weight:400; color:var(--dim); margin-top:3px; }
+.v-b tbody tr:hover { background:var(--tint); }
+.v-b .tblcap { color:var(--dim); font-size:13px; margin:12px 0 0; }
+.v-b .sec { padding:56px 28px; border-top:1px solid var(--line); }
+.v-b h2 { font-size:26px; letter-spacing:-.028em; margin:0 0 8px; }
+.v-b .sec > .wrap > p.lede { color:var(--dim); margin:0 0 30px; max-width:64ch; }
+.v-b .grid3 { display:grid; grid-template-columns:repeat(3,1fr); gap:20px; }
+@media (max-width:860px){ .v-b .grid3 { grid-template-columns:1fr; } }
+.v-b .f { border:1px solid var(--line); border-radius:12px; padding:22px; }
+.v-b .f h4 { margin:0 0 7px; font-size:15.5px; }
+.v-b .f p { margin:0; color:var(--dim); font-size:14px; }
+.v-b details { border-bottom:1px solid var(--line); }
+.v-b summary { cursor:pointer; padding:16px 2px; font-weight:600; font-size:15px; list-style:none;
+  display:flex; justify-content:space-between; gap:16px; }
+.v-b summary::-webkit-details-marker { display:none; }
+.v-b summary::after { content:"+"; color:var(--dim); }
+.v-b details[open] summary::after { content:"−"; }
+.v-b details p { margin:0 0 18px; color:var(--dim); max-width:76ch; }
+.v-b .warn { border-left:3px solid #d9822b; background:var(--tint); padding:16px 20px;
+  border-radius:0 8px 8px 0; font-size:14px; color:var(--dim); margin-top:34px; }
+.v-b .warn strong { color:var(--fg); }
+.v-b footer { border-top:1px solid var(--line); padding:30px 28px; color:var(--dim); font-size:13px; }
+</style>
+
+<section class="variant v-b" id="variant-B">
+  <div class="top"><div class="wrap">
+    <span class="brand">pi-ptc-subagents</span>
+    <nav><a href="#">Install</a><a href="#">Docs</a><a href="#">Source</a><a href="#">npm</a></nav>
+  </div></div>
+
+  <div class="lead">
+    <h1>Two capabilities pi does not ship,<br>one package, no configuration</h1>
+    <p>The <b>surface is detected, not configured</b> &mdash; there is no setting for it. Install and the extension decides what to register from the pi it finds itself in.</p>
+    <code class="install">pi install npm:pi-ptc-subagents</code>
+  </div>
+
+  <div class="sec" style="padding-top:44px">
+    <div class="wrap">
+      <h2>What you get, by pi</h2>
+      <p class="lede">Three configurations, three different answers. The <code>subagents</code> line exists because a <code>codemode</code> sandbox cannot spawn a process at all &mdash; taking the program face away there would delete the capability rather than hand it over.</p>
+      <table>
+        <thead><tr><th>Capability</th><th style="text-align:center">pi alone</th><th style="text-align:center">+ codemode</th><th style="text-align:center">+ this</th></tr></thead>
+        <tbody>
+          <tr><td class="cap">Write a program that composes tools<small><code>ptc_run_code</code> / <code>ptc_workflow</code></small></td><td class="no">—</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+          <tr><td class="cap">A real Node runtime inside the program<small>no OS sandbox</small></td><td class="no">—</td><td class="no">QuickJS</td><td class="yes">✓</td></tr>
+          <tr><td class="cap">Spawn a fresh <code>pi</code> subprocess<small><code>pi.dispatch</code></small></td><td class="no">—</td><td class="no">—</td><td class="yes">✓</td></tr>
+          <tr><td class="cap">Background tasks you can list, read and stop<small><code>ptc_task_*</code></small></td><td class="no">—</td><td class="no">—</td><td class="yes">✓</td></tr>
+          <tr><td class="cap">Top-level subagent call, no program needed<small><code>ptc_subagent</code></small></td><td class="no">—</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+          <tr><td class="cap">Value&#8209;tree TUI rendering<small>not escaped JSON</small></td><td class="no">—</td><td class="no">—</td><td class="yes">✓</td></tr>
+        </tbody>
+      </table>
+      <p class="tblcap">Two columns reading the same: on <code>codemode</code> the pair registers underneath as an execution layer, so a script can reach what the sandbox cannot.</p>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="wrap">
+      <h2>The three things worth knowing</h2>
+      <div class="grid3">
+        <div class="f"><h4>Bindings mirror your loadout</h4><p>Only tools pi has <i>enabled</i> are reachable from inside a program. A session started with <code>--tools read,bash</code> can only bind those two.</p></div>
+        <div class="f"><h4>Programs run as you</h4><p>No OS&#8209;level sandbox. There is an explicit trust posture page, and it is worth reading before you install.</p></div>
+        <div class="f"><h4>Source is the truth</h4><p>Public repo, one maintainer. <code>dist/</code> on npm is the compiled form of what you read.</p></div>
+      </div>
+
+      <div class="warn"><strong>Read this before installing:</strong> tool calls made from inside a PTC program execute directly and bypass pi's <code>tool_call</code> hooks &mdash; permission gates and path guards included. Do not rely on those guards while this extension is enabled.</div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="wrap">
+      <h2>Questions</h2>
+      <div style="margin-top:22px">
+        <details open><summary>Is this a different agent from pi?</summary><p>No. It is a pi extension. It registers tools in the session you already have; it does not run its own agent, and it does not replace pi's <code>codemode</code> when that is present.</p></details>
+        <details><summary>Why is the surface detected instead of configured?</summary><p>Because a mirror of pi's own rule is a second implementation of a rule the host owns &mdash; and it goes stale the moment pi changes the rule. Reading pi's real active tool set at session start cannot disagree with pi.</p></details>
+        <details><summary>Can I keep it out of my sessions entirely?</summary><p>Yes &mdash; <code>pi config</code> and disable its extensions there. Per&#8209;session, <code>/ptc off</code> turns PTC mode off while keeping the task lifecycle visible.</p></details>
+        <details><summary>What happens to long output?</summary><p>It follows pi's own truncation contract: the text block keeps the tail, the untruncated text is written to a temp file the next program can read, and the collapsed row says <code>truncated</code>.</p></details>
+      </div>
+    </div>
+  </div>
+
+  <footer><div class="wrap">Apache&#8209;2.0 · <a href="#">Source</a> · <a href="#">Issues</a> · <a href="#">Security policy</a></div></footer>
+</section>
+
+<!-- ==================================================================== -->
+<!-- VARIANT C — terminal / code&#8209;forward (invented family)              -->
+<!-- ==================================================================== -->
+<style>
+.v-c { --bg:#0b0d11; --fg:#d6dae4; --dim:#7b8496; --line:#1e222b;
+       --a:#7ee787; --b:#79c0ff; --c:#ffa657; background:var(--bg); color:var(--fg);
+       font:14.5px/1.6 ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+.v-c a { color:var(--b); text-decoration:none; } .v-c a:hover { text-decoration:underline; }
+.v-c .bar { border-bottom:1px solid var(--line); padding:11px 20px; display:flex; gap:16px; align-items:center; }
+.v-c .dots { display:flex; gap:7px; }
+.v-c .dots i { width:11px; height:11px; border-radius:50%; display:block; }
+.v-c .bar .path { color:var(--dim); font-size:12.5px; }
+.v-c .hero { padding:52px 20px 30px; border-bottom:1px solid var(--line); }
+.v-c .hero h1 { font-size:clamp(22px,4vw,34px); letter-spacing:-.03em; margin:0 0 8px; color:#fff; }
+.v-c .hero .lede { color:var(--dim); margin:0 0 28px; max-width:74ch; }
+.v-c .term { border:1px solid var(--line); border-radius:10px; overflow:hidden; background:#0e1117; }
+.v-c .term .thead { padding:9px 15px; border-bottom:1px solid var(--line); color:var(--dim); font-size:12.5px; }
+.v-c pre.body { margin:0; padding:18px 20px; font-size:13.5px; line-height:1.75; overflow-x:auto; }
+.v-c .kw { color:var(--c); } .v-c .fn { color:var(--b); } .v-c .st { color:var(--a); }
+.v-c .cm { color:var(--dim); } .v-c .pn { color:#d2a8ff; }
+.v-c .out { padding:0 20px 18px; font-size:13px; }
+.v-c .out .hdr { color:var(--dim); margin-bottom:8px; }
+.v-c .out .line { color:var(--dim); }
+.v-c .out .ok { color:var(--a); }
+.v-c .tree { margin-top:6px; color:var(--fg); }
+.v-c .sec { padding:40px 20px; border-bottom:1px solid var(--line); }
+.v-c .sec h2 { font-size:13px; letter-spacing:.12em; text-transform:uppercase; color:var(--dim);
+  margin:0 0 20px; font-weight:600; }
+.v-c table { width:100%; border-collapse:collapse; font-size:13.5px; }
+.v-c td { padding:8px 12px 8px 0; border-bottom:1px solid var(--line); vertical-align:top; }
+.v-c td.n { color:var(--a); white-space:nowrap; width:1%; }
+.v-c td.d { color:var(--dim); }
+.v-c .faq { margin-top:8px; }
+.v-c .faq dt { color:var(--c); margin-top:20px; }
+.v-c .faq dd { margin:5px 0 0; color:var(--dim); }
+.v-c .faq dd a { color:var(--b); }
+.v-c .cta { padding:38px 20px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+.v-c .cta .cmd { border:1px solid var(--line); border-radius:8px; padding:11px 16px; color:var(--fg); }
+.v-c .cta .p { color:var(--dim); font-size:12.5px; }
+</style>
+
+<section class="variant v-c" id="variant-C">
+  <div class="bar">
+    <span class="dots"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></span>
+    <span class="path">~/projects &nbsp;—&nbsp; ptc_run_code</span>
+  </div>
+
+  <div class="hero">
+    <h1>pi-ptc-subagents</h1>
+    <p class="lede">Programmable tool calling and subagent fan&#8209;out for pi. What you are looking at is what the model writes &mdash; the tool calls stop being the interface and become the vocabulary.</p>
+
+    <div class="term">
+      <div class="thead">a PTC program &mdash; one round trip, not twelve</div>
+<pre class="body"><span class="cm">// read many files, then keep only the ones that match</span>
+<span class="kw">const</span> results = <span class="kw">await</span> Promise.<span class="fn">allSettled</span>(
+  paths.<span class="fn">map</span>((<span class="pn">p</span>) =&gt; tools.<span class="fn">read</span>({ path: <span class="pn">p</span> }))
+);
+
+<span class="kw">const</span> hits = results
+  .<span class="fn">filter</span>((<span class="pn">r</span>) =&gt; r.status === <span class="st">"fulfilled"</span>)
+  .<span class="fn">map</span>((<span class="pn">r</span>) =&gt; r.value.content[<span class="st">0</span>].text)
+  .<span class="fn">filter</span>((<span class="pn">t</span>) =&gt; t.<span class="fn">includes</span>(<span class="st">"AssistantMessageComponent"</span>));
+
+<span class="cm">// and fan out work that does not belong in this context</span>
+<span class="kw">const</span> <span class="pn">audit</span> = <span class="kw">await</span> tools[<span class="st">"pi.dispatch"</span>]({
+  agent: <span class="st">"auditor"</span>,
+  task: <span class="st">"check every relative link in docs/**"</span>,
+  background: <span class="kw">true</span>,
+});
+
+<span class="kw">return</span> { matched: hits.length, of: paths.length, audit: <span class="pn">audit</span>.id };</pre>
+      <div class="out">
+        <div class="hdr">↓ only this comes back to the model</div>
+        <div class="tree">
+PTC&nbsp; Read 14 files · 1 match
+  ├─ hits: Array(1)
+  │  └─ [0] {file: "chat-viewport.ts", line: 23}
+  └─ audit: <span class="ok">"bg-7f3c"</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <h2>registered tools</h2>
+    <table>
+      <tr><td class="n">ptc_subagent</td><td class="d">top&#8209;level fan&#8209;out, no program needed &mdash; <span class="cm">subagents surface only</span></td></tr>
+      <tr><td class="n">ptc_run_code</td><td class="d">run a JS/TS program that composes tools</td></tr>
+      <tr><td class="n">ptc_workflow</td><td class="d">structured variant + <span class="cm">log phase parallel pipeline</span></td></tr>
+      <tr><td class="n">ptc_task_list</td><td class="d">background dispatch &mdash; stays available when PTC mode is off</td></tr>
+      <tr><td class="n">ptc_task_output</td><td class="d">read a background child's events</td></tr>
+      <tr><td class="n">ptc_task_stop</td><td class="d">stop it</td></tr>
+    </table>
+  </div>
+
+  <div class="sec">
+    <h2>bindings inside a program</h2>
+    <table>
+      <tr><td class="n">read bash edit write grep find ls</td><td class="d">pi's built&#8209;ins, mirrored from the session's <em>enabled</em> set</td></tr>
+      <tr><td class="n">pi.dispatch</td><td class="d">a parallel binding &mdash; spawns a fresh <span class="st">pi</span> subprocess per call</td></tr>
+    </table>
+  </div>
+
+  <div class="sec">
+    <h2>before you install</h2>
+    <dl class="faq">
+      <dt>does it sandbox?</dt>
+      <dd>No. Programs run as <span class="st">you</span>, with no OS&#8209;level sandbox.</dd>
+      <dt>does it respect pi's permission gates?</dt>
+      <dd>No. Calls from inside a program bypass <span class="st">tool_call</span> hooks &mdash; permission gates and path guards included. <a href="#">read the full trust posture →</a></dd>
+      <dt>do I configure which tools it registers?</dt>
+      <dd>No. The surface is detected from the pi it finds. There is no setting.</dd>
+    </dl>
+  </div>
+
+  <div class="cta">
+    <span class="cmd">pi install npm:pi-ptc-subagents</span>
+    <span class="p"><a href="#">docs →</a> &nbsp; <a href="#">source →</a> &nbsp; <a href="#">issues →</a> &nbsp; Apache&#8209;2.0</span>
+  </div>
+</section>
+
+<!-- ==================================================================== -->
+<!-- VARIANT D — docs&#8209;first (family: VitePress default)                  -->
+<!-- ==================================================================== -->
+<style>
+.v-d { --bg:#fff; --fg:#213547; --dim:#6b7787; --line:#e6e9ef; --accent:#3eaf7c;
+       --sidebar:#f7f8fa; background:var(--bg); color:var(--fg);
+       font:15px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif; }
+.v-d a { text-decoration:none; }
+.v-d .top { border-bottom:1px solid var(--line); position:sticky; top:0; background:rgba(255,255,255,.9);
+  backdrop-filter:blur(8px); z-index:20; }
+.v-d .top .wrap { display:flex; align-items:center; gap:22px; height:58px; }
+.v-d .brand { font-weight:700; letter-spacing:-.02em; }
+.v-d .top nav { margin-left:auto; display:flex; gap:20px; font-size:14px; color:var(--dim); }
+.v-d .banner { background:linear-gradient(180deg,var(--sidebar),var(--bg)); border-bottom:1px solid var(--line);
+  padding:52px 28px 46px; text-align:center; }
+.v-d .banner h1 { font-size:clamp(26px,4vw,40px); letter-spacing:-.035em; margin:0 0 10px; color:#182029; }
+.v-d .banner p { color:var(--dim); max-width:60ch; margin:0 auto 22px; }
+.v-d .banner code { background:#fff; border:1px solid var(--line); border-radius:8px; padding:10px 16px;
+  display:inline-block; font-size:14px; }
+.v-d .layout { display:grid; grid-template-columns:250px minmax(0,1fr); gap:52px;
+  max-width:1080px; margin:0 auto; padding:44px 28px 90px; }
+@media (max-width:860px){ .v-d .layout { grid-template-columns:1fr; gap:26px; } .v-d .side { display:none; } }
+.v-d .side { position:sticky; top:80px; align-self:start; }
+.v-d .side .grp { font-size:11.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--dim);
+  margin:22px 0 8px; font-weight:700; }
+.v-d .side .grp:first-child { margin-top:0; }
+.v-d .side a { display:block; padding:5px 12px; border-left:2px solid transparent; color:#3c4859; font-size:14.5px; }
+.v-d .side a:hover { color:var(--accent); }
+.v-d .side a.on { border-left-color:var(--accent); color:var(--accent); font-weight:600; }
+.v-d .generated { display:flex; gap:11px; align-items:flex-start; background:var(--sidebar);
+  border:1px solid var(--line); border-radius:10px; padding:13px 17px; font-size:13.5px;
+  color:var(--dim); margin-bottom:34px; }
+.v-d .generated .tag { background:var(--accent); color:#fff; font-size:10.5px; font-weight:700;
+  letter-spacing:.07em; padding:3px 8px; border-radius:5px; white-space:nowrap; margin-top:1px; }
+.v-d .generated code { background:#fff; padding:1px 6px; border-radius:4px; border:1px solid var(--line); font-size:12.5px; }
+.v-d article h1 { font-size:34px; letter-spacing:-.03em; margin:0 0 6px; color:#182029; }
+.v-d article .anchor { color:var(--dim); font-size:15px; margin:0 0 28px; padding-bottom:20px;
+  border-bottom:1px solid var(--line); }
+.v-d article h2 { font-size:23px; letter-spacing:-.022em; margin:38px 0 12px; padding-top:8px; color:#182029; }
+.v-d article h3 { font-size:17px; margin:26px 0 8px; }
+.v-d article p { margin:0 0 15px; }
+.v-d article pre { background:var(--sidebar); border:1px solid var(--line); border-radius:9px;
+  padding:15px 18px; font-size:13px; line-height:1.65; }
+.v-d article ul { padding-left:22px; margin:0 0 15px; }
+.v-d article li { margin-bottom:7px; }
+.v-d article a.x { color:var(--accent); text-decoration:underline; text-underline-offset:2px; }
+.v-d .tablewrap { overflow-x:auto; margin:0 0 15px; }
+.v-d table { border-collapse:collapse; width:100%; font-size:14px; }
+.v-d th, .v-d td { border-bottom:1px solid var(--line); padding:9px 12px; text-align:left; }
+.v-d th { background:var(--sidebar); font-size:12.5px; letter-spacing:.05em; text-transform:uppercase; color:var(--dim); }
+.v-d footer { border-top:1px solid var(--line); padding:26px 28px; color:var(--dim); font-size:13px; text-align:center; }
+</style>
+
+<section class="variant v-d" id="variant-D">
+  <div class="top"><div class="wrap">
+    <span class="brand">pi-ptc-subagents</span>
+    <nav><span>Guide</span><span>Reference</span><span>Source</span></nav>
+  </div></div>
+
+  <div class="banner">
+    <h1>Programmable tool calling for pi</h1>
+    <p>You have the tool list already. Start with surface detection &mdash; it decides everything else.</p>
+    <code>pi install npm:pi-ptc-subagents</code>
+  </div>
+
+  <div class="layout">
+    <aside class="side">
+      <div class="grp">Getting started</div>
+      <a class="on" href="#">Surface detection</a>
+      <a href="#">Install</a>
+      <a href="#">PTC default mode</a>
+      <div class="grp">Reference</div>
+      <a href="#">Background dispatch</a>
+      <a href="#">Structured results</a>
+      <a href="#">Tools &amp; bindings</a>
+      <div class="grp">Project</div>
+      <a href="#">Trust posture</a>
+      <a href="#">Source on GitHub</a>
+    </aside>
+
+    <article>
+      <div class="generated">
+        <span class="tag">GENERATED</span>
+        <span>This page is rendered from <code>docs/usage/surface.md</code> in the repository. Edit the file and the site follows &mdash; the markdown here is not maintained separately.</span>
+      </div>
+
+      <h1>Surface detection</h1>
+      <p class="anchor">Which model-facing tools this package registers, independent of PTC mode. Detected, not configured.</p>
+
+      <p>There is no key for the surface mode, and the former <code>surfaceMode</code> setting in <code>ptc.json</code> was removed on 2026&#8209;10&#8209;10. The session names the outcome at startup rather than defaulting in silence, because a detection that cannot be seen is indistinguishable from a pi that moved its <code>dist</code>.</p>
+
+      <h2>The three questions</h2>
+      <ul>
+        <li>Does this pi ship a <code>codemode</code> extension directory?</li>
+        <li>Will pi actually load it? Since 0.99.0 a user can disable a built&#8209;in extension, so a pi can ship <code>codemode</code> and be told not to run it.</li>
+        <li>Will <code>codemode</code> be <em>active</em> &mdash; callable by the model?</li>
+      </ul>
+      <p>Shipped, loading and active resolves to <code>subagents</code>. Any other combination resolves to <code>full</code> &mdash; and so does a probe that cannot answer, which lands in the safe direction.</p>
+
+      <h2>The surface you get</h2>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Surface</th><th><code>ptc_subagent</code></th><th><code>ptc_run_code</code> / <code>ptc_workflow</code></th></tr></thead>
+          <tbody>
+            <tr><td><code>subagents</code> &mdash; <code>codemode</code> is present and active</td><td>declared</td><td>registered, reachable from a <code>codemode</code> script</td></tr>
+            <tr><td><code>full</code> &mdash; everything else</td><td>not registered</td><td>declared to the model</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>The asymmetry is deliberate. On the <code>subagents</code> line the program pair <em>is</em> registered, which is what lets a QuickJS sandbox reach <code>pi.dispatch</code> &mdash; something it cannot do on its own.</p>
+
+      <h2>Forcing the subagents surface</h2>
+      <p>Put <code>codemode</code> in your tool list:</p>
+      <pre>pi --tools read,bash,edit,write,codemode</pre>
+      <p>or in settings:</p>
+      <pre>{ "defaultTools": ["read", "bash", "edit", "write", "+codemode"] }</pre>
+      <p>The full detection table, startup notices, and edge cases (<code>--print</code>, <code>--no-extensions</code>, untrusted projects) live in the repository at <a class="x" href="#">docs/usage/surface.md</a>.</p>
+    </article>
+  </div>
+
+  <footer>Apache&#8209;2.0 · <a href="#">Source</a> · <a href="#">Issues</a> · every page is generated from <code>docs/</code></footer>
+</section>
+
+<!-- ================= prototype switcher ================= -->
+<div id="pswitch" role="group" aria-label="Prototype variant switcher">
+  <span class="ptag">PROTOTYPE</span>
+  <button type="button" data-pswitch="-1" aria-label="Previous variant">‹</button>
+  <span class="plabel" id="pswitch-label"></span>
+  <button type="button" data-pswitch="1" aria-label="Next variant">›</button>
+</div>
+
+<script>
+(function () {
+  var NAMES = {
+    A: 'Narrative hero — pi.dev family',
+    B: 'Comparison-first — dense, table-driven',
+    C: 'Terminal — dark, code-forward',
+    D: 'Docs-first — sidebar, straight to content'
+  };
+  var KEYS = ['A', 'B', 'C', 'D'];
+  var current = null;
+
+  function fromUrl() {
+    var m = /[?&]variant=([A-D])/i.exec(window.location.search || '');
+    return m ? m[1].toUpperCase() : null;
+  }
+
+  function render() {
+    KEYS.forEach(function (k) {
+      document.getElementById('variant-' + k).classList.toggle('is-on', k === current);
+    });
+    document.getElementById('pswitch-label').innerHTML =
+      '<b>' + current + '</b> — ' + NAMES[current];
+  }
+
+  function go(key, push) {
+    current = key;
+    var url = new URL(window.location.href);
+    url.searchParams.set('variant', key);
+    if (push) history.pushState({ variant: key }, '', url);
+    else history.replaceState({ variant: key }, '', url);
+    render();
+  }
+
+  function step(delta) {
+    var i = KEYS.indexOf(current);
+    go(KEYS[(i + delta + KEYS.length) % KEYS.length], true);
+  }
+
+  document.querySelectorAll('[data-pswitch]').forEach(function (btn) {
+    btn.addEventListener('click', function () { step(parseInt(btn.dataset.pswitch, 10)); });
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    var el = document.activeElement;
+    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+    e.preventDefault();
+    step(e.key === 'ArrowRight' ? 1 : -1);
+  });
+
+  window.addEventListener('popstate', function () { go(fromUrl() || 'A', false); });
+
+  // copy buttons (variants A and C)
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest && e.target.closest('[data-copy]');
+    if (!btn) return;
+    var text = btn.dataset.copy;
+    var done = function () {
+      var old = btn.textContent;
+      btn.textContent = 'Copied';
+      setTimeout(function () { btn.textContent = old; }, 1400);
+    };
+    if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(done, function () {});
+    else done();
+  });
+
+  go(fromUrl() || 'A', false);
+})();
+</script>
+</body>
+</html>
