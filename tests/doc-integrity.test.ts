@@ -344,6 +344,20 @@ function formatRef(ref: LinkRef): string {
 }
 
 // ---------------------------------------------------------------------------
+// doc-integrity 的第 9 条自查（为什么不算断言二的一个用例）：
+//   `tests/helpers/ptc.ts` 决定 `session_start` 到底会不会被触发，而
+//   `tests/test-meta-discipline.test.ts` 只收 *.test.ts，于是 helpers/ 落在所有 F1–F4 机械扫描
+//   之外；将来若有人给 `makeExtensionStub` 加一个「不 emit session_start」的开关，63 个调用点会各自
+//   拿到空 registry 而四条检查一条都不红。这个风险没有检查兜——它不机械（没有固定语法模式），也不算
+//   doc-integrity 断言的题材（断言管引用与符号，不管「事件触发被关掉」）。本文件管不了它，得靠
+//   tests/helpers/ptc.ts 自己的注释记着这条：改动 emit 行为时，先想那 63 个调用点。
+// doc-integrity 的第 10 条自查（为什么不算断言二的一个用例）：
+//   一次 review-fix-loop 的 anchor 教助：「session_start 上读 loadout / 注册」这条 pi 宿主行为会随
+//   pi 版本变化，而它跨版本变化的方式没有任何 CI 能预判——只有真机跑一次才看得见。把它记在这里，是
+//   评审走 audit 3 的声明—读点对照时「到哪里去拿这个声明的真机 anchor」这条线索的落点。
+//   它是笔记不是检查，所以不在断言里；详见 docs/reviews/2026-10-10-loadout-is-read-code-review.md
+//   的 §Anchor，以及 docs/agents/issue-tracker.md 里「实机验证」一节的约定。
+
 // 断言二：规范文档点名的符号在 src/ 有读点
 // ---------------------------------------------------------------------------
 

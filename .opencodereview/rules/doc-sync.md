@@ -72,6 +72,12 @@
    未挂账漂移要报。
    完成判据:文档中每个引用都能被一条命令验证(链接存在、行号落在目标文件范围内、常量与 `src/` 定义相等)。
 
+- **移动的代码块必须重读其注释**。当 diff 的一个 hunk 是纯移动(块的位置变了、内容基本没动)时,块内
+  描述**自己的**注释要当成会过期来重读——「registered at factory time」「在 `off` 早退之后」这类声明,
+  一旦块被搬走立刻变成假的,而 diff 工具默认只报「移动」,review 看的是变化、往往会漏掉移动的块里没变的
+  注释。review 侧查点:diff 含纯移动块时,逐项打开块内注释、核对其描述的行为在**新位置**是否仍成立。
+  这是判断类规则(review 侧),机械的那半由 `tests/doc-integrity.test.ts` 的符号存在性检查兜。
+
 8. **文档里写死的整跑门禁必须真的能跑**。文档若把某条命令写成「发布前必须跑」,它就得在任何 diff 外
    的场景成立。仓库的发布门禁逐字对应 `package.json` 的 scripts 字段:
    `pnpm run typecheck && pnpm run lint && pnpm run fmt:check && pnpm run build && pnpm exec vp test --run --coverage && pnpm run verify:dist`。

@@ -99,6 +99,13 @@ catch-all 兜底层固定是数组末尾这一条:
 - **CI workflow / 脚本走 `ocr scan`**:`ocr scan --path .github/workflows` 会真的审 `.yml`;
   它们在规则侧命中 `**`(general.md),因为没有更具体的锚。
 
+## 4.5 `--background-file` 的 8000 字符硬上限
+
+`ocr delegate preview --background-file <spec>` 把 spec 正文当需求上下文注入,但它对长度是硬中断:
+超过 **8000 字符**直接 `Error: background content is N characters, exceeding the hard limit of 8000 (aborting)`,
+不是截断是 abort,preview 根本不产出。所以 spec 上下文要**压**——只带 issue 验收条件 + 一句治理决策,
+正稿留在 issue tracker 里。遇到 abort 先查长度,再查别的。
+
 ## 5. 验证命令
 
 ```bash
