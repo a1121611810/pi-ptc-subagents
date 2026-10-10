@@ -595,6 +595,15 @@ const EXTERNAL_VOCABULARY: ReadonlyMap<string, string> = new Map([
   ["mangleProps", "rolldown 的属性混淆选项"],
   ["outExtensions", "rolldown 的产物扩展名映射选项"],
   ["withDist", "打包脚本的选项名"],
+  // B2. 站点（packages/website）的构建与门禁配置键。ADR-0036 用它们说明「站点被排除出根门禁」
+  // 这个决定本身——正是那份文档让它们第一次成为规范文档里的具名符号。它们属于 oxlint/oxfmt 与
+  // VitePress 的配置 schema，本仓从不声明这些键，只是在 .oxlintrc.json / .oxfmtrc.json /
+  // packages/website/.vitepress/config.ts 里**写**它们，与 rolldown 那一组同类。
+  ["ignorePatterns", "oxlint/oxfmt 的配置键，ADR-0036 记录站点正是靠它被排除出根门禁"],
+  [
+    "ignoreDeadLinks",
+    "VitePress 的配置键，ADR-0038 明确禁止添加它（#147 的反事实测试就是为它设的）",
+  ],
   // C. ADR-0022 推迟到 v2 的宿主 PTC 方法（文档自己标注 out of scope）
   ["ptc_parent_query", "ADR-0022 v2 方法，v1 明确 out of scope"],
   ["ptc_query_response", "ADR-0022 v2 方法，v1 明确 out of scope"],
@@ -613,6 +622,15 @@ const EXTERNAL_VOCABULARY: ReadonlyMap<string, string> = new Map([
   ["required_status_checks", "GitHub ruleset 的规则类型名，ADR-0031 §A 的 main 门禁表逐条列出"],
   ["toEqual", "vitest 的断言器名，ADR 里在讲测试写法"],
   ["tool_name", "竞态采集表的列名字面量，不是代码符号"],
+  // D2. 站点工作流与工具输出里的词表，随 ADR-0036 / ADR-0038 进入规范文档。
+  [
+    "workflow_dispatch",
+    "GitHub Actions 的事件名字面量；ADR-0038 把它列为 pages.yml 的第二个触发器，与 pull_request 同类",
+  ],
+  [
+    "SyntaxError",
+    "JavaScript 内建错误类型名；ADR-0036 引它是因为 oxfmt 解析 HTML 写坏时报的就是这个错（exit 2），文档引的是那段**输出文本**，不是代码符号",
+  ],
 ]);
 
 // ---------------------------------------------------------------------------
