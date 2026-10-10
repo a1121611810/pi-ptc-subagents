@@ -872,6 +872,49 @@ function countLines(absolute: string): number {
   return readFileSync(absolute, "utf8").split("\n").length;
 }
 
+/**
+ * 找出行号能解析、但**目标行里没有该出现的东西**的引用。
+ *
+ * 这是 `/docs/testing-constraints.md`「What the gate does not check」说的那件事的机械版：断言四只
+ * 校验「引用能解析到目标文件、行号在范围内」，而**一个能解析的引用不等于一个指对了的引用**。两者
+ * 的差距不是理论——2026-10-10 那次按内容逐条核对时，23 条里有 15 条指错了东西，而断言四全程是绿的。
+ *
+ * `tokens` 以**引用字符串**为键而不是以 `文件:行号` 为键：同一个位置可以被两条引用指向而声称不同的
+ * 东西（`0029:32` 与 `0029:105` 就是），按位置做键会把它们合并成一条，也就是把两条断言变成一条。
+ *
+ * 判定是「目标行**包含**这个词」，不是「等于」：引用指向一个函数时，声称的是「这里有个叫它的东西」，
+ * 而不是「这一行只有它」。要求相等会逼着每一条去指最窄的那一行，于是又回到「挑一个看起来对的行号」，
+ * 正是这个检查要防的。
+ *
+ * 单独抽成函数，理由与 {@link outOfRangeLineRefs} 相同：全称断言与反事实走同一条判定，反事实因此
+ * 证明的是真逻辑，不是「恰好没跑到」。
+ */
+function wrongContentRefs(
+  refs: readonly LineRef[],
+  tokens: Readonly<Record<string, string>>,
+): string[] {
+  const offenders: string[] = [];
+  for (const ref of refs) {
+    const key = `${ref.doc}:${ref.line} -> ${ref.file}:${ref.targetLine}`;
+    const token = tokens[key];
+    // 没有登记 token 的引用由另一条断言负责报出来（见「每条基线都带了标识符」），
+    // 这里跳过而不是报错：否则同一个缺陷会在两条断言里各红一次，读的人会以为有两处问题。
+    if (token === undefined) continue;
+    const absolute = inRepoTarget(ref);
+    if (absolute === null) continue;
+    const lines = readFileSync(absolute, "utf8").split("\n");
+    const content = lines[ref.targetLine - 1];
+    // 越界由断言四报，这里不重复报。
+    if (content === undefined) continue;
+    if (!content.includes(token)) {
+      offenders.push(
+        `${key}（该行应含 ${JSON.stringify(token)}，实际是 ${JSON.stringify(content.trim().slice(0, 72))}）`,
+      );
+    }
+  }
+  return offenders;
+}
+
 // ---------------------------------------------------------------------------
 // 测试
 // ---------------------------------------------------------------------------
@@ -1258,6 +1301,144 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     );
   });
 
+  /**
+   * 每条仓库内引用，它的目标行里**必须出现**的那个标识符。
+   *
+   * 这张表存在的理由只有一条：**行号会动，标识符通常不会**。引用写错行号是常态（本文件 2026-10-10
+   * 那次核对发现 15/23 条指错），写错标识符很少见；所以钉住标识符能以很小的维护成本抓住绝大多数漂移。
+   * 它抓不住的是「标识符和行号同时写错」，那种情况只能靠人打开那一行看——那正是这张表想减少的工作量，
+   * 而不是它声称能替代的工作。
+   *
+   * 键是引用字符串本身（与上面基线用的同一把串），所以**新增一条引用必须同时给出 token**：
+   * token 缺失由「每条基线都带了标识符」那条断言报出来，不会静默跳过。
+   *
+   * **指向 `node_modules` 下的 pi 包不在表内，是有意的。** 那些行号随 pi 的版本走，与本仓的改动
+   * 无关，而两个相邻 pi 版本之间的位移（实测 1.0.0 ↔ 1.1.0 之间 `--tools` 在 110 与 114）比这批
+   * 记录任何一条的容差都大。一个会在别人的版本更新时变红的门，教出来的是忽略红。
+   */
+  const PIN_TOKENS: Readonly<Record<string, string>> = {
+    "docs/adr/0013-ptc-row-compact-summary.md:140 -> src/tools/render.ts:83":
+      "MAX_CODE_LINES_EXPANDED = 3",
+    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:146": "function firstLine(",
+    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:902": "function errorText(",
+    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:1047": "errorText(result)",
+    "docs/adr/0013-ptc-row-compact-summary.md:176 -> render.ts:1141": "errorText(result)",
+    "docs/adr/0013-ptc-row-compact-summary.md:177 -> render.ts:1143": "MAX_LOG_LINES_EXPANDED",
+    "docs/adr/0013-ptc-row-compact-summary.md:178 -> render.ts:130": "function alignRow(",
+    "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:1138":
+      "The failure text is the reason",
+    "docs/adr/0016-ptc-dispatch-binding.md:39 -> src/runtime/dispatcher.ts:438":
+      "new DispatchSlotCounter(",
+    "docs/adr/0026-surface-default-is-detected.md:258 -> dispatch.ts:1503":
+      "spawnOptions.sessionId = taskId;",
+    "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:985":
+      "export function detectedSurfaceMode(",
+    "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:908":
+      'getActiveTools().includes("codemode")',
+    "docs/adr/0029-surface-follows-codemode-activation.md:105 -> src/index.ts:908":
+      'getActiveTools().includes("codemode")',
+    "docs/adr/0029-surface-follows-codemode-activation.md:129 -> ptc-mode.ts:27":
+      "## Fail-safe on external loadout changes",
+    "docs/adr/0029-surface-follows-codemode-activation.md:166 -> src/index.ts:859":
+      "if (detected.present && !known) {",
+    "docs/adr/0030-surface-switch-reloads.md:83 -> ptc-mode.ts:27":
+      "## Fail-safe on external loadout changes",
+    "docs/adr/0031-open-source-and-publish-authority.md:129 -> src/runtime/limits.ts:4":
+      "The numbers are DSH's",
+    "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1151": "function assistantText(",
+    "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:174":
+      "export const SUBAGENT_OUTPUT_SCHEMA",
+    "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1174": "function accumulateUsage(",
+    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:279":
+      "structuredContent: structured,",
+    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:229":
+      "outputSchema: LIST_OUTPUT_SCHEMA,",
+    "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1033":
+      "export function childToolList(",
+  };
+
+  /**
+   * 内容校验真正判定的引用数下界。
+   *
+   * 存在的理由与 `MARKDOWN_FILE_FLOOR` 相同：一条「没有 offender」的全称断言，在判定面为空时也是绿的，
+   * 而「没有引用」与「所有引用都对」是不可区分的两个世界。改引用集合时这个数要跟着走，改动本身就是
+   * 一次「我确实动过判定面」的确认。
+   */
+  const PIN_TOKENS_COUNT_FLOOR = 20;
+
+  /** 上面那份基线，原样；两条断言共用它，避免「改了数组忘了表」这种漂移。 */
+  const IN_REPO_PIN_BASELINE: readonly string[] = [
+    "docs/adr/0013-ptc-row-compact-summary.md:140 -> src/tools/render.ts:83",
+    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:146",
+    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:902",
+    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:1047",
+    "docs/adr/0013-ptc-row-compact-summary.md:176 -> render.ts:1141",
+    "docs/adr/0013-ptc-row-compact-summary.md:177 -> render.ts:1143",
+    "docs/adr/0013-ptc-row-compact-summary.md:178 -> render.ts:130",
+    "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:1138",
+    // Hand-confirmed line by line, 2026-09-30 (review round 5). The extractor resolves this
+    // one only because the path is qualified: bare `dispatcher.ts` is ambiguous in this repo, and
+    // the rule is to refuse rather than guess. Line 438 is
+    // `const dispatchSlots = new DispatchSlotCounter(config.dispatchConcurrency);` -- the FALLBACK
+    // counter, since :712 prefers `options.dispatchDeps?.slots ?? dispatchSlots`. ADR-0016 §2
+    // names it as where the knob is read when nothing is injected.
+    "docs/adr/0016-ptc-dispatch-binding.md:39 -> src/runtime/dispatcher.ts:438",
+    // 2026-10-10 第七次复核：**1096 → 1501**。1096 是一段 JSDoc 的开头，不是本 ADR 声称的
+    // `spawnOptions.sessionId = taskId;`（那行在 1501）——而后者正是「同 id 重试从正常路径
+    // 不可达」这个论断的落点。**既有漂移**，dispatch.ts 本轮未改，HEAD 上 1096 同样不是它。
+    "docs/adr/0026-surface-default-is-detected.md:258 -> dispatch.ts:1503",
+    // 2026-10-10 第七次复核：四条全部因本轮删除 surfaceMode 而位移，逐条核对内容后改正。
+    //  29  → 628→1160 = `export function detectedSurfaceMode(`
+    //  32  → 962→856  = decision-4 的 `if (surface.surfaceMode === "subagents" && !pi.getActiveTools()…`
+    //  105 → 962→856  = 同一处（ADR-0029 正文第二次引用它）
+    //  129 → 27 保持    = ` * ## Fail-safe on external loadout changes`，本轮未移动
+    "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:985",
+    "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:908",
+    "docs/adr/0029-surface-follows-codemode-activation.md:105 -> src/index.ts:908",
+    "docs/adr/0029-surface-follows-codemode-activation.md:129 -> ptc-mode.ts:27",
+    //  166 → 920→807 = `if (detected.present && !known) {`，即交叉核对那一条
+    "docs/adr/0029-surface-follows-codemode-activation.md:166 -> src/index.ts:859",
+    // 2026-10-03 第四次复核（ADR-0030）：0030 引 ptc-mode.ts:27-31 那段「loadout 被外部改写
+    // 时模式如何退让」，27 行是段首。本轮该引用在**文档里**的行号因撤回声明从 68 前移到 83，
+    // 引用目标（ptc-mode.ts:27）未动。ADR-0030 另外四处引用写的是 pi 宿主的行号而非本仓文件，
+    // 解析器不收，因此不进这份基线——它们由 ADR 正文里的表格自带出处。
+    "docs/adr/0030-surface-switch-reloads.md:83 -> ptc-mode.ts:27",
+    "docs/adr/0031-open-source-and-publish-authority.md:129 -> src/runtime/limits.ts:4",
+    // 2026-10-08 **第六次**复核：ADR-0032 的 7 条全部重新逐行核对，且这次是按**内容**核对的。
+    //
+    // 前五次里有一次是空行漂移（index.ts 280 → 279），已被本仓抓出。但第六次复核发现的更糟：
+    // 第五次记录在案的这批行号，在 #101 之后**没有一条还对得上内容**，而断言四一直是绿的——
+    // 它只校验行号能解析到目标文件，不校验该行写了什么。所以「第五次已逐行核对过」这句话在
+    // 第六次复核时是**假的**。这正是 docs/testing-constraints.md「What the gate does not check」
+    // 说的那一类：门能看见形状，看不见引用指向的东西。
+    //
+    // 逐条内容（写在这里，是为了让下一个复核者不必重跑一遍就能知道每条该是什么）：
+    //   11 → dispatch.ts:1149 = `function assistantText(event: ParsedAgentEvent)`
+    //   20 → subagent.ts:174  = `export const SUBAGENT_OUTPUT_SCHEMA: SubagentOutputSchema`
+    //   27 → dispatch.ts:1172 = `function accumulateUsage(`（usage 的累加点，前景后台共用）
+    //   55 → subagent.ts:279 = 把投影写进 `structuredContent:` 的那一行
+    //   49 → ptc-task.ts:229/459/618 = 三处 `outputSchema:` 声明
+    //  117 → dispatch.ts:1031 = `export function childToolList(`，即合并进子进程 --tools 的那个函数
+    //
+    // 注意 117 这一条**换了目标而不是只移行号**：#101 之前的实现是一句
+    // `if (agent.tools && agent.tools.length > 0)` 的 guard，那行现在已经不在分支上了，
+    // 替换它的是 childToolList。只把行号从 101 挪到 117 会把一个假的引用钉得更牢。
+    //
+    // 2026-10-10 第七次复核：第六次记在案的**第七条**
+    // `0032:76 -> src/index.ts:280`（= `if (surface.surfaceMode === "off") return;`）
+    // **已从基线中删除**。那一行随 `off` 一起被删掉了，现在 280 处是 BG-14 段落的注释，
+    // 引用指不到它声称的东西；ADR-0032 正文已就此划线注明「该行已不存在」并且**不再引用那个
+    // 行号**——留着一个指向已删行的引用，正是 `tests/doc-integrity.test.ts` 要抓的悬空引用。
+    // 所以这里是**删一条**而不是改行号，本轮唯一的删除项，**新增 0 条**。
+    // 同一次编辑把 ADR-0032 里 123 那条**在文档里**的行号推到 130（引用目标未动，仍是 1031）。
+    "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1151",
+    "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:174",
+    "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1174",
+    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:279",
+    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:229",
+    "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1033",
+  ];
+
   test("仓库内引用清单是钉住的基线：新增一条就要有人重新确认一次", () => {
     // 实测基线（2026-09-29 复核并扩到第三条解析基准之后）：规范文档（README / CONTEXT / adr /
     // specs / usage）里 15 处 file:line，其中 8 处指向 DSH 宿主文件（ChatGroupSeat.tsx、ToolRow.tsx、
@@ -1308,77 +1489,78 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
        *
        * 下一次复核者：把上面那句「打开那一行看内容」重做一遍就够，不必往上加新段落。
        */
-    ).toEqual([
-      "docs/adr/0013-ptc-row-compact-summary.md:140 -> src/tools/render.ts:83",
-      "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:146",
-      "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:902",
-      "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:1047",
-      "docs/adr/0013-ptc-row-compact-summary.md:176 -> render.ts:1141",
-      "docs/adr/0013-ptc-row-compact-summary.md:177 -> render.ts:1143",
-      "docs/adr/0013-ptc-row-compact-summary.md:178 -> render.ts:130",
-      "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:1138",
-      // Hand-confirmed line by line, 2026-09-30 (review round 5). The extractor resolves this
-      // one only because the path is qualified: bare `dispatcher.ts` is ambiguous in this repo, and
-      // the rule is to refuse rather than guess. Line 438 is
-      // `const dispatchSlots = new DispatchSlotCounter(config.dispatchConcurrency);` -- the FALLBACK
-      // counter, since :712 prefers `options.dispatchDeps?.slots ?? dispatchSlots`. ADR-0016 §2
-      // names it as where the knob is read when nothing is injected.
-      "docs/adr/0016-ptc-dispatch-binding.md:39 -> src/runtime/dispatcher.ts:438",
-      // 2026-10-10 第七次复核：**1096 → 1501**。1096 是一段 JSDoc 的开头，不是本 ADR 声称的
-      // `spawnOptions.sessionId = taskId;`（那行在 1501）——而后者正是「同 id 重试从正常路径
-      // 不可达」这个论断的落点。**既有漂移**，dispatch.ts 本轮未改，HEAD 上 1096 同样不是它。
-      "docs/adr/0026-surface-default-is-detected.md:258 -> dispatch.ts:1503",
-      // 2026-10-10 第七次复核：四条全部因本轮删除 surfaceMode 而位移，逐条核对内容后改正。
-      //  29  → 628→1160 = `export function detectedSurfaceMode(`
-      //  32  → 962→856  = decision-4 的 `if (surface.surfaceMode === "subagents" && !pi.getActiveTools()…`
-      //  105 → 962→856  = 同一处（ADR-0029 正文第二次引用它）
-      //  129 → 27 保持    = ` * ## Fail-safe on external loadout changes`，本轮未移动
-      "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:985",
-      "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:908",
-      "docs/adr/0029-surface-follows-codemode-activation.md:105 -> src/index.ts:908",
-      "docs/adr/0029-surface-follows-codemode-activation.md:129 -> ptc-mode.ts:27",
-      //  166 → 920→807 = `if (detected.present && !known) {`，即交叉核对那一条
-      "docs/adr/0029-surface-follows-codemode-activation.md:166 -> src/index.ts:859",
-      // 2026-10-03 第四次复核（ADR-0030）：0030 引 ptc-mode.ts:27-31 那段「loadout 被外部改写
-      // 时模式如何退让」，27 行是段首。本轮该引用在**文档里**的行号因撤回声明从 68 前移到 83，
-      // 引用目标（ptc-mode.ts:27）未动。ADR-0030 另外四处引用写的是 pi 宿主的行号而非本仓文件，
-      // 解析器不收，因此不进这份基线——它们由 ADR 正文里的表格自带出处。
-      "docs/adr/0030-surface-switch-reloads.md:83 -> ptc-mode.ts:27",
-      "docs/adr/0031-open-source-and-publish-authority.md:129 -> src/runtime/limits.ts:4",
-      // 2026-10-08 **第六次**复核：ADR-0032 的 7 条全部重新逐行核对，且这次是按**内容**核对的。
-      //
-      // 前五次里有一次是空行漂移（index.ts 280 → 279），已被本仓抓出。但第六次复核发现的更糟：
-      // 第五次记录在案的这批行号，在 #101 之后**没有一条还对得上内容**，而断言四一直是绿的——
-      // 它只校验行号能解析到目标文件，不校验该行写了什么。所以「第五次已逐行核对过」这句话在
-      // 第六次复核时是**假的**。这正是 docs/testing-constraints.md「What the gate does not check」
-      // 说的那一类：门能看见形状，看不见引用指向的东西。
-      //
-      // 逐条内容（写在这里，是为了让下一个复核者不必重跑一遍就能知道每条该是什么）：
-      //   11 → dispatch.ts:1149 = `function assistantText(event: ParsedAgentEvent)`
-      //   20 → subagent.ts:174  = `export const SUBAGENT_OUTPUT_SCHEMA: SubagentOutputSchema`
-      //   27 → dispatch.ts:1172 = `function accumulateUsage(`（usage 的累加点，前景后台共用）
-      //   55 → subagent.ts:279 = 把投影写进 `structuredContent:` 的那一行
-      //   49 → ptc-task.ts:229/459/618 = 三处 `outputSchema:` 声明
-      //  117 → dispatch.ts:1031 = `export function childToolList(`，即合并进子进程 --tools 的那个函数
-      //
-      // 注意 117 这一条**换了目标而不是只移行号**：#101 之前的实现是一句
-      // `if (agent.tools && agent.tools.length > 0)` 的 guard，那行现在已经不在分支上了，
-      // 替换它的是 childToolList。只把行号从 101 挪到 117 会把一个假的引用钉得更牢。
-      //
-      // 2026-10-10 第七次复核：第六次记在案的**第七条**
-      // `0032:76 -> src/index.ts:280`（= `if (surface.surfaceMode === "off") return;`）
-      // **已从基线中删除**。那一行随 `off` 一起被删掉了，现在 280 处是 BG-14 段落的注释，
-      // 引用指不到它声称的东西；ADR-0032 正文已就此划线注明「该行已不存在」并且**不再引用那个
-      // 行号**——留着一个指向已删行的引用，正是 `tests/doc-integrity.test.ts` 要抓的悬空引用。
-      // 所以这里是**删一条**而不是改行号，本轮唯一的删除项，**新增 0 条**。
-      // 同一次编辑把 ADR-0032 里 123 那条**在文档里**的行号推到 130（引用目标未动，仍是 1031）。
-      "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1151",
-      "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:174",
-      "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1174",
-      "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:279",
-      "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:229",
-      "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1033",
-    ]);
+    ).toEqual([...IN_REPO_PIN_BASELINE]);
+  });
+
+  test("每条仓库内引用的目标行都含它声称的标识符", () => {
+    // 这道断言补的是断言四管不到的那一半。断言四问「这条引用能不能解析」；这里问「它指的东西是不是
+    // 它说的那个」。两者都要，因为**能解析的引用可以是错的**——2026-10-10 那次按内容核对，23 条里
+    // 15 条指错，而断言四全程绿。
+    //
+    // 抓不到的：标识符与行号同时写错。那种情况只能靠人打开那一行看，这张表的作用是把要人看的面缩到
+    // 「标识符对不对」这一层，而不是替代它。
+    const offenders = wrongContentRefs(inRepo, PIN_TOKENS);
+    expect(
+      offenders,
+      `以下引用的行号能解析，但目标行里没有它声称的东西：\n${offenders.join("\n")}`,
+    ).toEqual([]);
+    // 非恒真信号：上面那条全称断言必须真的在判定引用，否则它与「没有引用」不可区分。
+    // 这是本仓在断言四上犯过的同一个错（守卫看着覆盖 file:line，实际整类引用没进判定面）。
+    expect(
+      inRepo.filter(
+        (ref) =>
+          PIN_TOKENS[`${ref.doc}:${ref.line} -> ${ref.file}:${ref.targetLine}`] !== undefined,
+      ).length,
+      "被内容校验真正判定的引用数下界",
+    ).toBeGreaterThanOrEqual(PIN_TOKENS_COUNT_FLOOR);
+  });
+
+  test("每条基线都带了标识符：新增引用不能绕过内容校验", () => {
+    // 内容校验只对登记过的引用生效（没 token 的会被跳过，因为「没登记」由这条断言单独负责报）。
+    // 没有这条，新增一条引用时只更新基线数组、不补 token，就会静默地拿到「只验行号」的老待遇——
+    // 那是把一个已经修好的洞原样开在同一个位置。
+    const unregistered = IN_REPO_PIN_BASELINE.filter((pin) => PIN_TOKENS[pin] === undefined);
+    expect(
+      unregistered,
+      `以下基线条目没有登记标识符，因而逃出内容校验：\n${unregistered.join("\n")}`,
+    ).toEqual([]);
+    // 反向：表里不该有已经不存在的引用（删引用时忘了删 token，就是新的漂移源）。
+    const orphanTokens = Object.keys(PIN_TOKENS).filter(
+      (pin) => !IN_REPO_PIN_BASELINE.includes(pin),
+    );
+    expect(
+      orphanTokens,
+      `以下标识符登记项在基线里已经没有对应引用，请删掉：\n${orphanTokens.join("\n")}`,
+    ).toEqual([]);
+  });
+
+  test("内容校验的反事实：行号对、内容不对时必须被抓到", () => {
+    // 反事实用合成语料，走的是与全称断言同一条判定，所以它证明的是真逻辑而不是「恰好没跑到」。
+    // 引用指向**真实存在**的文件与行（不是构造的路径），但**断言的内容是从那个文件实读的**，
+    // 不硬编码。理由：硬编码会让这条测试也跟着文件内容漂移，于是它红的时候你分不清是「逻辑坏了」
+    // 还是「被引的文件动了」——而后者本来就由上面那条全称断言负责报。
+    const synthesis: LineRef = {
+      doc: "docs/adr/0013-ptc-row-compact-summary.md",
+      line: 140,
+      file: "render.ts",
+      targetLine: 83,
+    };
+    const pin = `docs/adr/0013-ptc-row-compact-summary.md:140 -> render.ts:83`;
+    const target = inRepoTarget(synthesis);
+    expect(target, "反事实要落在真实文件上，落空就测不到真逻辑").not.toBeNull();
+    const actualLine = readFileSync(target!, "utf8").split("\n")[synthesis.targetLine - 1]!;
+    // 正例：token 就是这一行实际含的内容，判定通过。
+    expect(wrongContentRefs([synthesis], { [pin]: actualLine.trim() })).toEqual([]);
+    // 反例一：token 换成这一行绝不含的东西（真实现里对应「引用指到了注释/相邻行」这一类）。
+    expect(wrongContentRefs([synthesis], { [pin]: "definitely-not-on-this-line-42" })).toHaveLength(
+      1,
+    );
+    // 反例二：**没登记**时静默跳过——这正是上面那条「每条基线都带了标识符」要守的口子，
+    // 在这里把它钉成行为而不是留给读者推断。
+    expect(wrongContentRefs([synthesis], {})).toEqual([]);
+    // 反例三：越界的行由断言四负责，这里不重复报（否则同一个缺陷会在两处各红一次）。
+    const outOfRange: LineRef = { ...synthesis, targetLine: 99999 };
+    expect(wrongContentRefs([outOfRange], { [pin]: "anything" })).toEqual([]);
   });
 
   test("盲点回归：只有 basename 的简写引用也能解析到本仓（第三条基准）", () => {
