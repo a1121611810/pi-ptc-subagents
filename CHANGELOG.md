@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.2] - 2026-10-10
+
+### Changed
+
+- **The README leads with what the package is instead of how it works.** The opening now
+  names the two capabilities up front — subagent fan-out and programmable tool calling —
+  and states the relationship with pi's own `codemode` in the first screen. The surface
+  detection deep-dive (three-question table, startup notices, `--print` / `--no-extensions`
+  edge cases) moves out of the README to
+  [docs/usage/surface.md](./docs/usage/surface.md), which now owns it; the README keeps
+  the short version and a pointer. Everything else is tightened, not deleted.
+- **The built-in tool enumeration no longer claims a count pi moved past.** The README used
+  to say "all seven built-ins"; pi 1.1.0 ships eight (`powershell` joined), so the copy now
+  enumerates the tools this package binds (`read`, `bash`, `edit`, `write`, `grep`, `find`,
+  `ls`) without claiming that is pi's full set. Docs only; no code change — note the
+  binding list itself is unchanged, and `powershell` is currently not reachable from PTC
+  programs even when enabled (tracked separately).
+
+[2.0.2]: https://github.com/a1121611810/pi-ptc-subagents/compare/v2.0.1...v2.0.2
+
 ## [2.0.1] - 2026-10-10
 
 ### Changed
