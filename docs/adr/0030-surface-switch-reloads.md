@@ -26,6 +26,17 @@ chosen: pi has `unregisterProvider` and `unregisterVirtualModel` but **no `unreg
 undone. Everything downstream inherits that — ADR-0026 and ADR-0029 both have to answer their
 question on the filesystem, at factory time, because it is the only moment the answer can be used.
 
+> **Amended 2026-10-10 by [ADR-0035](./0035-ask-pi-for-the-loadout.md).** The last sentence is the
+> one this record got wrong, and it got it wrong by inference rather than by measurement.
+> `unregisterTool` still does not exist; what does not follow is that the answer has to be known at
+> **factory** time. Registration is legal from an event handler, so the answer only has to be known
+> before the **session** opens — which is where `session_start` is. The filesystem was never the
+> only moment; it was the only moment available to a design that registered in the factory.
+>
+> This record is withdrawn by ADR-0034 regardless, so the paragraph above is history. It is marked
+> because the inference in it is the same one ADR-0035 exists to correct, and a reader who arrives
+> here first should not take it as a live constraint.
+
 The cost lands on the user. Choosing a surface means editing `~/.pi/agent/ptc.json` by hand and
 **starting a new session**, and the README has to say so in as many words. The setting is
 discoverable, well documented, and awkward — three properties that together mean most people never

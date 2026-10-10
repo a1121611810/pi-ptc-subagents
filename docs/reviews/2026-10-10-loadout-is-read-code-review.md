@@ -91,12 +91,29 @@ source file's `sha256` checked before and after.
 
 `src/mode/ptc-mode.ts` and `src/tools/render.ts` were byte-identical after their rounds.
 
+### Round 2 — delta over the fix commit
+
+Per this repository's closure discipline the next round reviews the fix commits rather than the
+whole change. Scope `fc756f8..HEAD`: nine files, and all but the ledger are comments or prose.
+
+**No new findings in the deliverable.** The two named-but-unfixed sites this round closed were the
+ones round 1 listed as "same class, outside the diff": `ADR-0033` asserted the activation probe
+"reads the developer's own `settings.json`" — a sentence written during this very change and
+falsified by the next commit in it — and `ADR-0030` carried the inference ADR-0035 exists to
+correct ("the filesystem, at factory time, because it is the only moment the answer can be used").
+Both now state what is true and keep the old claim visible rather than deleting it.
+
+Anchor re-taken on the **rebuilt** artifact, because the fixes touched `src/index.ts` even though
+only its comments changed: declined → `codemodeActive: false`, no `ptc_subagent`, no subagent face;
+trusted → `codemodeActive: true`, `ptc_subagent` registered and model-facing. Same two rows as
+before the fixes, as expected of a comment-only change, and measured rather than assumed.
+
 ## Verdict
 
-Round **advanced**, then **passed**: the four blocking findings are closed, the anchor is green,
+Round 1 **advanced**; round 2 **passed** with the anchor green, which is the stop condition. the four blocking findings are closed, the anchor is green,
 and no finding was raised against the deliverable that this round's own fixes did not introduce.
 Whole-tree gate green at close: `typecheck`, `lint`, `fmt:check`, `build`,
-`1104 passed · 5 skipped (1109)`, `verify:dist 29/29`.
+`1104 passed · 5 skipped (1109)`, `verify:dist 29/29` on the rebuilt artifact.
 
 One observation worth carrying forward rather than a finding: **three of the four blocking
 findings, and the two ADR ones, were the same defect** — a record asserting behaviour the code no

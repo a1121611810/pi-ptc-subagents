@@ -1341,7 +1341,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       "## Fail-safe on external loadout changes",
     "docs/adr/0029-surface-follows-codemode-activation.md:188 -> src/index.ts:863":
       "if (detected.present && !known) {",
-    "docs/adr/0030-surface-switch-reloads.md:83 -> ptc-mode.ts:27":
+    "docs/adr/0030-surface-switch-reloads.md:94 -> ptc-mode.ts:27":
       "## Fail-safe on external loadout changes",
     "docs/adr/0031-open-source-and-publish-authority.md:129 -> src/runtime/limits.ts:4":
       "The numbers are DSH's",
@@ -1402,7 +1402,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // 时模式如何退让」，27 行是段首。本轮该引用在**文档里**的行号因撤回声明从 68 前移到 83，
     // 引用目标（ptc-mode.ts:27）未动。ADR-0030 另外四处引用写的是 pi 宿主的行号而非本仓文件，
     // 解析器不收，因此不进这份基线——它们由 ADR 正文里的表格自带出处。
-    "docs/adr/0030-surface-switch-reloads.md:83 -> ptc-mode.ts:27",
+    "docs/adr/0030-surface-switch-reloads.md:94 -> ptc-mode.ts:27",
     "docs/adr/0031-open-source-and-publish-authority.md:129 -> src/runtime/limits.ts:4",
     // 2026-10-08 **第六次**复核：ADR-0032 的 7 条全部重新逐行核对，且这次是按**内容**核对的。
     //

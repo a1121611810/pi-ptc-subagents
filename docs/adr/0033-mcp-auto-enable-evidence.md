@@ -174,10 +174,15 @@ user who pinned `full` on an MCP session is never told" — cannot occur.
    `readSurfaceModeConfig` in the same way, and another seam is another place for the three to
    drift.~~ **Reversed 2026-10-10 by [ADR-0034](./0034-surface-is-detected-not-set.md)**: that
    function is gone with the key it read, and `codemodeActivation` is now a third seam — which this
-   package needed anyway, because the activation probe reads the developer's own `settings.json`.
-5. **No mid-session surface switch.** Registration happens in the factory and pi has no
-   `unregisterTool` (ADR-0029), so the notice is visibility, not a remedy; the remedy was ADR-0030's
-   `surfaceMode` + reload — **both withdrawn by ADR-0034**, which leaves neither.
+   package needed anyway, because the probe it feeds reaches the developer's own machine. _(That
+   last clause said "reads the developer's own `settings.json`" until ADR-0035, which stopped the
+   loadout axis reading settings files at all. The seam is still needed: the machine-dependence is
+   gone, but a test whose subject is the axis still has to state an answer pi would not produce.)_
+5. **No mid-session surface switch.** pi has no `unregisterTool` (ADR-0029) — and while
+   registration now happens at `session_start` rather than in the factory ([ADR-0035](./0035-ask-pi-for-the-loadout.md)),
+   the session is still the unit: the surface is decided once when it opens and cannot be revised
+   inside it. So the notice is visibility, not a remedy; the remedy was ADR-0030's `surfaceMode` +
+   reload — **both withdrawn by ADR-0034**, which leaves neither.
 
 ## Consequences
 
