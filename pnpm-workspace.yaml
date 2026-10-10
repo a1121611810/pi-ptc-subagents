@@ -1,5 +1,16 @@
-# pnpm 12 project config (single-package — no `packages:` field means only the
-# root is included, see https://pnpm.io/settings).
+# pnpm 12 project config.
+#
+# `packages:` — the root is always a workspace member; this field adds the
+# members beside it. `website` is the project site (VitePress, published to
+# GitHub Pages). It is `private`, is excluded from the published npm package by
+# the root `files` allowlist, and is deliberately NOT part of the root release
+# gate: that gate asserts what the npm package ships. See the website ADR.
+#
+# The lockfile is the discipline this field creates. Every workflow in this
+# repository installs with `--frozen-lockfile`, and a workspace member with
+# dependencies that is absent from `pnpm-lock.yaml` fails that install with
+# `ERR_PNPM_PACKAGE_MANAGER_NO_IMPORTER`. So: regenerate the lockfile and commit
+# it in the SAME commit that adds or changes the website's dependencies.
 #
 # `allowBuilds` (added in pnpm 10.26, replaces the removed `onlyBuiltDependencies`):
 # this project does not need any dependency's install/postinstall scripts.
@@ -7,6 +18,9 @@
 # never invoke directly, and `@google/genai` / `protobufjs` are not used at
 # runtime. Listing each known transitive here with `false` documents that we
 # reviewed them and chose not to run their scripts.
+packages:
+  - "packages/*"
+
 allowBuilds:
   esbuild: false
   "@google/genai": false

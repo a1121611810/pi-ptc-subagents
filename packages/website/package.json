@@ -1,0 +1,15 @@
+{
+  "name": "website",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "The pi-ptc-subagents project site. Not published to npm; see the root `files` allowlist.",
+  "scripts": {
+    "dev": "vitepress dev",
+    "build": "vitepress build",
+    "preview": "vitepress preview"
+  },
+  "devDependencies": {
+    "vitepress": "1.6.4"
+  }
+}
