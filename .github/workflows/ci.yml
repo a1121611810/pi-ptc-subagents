@@ -14,6 +14,37 @@ permissions:
   contents: read
 
 jobs:
+  # The About panel is the one surface this repository states its purpose on that is not under
+  # version control: `package.json` says what the package is, the repository metadata says it
+  # independently, and nothing connected them. They match today; a rewording of the manifest's
+  # sentence would leave the panel describing something else, silently.
+  #
+  # `if: github.event_name == 'push'` is load-bearing, not a convenience. This workflow runs on
+  # both `pull_request` and `push` to `main`; the repair for drift is `gh repo edit`, an out-of-band
+  # action against the repository's own metadata that no commit can carry. Run on PRs, every
+  # legitimate description change would fail against something the PR author cannot fix in that PR.
+  # So this asserts the merged state, which is the only state where the drift is observable.
+  #
+  # This is also the repository's first network-dependent check, and deliberately not part of
+  # `prepublishOnly` — every gate in the release chain is hermetic, and this one would make
+  # publishing contingent on GitHub's API being up. It fails when it cannot verify, because
+  # "could not check" and "no drift" are different states.
+  repo-metadata:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      # No `pnpm install`: the check reads package.json and calls the GitHub API using node
+      # built-ins only. There is nothing to install and nothing to cache.
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: lts/*
+      - run: node scripts/check-repo-metadata.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+
   format:
     runs-on: ubuntu-latest
     steps:

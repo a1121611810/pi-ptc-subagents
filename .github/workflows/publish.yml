@@ -71,3 +71,17 @@ jobs:
       # at which npm reports the OIDC exchange, so the release log records it instead of
       # hiding both success and failure (ADR-0018 §2).
       - run: npm publish --loglevel verbose
+      # ADR-0018 establishes that the tag is the release's identity. This is the other
+      # half of it: `npm publish` exiting 0 means a tarball was accepted, not that the
+      # registry now *serves* the fields the manifest promised — the registry serves
+      # the published manifest, and a change lands there only when a version carrying
+      # it ships. So read it back and compare.
+      #
+      # `continue-on-error` is deliberate. By this line the publish has already happened
+      # and is irreversible; a red `Publish` run on `main` would read as "the release
+      # failed" when it did not. The script still exits non-zero on drift, so the
+      # release log carries the signal without anything pretending the artifact was
+      # verified when it was not.
+      - name: Verify the published manifest matches this one
+        continue-on-error: true
+        run: node scripts/check-published-manifest.mjs

@@ -8,8 +8,9 @@
     "project": "node scripts/project-docs.mjs",
     "dev": "node scripts/project-docs.mjs && vitepress dev",
     "build": "node scripts/project-docs.mjs && vitepress build && pnpm run check",
-    "check": "node scripts/check-landing-tool-names.mjs && node scripts/check-internal-links.mjs",
-    "preview": "vitepress preview"
+    "check": "node scripts/run-checks.mjs",
+    "preview": "vitepress preview",
+    "check:external-links": "node scripts/check-external-links.mjs"
   },
   "devDependencies": {
     "vitepress": "1.6.4"
