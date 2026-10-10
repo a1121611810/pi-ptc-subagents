@@ -36,12 +36,12 @@ for (const t of rows.tasks) {
 }
 ```
 
-| tool              | `structuredContent`                                                                                                                                       |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ptc_task_list`   | `{ tasks: [{ id, status, agent, depth, label, output_bytes?, error_message? }], count }`                                                                  |
-| `ptc_task_output` | `{ task_id, status, output, output_bytes, output_preview?, output_truncated, output_full_path?, report_channel?, report? }`                                 |
-| `ptc_task_stop`   | `{ task_id, status, from_status, stop_reason? }`                                                                                                             |
-| `ptc_subagent`    | `{ task_id?, status, exit_code? }`                                                                                                                           |
+| tool              | `structuredContent`                                                                                                         |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `ptc_task_list`   | `{ tasks: [{ id, status, agent, depth, label, output_bytes?, error_message? }], count }`                                    |
+| `ptc_task_output` | `{ task_id, status, output, output_bytes, output_preview?, output_truncated, output_full_path?, report_channel?, report? }` |
+| `ptc_task_stop`   | `{ task_id, status, from_status, stop_reason? }`                                                                            |
+| `ptc_subagent`    | `{ task_id?, status, exit_code? }`                                                                                          |
 
 Optional keys are **omitted**, never present-and-null, so `Object.hasOwn(t, "error_message")` is
 the test for "this task had an error", not `t.error_message !== undefined`.
