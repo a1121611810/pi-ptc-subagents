@@ -206,6 +206,9 @@ function main() {
       `description: ${JSON.stringify(doc.blurb)}\n` +
       `---\n`;
 
+    // The file is named after the route slug, not after its source path, so that
+    // moving a document inside the repository does not silently move a published
+    // URL. The route is curated in DOCUMENTS above and nowhere else.
     const out = join(OUT_DIR, `${doc.slug}.md`);
     writeFileSync(out, `${frontmatter}${insertBanner(markdown, doc.source, title)}`, 'utf8');
     emitted.push({ ...doc, title, rewrites });

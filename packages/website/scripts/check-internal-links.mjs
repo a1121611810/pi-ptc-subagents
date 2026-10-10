@@ -15,12 +15,21 @@
  * in-page anchors are out of scope: the first cannot be checked from here, the
  * second is a same-page reference.
  *
+ * It also resolves one class of *absolute* link, which the routing pass cannot
+ * see: a URL into this repository (`.../blob|edit|tree/main/<path>`). Those are
+ * checked against the working tree, because the whole point of such a link is
+ * that the file is there. That pass exists because the site shipped with an
+ * `editLink` pattern that resolved to `docs/docs/install.md` on every projected
+ * page — a path that exists in neither the repository nor the site. Root-relative
+ * routing saw nothing wrong, VitePress saw nothing wrong, and the link was dead
+ * on all four pages.
+ *
  * Exit 1 lists every unresolved href. Silence is not a pass signal — the point
  * of printing the resolved count is that a run with nothing to report is
  * distinguishable from a run that looked at nothing.
  */
 
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -40,6 +49,16 @@ const BASE = '/pi-ptc-subagents/';
 
 /** A path ending in a file extension is an asset, not a page to navigate to. */
 const ASSET = /\.[a-z0-9]{2,5}(\?|#|$)/i;
+
+/**
+ * A URL into this repository's `main` branch, capturing the repository-relative path.
+ *
+ * Only `main` is recognised, and only for this repository: a link to another repo
+ * or another branch is not checkable from here and is left alone rather than
+ * reported as broken.
+ */
+const REPO_FILE =
+  /^https:\/\/github\.com\/a1121611810\/pi-ptc-subagents\/(?:blob|edit|tree)\/main\/([^?#]+)/;
 
 /**
  * Every built HTML file, as a route path.
@@ -105,18 +124,46 @@ function main() {
   }
 
   const broken = new Map();
+  const missingRepoFiles = new Map();
+  let repoFileLinks = 0;
 
   for (const file of files) {
     const html = readFileSync(file, 'utf8');
     const from = '/' + relative(DIST, file).split(/[\\/]/).join('/');
     for (const match of html.matchAll(/href="([^"]*)"/g)) {
       const href = match[1];
+
+      // A link into this repository: the path must exist in the working tree.
+      const repoFile = REPO_FILE.exec(href);
+      if (repoFile) {
+        repoFileLinks += 1;
+        const target = decodeURIComponent(repoFile[1]);
+        if (!existsSync(join(REPO_ROOT, target))) {
+          if (!missingRepoFiles.has(target)) missingRepoFiles.set(target, new Set());
+          missingRepoFiles.get(target).add(from);
+        }
+        continue;
+      }
+
       // Skip external, protocol-relative, mailto, and bare-anchor links.
       if (!href.startsWith('/') || href.startsWith('//')) continue;
       if (resolves(href, routes)) continue;
       if (!broken.has(href)) broken.set(href, new Set());
       broken.get(href).add(from);
     }
+  }
+
+  if (missingRepoFiles.size > 0) {
+    console.error(`✗ ${missingRepoFiles.size} repository link(s) name a file that does not exist:\n`);
+    for (const [target, froms] of [...missingRepoFiles].sort()) {
+      console.error(`   ${target}`);
+      console.error(`      linked from: ${[...froms].join(', ')}`);
+    }
+    console.error(
+      `\n  These are the paths a reader would be sent to edit or view. A projected page's\n` +
+        `  source lives at its own repository path, not under the site's generated tree.`,
+    );
+    process.exit(1);
   }
 
   if (broken.size > 0) {
@@ -130,7 +177,8 @@ function main() {
   }
 
   console.log(
-    `✓ internal links — ${files.length} page(s), ${routes.length} route(s), nothing dangling`
+    `✓ internal links — ${files.length} page(s), ${routes.length} route(s), ` +
+      `${repoFileLinks} repository link(s) resolved, nothing dangling`,
   );
 }
 
