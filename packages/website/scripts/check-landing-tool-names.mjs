@@ -19,13 +19,26 @@
  *     the pipeline. Comments are stripped first, so prose that merely names a
  *     tool cannot make this pass.
  *
- * It is NOT a check that the landing page is factually complete. A page that
- * forgot to mention a tool passes. That gap is deliberate and recorded as
- * out-of-scope in the spec (#144); this catches the dangerous direction, where
- * the page advertises something that does not exist.
+ * It checks three directions, not one.
  *
- * Exit code is 1 on any claim without a registration, and the unbacked names
- * are printed — a silent pass here would be indistinguishable from a pass.
+ * 1. **Nothing invented.** Every `ptc_*` the page shows must be registered. A
+ *    visitor has no way to check a landing page, so advertising something that
+ *    does not exist is the dangerous direction.
+ * 2. **Nothing required is missing.** Every entry in MUST_APPEAR must appear on
+ *    the built page, so a redesign that quietly drops a tool fails the build.
+ * 3. **Nothing is unaccounted for.** Every registered `ptc_*` must be in
+ *    MUST_APPEAR **or** DECLARED_ABSENT, so adding a tool fails until someone
+ *    says which side it is on.
+ *
+ * Direction 3 is what this gate was missing, and it is deliberately **not**
+ * "the page must list every tool". `ptc_child_report` is what a dispatched
+ * child uses to return its report (ADR-0032); no reader of this package calls
+ * it. A literal two-way set comparison would have demanded the page mention
+ * it, encoding a wrong requirement as a check. The partition enforces the
+ * thing that actually drifts instead: a new tool nobody decided to advertise.
+ *
+ * Exit code is 1 on any failure, and every failure names what to change. A
+ * silent pass here would be indistinguishable from a pass.
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -39,6 +52,31 @@ const BUILT_INDEX = join(HERE, '..', '.vitepress', 'dist', 'index.html');
 
 /** Names the landing page may use as a family, e.g. `ptc_task_*`. */
 const WILDCARD = /\*$/;
+
+/**
+ * What the landing page is required to show.
+ *
+ * A trailing `*` is a family claim and covers every registered name under it, so
+ * `ptc_task_*` stands for `ptc_task_list`, `ptc_task_output` and `ptc_task_stop`
+ * without listing them twice. Removing one of the three from the page does **not**
+ * fail the build; removing the family claim does.
+ */
+const MUST_APPEAR = ["ptc_run_code", "ptc_subagent", "ptc_workflow", "ptc_task_*"];
+
+/**
+ * Registered tools the landing page deliberately does not mention, each with its reason.
+ *
+ * The reason is not decoration. An exclusion without one is how a tool stays invisible by
+ * accident, which is the drift this partition exists to prevent — so a future maintainer can
+ * tell "we decided this" from "nobody has looked".
+ */
+const DECLARED_ABSENT = new Map([
+  [
+    "ptc_child_report",
+    "the child-side contract a dispatched task calls to return its report (ADR-0032); no reader " +
+      "of the package calls it, and the landing page advertises the parent-side surface",
+  ],
+]);
 
 /** Recursively list .ts files under a directory. */
 function tsFiles(dir) {
@@ -146,9 +184,71 @@ function main() {
     process.exit(1);
   }
 
+  // Direction 2 — a required name the page stopped showing.
+  const missing = MUST_APPEAR.filter(
+    (required) =>
+      !claims.some((claim) =>
+        WILDCARD.test(required)
+          ? claim === required || claim.startsWith(required.slice(0, -1))
+          : claim === required,
+      ),
+  );
+
+  if (missing.length > 0) {
+    console.error('✗ the landing page no longer shows a tool it is required to show:\n');
+    for (const name of missing) console.error(`   ${name}`);
+    console.error(
+      '\n  Either the page should name it, or it is no longer required — in which case it\n' +
+        '  comes out of MUST_APPEAR here. Removing it from the page and from MUST_APPEAR in\n' +
+        '  the same change is a decision; removing it from the page alone is drift.',
+    );
+    process.exit(1);
+  }
+
+  // Direction 3 — a registered tool that neither set accounts for.
+  const unaccounted = [...registered]
+    .filter(
+      (name) =>
+        !DECLARED_ABSENT.has(name) &&
+        !MUST_APPEAR.some((required) =>
+          WILDCARD.test(required) ? name.startsWith(required.slice(0, -1)) : name === required,
+        ),
+    )
+    .sort(byName);
+
+  if (unaccounted.length > 0) {
+    console.error(
+      `✗ ${unaccounted.length} registered tool(s) are neither required on the landing page ` +
+        `nor declared absent:\n`,
+    );
+    for (const name of unaccounted) console.error(`   ${name}`);
+    console.error(
+      '\n  A new tool has to be decided: add it to MUST_APPEAR to advertise it, or to\n' +
+        '  DECLARED_ABSENT with a reason if the page should not mention it. Both are\n' +
+        '  decisions; landing in neither is the drift this check exists to catch.',
+    );
+    process.exit(1);
+  }
+
+  // An exclusion naming a tool that no longer exists is a stale record, not a spare.
+  const stale = [...DECLARED_ABSENT.keys()]
+    .filter((name) => !registered.has(name))
+    .sort(byName);
+
+  if (stale.length > 0) {
+    console.error('✗ DECLARED_ABSENT names tools this package does not register:\n');
+    for (const name of stale) console.error(`   ${name}`);
+    console.error(
+      '\n  The tool was removed or renamed. Delete the exclusion in the same commit that\n' +
+        '  removed the tool — a spare exclusion hides the next rename.',
+    );
+    process.exit(1);
+  }
+
   console.log(
-    `✓ landing page tool names — ${claims.length} claim(s) checked against ` +
-      `${registered.size} registered tool(s)`
+    `✓ landing page tool names — ${claims.length} claim(s) against ${registered.size} ` +
+      `registered tool(s); ${MUST_APPEAR.length} required, ` +
+      `${DECLARED_ABSENT.size} declared absent, 0 unaccounted`,
   );
   for (const claim of claims) console.log(`    ${claim}`);
 }
