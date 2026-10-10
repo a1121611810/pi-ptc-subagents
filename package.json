@@ -56,7 +56,7 @@
     "@earendil-works/pi-tui": "^1.0.0",
     "@types/node": "^22.0.0",
     "@vitest/coverage-v8": "4.1.11",
-    "oxfmt": "^0.70.0",
+    "oxfmt": "^0.72.0",
     "oxlint": "^1.85.0",
     "oxlint-tsgolint": "^7.0.2002",
     "rolldown": "^1.2.9",
