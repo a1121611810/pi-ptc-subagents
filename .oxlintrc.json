@@ -11,5 +11,5 @@
   "env": {
     "builtin": true
   },
-  "ignorePatterns": ["docs/prototypes/**"]
+  "ignorePatterns": ["docs/prototypes/**", "packages/website/**"]
 }

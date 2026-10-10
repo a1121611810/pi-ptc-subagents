@@ -1,0 +1,424 @@
+/**
+ * The landing page is a hand-written single page with no markdown body, so it
+ * brings its own styles rather than inheriting the docs typography.
+ *
+ * Dark by default, because the product lives in a terminal — but it follows
+ * `prefers-color-scheme` so it is not a dark-only page pretending to be a site.
+ */
+
+:root {
+  --lp-fg: #14151a;
+  --lp-dim: #5b6070;
+  --lp-line: #e3e5ec;
+  --lp-accent: #e5484d;
+  --lp-code-bg: #f4f5f8;
+  --lp-hero-bg: #fbfbfd;
+  --lp-alt-bg: #f7f8fa;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --lp-fg: #eceef4;
+    --lp-dim: #949bb0;
+    --lp-line: #23262f;
+    --lp-accent: #ff6369;
+    --lp-code-bg: #16181e;
+    --lp-hero-bg: #0e0f13;
+    --lp-alt-bg: #111319;
+  }
+}
+
+/*
+ * VitePress still renders the page inside its own `.Layout` → `.VPContent`
+ * shell, so "hide the docs chrome" means hiding the chrome, not the container
+ * the landing page is mounted in. Hiding `.VPContent` hid the landing page
+ * with it: the build stayed green, the route answered 200, and the text was in
+ * the DOM — and the page rendered blank. Only a screenshot showed it.
+ */
+.VPNav,
+.VPFooter {
+  display: none !important;
+}
+
+/*
+ * Full bleed. VitePress centres `.VPDoc` and caps its width for documentation
+ * prose; a landing page is not prose and must not inherit that measure.
+ */
+.VPContent,
+.VPContentContainer,
+.VPDoc,
+.VPDocContainer,
+.VPDocWrapper,
+.VPDocSider {
+  padding: 0 !important;
+  margin: 0 !important;
+  max-width: none !important;
+  width: 100% !important;
+}
+
+.VPDocSider {
+  display: none !important;
+}
+
+.lp {
+  color: var(--lp-fg);
+  font-size: 15px;
+  line-height: 1.65;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, system-ui, sans-serif;
+}
+
+.lp code {
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.9em;
+}
+
+/* ── hero ──────────────────────────────────────────────────────────────── */
+
+.lp-hero {
+  background: var(--lp-hero-bg);
+  text-align: center;
+  padding: 92px 28px 68px;
+}
+
+.lp-mark {
+  font-size: clamp(42px, 8.5vw, 92px);
+  font-weight: 800;
+  letter-spacing: -0.045em;
+  line-height: 0.95;
+  margin: 0 0 28px;
+}
+
+.lp-mark em {
+  font-style: normal;
+  color: var(--lp-accent);
+}
+
+.lp-tag {
+  font-size: clamp(19px, 2.5vw, 27px);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  max-width: 22ch;
+  margin: 0 auto 14px;
+  line-height: 1.25;
+}
+
+.lp-sub {
+  color: var(--lp-dim);
+  max-width: 60ch;
+  margin: 0 auto 34px;
+  font-size: 16px;
+}
+
+.lp-sub a {
+  color: var(--lp-fg);
+  text-underline-offset: 3px;
+}
+
+.lp-install {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--lp-code-bg);
+  border: 1px solid var(--lp-line);
+  border-radius: 12px;
+  padding: 13px 13px 13px 20px;
+  font-size: 15px;
+}
+
+.lp-install button {
+  cursor: pointer;
+  background: var(--lp-fg);
+  color: var(--lp-hero-bg);
+  border: none;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+}
+
+.lp-install-note {
+  color: var(--lp-dim);
+  font-size: 13.5px;
+  margin: 16px 0 0;
+}
+
+/* ── sections ──────────────────────────────────────────────────────────── */
+
+.lp-sec {
+  padding: 66px 28px;
+  border-top: 1px solid var(--lp-line);
+}
+
+.lp-sec-alt {
+  background: var(--lp-alt-bg);
+}
+
+.lp-sec-warn {
+  background: var(--lp-alt-bg);
+}
+
+.lp-sec > * {
+  max-width: 1080px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.lp-eyebrow {
+  font-size: 12px;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--lp-dim);
+  font-weight: 600;
+  margin: 0 0 8px;
+  text-align: center;
+}
+
+.lp-h2 {
+  font-size: clamp(22px, 3vw, 30px);
+  letter-spacing: -0.025em;
+  margin: 0 auto 14px;
+  text-align: center;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.lp-lede {
+  color: var(--lp-dim);
+  text-align: center;
+  max-width: 64ch;
+  margin: 0 auto 38px;
+}
+
+.lp-lede a {
+  color: var(--lp-fg);
+  text-underline-offset: 3px;
+}
+
+.lp-foot {
+  color: var(--lp-dim);
+  font-size: 13.5px;
+  text-align: center;
+  margin: 18px auto 0;
+}
+
+.lp-foot a {
+  color: var(--lp-fg);
+  text-underline-offset: 3px;
+}
+
+/* ── capability cards ──────────────────────────────────────────────────── */
+
+.lp-two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 26px;
+}
+
+.lp-card {
+  border: 1px solid var(--lp-line);
+  border-radius: 14px;
+  padding: 26px;
+  background: var(--lp-hero-bg);
+}
+
+.lp-card h3 {
+  margin: 0 0 10px;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+  font-weight: 600;
+}
+
+.lp-num {
+  color: var(--lp-accent);
+  font-weight: 700;
+  margin-right: 8px;
+}
+
+.lp-card p {
+  color: var(--lp-dim);
+  margin: 0 0 16px;
+}
+
+.lp-card pre,
+.lp-gap pre {
+  background: var(--lp-code-bg);
+  border: 1px solid var(--lp-line);
+  border-radius: 10px;
+  padding: 16px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  margin: 0;
+  overflow-x: auto;
+}
+
+.lp-card pre b {
+  color: var(--lp-accent);
+  font-weight: 700;
+}
+
+.lp-card pre i {
+  color: var(--lp-dim);
+  font-style: normal;
+}
+
+/* ── "what pi doesn't build" ───────────────────────────────────────────── */
+
+.lp-gaps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+
+.lp-gap {
+  border: 1px solid var(--lp-line);
+  border-radius: 12px;
+  padding: 22px;
+  background: var(--lp-hero-bg);
+}
+
+.lp-gap s {
+  color: var(--lp-dim);
+  text-decoration-color: var(--lp-accent);
+  font-weight: 600;
+}
+
+.lp-gap h4 {
+  margin: 8px 0 8px;
+  font-size: 15.5px;
+  color: var(--lp-accent);
+  font-weight: 600;
+}
+
+.lp-gap p {
+  margin: 0;
+  color: var(--lp-dim);
+  font-size: 14px;
+}
+
+/* ── comparison table ──────────────────────────────────────────────────── */
+
+.lp-tablewrap {
+  overflow-x: auto;
+}
+
+.lp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14.5px;
+}
+
+.lp-table th,
+.lp-table td {
+  text-align: left;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--lp-line);
+  vertical-align: top;
+}
+
+.lp-table thead th {
+  font-size: 11.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--lp-dim);
+  border-bottom: 1.5px solid var(--lp-line);
+  font-weight: 700;
+}
+
+.lp-table td.c,
+.lp-table th.c {
+  text-align: center;
+  width: 108px;
+  white-space: nowrap;
+}
+
+.lp-table td.yes {
+  color: var(--lp-accent);
+  font-weight: 700;
+}
+
+.lp-table td.no {
+  color: #b9bfcc;
+}
+
+.lp-table tbody tr:hover {
+  background: var(--lp-code-bg);
+}
+
+.lp-table small {
+  display: block;
+  font-weight: 400;
+  color: var(--lp-dim);
+  margin-top: 4px;
+  font-size: 13px;
+}
+
+/* ── trust ─────────────────────────────────────────────────────────────── */
+
+.lp-trust {
+  max-width: 78ch;
+  margin: 0 auto;
+  padding-left: 22px;
+}
+
+.lp-trust li {
+  margin-bottom: 12px;
+  color: var(--lp-dim);
+}
+
+.lp-trust strong {
+  color: var(--lp-fg);
+}
+
+/* ── footer nav ────────────────────────────────────────────────────────── */
+
+.lp-foot-nav {
+  border-top: 1px solid var(--lp-line);
+  padding: 52px 28px 72px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 18px;
+  max-width: 1080px;
+  margin: 0 auto;
+}
+
+.lp-foot-nav a {
+  border: 1px solid var(--lp-line);
+  border-radius: 12px;
+  padding: 18px;
+  display: block;
+  text-decoration: none;
+  color: var(--lp-fg);
+}
+
+.lp-foot-nav a:hover {
+  border-color: var(--lp-accent);
+}
+
+.lp-foot-nav strong {
+  display: block;
+  font-size: 14.5px;
+  margin-bottom: 3px;
+}
+
+.lp-foot-nav span {
+  color: var(--lp-dim);
+  font-size: 13px;
+}
+
+/* ── narrow ────────────────────────────────────────────────────────────── */
+
+@media (max-width: 860px) {
+  .lp-two,
+  .lp-gaps,
+  .lp-foot-nav {
+    grid-template-columns: 1fr;
+  }
+  .lp-hero {
+    padding: 64px 20px 52px;
+  }
+  .lp-sec {
+    padding: 48px 20px;
+  }
+}
