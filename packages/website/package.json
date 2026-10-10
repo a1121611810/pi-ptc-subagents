@@ -5,10 +5,11 @@
   "type": "module",
   "description": "The pi-ptc-subagents project site. Not published to npm; see the root `files` allowlist.",
   "scripts": {
-    "dev": "vitepress dev",
-    "build": "vitepress build && node scripts/check-landing-tool-names.mjs",
-    "preview": "vitepress preview",
-    "check": "pnpm run build"
+    "project": "node scripts/project-docs.mjs",
+    "dev": "node scripts/project-docs.mjs && vitepress dev",
+    "build": "node scripts/project-docs.mjs && vitepress build && pnpm run check",
+    "check": "node scripts/check-landing-tool-names.mjs && node scripts/check-internal-links.mjs",
+    "preview": "vitepress preview"
   },
   "devDependencies": {
     "vitepress": "1.6.4"

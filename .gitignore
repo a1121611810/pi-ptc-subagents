@@ -4,3 +4,7 @@ coverage/
 .DS_Store
 .zcode/
 .scratch/
+
+# Projected at build time from docs/** by packages/website/scripts/project-docs.mjs.
+# Never committed: a committed copy is the second copy this design exists to avoid.
+packages/website/docs/
