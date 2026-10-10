@@ -1,6 +1,6 @@
 ---
 
-status: accepted (2026-10-03). §Context and §Verification amended 2026-10-09: the pair registers on `subagents`, at `codemode` reach.
+status: accepted (2026-10-03). §Context and §Verification amended 2026-10-09: the pair registers on `subagents`, at `codemode` reach. **§"Absence of evidence" and §"The mirror" and §"We do not make the `session_start` measurement authoritative" amended 2026-10-10 by ADR-0035**, which deletes the reconstruction those sections describe.
 
 # The detected surface follows whether codemode will be ACTIVE, not only whether it ships or loads
 
@@ -29,7 +29,7 @@ chain runs:
 | ⇒ surface  | `subagents`                                                    | `detectedSurfaceMode` (`ptc-mode.ts:985-994`) |
 | activation | `codemode` registers with **`defaultActive: false`**           | `dist/extensions/codemode/index.js:26`        |
 | ⇒ loadout  | pi's default active names are `["read","bash","edit","write"]` | `settings-manager.js:35`                      |
-| ⇒ warning  | `getActiveTools()` has no `codemode`                           | `src/index.ts:908`                            |
+| ⇒ warning  | `getActiveTools()` has no `codemode`                           | `src/index.ts:914`                            |
 
 So `subagents` hands orchestration to a tool that is loaded, registered, and not callable, and the
 session is left with nothing to orchestrate with ~~because `subagents` deliberately does not
@@ -65,6 +65,13 @@ The last row is the one this ADR adds, and it is the default.
 
 ### Absence of evidence is `inactive`
 
+> **Amended 2026-10-10, ADR-0035.** The three places below are no longer read by this package. The
+> activation column is now filled by asking pi for its own active tool set (ADR-0035); the three
+> sources are still described here because they are what pi resolves, and this ADR's argument is
+> about the _direction_ of the answer rather than about who computes it. Read the list as "what pi
+> consults", not as "what this probe mirrors". The next section's copy of pi's two settings
+> functions is deleted from the code and is history.
+
 The activation probe resolves in the same order pi does, reading the same three places:
 
 1. `--tools` / `-t <list>` on the command line (`dist/cli/args.js:110`) — an allowlist that
@@ -78,6 +85,14 @@ Step 3 is the load-bearing one, and it is the whole design: `subagents` is chose
 **positive** evidence that codemode is callable. "Nobody said anything" resolves to `full`.
 
 ### The mirror, and why it does not have to be perfect
+
+> **Withdrawn 2026-10-10 by ADR-0035.** Everything below this line describes code that no longer
+> exists: `isToolModifier`, `mergeDefaultTools` and `resolveDefaultTools` were deleted along with
+> the command-line reader that fed them. The section is kept because its argument is the reason the
+> reconstruction was believed safe, and ADR-0035 is about why that argument was wrong in the end —
+> a second implementation of a rule the host owns drifts when the host changes the rule, and it
+> cannot see a fact the host applies after the files are read. Read it as the case for the mirror;
+> ADR-0035 is the case against.
 
 Both settings functions are reproduced against pi 1.0.0's source rather than approximated, and
 both are short enough to copy whole:
@@ -102,7 +117,7 @@ are not symmetric:
 
 - **Over-reporting activation** — we say `active`, pi does not activate it. The surface is
   `subagents` with no orchestrator, which is the bug this ADR exists to remove. It is caught, and
-  caught by measurement rather than by this probe: the decision-4 warning at `src/index.ts:908`
+  caught by measurement rather than by this probe: the decision-4 warning at `src/index.ts:914`
   asks `pi.getActiveTools()` at `session_start`, where the answer is the real one. The failure
   degrades to exactly the behaviour that exists today, loudly.
 - **Under-reporting activation** — we say `inactive`, pi would have activated it. The surface is
@@ -119,6 +134,13 @@ axis further out.
 only make the truth `inactive`; accounting for them could only move the probe toward
 under-reporting, which the table above already handles. Adding them would grow the mirror for a
 direction that is already safe and self-correcting.
+
+> **Reversed 2026-10-10 by ADR-0035.** This is the one decision below that ADR-0035 undoes rather
+> than superannuates, so read it as the argument that was made and lost rather than as a rule. The
+> rebuttal is in ADR-0035's §"The measurement that decided it": registration is movable, so the
+> measurement does not arrive too late — it arrives at `session_start`, and `registerTool` is legal
+> from an event handler on every pi this package supports. The paragraph's other premise, that
+> deciding later means registering both surfaces, is also not what happened.
 
 **We do not make the `session_start` measurement authoritative.** It is the better answer — it is
 the real loadout — and it arrives too late. Registration happens in the factory and pi has no
@@ -163,7 +185,7 @@ so the unspecified case is the ordinary one rather than the dangerous one.
   are paid on the explicit-key path too, for the same reason ADR-0027 pays its two: the
   disagreement notice needs the table's own answer.
 - **A message that could now lie.** The `detected.present && !known` notice at
-  `src/index.ts:859` hard-codes the string `"subagents"` as the detected surface. With a fifth
+  `src/index.ts:863` hard-codes the string `"subagents"` as the detected surface. With a fifth
   cell, `detected` can be `full` while `present && !known` still holds (activation predicted
   `active` from a project `defaultTools`, and the project turned out to be untrusted —
   `settings-manager.js:327` drops project settings in that case, which this probe cannot observe).

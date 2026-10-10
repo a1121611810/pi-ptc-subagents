@@ -1333,13 +1333,13 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       "spawnOptions.sessionId = taskId;",
     "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:985":
       "export function detectedSurfaceMode(",
-    "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:908":
+    "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:914":
       'getActiveTools().includes("codemode")',
-    "docs/adr/0029-surface-follows-codemode-activation.md:105 -> src/index.ts:908":
+    "docs/adr/0029-surface-follows-codemode-activation.md:120 -> src/index.ts:914":
       'getActiveTools().includes("codemode")',
-    "docs/adr/0029-surface-follows-codemode-activation.md:129 -> ptc-mode.ts:27":
+    "docs/adr/0029-surface-follows-codemode-activation.md:151 -> ptc-mode.ts:27":
       "## Fail-safe on external loadout changes",
-    "docs/adr/0029-surface-follows-codemode-activation.md:166 -> src/index.ts:859":
+    "docs/adr/0029-surface-follows-codemode-activation.md:188 -> src/index.ts:863":
       "if (detected.present && !known) {",
     "docs/adr/0030-surface-switch-reloads.md:83 -> ptc-mode.ts:27":
       "## Fail-safe on external loadout changes",
@@ -1393,11 +1393,11 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     //  105 → 962→856  = 同一处（ADR-0029 正文第二次引用它）
     //  129 → 27 保持    = ` * ## Fail-safe on external loadout changes`，本轮未移动
     "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:985",
-    "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:908",
-    "docs/adr/0029-surface-follows-codemode-activation.md:105 -> src/index.ts:908",
-    "docs/adr/0029-surface-follows-codemode-activation.md:129 -> ptc-mode.ts:27",
+    "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:914",
+    "docs/adr/0029-surface-follows-codemode-activation.md:120 -> src/index.ts:914",
+    "docs/adr/0029-surface-follows-codemode-activation.md:151 -> ptc-mode.ts:27",
     //  166 → 920→807 = `if (detected.present && !known) {`，即交叉核对那一条
-    "docs/adr/0029-surface-follows-codemode-activation.md:166 -> src/index.ts:859",
+    "docs/adr/0029-surface-follows-codemode-activation.md:188 -> src/index.ts:863",
     // 2026-10-03 第四次复核（ADR-0030）：0030 引 ptc-mode.ts:27-31 那段「loadout 被外部改写
     // 时模式如何退让」，27 行是段首。本轮该引用在**文档里**的行号因撤回声明从 68 前移到 83，
     // 引用目标（ptc-mode.ts:27）未动。ADR-0030 另外四处引用写的是 pi 宿主的行号而非本仓文件，

@@ -2,9 +2,10 @@
  * BG-14 acceptance tests: the extension factory wires a session-scoped background runtime and
  * registers the three `ptc_task_*` tools always-on.
  *
- * These drive the REAL factory (`ptcSubagents`) through the recording ExtensionAPI stub — the
+ * These drive the REAL extension (`ptcSubagents`) through the recording ExtensionAPI stub — the
  * same entry points pi calls — and assert on observables only:
- *   - the five registered tool names (registration happens at factory time, before any session);
+ *   - the five registered tool names, read after the stub has opened a session, because that is
+ *     where registration happens (ADR-0035 moved it out of the factory);
  *   - `pi.setActiveTools` after /ptc on + /ptc off (the three tools must survive the mode);
  *   - the registered `ptc_task_list.execute` output against a task the dispatch path wrote;
  *   - the notification strings actually handed to `sendUserMessage` / `sendMessage`;

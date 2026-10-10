@@ -4,8 +4,11 @@
  *
  * ## Why a holder
  *
- * The two model-facing background surfaces are built ONCE, at extension-factory time, before any
- * session exists:
+ * The two model-facing background surfaces capture this holder ONCE, before any session exists.
+ * The holder itself is constructed in the extension factory; the tool definitions that capture it
+ * are built in the `session_start` handler (ADR-0035 moved registration there, so the detected
+ * surface could be read rather than reconstructed). Either way the captured delegates are the
+ * stable ones below:
  *
  *   - the three `ptc_task_*` tools take a `TaskRegistry` / `OutputStorage` in their constructors;
  *   - the two PTC tools forward a `DispatchDeps` bag to `runPtcProgram` so a program's

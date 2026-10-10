@@ -3,8 +3,9 @@
  *
  * These are integration tests: every case except the schema/description guards runs a real
  * worker through `runPtcProgram`, exactly as the model's call would. The tool definitions come
- * either from the extension factory (the registration path pi uses) or from the factory with a
- * config override, so a run can be pushed into a limit without materializing 64 MiB of output.
+ * either from the real extension — its factory plus the session that registers what it detected
+ * (ADR-0035) — or from the same path with a config override, so a run can be pushed into a limit
+ * without materializing 64 MiB of output.
  */
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { writeFile } from "node:fs/promises";

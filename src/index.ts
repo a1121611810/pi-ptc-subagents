@@ -200,14 +200,18 @@ export interface PtcSubagentsOptions {
   codemodeSwitch?: CodemodeSwitchResolution;
   /**
    * ADR-0029 test seam: whether `codemode` will be in the model's tool list. Undefined in
-   * production, where `readCodemodeActivation` reads pi's real settings files AND this
-   * process's `argv`.
+   * production, where `readCodemodeActivation` reads pi's own active tool set and the MCP
+   * evidence — no settings file and no `argv` on this axis any more (ADR-0035).
    *
    * This seam exists because the `surfaceMode` pin it replaced did. That pin was there to keep a
-   * test off the developer's machine: the activation probe reads `defaultTools` out of
-   * `~/.pi/agent/settings.json`, so a test file that pins nothing decides its own surface by
-   * however the machine running it happens to be configured. Removing the pin without adding this
-   * would have moved that failure back in, silently, to every stub-built factory.
+   * test off the developer's machine: the probe it fed read a settings file out of the developer's
+   * own agent dir, so a test file that pinned nothing decided its own surface by however the
+   * machine running it happened to be configured. Removing the pin without adding this would have
+   * moved that failure back in, silently, to every stub-built factory.
+   *
+   * The machine-dependence is gone — the loadout is handed in rather than read off disk — but the
+   * seam stays, because a test whose subject IS the axis needs to state an answer pi would not
+   * produce on its own (`null` runs the real probe; see `tests/helpers/ptc.ts`).
    */
   codemodeActivation?: CodemodeActivationResolution;
 }
@@ -215,19 +219,6 @@ export interface PtcSubagentsOptions {
 export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOptions = {}): void {
   const mode = initialModeState();
 
-  /**
-   * ADR-0026: which model-facing tools this package registers, read ONCE here so the
-   * `registerTool` calls below can act on it. Reading it later would mean the tools already
-   * exist when the answer arrives, and the only way to honour a different one would be to
-   * unregister - which pi has no call for. It is DETECTED, never read from a setting: there is
-   * no `surfaceMode` key and no way to pin a surface, so the only question is what this pi is.
-   * See `detectSurfaceMode` for why the escape hatch that used to be here is not one this
-   * package can replace.
-   *
-   * The result is a function of three probes rather than of a file, which is what makes
-   * `surface.codemode !== undefined` no longer a test for "was this detected" -- it is always
-   * defined. The reporting below reads each probe directly instead.
-   */
   /**
    * The session's detected surface, assigned once by `session_start` before anything can reach it.
    *
@@ -240,6 +231,10 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
    * At `session_start` the runtime is bound, the loadout is readable, and pi has already applied
    * project trust to it — so the surface is read rather than mirrored. That is also what makes
    * registration movable: the thing registration had to wait for no longer has to be guessed.
+   *
+   * It is DETECTED, never read from a setting: there is no `surfaceMode` key and no way to pin a
+   * surface, so the only question is what this pi is. See `detectSurfaceMode` for why the escape
+   * hatch that used to be here is not one this package can replace.
    *
    * The definite-assignment assertion is safe for one reason: a tool cannot execute, and the
    * cross-checks cannot run, before the handler that registers them has been invoked.
@@ -470,15 +465,20 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     }
 
     /*
-     * Always-on management tools (ADR-0022 "What we add" #6): registered at factory time, OUTSIDE
-     * the PTC mode loadout. `/ptc off` only gates new spawns; it must never hide the lifecycle face
-     * of in-flight tasks. The mode's `modeLoadout` keeps non-built-in names, so these survive both
-     * entry and exit (proved in tests/unit/extension-background.test.ts).
+     * Always-on management tools (ADR-0022 "What we add" #6), OUTSIDE the PTC mode loadout.
+     * `/ptc off` only gates new spawns; it must never hide the lifecycle face of in-flight tasks.
+     * The mode's `modeLoadout` keeps non-built-in names, so these survive both entry and exit
+     * (proved in tests/unit/extension-background.test.ts).
      *
-     * ADR-0025: unconditional from here on. The one mode that would not keep this face, `off`,
-     * has already returned at the top of the factory, so "always-on" stays literally true for
-     * every mode that reaches this line -- including `subagents`, where a task spawned through
-     * the top-level subagent tool is inspectable exactly the same way.
+     * ADR-0025: unconditional from here on, and now literally so. The one mode that would not keep
+     * this face, `off`, was removed by ADR-0034 -- there is no value that skips this function, and
+     * no early return anywhere above it. "Always-on" therefore holds for every detected surface,
+     * including `subagents`, where a task spawned through the top-level subagent tool is
+     * inspectable exactly the same way.
+     *
+     * (This paragraph used to say `off` "has already returned at the top of the factory". That was
+     * true of the factory it was written in and false of the function it now sits in, which is what
+     * happens when a block moves and its comments do not — ADR-0035 moved this one.)
      */
     pi.registerTool(createPtcTaskListTool(background.registry));
     pi.registerTool(createPtcTaskOutputTool(background.registry, background.outputStorage));
@@ -487,8 +487,8 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     );
 
     /*
-     * ADR-0032's report tool (ticket #101). Registered here, after the `off` early return, so it
-     * exists in every surface that has one — but ACTIVE only where it has a caller.
+     * ADR-0032's report tool (ticket #101). Registered here, inside the one registration path, so
+     * it exists in every surface — but ACTIVE only where it has a caller.
      *
      * `defaultActive` is `ptcDepth > 0`, and `ptcDepth` is this process's own depth baseline read
      * from `PI_PTC_DEPTH`: 0 in a parent session, 1+ inside a `pi.dispatch` child. A parent has no
@@ -837,13 +837,17 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
       const known = pi.getAllTools().some((tool) => tool.name === "codemode");
       if (!detected.present && known) {
         /*
-         * The mirror, and round 4 caught that only the over-estimate was handled. The probe is a
-         * filesystem guess, so it fails in BOTH directions: a pi that restructures its `dist`, or a
-         * layout no candidate covers, answers `not-found` while pi plainly registers codemode. The
-         * session then registers `ptc_run_code` AND `ptc_workflow` beside a live codemode -- the
-         * duplicate model-facing surface this whole setting exists to remove -- and the `info`
-         * notice above calls that "the safe direction, not an error", which is the opposite of what
-         * the user just got. `known` is the registry's own answer and it costs one line to use.
+         * The probe is a filesystem guess, so it fails in BOTH directions: a pi that restructures
+         * its `dist`, or a layout no candidate covers, answers `not-found` while pi plainly
+         * registers codemode. The session then registers `ptc_run_code` AND `ptc_workflow` beside a
+         * live codemode -- the duplicate model-facing surface this package exists to avoid -- and
+         * the `info` notice above calls that "the safe direction, not an error", which is the
+         * opposite of what the user just got. `known` is the registry's own answer and it costs one
+         * line to use.
+         *
+         * (This used to open "The mirror, and round 4 caught that only the over-estimate was
+         * handled". The mirror is deleted, ADR-0035, and what it names is simply the probe: the
+         * second half of that sentence is the part worth keeping, and it is unchanged.)
          */
         ctx.ui.notify(
           "pi-ptc-subagents: this session registers pi's codemode, but the probe did not find " +
@@ -862,22 +866,24 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
          * `surface.surfaceMode` — which, now that there is no `source: "file"` path to read
          * `surface.detected` from, is also the only value there is.
          *
-         * What can put a session in the `subagents` half of this branch was measured rather than
-         * reasoned about, and the answer is narrower than the comment that used to stand here.
-         * That comment claimed the table answers `full` when a project `defaultTools` names
-         * `codemode` and pi ignored the project because it was untrusted. It does not:
-         * `readSettingsObject` reads `.pi/settings.json` with no trust check, so this package sees
-         * `active` and picks `subagents` exactly as it would have if the project were trusted.
-         * Measured on pi 1.1.0 with a project-only `defaultTools: ["+codemode"]`: `-na` gives
-         * `codemodeActive: false` while this package has chosen `subagents`, and `-a` gives
-         * `codemodeActive: true` with the same choice. That is the residual wrong-way answer, and
-         * it is why the advice below names ways to make `codemode` callable rather than a setting
-         * in this package: there is no setting here any more.
+         * What can put a session in the `subagents` half of this branch, restated after ADR-0035
+         * because the previous account of it described code that no longer exists. That account
+         * said the residual wrong-way answer was a project `defaultTools` this package read off
+         * disk while pi ignored the project for being untrusted. It could say that because it was
+         * true: activation was reconstructed from the files, so this package saw `active` and chose
+         * `subagents` whether or not pi had been told to trust the folder.
          *
-         * The two flags this branch used to name no longer describe it either. `--exclude-tools
-         * codemode` IS read now (`cliToolFlags`), so it resolves to `inactive` and the table answers
-         * `full` before reaching here — which is what the real-pi runs show. `--no-extensions` is
-         * still the case that lands here with `codemode` on disk and unregistered.
+         * Activation is now READ from pi's own loadout, which already has the trust decision
+         * applied, so a project setting pi declined to read is simply absent from the answer and
+         * resolves `inactive` — that branch is `full` before reaching here. `--exclude-tools
+         * codemode` is likewise gone from this branch: pi honours the denylist, so the loadout does
+         * not name codemode and the table answers `full` first. (The deleted `cliToolFlags` used to
+         * be named here as the reason `--exclude-tools` was handled; the reason is now that pi is
+         * the one being asked, which is the same conclusion reached without the reconstruction.)
+         *
+         * What lands here is the case the earlier comment already identified correctly and still
+         * does: `--no-extensions`, where codemode is on disk and pi does not register it at all.
+         * That is the one this notice is for, and it is now the only one.
          */
         ctx.ui.notify(
           "pi-ptc-subagents: the codemode probe found pi's codemode on disk, but this " +
