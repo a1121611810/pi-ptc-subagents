@@ -234,6 +234,16 @@ function main() {
 
   writeFileSync(join(OUT_DIR, 'index.md'), index, 'utf8');
 
+  // A machine-readable record of what was projected, for `check-projection-coverage.mjs`.
+  // That check has to know the difference between "this document is not on the site" and
+  // "this document is not on the site because the list does not mention it yet" — and
+  // reading a list out of another script's source would couple the two by regex.
+  writeFileSync(
+    join(OUT_DIR, 'projected.json'),
+    `${JSON.stringify({ projected: emitted.map((d) => ({ source: d.source, slug: d.slug })) }, null, 2)}\n`,
+    'utf8',
+  );
+
   console.log(`projected ${emitted.length} document(s), ${totalRewrites} link(s) rewritten`);
   for (const d of emitted) {
     console.log(`  ${d.source} -> /docs/${d.slug}  (${d.rewrites} rewritten)`);

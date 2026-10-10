@@ -8,7 +8,7 @@
     "project": "node scripts/project-docs.mjs",
     "dev": "node scripts/project-docs.mjs && vitepress dev",
     "build": "node scripts/project-docs.mjs && vitepress build && pnpm run check",
-    "check": "node scripts/check-doc-claims.mjs && node scripts/check-landing-tool-names.mjs && node scripts/check-internal-links.mjs",
+    "check": "node scripts/check-doc-claims.mjs && node scripts/check-projection-coverage.mjs && node scripts/check-landing-tool-names.mjs && node scripts/check-internal-links.mjs",
     "preview": "vitepress preview"
   },
   "devDependencies": {
