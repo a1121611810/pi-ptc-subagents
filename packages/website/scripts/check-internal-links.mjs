@@ -30,7 +30,7 @@
  */
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
@@ -138,7 +138,14 @@ function main() {
       if (repoFile) {
         repoFileLinks += 1;
         const target = decodeURIComponent(repoFile[1]);
-        if (!existsSync(join(REPO_ROOT, target))) {
+        // Containment first. `join(REPO_ROOT, '../../../../etc/hosts')` resolves
+        // against the real filesystem, so without this check a link that walks out
+        // of the repository is reported as *resolved* — a false pass in the very
+        // gate whose job is to remove false passes. `project-docs.mjs` rejects
+        // the same shape for the same reason.
+        const absolute = resolve(REPO_ROOT, target);
+        const inRepo = !relative(REPO_ROOT, absolute).startsWith('..');
+        if (!inRepo || !existsSync(absolute)) {
           if (!missingRepoFiles.has(target)) missingRepoFiles.set(target, new Set());
           missingRepoFiles.get(target).add(from);
         }
@@ -154,7 +161,9 @@ function main() {
   }
 
   if (missingRepoFiles.size > 0) {
-    console.error(`✗ ${missingRepoFiles.size} repository link(s) name a file that does not exist:\n`);
+    console.error(
+      `✗ ${missingRepoFiles.size} repository link(s) do not resolve to a file in this repository:\n`,
+    );
     for (const [target, froms] of [...missingRepoFiles].sort()) {
       console.error(`   ${target}`);
       console.error(`      linked from: ${[...froms].join(', ')}`);
