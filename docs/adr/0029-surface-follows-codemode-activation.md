@@ -22,14 +22,14 @@ nothing was misconfigured at all: `~/.pi/agent/ptc.json` absent, no `extensions`
 `builtin:codemode` in the user settings, no `defaultTools`, no `--tools` on the command line. The
 chain runs:
 
-| step       | fact                                                           | source                                          |
-| ---------- | -------------------------------------------------------------- | ----------------------------------------------- |
-| presence   | `dist/extensions/codemode` exists                              | `probeCodemodePresence`                         |
-| switch     | no entry anywhere ⇒ `"absent"` ⇒ pi loads built-ins by default | `resolveCodemodeSwitch`                         |
-| ⇒ surface  | `subagents`                                                    | `detectedSurfaceMode` (`ptc-mode.ts:1160-1169`) |
-| activation | `codemode` registers with **`defaultActive: false`**           | `dist/extensions/codemode/index.js:26`          |
-| ⇒ loadout  | pi's default active names are `["read","bash","edit","write"]` | `settings-manager.js:35`                        |
-| ⇒ warning  | `getActiveTools()` has no `codemode`                           | `src/index.ts:856`                              |
+| step       | fact                                                           | source                                        |
+| ---------- | -------------------------------------------------------------- | --------------------------------------------- |
+| presence   | `dist/extensions/codemode` exists                              | `probeCodemodePresence`                       |
+| switch     | no entry anywhere ⇒ `"absent"` ⇒ pi loads built-ins by default | `resolveCodemodeSwitch`                       |
+| ⇒ surface  | `subagents`                                                    | `detectedSurfaceMode` (`ptc-mode.ts:985-994`) |
+| activation | `codemode` registers with **`defaultActive: false`**           | `dist/extensions/codemode/index.js:26`        |
+| ⇒ loadout  | pi's default active names are `["read","bash","edit","write"]` | `settings-manager.js:35`                      |
+| ⇒ warning  | `getActiveTools()` has no `codemode`                           | `src/index.ts:908`                            |
 
 So `subagents` hands orchestration to a tool that is loaded, registered, and not callable, and the
 session is left with nothing to orchestrate with ~~because `subagents` deliberately does not
@@ -102,7 +102,7 @@ are not symmetric:
 
 - **Over-reporting activation** — we say `active`, pi does not activate it. The surface is
   `subagents` with no orchestrator, which is the bug this ADR exists to remove. It is caught, and
-  caught by measurement rather than by this probe: the decision-4 warning at `src/index.ts:856`
+  caught by measurement rather than by this probe: the decision-4 warning at `src/index.ts:908`
   asks `pi.getActiveTools()` at `session_start`, where the answer is the real one. The failure
   degrades to exactly the behaviour that exists today, loudly.
 - **Under-reporting activation** — we say `inactive`, pi would have activated it. The surface is
@@ -163,7 +163,7 @@ so the unspecified case is the ordinary one rather than the dangerous one.
   are paid on the explicit-key path too, for the same reason ADR-0027 pays its two: the
   disagreement notice needs the table's own answer.
 - **A message that could now lie.** The `detected.present && !known` notice at
-  `src/index.ts:807` hard-codes the string `"subagents"` as the detected surface. With a fifth
+  `src/index.ts:859` hard-codes the string `"subagents"` as the detected surface. With a fifth
   cell, `detected` can be `full` while `present && !known` still holds (activation predicted
   `active` from a project `defaultTools`, and the project turned out to be untrusted —
   `settings-manager.js:327` drops project settings in that case, which this probe cannot observe).

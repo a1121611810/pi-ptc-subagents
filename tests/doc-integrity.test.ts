@@ -1281,64 +1281,42 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     expect(
       inRepo.map((ref) => `${ref.doc}:${ref.line} -> ${ref.file}:${ref.targetLine}`),
       "仓库内 file:line 引用基线变了。新增/删除引用后请逐条核对行号，再更新这份基线。",
-      // 2026-09-29 第一次复核：ADR-0013 §6 插入 85 行后，这条引用从 135 行位移到 140 行，已核对属实。
-      // 2026-09-29 第二次复核（补第三条解析基准之后）：7 处 `render.ts:N` 简写第一次进入校验面，
-      // 逐条核对记录见上方注释。**这七条此前是盲区**——现在才真的在被检查。
-      // 2026-10-03 第三次复核：ADR-0029 引入 5 条。**其中两条初稿写的是插入代码之前的行号，
-      // 本次复核当场发现并改正**——`ptc-mode.ts:464` 指向的已是 activation 探针的注释而非
-      // `detectedSurfaceMode`（插入约 190 行后移到 628），`src/index.ts:753` 指向的已是交叉核对
-      // 块而非 decision-4 警告（下方那段重写后移到 771）。这正是这道断言存在的理由：
-      // 「引用能解析」与「引用指对了东西」是两件事，而只有后者要靠人看。
-      // 逐条：29→ptc-mode.ts:628 = `export function detectedSurfaceMode(`；
-      // 32/105→index.ts:962 = decision-4 的 `if (... && !pi.getActiveTools().includes("codemode"))`；
-      // 129→ptc-mode.ts:27 = 「## Fail-safe on external loadout changes」段首，27-31 覆盖 setActiveTools 那段；
-      // 154→index.ts:920 = `if (detected.present && !known) {`。
-      // **以上四条已于 2026-10-10 全部位移**（见下方第七次复核记录）：本轮删除 surfaceMode 后，
-      // ptc-mode.ts 628→1160、index.ts 962→856、920→807；129 那条 ptc-mode.ts:27 至今未动。
-      // 2026-10-03 第四次复核：ADR-0031 引入 1 条。逐条：
-      // 105→limits.ts:4 = `* The numbers are DSH's (`dsh-v0.2.0-rc.2`, …` — 即 ADR-0031 §C
-      // 讨论的那一行版本自述，本次复核时该行已被本次改动一并更正为 0.2.0-rc.2，所以引用
-      // 指到的是**改过之后**的行；这正是「引用能解析」与「引用指对了东西」要分开看的原因，
-      // 改文档和改引用在同一批里发生，光看解析通过不足以说明它还指对。
-      //
-      // **2026-10-10 第七次复核（ADR-0034：删除 surfaceMode）**。这次不只复核本轮碰过的文件，
-      // 而是把**全部 24 条重新按内容核对一遍**。前六次的记录都声称做过这件事，而
-      // docs/testing-constraints.md「What the gate does not check」说的正是这一类：门看得见形状，
-      // 看不见引用指向的东西。结果是**六条里有五条此前就指错了，其中四条与本轮改动无关**。
-      //
-      // 逐条（改 = 本轮修正；留 = 核对属实；删 = 引用指向的东西已不存在）：
-      //  0026:235 → dispatch.ts **1096→1501**。改。1096 处是一段 JSDoc 的 `/**`；本 ADR 声称的
-      //    `spawnOptions.sessionId = taskId;` 实际在 1501。**与本轮无关**：dispatch.ts 未被本轮
-      //    修改，HEAD 上的 1096 同样不是它——上一轮「逐行核对」的记录是假的。
-      //  0029:29  → ptc-mode.ts **628→1160**。改。`export function detectedSurfaceMode(`。
-      //  0029:32  → index.ts **962→856**。改。decision-4 的
-      //    `if (surface.surfaceMode === "subagents" && !pi.getActiveTools().includes("codemode"))`。
-      //  0029:105 → index.ts **962→856**。改。同上一行，ADR-0029 正文第二次引用它。
-      //  0029:129 → ptc-mode.ts:27。留。` * ## Fail-safe on external loadout changes` 段首。
-      //  0029:166 → index.ts **920→807**。改。`if (detected.present && !known) {`。
-      //  0030:83  → ptc-mode.ts:27。留。同上；0030 引的是同一段，只是它在**文档里**的行号
-      //    因本轮加的撤回声明从 68 前移到 83，引用目标未动。
-      //  0032:76  → src/index.ts:280。**整条删除**。它指的是
-      //    `if (surface.surfaceMode === "off") return;`——那行已随 `off` 一起删掉，280 处现在是
-      //    BG-14 段落的注释。ADR-0032 正文已就此划线注明撤回，所以这里是**删一条**而非改行号。
-      //  0031:129 → limits.ts:4、0016:39 → dispatcher.ts:438、0032 的 11/20/33/55/123 →
-      //    dispatch.ts:1149/1172/1031、subagent.ts:174/279、ptc-task.ts:229。留，逐行核对属实。
-      //
-      // **仍未修的八条（render.ts）——本轮刻意不碰，理由写在这里免得下一个人以为漏了**：
-      // 78/145/693/834/925/928/930/127 这批 `render.ts:N` 与 render.ts 的实际内容已经对不上
-      // （例：78 处是一段讲 gutter width 的注释，而 `MAX_CODE_LINES_EXPANDED = 3` 实际在 83）。
-      // 它们**与 ADR-0034 无关，是早于本轮的既有漂移**：render.ts 本轮一行未动，而断言四一直
-      // 绿，因为它只校验行号能解析到目标文件、不校验该行写了什么。要修就得逐条重核 ADR-0013
-      // 的渲染论断本身，那超出本轮「记录 surfaceMode 删除」的范围。已作为发现上报，不在此处顺手改。
+      /*
+       * 复核记录。**这里只写「哪一轮、查了什么、结论是什么」，行号一律不写**——行号是上面那份
+       * 基线的，写第二遍就是第二份会漂移的副本。这个文件已经因为「记录声称做过核对、而行号是错的」
+       * 吃过两次教训（2026-09-30 那次写着「逐行核实」，2026-10-10 那次全 24 条里有 15 条指错），
+       * 两次都是在这里留了一份行号副本。别再留。
+       *
+       * 每次复核做的事是一样的，区别只在范围和结果：**打开每条引用指向的那一行，看它是不是引用
+       * 声称的那个东西**。不是看文件能不能找到、行号有没有越界——断言四本身只校验后者，所以这两件
+       * 事必须分开做，也正因如此「断言四绿」从来不是「引用指对了」的证据。
+       *
+       * 2026-09-29（一、二次）：ADR-0013 插入一段后一条引用位移；补上第三条解析基准后，7 处
+       *   `render.ts:N` 简写第一次进入校验面——此前是盲区，那一次才真的在被检查。
+       * 2026-10-03（三、四次）：ADR-0029 的 5 条里当场发现 2 条写成了插入代码之前的行号；
+       *   ADR-0031 的 1 条指向的是同批刚被改过的行，所以「解析通过」在那批里说明不了什么。
+       * 2026-10-08（六次）：ADR-0032 的 7 条按内容重核，发现第五次记录在案的行号**没有一条还
+       *   对得上内容**，而断言四一直绿。其中一条是换了目标而不是移了行号——只移行号会把假引用
+       *   钉得更牢。
+       * 2026-10-10（七次）：为记录 ADR-0034 删除 surfaceMode 而复核，发现 24 条里 15 条指错，
+       *   其中 4 条是本轮自己的注释改动顶偏的、8 条 render.ts 是更早的漂移、3 条是上一轮
+       *   改错了版本（在工作树与 HEAD 之间取错了基准）。删掉 1 条指向已删代码的。
+       * 2026-10-10（八次，本轮的第二次）：全部 23 条**用脚本按内容**核对，不靠读注释。
+       *   15 条错了：render.ts 8 条（两次插入造成的位移）、ADR-0029 4 条、ADR-0032 3 条。
+       *   8 条本来就对。改正后逐条重新核对，23/23 通过。ADR-0013 的渲染论断随之重核，
+       *   仍然成立——移动的是行号，不是结论。
+       *
+       * 下一次复核者：把上面那句「打开那一行看内容」重做一遍就够，不必往上加新段落。
+       */
     ).toEqual([
-      "docs/adr/0013-ptc-row-compact-summary.md:140 -> src/tools/render.ts:78",
-      "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:145",
-      "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:693",
-      "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:834",
-      "docs/adr/0013-ptc-row-compact-summary.md:176 -> render.ts:928",
-      "docs/adr/0013-ptc-row-compact-summary.md:177 -> render.ts:930",
-      "docs/adr/0013-ptc-row-compact-summary.md:178 -> render.ts:127",
-      "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:925",
+      "docs/adr/0013-ptc-row-compact-summary.md:140 -> src/tools/render.ts:83",
+      "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:146",
+      "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:902",
+      "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:1047",
+      "docs/adr/0013-ptc-row-compact-summary.md:176 -> render.ts:1141",
+      "docs/adr/0013-ptc-row-compact-summary.md:177 -> render.ts:1143",
+      "docs/adr/0013-ptc-row-compact-summary.md:178 -> render.ts:130",
+      "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:1138",
       // Hand-confirmed line by line, 2026-09-30 (review round 5). The extractor resolves this
       // one only because the path is qualified: bare `dispatcher.ts` is ambiguous in this repo, and
       // the rule is to refuse rather than guess. Line 438 is
@@ -1355,12 +1333,12 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       //  32  → 962→856  = decision-4 的 `if (surface.surfaceMode === "subagents" && !pi.getActiveTools()…`
       //  105 → 962→856  = 同一处（ADR-0029 正文第二次引用它）
       //  129 → 27 保持    = ` * ## Fail-safe on external loadout changes`，本轮未移动
-      "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:1160",
-      "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:856",
-      "docs/adr/0029-surface-follows-codemode-activation.md:105 -> src/index.ts:856",
+      "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:985",
+      "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:908",
+      "docs/adr/0029-surface-follows-codemode-activation.md:105 -> src/index.ts:908",
       "docs/adr/0029-surface-follows-codemode-activation.md:129 -> ptc-mode.ts:27",
       //  166 → 920→807 = `if (detected.present && !known) {`，即交叉核对那一条
-      "docs/adr/0029-surface-follows-codemode-activation.md:166 -> src/index.ts:807",
+      "docs/adr/0029-surface-follows-codemode-activation.md:166 -> src/index.ts:859",
       // 2026-10-03 第四次复核（ADR-0030）：0030 引 ptc-mode.ts:27-31 那段「loadout 被外部改写
       // 时模式如何退让」，27 行是段首。本轮该引用在**文档里**的行号因撤回声明从 68 前移到 83，
       // 引用目标（ptc-mode.ts:27）未动。ADR-0030 另外四处引用写的是 pi 宿主的行号而非本仓文件，
@@ -1394,12 +1372,12 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       // 行号**——留着一个指向已删行的引用，正是 `tests/doc-integrity.test.ts` 要抓的悬空引用。
       // 所以这里是**删一条**而不是改行号，本轮唯一的删除项，**新增 0 条**。
       // 同一次编辑把 ADR-0032 里 123 那条**在文档里**的行号推到 130（引用目标未动，仍是 1031）。
-      "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1149",
+      "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1151",
       "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:174",
-      "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1172",
+      "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1174",
       "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:279",
       "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:229",
-      "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1031",
+      "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1033",
     ]);
   });
 

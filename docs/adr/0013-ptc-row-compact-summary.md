@@ -137,7 +137,7 @@ remove rather than relocate.
 bounded, opens with a label in a fixed gutter, and reports what it withheld. At the time the caps
 were whatever the renderer had grown into. §5 §2 did name its numbers — `maxDepth` 4,
 `maxChildren` 6, `maxLineChars` 120, for the value tree. The eight caps below never got the same
-treatment: they live in `src/tools/render.ts:78-85`, they have governed the row since they were
+treatment: they live in `src/tools/render.ts:83-90`, they have governed the row since they were
 written, and until this section no document in the repository recorded any of them — not this ADR,
 not the README (whose "each block labelled and capped" carries no number), not any other file under
 `docs/`. The audit that found the gap (`docs/reviews/2026-09-29-ocr-rule-coverage-audit-2.md`)
@@ -171,15 +171,15 @@ eight_", never "this repository has no other unrecorded caps".
 
 **The failure block is the one bound that is not a `MAX_*`.** `MAX_ERROR_CHARS` (120) is not
 that bound. It reaches exactly one line: the collapsed `failed: …` row,
-through `firstLine()` (`render.ts:145`) ← `errorText()` (`render.ts:693`) ← `render.ts:834` — and,
+through `firstLine()` (`render.ts:146`) ← `errorText()` (`render.ts:902`) ← `render.ts:1047` — and,
 expanded, only as the fallback source for a result that carries no text block at all
-(`render.ts:928`). Expanded, the failure block is bounded twice, and neither bound is a width
-constant: the line count is cut at `MAX_LOG_LINES_EXPANDED` (12, `render.ts:930`), and every line
-that survives is cut to the viewport by `alignRow` (`render.ts:127`).
+(`render.ts:1141`). Expanded, the failure block is bounded twice, and neither bound is a width
+constant: the line count is cut at `MAX_LOG_LINES_EXPANDED` (12, `render.ts:1143`), and every line
+that survives is cut to the viewport by `alignRow` (`render.ts:130`).
 
 The absent per-line cap is intentional: the renderer says the failure text is "the reason the
 reader expanded the row at all" and gives it the full width under the summary instead of a cap of
-its own (`render.ts:925-926`). §3's "expanded is never unbounded" therefore holds for this block
+its own (`render.ts:1138-1139`). §3's "expanded is never unbounded" therefore holds for this block
 as **lines + viewport**, not as a `MAX_*` constant — it is bounded, just not by the kind of bound
 the other seven rows in the table carry, and a reader auditing that table should not go looking for
 a width constant here. Writing the deviation down is the point: every other block's bound is a

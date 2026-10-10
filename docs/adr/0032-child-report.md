@@ -8,7 +8,7 @@ status: accepted (2026-10-08)
 
 A dispatched child is a fresh `pi` subprocess. Everything it hands back crosses one boundary: the
 host reads the child's stdout, parses it as JSONL, and keeps the **last text part of its final
-assistant message** (`assistantText`, `src/runtime/dispatch.ts:1149` — whose own comment says "the
+assistant message** (`assistantText`, `src/runtime/dispatch.ts:1151` — whose own comment says "the
 last part wins"). That string is the entire result.
 
 Both kinds of caller are worse off than they need to be, for different reasons:
@@ -30,7 +30,7 @@ Both kinds of caller are worse off than they need to be, for different reasons:
 Two facts are already collected and never surfaced:
 
 - `DispatchResult.usage` is accumulated from the child's `message_end` blocks
-  (`src/runtime/dispatch.ts:1172`) and then dropped, so neither caller can budget a child.
+  (`src/runtime/dispatch.ts:1174`) and then dropped, so neither caller can budget a child.
 - Which files a child touched is only knowable by the child. A child that edits through `bash`
   cannot be observed by the host at all.
 
@@ -52,7 +52,7 @@ Measured against the installed artifact, not the release notes.
 3. **`tool_execution_end.result.structuredContent` _is_ reachable.** It is the full
    `AgentToolResult` (`pi-agent-core/dist/types.d.ts:370-391`), emitted verbatim at
    `pi-agent-core/dist/agent-loop.js:640-648`. This repo already depends on that mechanism
-   (`src/tools/subagent.ts:279`, `src/tools/ptc-task.ts:229, 459, 618`).
+   (`src/tools/subagent.ts:279`, `src/tools/ptc-task.ts:229, 470, 629`).
 
 So a structured return is reachable exactly two ways, and neither is enforced by pi: prompt the
 child into emitting JSON, or give it a tool whose declared schema the host reads back.
@@ -127,7 +127,7 @@ The host merges the report tool into the child's tool list when the contract is 
 get wrong in a way that fails silently: `buildArgv` only emits a tool-list flag when the agent's
 markdown declares tools of its own, so a child whose agent declares none would receive **no** flag at
 all, and the tool would sit inactive with no error anywhere. That merge now lives in `childToolList`
-(`src/runtime/dispatch.ts:1031`), and the `if (agent.tools && agent.tools.length > 0)` guard this
+(`src/runtime/dispatch.ts:1033`), and the `if (agent.tools && agent.tools.length > 0)` guard this
 decision originally named no longer exists on this branch — see the amendment below.
 
 Amendment (2026-10-08, #101): the merge is necessary but **not sufficient**, and the reason is a
