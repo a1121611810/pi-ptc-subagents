@@ -38,7 +38,7 @@ jobs:
           persist-credentials: false
       # No `pnpm install`: the check reads package.json and calls the GitHub API using node
       # built-ins only. There is nothing to install and nothing to cache.
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: lts/*
       - run: node scripts/check-repo-metadata.mjs
@@ -57,7 +57,7 @@ jobs:
       # the binary at setup time and will fail if pnpm isn't already
       # installed.
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: lts/*
           cache: pnpm

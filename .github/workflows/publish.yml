@@ -31,7 +31,7 @@ jobs:
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
       # Node is pinned rather than `lts/*` (ci.yml's choice): trusted publishing
       # needs npm CLI >= 11.5.1, which ships with the runtime.
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           # No `registry-url`: it would write `_authToken=${NODE_AUTH_TOKEN}` into
