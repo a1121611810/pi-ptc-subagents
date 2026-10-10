@@ -225,20 +225,10 @@ the session. The mode's rationale and rejected alternatives are in [ADR-0010](./
 { "defaultMode": false }
 ```
 
-**Choosing the surface.** `defaultMode` decides whether the session _enters_ PTC mode; `surfaceMode`
-decides which model-facing tools this package registers at all ([ADR-0025](./docs/adr/0025-extension-surface-is-a-setting.md)):
+**Choosing the surface.** `defaultMode` decides whether the session _enters_ PTC mode. Which
+model-facing tools this package registers is **detected, not configured** — there is no setting for
+it ([ADR-0034](./docs/adr/0034-surface-is-detected-not-set.md)):
 
-```
-/ptc surface              # report the current surface and where it came from
-/ptc surface subagents    # write the key and reload so it applies now
-```
-
-```jsonc
-// ~/.pi/agent/ptc.json
-{ "surfaceMode": "subagents" }
-```
-
-- `off` — a stock pi session: no tool, no `/ptc` command, no briefing.
 - `subagents` — `ptc_subagent` plus the three `ptc_task_*` tools, with pi's own `codemode`
   doing the orchestration; warns at startup when `codemode` is not in the active tool set and
   `ptc_run_code` is not declared to the model either (which on a pi below 0.99.0 it is, since
@@ -246,21 +236,29 @@ decides which model-facing tools this package registers at all ([ADR-0025](./doc
   `ptc_run_code` / `ptc_workflow` are registered here too, but at `codemode` reach: a `codemode`
   script can call them, and the model is not shown them. That is what puts `pi.dispatch` and
   background tasks underneath `codemode`, whose sandbox cannot spawn a process itself.
-- `full` — today's set: `ptc_run_code` / `ptc_workflow` plus the three `ptc_task_*` tools.
+- `full` — the rest: `ptc_run_code` / `ptc_workflow` plus the three `ptc_task_*` tools. Also the
+  answer to every "the probe could not tell" case.
 
-The command exists because the alternative is editing JSON by hand and starting a new session: the
-surface is read once in the extension factory and pi has no way to unregister a tool, so a change
-cannot apply in place. `/ptc surface` writes the key and then performs pi's own `/reload`, which
-re-runs every extension factory ([ADR-0030](./docs/adr/0030-surface-switch-reloads.md)). Two things
-it will not do silently: a malformed `ptc.json` is reported and left exactly as it was, and an
-unchanged value does not reload — a reload replaces every extension instance in the session, so
-retyping the value you already have costs you in-flight state for nothing. Switching to
-`subagents` or `off` also ends a running PTC mode, which the command says before it does it.
+**To keep this package out of your sessions, use pi, not this package.** Run `pi config` and
+disable this package's extensions there. Measured on pi 1.1.0 against this package's own
+`dist/index.js`: a `packages` entry whose `extensions` is `[]` or `["!dist/index.js"]` is not
+loaded at all, while `["+dist/index.js"]` and an omitted key are. pi does this **without loading
+the extension**, which no value of a key this package reads could achieve — reading the key
+requires having run the code that reads it.
 
-**The default is detected, and it follows three questions, not one**
+> In the **project-level** `.pi/settings.json`, write `"extensions": ["!dist/index.js"]` rather than
+> `"extensions": []`. The two settings files are resolved by two different functions in pi
+> (`package-manager.js:1850`): the personal-level path reads `[]` as "load nothing", the
+> project-level path reads it as an empty delta, which means "no change".
+
+**If you had `surfaceMode` in `ptc.json`, it is no longer read** — including `"off"`, so upgrading
+brings this package back. At session start you get one `warning` naming the file and pointing here.
+Delete the key to silence it.
+
+**The surface is detected, and it follows three questions, not one**
 ([ADR-0026](./docs/adr/0026-surface-default-is-detected.md),
 [ADR-0027](./docs/adr/0027-codemode-switch-decides-surface.md),
-[ADR-0029](./docs/adr/0029-surface-follows-codemode-activation.md)). With no `surfaceMode` key:
+[ADR-0029](./docs/adr/0029-surface-follows-codemode-activation.md)):
 
 | does this pi ship `codemode`? | will pi load it?                               | can the model call it?                        | surface     |
 | ----------------------------- | ---------------------------------------------- | --------------------------------------------- | ----------- |
@@ -269,15 +267,15 @@ retyping the value you already have costs you in-flight state for nothing. Switc
 | yes                           | no (`-builtin:codemode`, or `--no-extensions`) | —                                             | `full`      |
 | no                            | —                                              | —                                             | `full`      |
 
-The third column is the one that decides most sessions, and it is why the default is `full` on a pi
+The third column is the one that decides most sessions, and it is why the answer is `full` on a pi
 that has never been configured. pi ships `codemode` and loads it by default, but registers it
 **inactive** (`defaultActive: false`) — it joins the model's tool list only when a loadout names it.
 Handing orchestration to a tool the model cannot call is the failure this avoids, so `subagents` is
 chosen only on positive evidence.
 
-Setting the key always wins. A probe that cannot answer falls back to `full` — the safe direction,
-since `subagents` as a failure mode would take away the orchestration tool the session was relying
-on.
+A probe that cannot answer falls back to `full` — the safe direction, since `subagents` as a
+failure mode would take away the orchestration tool the session was relying on. There is no key
+that overrides this, by design ([ADR-0034](./docs/adr/0034-surface-is-detected-not-set.md)).
 
 > **To use the `subagents` surface, put `codemode` in your tool list.** Without that you get
 > `ptc_run_code` / `ptc_workflow` and no startup warning, which is the correct answer for a session
@@ -289,11 +287,7 @@ on.
 > ```
 >
 > or per launch, `pi --tools read,bash,edit,write,codemode`. A list made only of modifiers starts
-> from pi's four defaults, so `{ "defaultTools": ["+codemode"] }` means the same thing. If you would
-> rather pin the surface regardless of what pi is doing, set `{ "surfaceMode": "subagents" }` —
-> and note that pinning it does not activate `codemode`, so a pinned `subagents` on a session that
-> never configured it still warns, by design ([ADR-0025](./docs/adr/0025-extension-surface-is-a-setting.md)
-> decision 4).
+> from pi's four defaults, so `{ "defaultTools": ["+codemode"] }` means the same thing.
 
 > Turning pi's `codemode` **off** — `"extensions": ["-builtin:codemode"]`, or launching with
 > `--no-extensions` — brings the PTC surfaces back on its own. Before ADR-0027 it did not: the
@@ -301,42 +295,34 @@ on.
 > counted as an orchestrator and you got `ptc_subagent` with nothing to compose with. The switch is
 > read from the same three places pi reads it — the command line, `<cwd>/.pi/settings.json`, and
 > `<agentDir>/settings.json` — in the same order, and the activation probe reads the first two plus
-> `--tools`.
+> `--tools`, `--exclude-tools` and `--no-tools`.
 
-No file, or a value outside that set, falls back to the detected default and says so at startup
-rather than half-applying: which tools exist is not something to change on a guess.
-
-**A detection you cannot see is the failure this design has**, so the result is reported. With no
-`surfaceMode` key, the outcome is issued through the TUI notification channel at session start —
-how the probe came out and which surface the default therefore is — but only when the probe could
-not answer. A pi that ships `codemode`, loads it, and has it in the tool list is the expected case
-and says nothing. A second notice is issued when the probe and pi's own tool registry disagree, which
-is the case the probe structurally cannot see: it walks the filesystem, so under
-`--exclude-tools codemode` it answers `present` for a tool this session does not have (and the
-mirror: a restructured `dist` answers `not-found` for one pi plainly registers). A third notice
-covers ADR-0027: a settings file that could not be read, and an explicit `surfaceMode` that
-disagrees with the table — the pinned value still wins, and the notice only says so. What is **not**
-established is that either line actually paints in a real pi TUI: a pty capture at review time
-showed neither the notice nor a control marker, and a TUI quits on stdin EOF before a toast
-renders, so that is an unmeasured end to end rather than a broken one. No test in this repository
-observes a notice through a real TUI. If you are relying on the notice rather than on your own
-`surfaceMode` key, verify it once.
+**A detection you cannot see is the failure this design has**, so the result is reported. The
+outcome is issued through the TUI notification channel at session start — how the probe came out
+and which surface therefore is — but only when the probe could not answer. A pi that ships
+`codemode`, loads it, and has it in the tool list is the expected case and says nothing. A second
+notice is issued when the probe and pi's own tool registry disagree, which is the case the probe
+structurally cannot see: it walks the filesystem, so under `--exclude-tools codemode` it answers
+`present` for a tool this session does not have (and the mirror: a restructured `dist` answers
+`not-found` for one pi plainly registers). A third notice covers ADR-0027: a settings file that
+could not be read. What is **not** established is that either line actually paints in a real pi
+TUI: a pty capture at review time showed neither the notice nor a control marker, and a TUI quits
+on stdin EOF before a toast renders, so that is an unmeasured end to end rather than a broken one.
+No test in this repository observes a notice through a real TUI.
 
 **On a `--print` session, none of it prints.** `ui.notify` is the TUI channel; measured across
 three `--print` runs that each emit one of these notices, stdout and stderr received **0 bytes**
 each. That makes this page the only channel on which a `--print` user learns why they got the
-surface they got — ADR-0025's decision-4 warning shares the gap, and there the answer is the same
-one line of JSON: set `surfaceMode` yourself and the detection no longer matters.
+surface they got.
 
 **Where it does not run.** Print / JSON / RPC sessions are left exactly as launched, and so is a
 session started with an explicit tool restriction (`--tools`, `--exclude-tools`,
 `--no-builtin-tools`, `--no-extensions`) — the extension does not override what you asked for.
 `--no-extensions` does, however, change the **detected surface**: pi's own `codemode` is a built-in
-extension, so turning extensions off means it will not load, and ADR-0027's table resolves the
-default to `full` — you keep `ptc_run_code` / `ptc_workflow` rather than a `ptc_subagent` with
-nothing to compose with. If you would rather pin the surface regardless, set `"surfaceMode"` in
-`ptc.json`. If another extension changes the tool set while the mode is on, the mode yields and
-tells you.
+extension, so turning extensions off means it will not load, and ADR-0027's table resolves to
+`full` — you keep `ptc_run_code` / `ptc_workflow` rather than a `ptc_subagent` with
+nothing to compose with. If another extension changes the tool set while the mode is on, the mode
+yields and tells you.
 
 **The important consequence:** in a TUI session, bindings come from the loadout recorded _before_
 the mode narrowed it. That is what keeps `tools.read(…)` working — and it is why a `--tools`

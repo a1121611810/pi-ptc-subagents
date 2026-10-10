@@ -14,9 +14,9 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import ptcSubagents from "../../src/index.ts";
 import type {
+  CodemodeActivationResolution,
   CodemodePresence,
   CodemodeSwitchResolution,
-  SurfaceMode,
 } from "../../src/mode/ptc-mode.ts";
 import type { Binding, BindingTable } from "../../src/runtime/bindings.ts";
 import type { BackgroundTaskRuntime } from "../../src/runtime/background-runtime.ts";
@@ -42,7 +42,7 @@ export const ACTIVE_CODEMODE_SETTINGS: unknown = { defaultTools: ["+codemode"] }
 
 /**
  * Write the user-scope `settings.json` the activation probe reads, for a test whose factory
- * really resolves the surface off disk (`surfaceMode: "from-file"`).
+ * really resolves the surface off disk.
  */
 export async function writeAgentSettings(agentDir: string, body: unknown): Promise<void> {
   await writeFile(join(agentDir, "settings.json"), JSON.stringify(body), "utf8");
@@ -55,9 +55,8 @@ export async function writeAgentSettings(agentDir: string, body: unknown): Promi
  * Every test that resolves the surface off disk needs this, and the reason is ADR-0029: the
  * activation probe reads `settings.json` out of the agent dir, so a test that leaves
  * `PI_CODING_AGENT_DIR` alone resolves against the DEVELOPER'S OWN `~/.pi/agent` and passes or
- * fails depending on how that machine is configured. `ptc.json` had always been read from there,
- * which is why the per-surface tests pin `surfaceMode` and bypass the file entirely; the
- * `from-file` tests are the ones that cannot.
+ * fails depending on how that machine is configured. `ptc.json` is read from the same place, for
+ * the legacy-key notice, so it inherits the same rule.
  *
  * `ptc` is the `ptc.json` body, or `null` for no file. `agentSettings` is the `settings.json`
  * body; omitted means the default session, where codemode is not active and the surface is
@@ -72,6 +71,8 @@ export async function makeStubInAgentDir(
     mcpJson?: string;
     codemode?: CodemodePresence;
     codemodeSwitch?: CodemodeSwitchResolution;
+    /** `null` = let the real probe run; see the note on the same option in `makeExtensionStub`. */
+    codemodeActivation?: CodemodeActivationResolution | null;
     active?: readonly string[];
     registeredInactive?: readonly string[];
   } = {},
@@ -91,9 +92,11 @@ export async function makeStubInAgentDir(
     }
     return {
       stub: makeExtensionStub({
-        surfaceMode: "from-file",
         ...(options.codemode === undefined ? {} : { codemode: options.codemode }),
         ...(options.codemodeSwitch === undefined ? {} : { codemodeSwitch: options.codemodeSwitch }),
+        ...(options.codemodeActivation === undefined
+          ? {}
+          : { codemodeActivation: options.codemodeActivation }),
         ...(options.active === undefined ? {} : { active: options.active }),
         ...(options.registeredInactive === undefined
           ? {}
@@ -176,27 +179,35 @@ export function makeExtensionStub(
     /** BG-14 test seam: use a pre-built background runtime instead of constructing one. */
     backgroundRuntime?: BackgroundTaskRuntime;
     /**
-     * ADR-0025: which surface the factory should build. An unspecified value is PINNED to
-     * `full`, not read from disk -- seven test files build this factory, and without the pin they
-     * would inherit the developer's real `~/.pi/agent/ptc.json`.
-     *
-     * `"from-file"` is the escape hatch that keeps the production path observable: it passes no
-     * override at all, so the factory really does call `readSurfaceModeConfig(getAgentDir())`.
-     * Without it, that call had no test anywhere -- a review round mutated it to a hardcoded
-     * `"full"` and the whole suite stayed green.
-     */
-    surfaceMode?: SurfaceMode | "from-file";
-    /**
-     * ADR-0026: the codemode probe result the factory is told to believe. Only meaningful with
-     * `surfaceMode: "from-file"`, because an explicit surface never consults the probe.
+     * ADR-0026: the codemode probe result the factory is told to believe. Omit it and the real
+     * filesystem probe runs, which under a test runner resolves `present: false` — the old
+     * default surface, reached for the same reason.
      */
     codemode?: CodemodePresence;
     /**
      * ADR-0027: whether pi will actually LOAD its own codemode. Distinct from `codemode` on
      * purpose — a pi can ship the directory and be told not to load it, and that is the case
-     * the four-case table turns on. Only meaningful with `surfaceMode: "from-file"`.
+     * the four-case table turns on.
      */
     codemodeSwitch?: CodemodeSwitchResolution;
+    /**
+     * ADR-0029: whether `codemode` will be in the model's tool list.
+     *
+     * This REPLACES the `surfaceMode: "from-file"` escape hatch the stub used to carry, and it has
+     * to: the activation probe reads `defaultTools` out of `~/.pi/agent/settings.json`, so a stub
+     * that pins nothing decides its own surface by however the machine running it is configured.
+     * The default below is `inactive`, which is what pi does on a session that configured nothing
+     * — so an unspecified stub is the ordinary one, and a test wanting `subagents` says so by
+     * naming all three axes rather than by naming a surface.
+     *
+     * **`null` means "run the real probe"**, and it is the only way to reach it. A pin cannot be
+     * undone by omission, so a test whose subject IS the probe — ADR-0033's evidence cases, which
+     * exist to show that a temp `mcp.json` really moves the answer — would otherwise silently
+     * exercise a pinned one and pass for the wrong reason. Naming `null` rather than a fourth
+     * sentinel keeps "the caller chose to run the probe" distinguishable from "the caller said
+     * nothing", which are different claims and must not share a spelling.
+     */
+    codemodeActivation?: CodemodeActivationResolution | null;
     /**
      * Tools pi's registry knows about that are NOT in the active loadout.
      *
@@ -318,20 +329,20 @@ export function makeExtensionStub(
     ...(options.backgroundRuntime === undefined
       ? {}
       : { backgroundRuntime: options.backgroundRuntime }),
-    // ADR-0025: the surface is PINNED to `full` unless the caller asks for something else,
-    // and `"from-file"` is the only way to reach the production read. Both halves are load-bearing
-    // and the second was learned the hard way in review round 2: an earlier version passed NO
-    // override when the caller said nothing, which let the factory-driven test files inherit the developer's
-    // real `~/.pi/agent/ptc.json` -- 31 failures with a `surfaceMode: off` dir set, against 4
-    // before. An unspecified surface is a pin, never a read. (The count is deliberately not written here: round 2 put "eight" in a comment and round 3 found "seven" in another, and both were wrong. grep it.)
-    ...(options.surfaceMode === "from-file"
-      ? {
-          ...(options.codemode === undefined ? {} : { codemode: options.codemode }),
-          ...(options.codemodeSwitch === undefined
-            ? {}
-            : { codemodeSwitch: options.codemodeSwitch }),
-        }
-      : { surfaceMode: options.surfaceMode ?? "full" }),
+    // The surface is DETECTED, so a stub pins the three probes rather than the answer. Every seam
+    // is optional; the activation one defaults to `inactive` because that is pi's own default on a
+    // session that configured nothing, and because it is the axis that reads the developer's
+    // `~/.pi/agent/settings.json` if left to run for real.
+    ...(options.codemode === undefined ? {} : { codemode: options.codemode }),
+    ...(options.codemodeSwitch === undefined ? {} : { codemodeSwitch: options.codemodeSwitch }),
+    ...(options.codemodeActivation === null
+      ? {}
+      : {
+          codemodeActivation: options.codemodeActivation ?? {
+            activation: "inactive",
+            source: "default",
+          },
+        }),
   });
   return stub;
 }
@@ -403,12 +414,9 @@ export function stubContext(
       stub.notifications.push({ message, ...(type === undefined ? {} : { type }) });
     },
     setStatus: (key, text) => stub.statuses.push({ key, text }),
-    // ADR-0030: `/ptc surface` ends in `ctx.reload()`, so a stub without one would make the
-    // command untestable at exactly the step that matters. It records rather than reloading,
-    // because a real reload replaces every extension instance and there is nothing in a unit
-    // test to replace. `stub.reloads.length` is the assertion; the ORDER relative to the
-    // notification is the assertion that matters, and it is checkable because both land in
-    // recorded arrays on the same stub.
+    // ADR-0030's `reloads` recorder outlived the `/ptc surface` command that was its only
+    // caller. It records rather than reloading, because a real reload replaces every extension
+    // instance and there is nothing in a unit test to replace.
     reload: async () => {
       stub.reloads.push(stub.notifications.length);
     },

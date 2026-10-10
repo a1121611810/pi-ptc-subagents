@@ -36,7 +36,7 @@
  * scripts buys nothing and breaks them. A session that was *launched* with an explicit tool
  * restriction is left alone too — see `decideModeEntry`.
  */
-import { readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { minimatch } from "minimatch";
 import { BUILTIN_BINDING_NAMES } from "../runtime/bindings.ts";
@@ -159,14 +159,16 @@ export function readDefaultModeConfig(agentDir: string): DefaultModeConfig {
 
 /**
  * Which model-facing tools this package registers, independent of PTC mode (which decides
- * which registered tools are *active*). Read from the same agent-dir file as
- * {@link readDefaultModeConfig}, beside the `defaultMode` key. ADR-0025.
+ * which registered tools are *active*).
  *
- * The order below is the order of increasing responsibility: `off` hands the whole
- * orchestration question back to pi, `subagents` keeps only the subagent face and lets pi's
- * `codemode` orchestrate, `full` keeps today's set.
+ * These are DETECTED values, not settings. The list is two long because detection is the only
+ * thing that produces them: `subagents` keeps the subagent face and lets pi's `codemode`
+ * orchestrate, `full` keeps the whole set. There was a third, `off`, and a `surfaceMode` key
+ * that could pin any of the three (ADR-0025); both are gone, and
+ * {@link detectSurfaceMode} is now a pure function of what pi is — see its doc for why the
+ * escape hatch the setting provided is not one this package can replace.
  */
-export const SURFACE_MODES = ["off", "subagents", "full"] as const;
+export const SURFACE_MODES = ["subagents", "full"] as const;
 export type SurfaceMode = (typeof SURFACE_MODES)[number];
 
 /**
@@ -545,35 +547,241 @@ function resolveDefaultTools(entries: readonly string[]): string[] {
   return tools;
 }
 
-/**
- * The `--tools` / `-t` allowlist, or `undefined` when the flag is absent or dangling.
+/*
+ * A note on every `file:line` in this region, because they are only true of one version.
  *
- * pi's own parser requires a following argument (`dist/cli/args.js:110`,
- * `(arg === "--tools" || arg === "-t") && i + 1 < args.length`), so a trailing `--tools` is
- * ignored, and the value is split on commas, trimmed, and emptied of blanks.
+ * They are measured against **pi 1.0.0**, the version in `node_modules` — the one this repo
+ * compiles and typechecks against, and therefore the one a reader can re-measure without leaving
+ * the checkout. pi **1.1.0** moves several of them: `--tools` 110 → 114, the `--` test 23 → 24,
+ * `_isAllowedTool` (`core/agent-session.js`) 1099 → 1118, and the `sdk.js` loadout expression
+ * 148 → 157. Nothing about the behaviour differs; only the addresses do, and an address that is
+ * wrong for the version in front of the reader is worse than no address at all. So when you re-measure
+ * one, re-measure against 1.0.0 or say which version you used.
  *
- * Known limit, in the recoverable direction: pi consumes some other flags' values (`-e NAME`),
- * so an argv in which such a value is the literal string `-t` would be read here as a tool flag
- * and not there. That over-reports activation, which the `session_start` measurement catches.
+ * (This is the same trap ADR-0026's presence probe already records: it cites 0.99.1's `loader.js`
+ * and says so, on purpose.)
  */
-function cliToolAllowlist(args: readonly string[]): string[] | undefined {
+
+/** pi's comma-separated tool-list syntax (`args.js:110,116` on pi 1.0.0): split, trimmed, blanks dropped. */
+function splitCliToolList(value: string): string[] {
+  return value
+    .split(",")
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0);
+}
+
+/**
+ * Every flag pi's parser consumes a following argument for, so a value that LOOKS like a tool
+ * flag is never re-read as one.
+ *
+ * pi writes those branches `args[++i]` (`dist/cli/args.js:63-189`), which advances the cursor past
+ * the value; `--mode` and `--use-theme` spell the same advance as a bare `i++` (`:46`, `:171`), and
+ * `-p` guards its value before advancing (`:139`). The whole flag loop is `:21-251`.
+ *
+ * This reader originally used `args[index + 1]` and did not advance, so it saw flags pi
+ * had already swallowed as values. That is not a cosmetic difference: `pi --exclude-tools --tools
+ * codemode` gives this reader `allowlist: ["codemode"]` and therefore `active`, while pi sets
+ * `excludeTools` to the literal `"--tools"` and never looks at `tools` at all — so pi decides from
+ * `defaultTools`, and the session is wrong in the direction that costs the user both orchestration
+ * tools.
+ *
+ * The set is deliberately an OVER-approximation of pi's branches rather than a transcription of
+ * them. A name listed here that pi happens to treat as valueless only makes this reader skip an
+ * argument, which can only hide a tool flag and so pushes the answer toward `inactive` — the safe
+ * direction, and the one ADR-0029's fallback exists for. A name MISSING here is the dangerous kind
+ * of error, which is why the list errs long.
+ *
+ * `--` is not in this set because it is not a value-consuming flag; it ends flag parsing outright
+ * (`args.js:23`, whose `break` is `:32`), which {@link cliToolFlags} handles separately.
+ */
+const PI_VALUE_CONSUMING_FLAGS: ReadonlySet<string> = new Set([
+  "--api-key",
+  "--append-system-prompt",
+  "--exclude-tools",
+  "--export",
+  "--extension",
+  "--fork",
+  "--model",
+  "--models",
+  "--name",
+  "--prompt-template",
+  "--provider",
+  "--session",
+  "--session-dir",
+  "--session-id",
+  "--skill",
+  "--system-prompt",
+  "--thinking",
+  "--tools",
+  "-e",
+  "-n",
+  "-t",
+  "-xt",
+]);
+
+/**
+ * The two flags pi only consumes a value from when that value does NOT look like a flag.
+ *
+ * `--mode` (`args.js:40-46`), `--use-theme` (`:164-171`) and `--list-models` (`:186-189`) all
+ * test `value === undefined || value.startsWith("-")` and skip the advance when it does.
+ * They were originally listed in the unconditional set above with the claim that they "spell the
+ * same advance as a bare `i++`", which is false in exactly the case that matters: `--mode -t
+ * codemode` leaves `-t codemode` for pi's main loop, and treating that as consumed here would hide
+ * a tool flag.
+ */
+const PI_CONDITIONALLY_CONSUMING_FLAGS: ReadonlySet<string> = new Set([
+  "--mode",
+  "--use-theme",
+  "--list-models",
+]);
+
+/**
+ * `-p` / `--print` has a THIRD rule, and it is the one that is easiest to get wrong.
+ *
+ * pi's branch (`args.js:134-141`) consumes the next token only when it is not `@file` and either
+ * does not start with `-` or starts with `---` — the last clause existing so `--print ---` still
+ * reads a message that begins with dashes. So `-p -t` does NOT consume, and the `-t` behind it is
+ * pi's own tool allowlist. Treating `-p` as an ordinary value-consuming flag hides that allowlist,
+ * which is the wrong direction: with `defaultTools` naming codemode, the answer flips from
+ * `subagents` to `full` and the model gets a second orchestration tool pi never offered.
+ */
+function piPrintConsumesNext(args: readonly string[], index: number): boolean {
+  const value = args[index + 1];
+  if (value === undefined || value.startsWith("@")) return false;
+  return !value.startsWith("-") || value.startsWith("---");
+}
+
+/**
+ * pi's `--`-style flags that swallow a following token that does not itself look like a flag.
+ *
+ * `dist/cli/args.js:227,235-237`: the unknown-flag branch stores `--name` with its value when the next
+ * token starts with neither `-` nor `@`, and advances `i` past it. pi then never treats that token
+ * as a flag, so neither may this reader. Treating it as one is the same class of error as the `-e NAME` case above.
+ */
+function piUnknownLongFlagEatsNext(args: readonly string[], index: number): boolean {
+  const next = args[index + 1];
+  return next !== undefined && !next.startsWith("-") && !next.startsWith("@");
+}
+
+/** The three CLI flags that decide which tools pi allows, and which of them are active. */
+export interface CliToolFlags {
+  /** `--tools` / `-t`, or `undefined` when the flag is absent or dangling. */
+  allowlist: string[] | undefined;
+  /** `--exclude-tools` / `-xt`, empty when absent or dangling. */
+  denylist: string[];
+  /**
+   * True when pi will start the session with an EMPTY active tool list. Set by BOTH
+   * `--no-tools` / `-nt` AND `--no-builtin-tools` / `-nbt`.
+   */
+  noTools: boolean;
+}
+
+/**
+ * Every CLI switch that can remove `codemode`, read the way pi reads it.
+ *
+ * The previous version of this read only `--tools`, which was correct for as long as `--tools`
+ * was the only flag that could take a tool away. It is not, and the two it missed both land on
+ * the SAME side — they make this package hand its orchestration tools to a `codemode` that is not
+ * there, and `subagents` reaches them at `exposure: "codemode"`, which means a `codemode` that
+ * does not exist reaches them from nowhere. So both were read as `active` where pi would not
+ * activate it:
+ *
+ * - **`-xt codemode`** filters the registry outright — `_isAllowedTool` is
+ *   `(!allowed || allowed.has(name)) && !excluded?.has(name)` (`agent-session.js:1099-1100`) —
+ *   so the tool is not merely inactive, it is absent.
+ * - **`-t codemode -xt codemode`** is the order-sensitive one. pi builds the initial active set
+ *   as `(tools ?? configured).filter(name => !excluded.has(name))` (`sdk.js:148`): the denylist
+ *   is applied AFTER the list that contains the name, so exclusion beats inclusion. An old
+ *   `allowlist.includes(codemode)` check cannot see that.
+ *
+ * `--no-tools` / `-nt` is read too, and it is NOT an empty allowlist. `-t ""` still *allows*
+ * every name and activates none; `-nt` empties `_allowedToolNames`, so nothing is allowed to
+ * register at all (`sdk.js:145`).
+ *
+ * `--no-builtin-tools` / `-nbt` sets this flag as well, and that one is worth the record because
+ * it was written here as deliberately NOT read, on the reasoning that pi maps it to
+ * `noTools: "builtin"` (`main.js:430`) which is not `"all"`, and that `codemode` is not one of the
+ * eight built-in tools anyway. Both halves are true and the conclusion drawn from them was wrong.
+ * `sdk.js:148` tests `options.noTools` for TRUTH, not for `"all"`:
+ *
+ * ```js
+ * (options.tools ?? (options.noTools ? [] : (configuredDefaultToolNames ?? DEFAULT_TOOL_NAMES)))
+ * ```
+ *
+ * so `"builtin"` empties the initial active list exactly as `"all"` does, and a user who has
+ * `defaultTools: ["+codemode"]` and launches with `-nbt` gets an INACTIVE codemode. Measured on
+ * pi 1.1.0 with this package's own `dist/index.js`: `-nbt` leaves `codemode` registered
+ * (`allowedToolNames` stays undefined, so `_isAllowedTool` admits it) and inactive
+ * (`initialActiveToolNames` is `[]`), which is a state the flag name does not suggest and which no
+ * amount of reading `sdk.js:145` in isolation reveals. `tests/unit/cli-tool-flags.test.ts` pins it.
+ */
+export function cliToolFlags(args: readonly string[]): CliToolFlags {
+  let allowlist: string[] | undefined;
+  let denylist: string[] = [];
+  let noTools = false;
   for (let index = 0; index < args.length; index += 1) {
-    if (args[index] !== "--tools" && args[index] !== "-t") continue;
-    const value = args[index + 1];
-    if (value === undefined) return undefined;
-    return value
-      .split(",")
-      .map((name) => name.trim())
-      .filter((name) => name.length > 0);
+    const arg = args[index];
+    if (arg === undefined) continue;
+    // pi breaks out of the flag loop at `--` (`args.js:23`, `break` at `:32`), so nothing after it is a flag.
+    if (arg === "--") break;
+    if (arg === "--no-tools" || arg === "-nt" || arg === "--no-builtin-tools" || arg === "-nbt") {
+      noTools = true;
+      continue;
+    }
+    if (arg === "--tools" || arg === "-t") {
+      const value = args[index + 1];
+      if (value !== undefined) {
+        allowlist = splitCliToolList(value);
+        index += 1;
+      }
+      continue;
+    }
+    if (arg === "--exclude-tools" || arg === "-xt") {
+      const value = args[index + 1];
+      if (value !== undefined) {
+        denylist = splitCliToolList(value);
+        index += 1;
+      }
+      continue;
+    }
+    // Every other branch pi writes as `args[++i]` consumes its value. Skipping it here is what
+    // keeps a value that happens to spell `--tools` from being read as a tool flag.
+    if (PI_VALUE_CONSUMING_FLAGS.has(arg)) {
+      if (args[index + 1] !== undefined) index += 1;
+      continue;
+    }
+    if (PI_CONDITIONALLY_CONSUMING_FLAGS.has(arg)) {
+      const value = args[index + 1];
+      if (value !== undefined && !value.startsWith("-")) index += 1;
+      continue;
+    }
+    if (arg === "-p" || arg === "--print") {
+      if (piPrintConsumesNext(args, index)) index += 1;
+      continue;
+    }
+    if (arg.startsWith("--") && piUnknownLongFlagEatsNext(args, index)) index += 1;
   }
-  return undefined;
+  return { allowlist, denylist, noTools };
 }
 
 /**
  * Resolve the LOADOUT half of whether `codemode` will be in the model's tool list: the
- * command-line allowlist, then the merged `defaultTools`, then pi's own default. This is the
+ * command-line switches, then the merged `defaultTools`, then pi's own default. This is the
  * ADR-0029 mirror; the MCP auto-enable evidence (ADR-0033) is unioned on top by
  * {@link applyMcpAutoEnableEvidence}, which {@link readCodemodeActivation} calls.
+ *
+ * The precedence below is pi's, in pi's order, and it is not the order the flags are written in:
+ *
+ * 1. **`-t`** decides the list, and it beats `-nt` — `options.tools ?? (options.noTools ? [] : …)`
+ *    (`sdk.js:148`). `-nt -t codemode` activates `codemode`.
+ * 2. **`-xt` vetoes whatever list won**, including the allowlist, because the denylist is the
+ *    `.filter` applied to that list rather than another source (`sdk.js:147-148`). This is the
+ *    check whose absence made `-t codemode -xt codemode` read as active.
+ * 3. **`-nt` and `-nbt`** with no allowlist empty the initial active list (`sdk.js:148`), so
+ *    `codemode` is not active whatever `defaultTools` says. Under `-nt` it is not even registered
+ *    (`sdk.js:145`); under `-nbt` it is registered and inactive. Same answer, different states.
+ * 4. Otherwise `defaultTools` decides, vetoed by `-xt` exactly as in (2), because the same
+ *    `.filter` is applied to the configured list.
  *
  * The last of those is the load-bearing one and is what makes absence of evidence mean
  * `inactive`: pi registers `codemode` inactive, so a session that configured nothing does not get
@@ -585,22 +793,26 @@ export function resolveCodemodeActivation(
   projectSettings: unknown,
   userSettings: unknown,
 ): CodemodeActivationResolution {
-  const allowlist = cliToolAllowlist(argv.slice(1));
-  if (allowlist !== undefined) {
+  const cli = cliToolFlags(argv.slice(1));
+  const denied = cli.denylist.includes(CODEMODE_TOOL_NAME);
+
+  if (cli.allowlist !== undefined) {
     return {
-      activation: allowlist.includes(CODEMODE_TOOL_NAME) ? "active" : "inactive",
+      activation: cli.allowlist.includes(CODEMODE_TOOL_NAME) && !denied ? "active" : "inactive",
       source: "cli",
     };
   }
+  if (cli.noTools) return { activation: "inactive", source: "cli" };
 
   const projectRaw = (projectSettings as { defaultTools?: unknown } | undefined)?.defaultTools;
   const userRaw = (userSettings as { defaultTools?: unknown } | undefined)?.defaultTools;
   const merged = mergeDefaultTools(userRaw, projectRaw);
   if (merged === undefined) return { activation: "inactive", source: "default" };
 
-  const answer = resolveDefaultTools(stringEntries(merged)).includes(CODEMODE_TOOL_NAME)
-    ? "active"
-    : "inactive";
+  const answer =
+    !denied && resolveDefaultTools(stringEntries(merged)).includes(CODEMODE_TOOL_NAME)
+      ? "active"
+      : "inactive";
   return { activation: answer, source: projectRaw !== undefined ? "project" : "user" };
 }
 
@@ -1000,21 +1212,6 @@ export function detectedSurfaceMode(
 }
 
 /**
- * Whether an explicit `surfaceMode` disagrees with what the table above decided.
- *
- * The explicit key always WINS — that is what an override is for — so this exists only to be
- * reported. `off` is exempt: it means "I do not want this package's surface at all", which is a
- * statement about the package rather than a claim about who orchestrates, and warning about it on
- * every session would be crying wolf.
- */
-export function surfaceModeConflict(
-  explicit: SurfaceMode | undefined,
-  detected: SurfaceMode,
-): boolean {
-  return explicit !== undefined && explicit !== "off" && explicit !== detected;
-}
-
-/**
  * Whether the pi that launched us ships its own `codemode` orchestration tool.
  *
  * pi's own tool listing is NOT usable here, and that is why this probe exists at all.
@@ -1085,217 +1282,110 @@ export interface CodemodePresence {
   how: "found" | "not-found" | "no-entry" | "unresolvable-entry";
 }
 
-/** Result of reading the surface mode, with enough detail to warn about a broken file. */
-export interface SurfaceModeConfig {
+/** The detected surface, plus every probe result `session_start` reports on. */
+export interface DetectedSurface {
+  /** What this package registers. Decided by {@link detectedSurfaceMode}; never configured. */
   surfaceMode: SurfaceMode;
-  source: "file" | "default" | "invalid";
-  error?: string;
-  /**
-   * What the probe found, on the paths where the surface was NOT decided by the file. Absent
-   * when the user set the key: that call never consults the probe (see
-   * {@link readSurfaceModeConfig}), so there is nothing to report.
-   */
-  codemode?: CodemodePresence;
-  /**
-   * Whether pi will actually load its own codemode (ADR-0027). Absent for the same reason as
-   * {@link codemode}: an explicit key short-circuits the probe, so there is nothing to report.
-   */
-  codemodeSwitch?: CodemodeSwitchResolution;
-  /**
-   * Whether `codemode` will be in the model's tool list (ADR-0029), the third axis of the
-   * detected table. Absent for the same reason as {@link codemodeSwitch}.
-   */
-  codemodeActivation?: CodemodeActivationResolution;
-  /**
-   * What the four-case table decided, carried even when an explicit key overrode it — that
-   * difference is exactly what {@link surfaceModeConflict} reports on.
-   */
-  detected?: SurfaceMode;
+  /** Whether this pi ships a `codemode` at all. */
+  codemode: CodemodePresence;
+  /** Whether pi will load it (ADR-0027). */
+  codemodeSwitch: CodemodeSwitchResolution;
+  /** Whether the model will be able to call it (ADR-0029), the third axis of the table. */
+  codemodeActivation: CodemodeActivationResolution;
 }
 
 /**
- * Read `surfaceMode` from the agent-dir config file.
+ * Decide the surface by asking the pi. A pure function of the three probes and nothing else.
  *
- * A pure function over the filesystem, shaped like {@link readDefaultModeConfig} on purpose:
- * an absent file, an absent key, unparseable JSON, a non-object, a wrong-typed value and an
- * out-of-set value all resolve to the detected default rather than a hardcoded one, and every
- * malformed shape additionally reports `invalid` with a reason. A malformed setting must never
- * half-apply - which tools exist is not something to change on a guess.
+ * This used to read a `surfaceMode` key first and only fall back to the probes, and the argument
+ * for that was an escape hatch: pi has `registerTool` but no `unregisterTool`, so a surface chosen
+ * wrongly cannot be corrected once the factory has returned — a session that got the wrong answer
+ * keeps it until it restarts. That argument is real, and it is also why the hatch is gone rather
+ * than merely narrowed:
  *
- * The `presence` and `codemodeSwitch` arguments are parameters rather than hidden calls, so a test
- * can state the pi it is reasoning about instead of depending on the machine it runs on. Omit
- * them and the real probes answer, but only on a path that actually needs the answer: they are
- * resolved inside the fallback branches rather than in a default parameter, because a default
- * parameter is evaluated on EVERY call -- including the ones an explicit `surfaceMode` key
- * short-circuits, where the user paid a `realpathSync` plus up to three `statSync` and the
- * settings reads below to set one line of JSON and get a constant.
+ * - **The wrong answer is now reported rather than prevented.** `session_start` measures the live
+ *   registry against all three probes and says so when they disagree (ADR-0029), which a pinned
+ *   value used to suppress.
+ * - **The direction that actually hurts is not reachable by a setting anyway.** A pin can only
+ *   make the surface *more* capable than detection, never less: every way the probes come back
+ *   wrong (`subagents` chosen for a `codemode` that cannot run) resolves to `full`, and no value
+ *   the file could hold would have produced a better outcome than the one already chosen.
+ * - **Disabling is pi's job now.** The `off` value existed because a package that cannot be
+ *   switched off is a package that stays loaded forever. `pi config` turns a package's extensions
+ *   off without loading them — measured, not assumed: on pi 1.1.0 a `packages` entry whose
+ *   `extensions` is `[]` or `["!dist/index.js"]` does not load the extension at all, while
+ *   `["+dist/index.js"]` and an absent key both do. That is a channel this package cannot offer
+ *   for itself, because the switch that uses it is pi's.
  *
- * The probes do NOT save an explicit key their reads, though, and the cost is worth naming exactly
- * rather than in the round number it is usually quoted as: `detected()` runs the switch probe AND
- * the activation probe, and each reads the SAME two settings files (`readCodemodeSwitch` and
- * `readCodemodeActivation` each call `readSettingsObject` twice), so one detected surface costs
- * four settings reads over two files, plus the two `mcp.json` reads ADR-0033 added. The
- * duplication is pre-existing and deliberate — each probe is copied from pi whole and kept
- * self-contained — so the number is recorded, not optimised.
+ * The `presence` and `codemodeSwitch` arguments stay parameters rather than hidden calls, so a
+ * test can state the pi it is reasoning about instead of depending on the machine it runs on.
+ *
+ * The probes are resolved here rather than in default parameters, so every call pays for all
+ * three — the shortcut that used to exist (`a default parameter is evaluated on EVERY call`)
+ * saved real work only when a key short-circuited the probes entirely, and there is no key left.
+ * The cost, named rather than rounded: each of the two settings-reading probes reads the SAME two
+ * files, so one detection is four settings reads over two files plus the two `mcp.json` reads
+ * ADR-0033 added. The duplication is pre-existing and deliberate — each probe is copied from pi
+ * whole and kept self-contained — so the number is recorded, not optimised.
  */
-export function readSurfaceModeConfig(
+export function detectSurfaceMode(
   agentDir: string,
   presence?: CodemodePresence,
   codemodeSwitch?: CodemodeSwitchResolution,
   codemodeActivation?: CodemodeActivationResolution,
   cwd: string = process.cwd(),
-): SurfaceModeConfig {
-  const path = join(agentDir, PTC_MODE_CONFIG_FILE);
-  const detected = (): {
-    surfaceMode: SurfaceMode;
-    codemode: CodemodePresence;
-    codemodeSwitch: CodemodeSwitchResolution;
-    codemodeActivation: CodemodeActivationResolution;
-  } => {
-    const probed = presence ?? probeCodemodePresence();
-    const sw = codemodeSwitch ?? readCodemodeSwitch(agentDir, cwd);
-    const act = codemodeActivation ?? readCodemodeActivation(agentDir, cwd);
-    return {
-      surfaceMode: detectedSurfaceMode(probed, sw.switch, act.activation),
-      codemode: probed,
-      codemodeSwitch: sw,
-      codemodeActivation: act,
-    };
+): DetectedSurface {
+  const probed = presence ?? probeCodemodePresence();
+  const sw = codemodeSwitch ?? readCodemodeSwitch(agentDir, cwd);
+  const act = codemodeActivation ?? readCodemodeActivation(agentDir, cwd);
+  return {
+    surfaceMode: detectedSurfaceMode(probed, sw.switch, act.activation),
+    codemode: probed,
+    codemodeSwitch: sw,
+    codemodeActivation: act,
   };
+}
+
+/** A `surfaceMode` left in `ptc.json` by a release that still had the key. */
+export interface LegacySurfaceKey {
+  /** The path it was found in, or `undefined` when there was no file to look in. */
+  path: string;
+  /** The value that was there, or the JSON rendering when it was not a string. */
+  value: unknown;
+}
+
+/**
+ * Read a `surfaceMode` key that this package no longer acts on, so `session_start` can say so.
+ *
+ * The key shipped in v1.6.0 and the three values it took are gone, which means a user who set
+ * `"off"` to keep this package out of their sessions would find it back on the next upgrade with
+ * nothing to explain why. Nothing here restores the behaviour: the returned value is only ever
+ * turned into a notice that names the replacement. The alternative — honouring `off` forever as a
+ * compatibility shim — is the switch this change exists to delete, and it would leave the package
+ * carrying two ways to be disabled, one of which silently does nothing.
+ *
+ * Returns `undefined` for an absent file, an absent key, and for a file this cannot parse or that
+ * is not an object. Those last two are NOT reported here: a `ptc.json` too broken to read has no
+ * `surfaceMode` to be stale about, and the parse failure belongs to whoever owns that file
+ * (`defaultMode` still lives there, and {@link readDefaultModeConfig} is what reports it).
+ */
+export function readLegacySurfaceKey(agentDir: string): LegacySurfaceKey | undefined {
+  const path = join(agentDir, PTC_MODE_CONFIG_FILE);
   let raw: string;
   try {
     raw = readFileSync(path, "utf8");
   } catch {
-    return { ...detected(), source: "default" };
+    return undefined;
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
-  } catch (error) {
-    return {
-      surfaceMode: detected().surfaceMode,
-      source: "invalid",
-      error: `${path} is not valid JSON (${error instanceof Error ? error.message : String(error)})`,
-    };
-  }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return {
-      surfaceMode: detected().surfaceMode,
-      source: "invalid",
-      error: `${path} must contain a JSON object`,
-    };
-  }
-  const value = (parsed as { surfaceMode?: unknown }).surfaceMode;
-  if (value === undefined) {
-    return { ...detected(), source: "default" };
-  }
-  if (typeof value !== "string") {
-    return {
-      surfaceMode: detected().surfaceMode,
-      source: "invalid",
-      error: `${path}: "surfaceMode" must be a string, received ${typeof value}`,
-    };
-  }
-  if (!SURFACE_MODES.includes(value as SurfaceMode)) {
-    return {
-      surfaceMode: detected().surfaceMode,
-      source: "invalid",
-      error: `${path}: "surfaceMode" must be one of ${SURFACE_MODES.join(" | ")}, received ${JSON.stringify(value)}`,
-    };
-  }
-  // An explicit key wins, but the table still runs so the caller can report a disagreement
-  // (ADR-0027). All three probes are paid for on this one path, and only this one.
-  const table = detected();
-  return {
-    surfaceMode: value as SurfaceMode,
-    source: "file",
-    detected: table.surfaceMode,
-    codemode: table.codemode,
-    codemodeSwitch: table.codemodeSwitch,
-    codemodeActivation: table.codemodeActivation,
-  };
-}
-
-/** Outcome of writing `surfaceMode` for `/ptc surface`. */
-export type SurfaceModeWrite =
-  | {
-      ok: true;
-      path: string;
-      /** The value already in the file, or `undefined` when there was none. */
-      previous: SurfaceMode | undefined;
-      /** False when the file already said this, in which case NOTHING was written. */
-      changed: boolean;
-    }
-  | { ok: false; path: string; error: string };
-
-/**
- * Write one `surfaceMode` key into the agent-dir config, preserving every other key.
- *
- * Three rules, each of which is a way a naive rewrite goes wrong:
- *
- * - **A malformed file is never overwritten.** An unparseable `ptc.json` is a file the user may
- *   be mid-edit on, and this command is not a licence to replace it with something valid that
- *   drops whatever was in it. The read side already reports that shape rather than acting on it
- *   ({@link readSurfaceModeConfig}), and the write side has to agree.
- * - **Other keys survive.** `defaultMode` lives in the same file (ADR-0010), and a command that
- *   wrote `{"surfaceMode": …}` wholesale would silently reset the user's mode preference.
- * - **An unchanged value writes nothing.** `/ptc surface full` on a session already at `full`
- *   should not touch the file's mtime, and — more to the point — should not trigger the reload
- *   that would follow, since a reload replaces every extension instance for no reason.
- */
-export function setSurfaceMode(agentDir: string, value: unknown): SurfaceModeWrite {
-  const path = join(agentDir, PTC_MODE_CONFIG_FILE);
-  if (typeof value !== "string" || !SURFACE_MODES.includes(value as SurfaceMode)) {
-    return {
-      ok: false,
-      path,
-      error: `surfaceMode must be one of ${SURFACE_MODES.join(" | ")}`,
-    };
-  }
-  const wanted = value as SurfaceMode;
-
-  let raw: string | undefined;
-  try {
-    raw = readFileSync(path, "utf8");
   } catch {
-    raw = undefined;
+    return undefined;
   }
-  let parsed: Record<string, unknown> = {};
-  if (raw !== undefined) {
-    let decoded: unknown;
-    try {
-      decoded = JSON.parse(raw);
-    } catch (error) {
-      return {
-        ok: false,
-        path,
-        error: `${path} is not valid JSON (${error instanceof Error ? error.message : String(error)}), so it was left alone`,
-      };
-    }
-    if (decoded === null || typeof decoded !== "object" || Array.isArray(decoded)) {
-      return {
-        ok: false,
-        path,
-        error: `${path} must contain a JSON object, so it was left alone`,
-      };
-    }
-    parsed = decoded as Record<string, unknown>;
-  }
-
-  const existing = parsed.surfaceMode;
-  const previous = typeof existing === "string" ? (existing as SurfaceMode) : undefined;
-  if (previous === wanted) return { ok: true, path, previous, changed: false };
-
-  try {
-    writeFileSync(path, JSON.stringify({ ...parsed, surfaceMode: wanted }, null, 2) + "\n", "utf8");
-  } catch (error) {
-    return {
-      ok: false,
-      path,
-      error: `could not write ${path} (${error instanceof Error ? error.message : String(error)})`,
-    };
-  }
-  return { ok: true, path, previous, changed: true };
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+  const value = (parsed as { surfaceMode?: unknown }).surfaceMode;
+  return value === undefined ? undefined : { path, value };
 }
 
 // --------------------------------------------------------------------------------------

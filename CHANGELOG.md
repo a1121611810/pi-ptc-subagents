@@ -37,11 +37,52 @@ exposure` over `pi-coding-agent@0.86.1`'s `dist/` returns nothing, and so does
 
 ### Changed
 
+- **BREAKING: the `surfaceMode` setting is removed, and the surface is detected only.** Which
+  model-facing tools this package registers is now a pure function of what pi is — three probes
+  (does this pi ship `codemode`, will pi load it, can the model call it), with `full` as the
+  fallback for every case a probe cannot answer
+  ([ADR-0034](./docs/adr/0034-surface-is-detected-not-set.md)).
+
+  **What is gone:**
+
+  - the `surfaceMode` key in `~/.pi/agent/ptc.json` (`off` / `subagents` / `full`);
+  - the `off` value — a session that wants none of this package's tools no longer has a way to say
+    so here;
+  - the `/ptc surface [off|subagents|full]` subcommand. **`/ptc off` is unaffected** — it turns PTC
+    _mode_ off, which was never the same thing as the extension surface;
+  - the `surfaceModeConflict` notice about a pinned value disagreeing with detection.
+
+  **Migrating: use pi, not this package.** Run `pi config` and disable this package's extensions
+  there — measured on pi 1.1.0 against this package's own `dist/index.js`, a `packages` entry whose
+  `extensions` is `[]` or `["!dist/index.js"]` is not loaded at all, while `["+dist/index.js"]` and
+  an omitted key are. This is strictly better than any value of a key this package reads, because
+  pi honours it **without loading the extension**: none of this package runs, rather than running
+  and then deciding to register nothing. In a project-level `.pi/settings.json` write
+  `["!dist/index.js"]` rather than `[]` — pi resolves the two scopes with two different functions
+  (`package-manager.js:1850`), where an empty project delta means "no change".
+
+  **Expect one warning on upgrade if you had the key set.** A `ptc.json` carrying `surfaceMode` is
+  reported at session start and the key is **not** honoured — deliberately, including for `"off"`,
+  which is why this package comes back after being switched off. The warning names the file, quotes
+  the value, and points at `pi config`; deleting the key silences it.
+
 - **ADR-0025 decision 3 is amended.** `subagents` does register the programming pair now. What
   the decision protected — the model being offered one orchestration surface, not two — is
   unchanged and is now enforced by exposure rather than by an absent tool. `CONTEXT.md`'s
   _orchestration surface_ and _subagent surface_ entries and the README's surface list say so
   too.
+
+- **The `codemode` activation probe now reads every CLI flag that can remove the tool.** It reads
+  `--exclude-tools` / `-xt` and `--no-tools` / `-nt` in addition to `--tools` / `-t`, and it applies
+  them in pi's own order: `-t` decides the list and beats `-nt`, while `-xt` vetoes whatever list
+  won. That last one was a real misreading — pi builds the active set as
+  `(tools ?? configured).filter(name => !excluded.has(name))` (`sdk.js:148`), so **exclusion beats
+  inclusion**, and `-t codemode -xt codemode` was previously read as `active`. The direction was the
+  harmful one: under `subagents`, `ptc_run_code` / `ptc_workflow` are at `codemode` reach, so an
+  orchestrator believed to be present but absent is an orchestrator nobody can call.
+  `--no-builtin-tools` is deliberately still not read: it maps to `noTools: "builtin"` and
+  `codemode` is not one of pi's built-in tools, so reading it would be a guess about a flag that
+  cannot move it.
 
 ## [1.6.0] - 2026-10-08
 
@@ -68,7 +109,7 @@ exposure` over `pi-coding-agent@0.86.1`'s `dist/` returns nothing, and so does
   session, and only on a detected surface: if nothing in `settings.json` or a readable `mcp.json`
   said codemode would be active, the surface defaulted to `full`, and pi's real tool loadout
   contains `codemode` anyway, the session is now told it is carrying two orchestration surfaces and
-  which `surfaceMode` key picks one. Checked at session start and again on the first turn, because
+  which setting picks one. Checked at session start and again on the first turn, because
   pi's MCP extension may activate codemode after this package's own `session_start` runs. It is
   `TUI`-only, like every other notice in this package.
 - **A named report for an `mcp.json` this package could not read.** A file that is absent is

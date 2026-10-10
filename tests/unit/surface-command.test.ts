@@ -1,20 +1,59 @@
 /**
- * ADR-0030 — `/ptc surface`, the runtime half of the surface setting.
+ * What replaced ADR-0030's `surfaceMode` key and its `/ptc surface` command.
  *
- * The surface is read once, in the extension factory, and pi has no `unregisterTool`, so a change
- * cannot apply to a running session. The one thing that DOES re-run every factory is a reload
- * (`DefaultResourceLoader.reload()` → `clearExtensionCache()`, then re-resolve and re-load), which
- * is also what pi's own `/reload` does. This file pins the two halves of that: the write, which
- * must never damage the file it is editing, and the command, which must reload rather than leave
- * the user to discover that nothing happened.
+ * Both are gone: the surface is now a pure function of what pi is (`detectSurfaceMode`), there is
+ * no value a user can pin and no subcommand that could write one. What is left behind is a
+ * MIGRATION problem, and it is the only thing worth pinning here — a developer's `ptc.json` still
+ * carries a key that now does nothing, and the difference between "reported once, with the
+ * replacement named" and "silently ignored" is the whole of what this file checks:
+ *
+ *   1. **The key changes nothing.** Every legacy value, compared DIFFERENTIALLY against the same
+ *      pi with no key at all — not against a hand-written tool list, so the claim is "the key is
+ *      inert" rather than "the tool list happens to look like this".
+ *   2. **The user is told**, once, as a `warning`, with the path, the value, and `pi config` as
+ *      the channel that actually works (pi does not LOAD an extension to honour it, which no value
+ *      of a key this package reads could ever achieve — `src/mode/ptc-mode.ts:1171-1176`).
+ *   3. **And only then.** A file with no key, no file, or a file too broken to parse raises no
+ *      such notice: a notice on every ordinary session is a notice nobody reads.
+ *
+ * ADR-0030's reload discipline survives in its one remaining form — the notice is raised at
+ * `session_start`, and nothing on this path reloads, so `stub.reloads` stays empty.
+ *
+ * NOTE: the filename is now a misnomer — there is no surface command. A rename to something like
+ * `legacy-surface-key.test.ts` is the honest follow-up, but renaming was outside the assigned
+ * scope, so the history stays visible here rather than being quietly dropped.
  */
 import { describe, expect, test } from "vitest";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { setSurfaceMode, SURFACE_MODES } from "../../src/mode/ptc-mode.ts";
+import {
+  PTC_MODE_CONFIG_FILE,
+  PTC_MODE_ENTRY_TYPE,
+  PTC_MODE_STATUS_KEY,
+} from "../../src/mode/ptc-mode.ts";
 import { makeExtensionStub, makeTempDir, removeTempDir, stubContext } from "../helpers/ptc.ts";
 
-const FILE = "ptc.json";
+const FILE = PTC_MODE_CONFIG_FILE;
+
+/**
+ * The three probes that resolve `full` (`detectedSurfaceMode`'s table, `src/mode/ptc-mode.ts:1046`).
+ *
+ * Pinned because nothing short-circuits the detection any more: with the key gone, an unpinned
+ * switch or activation axis runs the real probe over the developer's own
+ * `~/.pi/agent/settings.json` and this file's surface would depend on the machine running it.
+ */
+const FULL_SURFACE_AXES = {
+  codemode: { present: true, how: "found" },
+  codemodeSwitch: { switch: "enabled", source: "user" },
+  codemodeActivation: { activation: "inactive", source: "default" },
+} as const;
+
+/**
+ * The exact substring that identifies the stale-key notice, used to filter session_start's output.
+ * A filter and not a "no notices at all" assertion, because `session_start` raises several
+ * unrelated lines and pinning their absence would make this file a hostage to the others.
+ */
+const STALE_KEY = 'still has a "surfaceMode" key';
 
 async function withAgentDir(fn: (dir: string) => Promise<void>): Promise<void> {
   const dir = await makeTempDir("pi-ptc-surface-");
@@ -29,111 +68,154 @@ async function withAgentDir(fn: (dir: string) => Promise<void>): Promise<void> {
   }
 }
 
-const readConfig = async (dir: string): Promise<unknown> =>
-  JSON.parse(await readFile(join(dir, FILE), "utf8"));
+/** Write `body` as the agent dir's `ptc.json`, verbatim. */
+const writeConfig = (dir: string, body: string) => writeFile(join(dir, FILE), body, "utf8");
 
-describe("setSurfaceMode", () => {
-  test("every value in the set is accepted, and the file it writes reads back as that value", async () => {
-    // The literal set, not the constant: a value dropped from SURFACE_MODES has to turn this red
-    // rather than follow the constant that is under test.
-    for (const value of ["off", "subagents", "full"] as const) {
-      await withAgentDir(async (dir) => {
-        const written = setSurfaceMode(dir, value);
-        expect(written.ok, value).toBe(true);
-        if (!written.ok) return;
-        expect(written.changed, value).toBe(true);
-        expect(written.previous, value + ": nothing was there before").toBeUndefined();
-        expect(await readConfig(dir), value).toEqual({ surfaceMode: value });
-      });
-    }
-    expect([...SURFACE_MODES]).toEqual(["off", "subagents", "full"]);
-  });
+/**
+ * The stale-key notices `session_start` raised, and nothing else.
+ *
+ * Takes no agent dir: `withAgentDir` has already pointed `PI_CODING_AGENT_DIR` at it, which is
+ * what `readLegacySurfaceKey` resolves against, and the three pinned axes make the surface itself
+ * independent of it.
+ */
+async function staleKeyNotices(): Promise<{ message: string; type?: string }[]> {
+  const stub = makeExtensionStub(FULL_SURFACE_AXES);
+  await stub.emit("session_start", stubContext(stub, { mode: "tui" }));
+  return stub.notifications.filter((notice) => notice.message.includes(STALE_KEY));
+}
 
-  test("the other key in the file survives", async () => {
-    // `defaultMode` is ADR-0010's key and lives in the same file. A writer that emitted
-    // `{"surfaceMode": …}` wholesale would silently reset the user's mode preference, and nothing
-    // else in the suite would notice.
+describe("the legacy surfaceMode key is inert", () => {
+  test("every value it ever took registers exactly what no key at all registers", async () => {
+    // The differential IS the claim. An implementation that read the key back -- returning early
+    // for `"off"`, or registering the `subagents` line for `"subagents"` -- makes one of these
+    // three disagree with the baseline, and the assertion is on the tool NAMES rather than on a
+    // hand-written list, so it cannot be satisfied by a list that happens to still match.
     await withAgentDir(async (dir) => {
-      await writeFile(join(dir, FILE), JSON.stringify({ defaultMode: false }), "utf8");
-      const written = setSurfaceMode(dir, "full");
-      expect(written.ok).toBe(true);
-      expect(await readConfig(dir)).toEqual({ defaultMode: false, surfaceMode: "full" });
+      const baseline = [...makeExtensionStub(FULL_SURFACE_AXES).tools.keys()];
+      expect(baseline.length, "the baseline is a real surface, not an empty one").toBeGreaterThan(
+        0,
+      );
+
+      // The literal set, not a constant: a value this loop stops naming is a value whose
+      // behaviour stopped being checked, so it would go unnoticed rather than turn red.
+      for (const value of ["off", "subagents", "full"] as const) {
+        await writeConfig(dir, JSON.stringify({ surfaceMode: value }));
+        const names = [...makeExtensionStub(FULL_SURFACE_AXES).tools.keys()];
+        expect(names, `surfaceMode: ${JSON.stringify(value)}`).toEqual(baseline);
+      }
     });
   });
 
-  test("the previous value is reported, so the command can say what it replaced", async () => {
+  test("and it does not turn the PTC MODE off either -- the two were never the same switch", async () => {
+    // `defaultMode` is the key that governs PTC mode and it still lives in this file. A reader
+    // that reached for `surfaceMode: "off"` and acted on it would be acting on the wrong key, and
+    // the failure would be a session silently not entering the mode rather than a visible one.
     await withAgentDir(async (dir) => {
-      await writeFile(join(dir, FILE), JSON.stringify({ surfaceMode: "off" }), "utf8");
-      const written = setSurfaceMode(dir, "subagents");
-      expect(written.ok && written.previous).toBe("off");
-    });
-  });
+      await writeConfig(dir, JSON.stringify({ surfaceMode: "off", defaultMode: true }));
+      const stub = makeExtensionStub(FULL_SURFACE_AXES);
+      await stub.emit("session_start", stubContext(stub, { mode: "tui" }));
 
-  test("setting the value that is already there writes nothing at all", async () => {
-    // The consequence that matters is on the command side — no write means no reload, and a reload
-    // replaces every extension instance in the session for nothing. Asserted here as content
-    // equality so the "did it rewrite" question has an answer that is not `changed`.
-    await withAgentDir(async (dir) => {
-      const original = JSON.stringify({ defaultMode: true, surfaceMode: "full" }, null, 2) + "\n";
-      await writeFile(join(dir, FILE), original, "utf8");
-      const written = setSurfaceMode(dir, "full");
-      expect(written.ok && written.changed).toBe(false);
-      expect(written.ok && written.previous).toBe("full");
-      expect(await readFile(join(dir, FILE), "utf8")).toBe(original);
-    });
-  });
-
-  test("a malformed file is reported and left byte-for-byte alone", async () => {
-    // The failure this most easily gets wrong: a rewrite here would replace a file the user may be
-    // mid-edit on with a valid document that dropped whatever was in it, and the loss would be
-    // invisible. Both the reason and the fact of preservation are asserted.
-    for (const [body, expected] of [
-      ["{ not json", "not valid JSON"],
-      ["[]", "JSON object"],
-      ["null", "JSON object"],
-      ['"subagents"', "JSON object"],
-      ["3", "JSON object"],
-    ] as const) {
-      await withAgentDir(async (dir) => {
-        await writeFile(join(dir, FILE), body, "utf8");
-        const written = setSurfaceMode(dir, "full");
-        expect(written.ok, body).toBe(false);
-        if (written.ok) return;
-        expect(written.error, body).toContain(expected);
-        expect(written.error, body).toContain("left alone");
-        expect(await readFile(join(dir, FILE), "utf8"), body).toBe(body);
-      });
-    }
-  });
-
-  test("a value outside the set is refused, and names the set", async () => {
-    for (const bad of [7, null, "FULL", "sub-agent", "detect", ""]) {
-      await withAgentDir(async (dir) => {
-        const written = setSurfaceMode(dir, bad);
-        expect(written.ok, JSON.stringify(bad)).toBe(false);
-        if (written.ok) return;
-        expect(written.error).toContain("off | subagents | full");
-        // And nothing was created on the way to refusing.
-        await expect(readFile(join(dir, FILE), "utf8")).rejects.toThrow();
-      });
-    }
-  });
-
-  test("a value already in the file that is not in the set is still replaced, not refused", async () => {
-    // A hand-edited `surfaceMode: "detect"` is read as invalid by the READER (which falls back to
-    // the detected default and says so), so the writer replacing it is the repair, not the damage.
-    await withAgentDir(async (dir) => {
-      await writeFile(join(dir, FILE), JSON.stringify({ surfaceMode: "detect" }), "utf8");
-      const written = setSurfaceMode(dir, "full");
-      expect(written.ok && written.changed).toBe(true);
-      expect(await readConfig(dir)).toEqual({ surfaceMode: "full" });
+      const status = stub.statuses.at(-1);
+      expect(
+        stub.entries.filter((entry) => entry.customType === PTC_MODE_ENTRY_TYPE),
+        "the session still enters PTC mode",
+      ).toMatchObject([{ data: { enabled: true } }]);
+      expect(status?.key, "so it also publishes the mode status").toBe(PTC_MODE_STATUS_KEY);
     });
   });
 });
 
-describe("/ptc surface", () => {
-  async function run(_dir: string, args: string): Promise<ReturnType<typeof makeExtensionStub>> {
-    const stub = makeExtensionStub({ surfaceMode: "from-file" });
+describe("the legacy surfaceMode key is reported", () => {
+  test("once, as a warning, naming the path, the value and the replacement", async () => {
+    await withAgentDir(async (dir) => {
+      await writeConfig(dir, JSON.stringify({ surfaceMode: "off" }));
+
+      const notices = await staleKeyNotices();
+
+      expect(notices, "exactly once -- a repeated warning is one nobody reads").toHaveLength(1);
+      expect(notices[0]?.type, "a warning, not a note: the key is being IGNORED").toBe("warning");
+      // The three facts a user needs to act: which file, what it says, and what to do instead.
+      expect(notices[0]?.message, "which file").toContain(join(dir, FILE));
+      expect(notices[0]?.message, "what it says").toContain('("off")');
+      expect(notices[0]?.message, "and that it no longer does anything").toContain(
+        "no longer read",
+      );
+      expect(
+        notices[0]?.message,
+        "and the channel that does work -- pi, without loading this package",
+      ).toContain("pi config");
+    });
+  });
+
+  test("a value that was never legal is echoed as JSON, so the user can see which key is stale", async () => {
+    // `JSON.stringify` of a non-string, not an interpolation: a notice that printed `[object
+    // Object]` for `{"a":1}` would tell the user nothing about what to delete. `7` is the case
+    // that separates the two, because stringifying it drops the quotes a template literal adds.
+    await withAgentDir(async (dir) => {
+      await writeConfig(dir, JSON.stringify({ surfaceMode: 7 }));
+
+      const notices = await staleKeyNotices();
+
+      expect(notices).toHaveLength(1);
+      expect(notices[0]?.message).toContain("(7)");
+    });
+  });
+
+  test("a file with no such key, and no file at all, raise nothing", async () => {
+    // The guard that keeps this from being crying wolf: a session with a clean config is the
+    // overwhelming majority, and a warning there is a warning that trains the reader to skip it.
+    await withAgentDir(async (dir) => {
+      expect(await staleKeyNotices(), "no ptc.json at all").toEqual([]);
+      await writeConfig(dir, JSON.stringify({ defaultMode: false }));
+      expect(
+        await staleKeyNotices(),
+        "a ptc.json whose only key is defaultMode, which is still honoured",
+      ).toEqual([]);
+    });
+  });
+
+  test("a file too broken to parse raises no stale-key notice -- that file belongs to defaultMode", async () => {
+    // `readLegacySurfaceKey` documents the omission: a file it cannot parse has no `surfaceMode`
+    // to be stale about, and the parse failure is reported by whoever OWNS the file. Asserting
+    // the owner's notice as well is what makes this a filter rather than a way of asserting
+    // "session_start is silent".
+    for (const body of ["{ not json", "[]", "null", '"subagents"'] as const) {
+      await withAgentDir(async (dir) => {
+        await writeConfig(dir, body);
+        const stub = makeExtensionStub(FULL_SURFACE_AXES);
+        await stub.emit("session_start", stubContext(stub, { mode: "tui" }));
+
+        expect(
+          stub.notifications.filter((n) => n.message.includes(STALE_KEY)),
+          "no stale-key notice for " + body,
+        ).toEqual([]);
+        expect(
+          stub.notifications.some((n) => n.message.includes(PTC_MODE_CONFIG_FILE)),
+          "but the owner of the file still reports it: " + body,
+        ).toBe(true);
+      });
+    }
+  });
+
+  test("raising it does not reload -- a notice has nothing to apply to", async () => {
+    // ADR-0030's half that outlives the command. `ctx.reload()` tears down the context that
+    // raised it (`runner.js:482`), so a session_start that reloaded to deliver a message about
+    // itself would drop every extension instance in the session to say one line.
+    await withAgentDir(async (dir) => {
+      await writeConfig(dir, JSON.stringify({ surfaceMode: "off" }));
+
+      const stub = makeExtensionStub(FULL_SURFACE_AXES);
+      await stub.emit("session_start", stubContext(stub, { mode: "tui" }));
+
+      expect(stub.notifications.filter((n) => n.message.includes(STALE_KEY))).toHaveLength(1);
+      expect(stub.reloads, "and the session is left standing").toEqual([]);
+    });
+  });
+});
+
+describe("the /ptc surface subcommand is gone", () => {
+  async function run(dir: string, args: string): Promise<ReturnType<typeof makeExtensionStub>> {
+    const stub = makeExtensionStub(FULL_SURFACE_AXES);
     await stub.emit("session_start", stubContext(stub, { mode: "tui" }));
     const command = stub.commands.get("ptc");
     expect(command, "the /ptc command is registered").toBeDefined();
@@ -142,102 +224,39 @@ describe("/ptc surface", () => {
     return stub;
   }
 
-  test("with no value it reports the surface and its source, and does not reload", async () => {
+  test("the argument changes nothing and writes nothing", async () => {
+    // The old handler read this argument and wrote `ptc.json`. An argument that now falls
+    // through to the mode report is the proof it is gone: the file is compared BYTE FOR BYTE,
+    // so a writer that reformatted an unrelated file would still be caught.
     await withAgentDir(async (dir) => {
-      // `full`, not `off`: an `off` surface returns from the factory before the command is
-      // registered (there is nothing to toggle and nothing to say), so `/ptc surface` cannot be
-      // the way back out of it. That asymmetry is deliberate and ADR-0025's, and it is why this
-      // test cannot use the value it is reporting on.
-      await writeFile(join(dir, FILE), JSON.stringify({ surfaceMode: "full" }), "utf8");
-      const stub = await run(dir, "surface");
-      const said = stub.notifications.at(-1)?.message ?? "";
-      expect(said).toContain('"full"');
-      expect(said).toContain("from file");
-      expect(stub.reloads, "a report must not reload").toEqual([]);
-    });
-  });
+      const original = JSON.stringify({ defaultMode: true }, null, 2) + "\n";
+      await writeConfig(dir, original);
 
-  test("setting a value writes it and reloads, and says so BEFORE reloading", async () => {
-    // The order is the assertion. `ctx.reload()` invalidates this command context
-    // (`runner.js:482`), so a notification emitted after it is stale by contract — the message
-    // would be delivered by a torn-down UI channel, or not at all.
-    await withAgentDir(async (dir) => {
       const stub = await run(dir, "surface full");
-      expect(await readConfig(dir)).toEqual({ surfaceMode: "full" });
-      expect(stub.reloads, "exactly one reload").toHaveLength(1);
-      expect(stub.reloads[0], "the notice was already raised when the reload happened").toBe(
-        stub.notifications.length,
-      );
       const said = stub.notifications.at(-1)?.message ?? "";
-      expect(said).toContain("ptc.json");
-      expect(said).toContain('"full"');
+
+      expect(await readFile(join(dir, FILE), "utf8"), "no write").toBe(original);
+      expect(said, "no surface is mentioned").not.toContain("surface");
+      expect(said, "it is the mode report").toContain("PTC mode is");
     });
   });
 
-  test("a value outside the set warns, changes nothing, and does not reload", async () => {
+  test("/ptc off is still the MODE switch, which is a different switch", async () => {
+    // The asymmetry worth guarding: `surface` went, `off` stayed, and the two are unrelated.
+    // Deleting the wrong branch of that handler would take PTC mode's own off-switch with it and
+    // every test above would still be green.
+    //
+    // The session ENTERED the mode at `session_start` (no `ptc.json`, so `defaultMode` is true),
+    // which is what makes this a behavioural assertion: the persisted record has to flip, rather
+    // than the handler merely reaching a branch that prints something.
     await withAgentDir(async (dir) => {
-      const stub = await run(dir, "surface nonsense");
-      const last = stub.notifications.at(-1);
-      expect(last?.type, "an unusable value is a warning, not a note").toBe("warning");
-      expect(last?.message).toContain("off | subagents | full");
-      expect(last?.message).toContain("Nothing was changed");
-      expect(stub.reloads, "a refused write must not reload").toEqual([]);
-      await expect(readFile(join(dir, FILE), "utf8")).rejects.toThrow();
-    });
-  });
+      const stub = await run(dir, "off");
 
-  test("a malformed file warns and leaves it alone rather than replacing it", async () => {
-    await withAgentDir(async (dir) => {
-      await writeFile(join(dir, FILE), "{ not json", "utf8");
-      const stub = await run(dir, "surface full");
-      const last = stub.notifications.at(-1);
-      expect(last?.type).toBe("warning");
-      expect(last?.message).toContain("not valid JSON");
-      expect(stub.reloads).toEqual([]);
-      expect(await readFile(join(dir, FILE), "utf8")).toBe("{ not json");
-    });
-  });
-
-  test("setting the surface it already has reloads nothing", async () => {
-    // A reload replaces every extension instance in the session. Doing that because the user
-    // re-typed a value that was already set is a cost with no benefit, and it drops in-flight
-    // state that the user did not ask to lose.
-    await withAgentDir(async (dir) => {
-      await writeFile(join(dir, FILE), JSON.stringify({ surfaceMode: "full" }), "utf8");
-      const stub = await run(dir, "surface full");
-      expect(stub.reloads, "no change means no reload").toEqual([]);
-      expect(stub.notifications.at(-1)?.message).toContain("already");
-    });
-  });
-
-  test("switching away from full says that a running PTC mode cannot survive it", async () => {
-    // Not a hypothetical: `decideModeEntry` policy 3 refuses to enter without ptc_run_code or
-    // ptc_workflow, so a `subagents` or `off` surface ends the mode on the next session_start.
-    // The user asked for a surface, not for their mode to stop, so the coupling is stated.
-    await withAgentDir(async () => {
-      const stub = makeExtensionStub({ surfaceMode: "from-file" });
-      const enter = stub.commands.get("ptc");
-      expect(enter).toBeDefined();
-      if (enter === undefined) throw new Error("unreachable");
-      await stub.emit("session_start", stubContext(stub, { mode: "tui" }));
-      const on = stub.commands.get("ptc");
-      if (on === undefined) throw new Error("unreachable");
-      await on.handler("on", stubContext(stub, { mode: "tui" }));
-      stub.notifications.length = 0;
-
-      await on.handler("surface subagents", stubContext(stub, { mode: "tui" }));
-      const said = stub.notifications.at(-1)?.message ?? "";
-      expect(said).toContain("PTC mode was ON");
-      expect(said).toContain("/ptc on");
-      expect(said, "and it says what subagents needs").toContain("codemode");
-    });
-  });
-
-  test("the existing subcommands still work, so this is an addition and not a replacement", async () => {
-    await withAgentDir(async (dir) => {
-      const stub = await run(dir, "");
-      const said = stub.notifications.at(-1)?.message ?? "";
-      expect(said, "no argument is still the mode report").toContain("PTC mode is");
+      expect(
+        stub.entries.filter((entry) => entry.customType === PTC_MODE_ENTRY_TYPE).at(-1),
+        "the mode record flipped to off",
+      ).toMatchObject({ data: { enabled: false } });
+      expect(stub.notifications.at(-1)?.message, "and the user is told").toContain("PTC mode off");
     });
   });
 });

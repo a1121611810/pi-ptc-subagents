@@ -55,10 +55,21 @@ async function startAndTurn(options: {
   const { stub, dir } = await makeStubInAgentDir({
     // No ptc.json, so the surface is DETECTED; the probe is told pi ships codemode.
     codemode: { present: true, how: "found" },
+    // `null` = let the REAL activation probe read this temp agent dir's settings.json / mcp.json.
+    // This file's entire subject is that probe, so pinning it would make every case below pass
+    // for the wrong reason: a pinned `inactive` answers `full` regardless of what mcp.json says.
+    codemodeActivation: null,
     active: options.active,
     ...(options.mcpJson === undefined ? {} : { mcpJson: options.mcpJson }),
     ...(options.ptc === undefined ? {} : { ptc: options.ptc }),
   });
+  // `makeStubInAgentDir` restores `PI_CODING_AGENT_DIR` as soon as the factory returns, and the
+  // factory is where the probes run — but the legacy-key notice reads the agent dir from
+  // `session_start`, which is after that window closes. Production has the variable set for the
+  // whole process (measured on a real pi: the notice fires there), so holding it across the emit
+  // is what makes the test exercise the real path rather than the developer's own agent dir.
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = dir;
   try {
     const ctx = stubContext(stub, { mode: options.mode ?? "tui" });
     await stub.emit("session_start", ctx);
@@ -67,6 +78,8 @@ async function startAndTurn(options: {
     }
     return { notices: [...stub.notifications], tools: [...stub.tools.keys()] };
   } finally {
+    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
     await removeTempDir(dir);
   }
 }
@@ -110,7 +123,15 @@ test("a codemode the probe did not predict is reported once, as a warning naming
   const drift = notices.filter((n) => n.message.includes(DRIFT));
   expect(drift, "the drift is reported exactly once, however many turns run").toHaveLength(1);
   expect(drift[0]?.type).toBe("warning");
-  expect(drift[0]?.message, "and it names the key that picks one").toContain('"surfaceMode"');
+  expect(drift[0]?.message, "and it names the two things that still move the surface").toContain(
+    "-t codemode",
+  );
+  // The reverse assertion is the load-bearing half: the fix removed the setting this notice used
+  // to send the user to, and a message that still named it would send them to write a key nothing
+  // reads. Asserting only the new advice would pass on a message carrying both.
+  expect(drift[0]?.message, "and it names no setting this package no longer reads").not.toContain(
+    "surfaceMode",
+  );
   expect(tools, "the surface it defaulted to is the full one").toContain("ptc_run_code");
   expect(tools).not.toContain("ptc_subagent");
 });
@@ -171,23 +192,30 @@ test("a disabled server resolves full, and a session with no MCP at all resolves
   expect(none.tools).toEqual(FULL_TOOLS);
 });
 
-test("a PINNED surfaceMode is not second-guessed, even when it is the double-surface one", async () => {
-  // The guard review round 2 found undocumented and untested (Spec finding 3): a user who pinned
-  // `surfaceMode: "full"` has a predicted `full` surface AND a live codemode — the double surface
-  // the drift notice exists to report — and the code exempts them. That is the right call (they
-  // asked for this surface; ADR-0027's pinned-conflict notice already covers the disagreement),
-  // but it is a third guard on the AC "predicted full + active codemode → notice", so it is
-  // pinned here rather than left implicit.
+test("a leftover surfaceMode key is inert: it neither pins the surface nor buys silence", async () => {
+  // ADR-0034 removed the key, so the guard this file used to pin — "a pinned surface is not
+  // second-guessed" — has no subject left. What replaced it is the opposite claim, and it is worth
+  // an assertion rather than an absence: a `surfaceMode` left behind by an older release must not
+  // buy the user the exemption, or the package would be deciding the surface twice, once from a
+  // key it ignores and once from the probes.
   //
-  // This one is CHARACTERIZATION by construction: the guard already exists, so no mutation makes
-  // it red except deleting the guard. Counterfactual: remove `surface.source === "file"` from
-  // `notifyCodemodeDrift` and this turns red.
+  // The scenario is deliberately the worst one for that: `full` would be pinned while a codemode
+  // is live, which is exactly the double surface the drift notice exists to report. If the key were
+  // still honoured the drift notice would stay silent AND the pair would register.
   const { notices, tools } = await startAndTurn({
     active: ["read", "bash", "edit", "write", "codemode"],
     ptc: { surfaceMode: "full" },
   });
-  expect(notices.filter((n) => n.message.includes(DRIFT))).toEqual([]);
-  expect(tools, "and the pinned surface is what registers").toEqual(FULL_TOOLS);
+  expect(
+    notices.filter((n) => n.message.includes(DRIFT)),
+    "an ignored key must not suppress the drift report",
+  ).toHaveLength(1);
+  expect(
+    notices.filter((n) => n.message.includes("no longer read")),
+    "and the user is told the key is being ignored, with the replacement",
+  ).toHaveLength(1);
+  // The surface came from the probes, not the key: no live codemode was predicted, so `full`.
+  expect(tools).toEqual(FULL_TOOLS);
 });
 
 test("a --print session is told neither notice, because ctx.ui.notify is TUI-only", async () => {

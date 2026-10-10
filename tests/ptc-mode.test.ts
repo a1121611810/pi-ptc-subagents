@@ -18,17 +18,19 @@ import {
   decideModeEntry,
   DEFAULT_HIDE_STRATEGY,
   detectExternalLoadoutChange,
+  detectSurfaceMode,
+  detectedSurfaceMode,
   initialModeState,
   MODE_REQUIRED_TOOL_NAMES,
   modeLoadout,
+  probeCodemodePresence,
   PTC_MODE_CONFIG_FILE,
   PTC_MODE_ENTRY_TYPE,
   readDefaultModeConfig,
-  readSurfaceModeConfig,
-  detectedSurfaceMode,
-  probeCodemodePresence,
+  readLegacySurfaceKey,
   resolveBaseOnStart,
   sameToolSet,
+  SURFACE_MODES,
 } from "../src/mode/ptc-mode.ts";
 import { PTC_SKILL_LOAD_INSTRUCTION } from "../src/mode/skills-section.ts";
 import { BUILTIN_BINDING_NAMES } from "../src/runtime/bindings.ts";
@@ -69,17 +71,15 @@ const FULL = [...DEFAULT_SESSION_TOOLS, ...PTC_TOOLS];
 /** Every name that could be bound, for tests that need a session with all of them enabled. */
 const ALL_BINDABLE = [...BUILTIN_BINDING_NAMES, ...PTC_TOOLS];
 /**
- * The two answers `readSurfaceModeConfig` has to give when the file cannot decide, keyed to the
- * pi it is reasoning about (ADR-0026 decision 5).
+ * The two answers `detectSurfaceMode` has to give for a fixed pi, keyed to the presence it is
+ * reasoning about (ADR-0026 decision 5).
  *
  * Stated as a pair rather than as one expectation so that neither a hardcoded `full` nor a
- * hardcoded `subagents` can satisfy the malformed-file tests below. Every test that passes it
- * names the presence it is reasoning about; the default argument would silently run the
- * machine's real probe against vitest's argv instead.
+ * hardcoded `subagents` can satisfy the tests below.
  */
 const DETECTED_SURFACE_CASES = [
-  [{ present: true, how: "found" }, "subagents"],
-  [{ present: false, how: "not-found" }, "full"],
+  [PRESENT_CODEMODE, "subagents"],
+  [{ present: false, how: "not-found" } as const, "full"],
 ] as const;
 
 /**
@@ -109,30 +109,23 @@ async function withAgentDir(fn: (dir: string) => Promise<void>): Promise<void> {
 // Surface mode config (ADR-0025)
 // --------------------------------------------------------------------------------------
 
-test("with no file, the surface follows the pi that loaded us (ADR-0026)", async () => {
-  // Not a constant any more. Both branches are stated here rather than inherited from the machine
-  // the suite happens to run on, so a change to the detection rule has to be made here on purpose.
+test("detectSurfaceMode answers from the three axes, and reports every probe it used", async () => {
+  // The whole contract of the function in one expectation. It is a pure function of its arguments
+  // and nothing else — no `ptc.json` is read, and there is no `source` / `detected` / `error`
+  // field left to carry one. Both directions are stated so that neither a hardcoded `full` nor a
+  // hardcoded `subagents` can satisfy it.
   await withAgentDir(async (dir) => {
     expect(
-      readSurfaceModeConfig(
-        dir,
-        { present: false, how: "not-found" },
-        ABSENT_SWITCH,
-        ACTIVE_CODEMODE,
-      ),
+      detectSurfaceMode(dir, { present: false, how: "not-found" }, ABSENT_SWITCH, ACTIVE_CODEMODE),
     ).toEqual({
       surfaceMode: "full",
-      source: "default",
       codemode: { present: false, how: "not-found" },
       codemodeSwitch: ABSENT_SWITCH,
       codemodeActivation: ACTIVE_CODEMODE,
     });
-    expect(
-      readSurfaceModeConfig(dir, { present: true, how: "found" }, ABSENT_SWITCH, ACTIVE_CODEMODE),
-    ).toEqual({
+    expect(detectSurfaceMode(dir, PRESENT_CODEMODE, ABSENT_SWITCH, ACTIVE_CODEMODE)).toEqual({
       surfaceMode: "subagents",
-      source: "default",
-      codemode: { present: true, how: "found" },
+      codemode: PRESENT_CODEMODE,
       codemodeSwitch: ABSENT_SWITCH,
       codemodeActivation: ACTIVE_CODEMODE,
     });
@@ -147,14 +140,9 @@ test("a present, loadable codemode that the model cannot call resolves to full (
   // The activation argument is the ONLY difference from the `subagents` expectation above, so
   // dropping the third check from `detectedSurfaceMode` turns both of these red.
   await withAgentDir(async (dir) => {
-    const config = readSurfaceModeConfig(
-      dir,
-      { present: true, how: "found" },
-      ABSENT_SWITCH,
-      INACTIVE_CODEMODE,
-    );
-    expect(config.surfaceMode).toBe("full");
-    expect(config.codemodeActivation).toEqual(INACTIVE_CODEMODE);
+    const detected = detectSurfaceMode(dir, PRESENT_CODEMODE, ABSENT_SWITCH, INACTIVE_CODEMODE);
+    expect(detected.surfaceMode).toBe("full");
+    expect(detected.codemodeActivation).toEqual(INACTIVE_CODEMODE);
   });
 });
 
@@ -162,134 +150,113 @@ test("with no settings at all, activation is inactive and the surface is full", 
   // The end-to-end version of the cell above, through the real reader rather than a stated
   // argument: a temp agent dir with no `settings.json` in either scope is what every default
   // session looks like, and it must land on `full`.
+  //
+  // `cwd` is the temp dir as well as `agentDir`, because the activation probe reads BOTH the
+  // project and the user file. Leaving it at `process.cwd()` would put this repo (and any
+  // `.pi/settings.json` a developer keeps there) into the answer.
   await withAgentDir(async (dir) => {
-    const config = readSurfaceModeConfig(dir, { present: true, how: "found" }, ABSENT_SWITCH);
-    expect(config.surfaceMode).toBe("full");
-    expect(config.codemodeActivation).toEqual({ activation: "inactive", source: "default" });
+    const detected = detectSurfaceMode(dir, PRESENT_CODEMODE, ABSENT_SWITCH, undefined, dir);
+    expect(detected.surfaceMode).toBe("full");
+    expect(detected.codemodeActivation).toEqual({ activation: "inactive", source: "default" });
   });
 });
 
-test("surface mode honours every value the record names, and reports the file as the source", async () => {
+test("SURFACE_MODES is exactly the two surfaces, and `off` is not one of them", () => {
+  // The literal, not a length. `"off"` shipped in v1.6.0 and a value that came back would put a
+  // surface in the type that nothing can produce, so the constant is pinned against the name.
+  expect([...SURFACE_MODES]).toEqual(["subagents", "full"]);
+});
+
+test("a ptc.json holding a stale surfaceMode does not reach the surface, whatever the axes say", async () => {
+  // The inverse of the tests this replaces. Those existed because a `surfaceMode` key COULD decide
+  // the answer, so a reader that ignored it had to be pinned. Nothing reads it now — the only
+  // thing the package does with the key is report it (`readLegacySurfaceKey`, below) — so the
+  // claim needing a test is the refusal.
+  //
+  // Both directions are stated: a factory that hardcoded `full` passes the first pair and fails
+  // the second, and one that hardcoded `subagents` does the reverse.
+  for (const stale of [
+    { surfaceMode: "off" },
+    { surfaceMode: "subagents" },
+    { surfaceMode: "full" },
+  ]) {
+    await withAgentDir(async (dir) => {
+      await writeFile(join(dir, PTC_MODE_CONFIG_FILE), JSON.stringify(stale), "utf8");
+      for (const [presence, expected] of DETECTED_SURFACE_CASES) {
+        const detected = detectSurfaceMode(dir, presence, ABSENT_SWITCH, ACTIVE_CODEMODE);
+        expect(detected.surfaceMode, `${JSON.stringify(stale)} with codemode ${presence.how}`).toBe(
+          expected,
+        );
+      }
+    });
+  }
+});
+
+test("readLegacySurfaceKey reports a stale key and its value, and nothing else does", async () => {
+  // The reader behind the migration notice. Every value the key ever took, because a reader that
+  // filtered to `"off"` — the one that disables the package — would pass a single-case test and
+  // leave a user who pinned `"subagents"` unannounced.
   await withAgentDir(async (dir) => {
-    // The literal, not the constant: a value dropped from SURFACE_MODES has to turn this red.
-    const expected = ["off", "subagents", "full"] as const;
-    for (const value of expected) {
+    for (const value of ["off", "subagents", "full"]) {
       await writeFile(
         join(dir, PTC_MODE_CONFIG_FILE),
         JSON.stringify({ surfaceMode: value }),
         "utf8",
       );
-      // ADR-0027: the explicit key wins, and the four-case table still runs so the caller can
-      // report a disagreement. `detected` is therefore present on this path, and it is the
-      // field `session_start` warns from -- dropping the second probe here would silently
-      // disable that warning while this test stayed green.
-      expect(
-        readSurfaceModeConfig(dir, PRESENT_CODEMODE, ABSENT_SWITCH, ACTIVE_CODEMODE),
+      expect(readLegacySurfaceKey(dir), value).toEqual({
+        path: join(dir, PTC_MODE_CONFIG_FILE),
         value,
-      ).toEqual({
-        surfaceMode: value,
-        source: "file",
-        detected: "subagents",
-        codemode: PRESENT_CODEMODE,
-        codemodeSwitch: ABSENT_SWITCH,
-        codemodeActivation: ACTIVE_CODEMODE,
       });
     }
+    // A non-string is still a key the user wrote, and it is reported AS WRITTEN rather than
+    // rendered: a notice quoting `"7"` for `7` would misreport the file the user can open.
+    await writeFile(join(dir, PTC_MODE_CONFIG_FILE), JSON.stringify({ surfaceMode: 7 }), "utf8");
+    expect(readLegacySurfaceKey(dir)?.value, "the value, not a rendering of it").toBe(7);
   });
 });
 
-test("an unparseable surfaceMode file falls back to the detected default and says so", async () => {
+test("readLegacySurfaceKey stays silent for an absent key, a broken file and a non-object", async () => {
+  // The three ways a `ptc.json` can fail to carry one. All three must be silence rather than a
+  // reported error, and each for a different reason: the key was never set; the file is broken
+  // and `readDefaultModeConfig` owns that report; the file is not an object at all.
+  //
+  // The broken-file case is asserted with a TRUNCATED object whose text literally contains
+  // `"surfaceMode": "off"` — a reader that searched the raw text, or that reported on a failed
+  // parse, would announce a key in a file pi never managed to read.
   await withAgentDir(async (dir) => {
-    await writeFile(join(dir, PTC_MODE_CONFIG_FILE), "{ not json", "utf8");
-    // ADR-0026 decision 5 replaced "falls back to full" with "falls back to the DETECTED
-    // default", so both directions are stated: a hardcoded `full` and a hardcoded `subagents`
-    // each turn one of these red, which is the whole point of the rename.
-    //
-    // The presence is passed explicitly because the default argument is the machine's real
-    // probe. Under vitest, argv[1] is `.../vitest/dist/workers/forks.js`, which resolves to a
-    // directory with no codemode beside it, so the default arg silently answers `not-found` and
-    // the `full` expectation held for a reason that had nothing to do with the code.
-    for (const [presence, expected] of DETECTED_SURFACE_CASES) {
-      const where = "codemode " + presence.how;
-      const broken = readSurfaceModeConfig(dir, presence, ABSENT_SWITCH, ACTIVE_CODEMODE);
-      expect(broken.surfaceMode, where + ": a broken file must not half-apply").toBe(expected);
-      expect(broken.source, where).toBe("invalid");
-      expect(broken.error, where + ": the reason is reported, not swallowed").toContain(
-        "not valid JSON",
-      );
-    }
-  });
-});
-
-test("a surfaceMode of the wrong type or outside the set falls back to the detected default and says so", async () => {
-  await withAgentDir(async (dir) => {
-    for (const bad of [7, true, null, "partial", "FULL", "sub-agent"]) {
-      await writeFile(
-        join(dir, PTC_MODE_CONFIG_FILE),
-        JSON.stringify({ surfaceMode: bad }),
-        "utf8",
-      );
-      for (const [presence, expected] of DETECTED_SURFACE_CASES) {
-        const where = JSON.stringify(bad) + " with codemode " + presence.how;
-        const config = readSurfaceModeConfig(dir, presence, ABSENT_SWITCH, ACTIVE_CODEMODE);
-        expect(config.surfaceMode, where).toBe(expected);
-        expect(config.source, where).toBe("invalid");
-        expect(config.error, where).toContain("surfaceMode");
-      }
-    }
-  });
-});
-
-test("a config file that is valid JSON but not an object falls back to the detected default", async () => {
-  await withAgentDir(async (dir) => {
-    // A non-object is a broken file; an object carrying a valid key is simply a setting,
-    // and is covered by the previous test rather than here.
-    for (const bad of ["[]", "null", "3", "true"]) {
-      await writeFile(join(dir, PTC_MODE_CONFIG_FILE), bad, "utf8");
-      for (const [presence, expected] of DETECTED_SURFACE_CASES) {
-        const where = bad + " with codemode " + presence.how;
-        const config = readSurfaceModeConfig(dir, presence, ABSENT_SWITCH, ACTIVE_CODEMODE);
-        expect(config.surfaceMode, where).toBe(expected);
-        // The source is half of what makes this a fallback rather than a setting: a file the
-        // reader could not use has to be reported as such.
-        expect(config.source, where).toBe("invalid");
-        expect(config.error, where + ": and with a reason").toContain("JSON object");
-      }
-    }
-  });
-});
-test("an absent surfaceMode key is a default, not invalid", async () => {
-  await withAgentDir(async (dir) => {
-    await writeFile(
-      join(dir, PTC_MODE_CONFIG_FILE),
+    for (const body of [
       JSON.stringify({ defaultMode: false }),
-      "utf8",
-    );
-    const config = readSurfaceModeConfig(
-      dir,
-      { present: true, how: "found" },
-      ABSENT_SWITCH,
-      ACTIVE_CODEMODE,
-    );
-    // An absent key is a DEFAULT, so it is detected -- the same as an absent file. What this test
-    // is about is `source`, not the surface: a key that is not there must not read as invalid.
-    expect(config.surfaceMode).toBe("subagents");
-    expect(config.source).toBe("default");
-    expect(config.error).toBeUndefined();
+      JSON.stringify({ defaultMode: false, surfaceMode: undefined }),
+      "{ not json",
+      '{ "surfaceMode": "off"',
+      "[]",
+      "null",
+      "3",
+    ]) {
+      await writeFile(join(dir, PTC_MODE_CONFIG_FILE), body, "utf8");
+      expect(readLegacySurfaceKey(dir), body).toBeUndefined();
+    }
+  });
+  // An agent dir with no file at all, which is the common case.
+  await withAgentDir(async (dir) => {
+    expect(readLegacySurfaceKey(dir), "no ptc.json at all").toBeUndefined();
   });
 });
 
-test("the two config keys are read from one file without shadowing each other", async () => {
+test("the two keys in ptc.json are read independently, and the stale one does not shadow the live one", async () => {
+  // `defaultMode` still lives in this file and is still read; the removed key is read only to be
+  // reported. A reader that returned early on seeing `surfaceMode` would silently opt every such
+  // user out of PTC mode — a behaviour change nobody would notice, which is what this pins.
   await withAgentDir(async (dir) => {
     await writeFile(
       join(dir, PTC_MODE_CONFIG_FILE),
-      JSON.stringify({ defaultMode: false, surfaceMode: "subagents" }),
+      JSON.stringify({ defaultMode: false, surfaceMode: "off" }),
       "utf8",
     );
-    expect(readDefaultModeConfig(dir).defaultMode).toBe(false);
-    expect(readSurfaceModeConfig(dir, PRESENT_CODEMODE, ABSENT_SWITCH).surfaceMode).toBe(
-      "subagents",
+    expect(readDefaultModeConfig(dir).defaultMode, "the live key still decides the mode").toBe(
+      false,
     );
+    expect(readLegacySurfaceKey(dir)?.value, "and the stale one is still reported").toBe("off");
   });
 });
 
@@ -494,10 +461,16 @@ test("session_start narrows the loadout, persists the record, paints the status 
       { customType: PTC_MODE_ENTRY_TYPE, data: { enabled: true, base: FULL } },
     ]);
     expect(stub.statuses).toEqual([{ key: "ptc-mode", text: "PTC" }]);
-    expect(stub.notifications).toHaveLength(1);
-    expect(stub.notifications[0]?.message).toContain("PTC mode on");
-    expect(stub.notifications[0]?.message).toContain("/ptc off");
-    expect(stub.notifications[0]?.message).toContain("read, bash");
+    // Scoped to the mode's own announcement. The total notification count used to be exactly 1,
+    // and it stopped being when the surface stop stopped being pinnable: with no `surfaceMode` to
+    // short-circuit detection, `surface.codemode` is always populated, so the probe-miss `info`
+    // notice now fires on any session whose pi has no codemode beside it — which under vitest is
+    // every session in this file. Counting all of them would make this test about the probe, and
+    // the assertion below states the part that is about the mode.
+    const modeNotices = stub.notifications.filter((n) => n.message.includes("PTC mode on"));
+    expect(modeNotices.length, "announced once").toBe(1);
+    expect(modeNotices[0]?.message).toContain("/ptc off");
+    expect(modeNotices[0]?.message).toContain("read, bash");
   });
 });
 

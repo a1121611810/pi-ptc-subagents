@@ -18,7 +18,7 @@ landed on a branch during the cycle. Snapshots are `git stash create` objects:
 `git stash create` object is unreachable the moment the command returns — nothing references it,
 `git stash list` was empty throughout, and the batch it recorded was never landed on a branch.
 A `git gc --prune=now` on 2026-10-10 collected them, which is what a snapshot is for. The SHAs
-below are kept because this ledger is the record of *what was reviewed*, not a handle on the
+below are kept because this ledger is the record of _what was reviewed_, not a handle on the
 content: none of the three rounds' diffs is retrievable, and no claim in this file depends on
 resolving them. See `tests/doc-integrity.test.ts`'s `SNAPSHOT_SHAS` for how the gate treats them.
 

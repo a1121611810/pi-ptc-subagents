@@ -73,10 +73,17 @@ prose is preserved alongside it, never replaced.
    clause; the host parses a fenced JSON block from the final text.
 
 The fallback is not a formality. The tool channel has a **reachable** failure mode: it exists in
-the child only when this package loads there. `src/index.ts:280` returns early when
-`surfaceMode === "off"`, and pi's `-ne` removes extensions entirely. A design that treated the
-fallback as decorative would have a primary channel that is simply absent on a meaningful fraction
-of installs — silently, since nothing reports a missing tool.
+the child only when this package loads there. ~~The factory used to return early when
+`surfaceMode === "off"`, before any tool was registered.~~ **Withdrawn 2026-10-10**: the `off` value
+was removed with the `surfaceMode` key ([ADR-0034](./0034-surface-is-detected-not-set.md)), so that
+early return no longer exists and this paragraph no longer cites a line number for it — a citation to
+a deleted line is exactly the dangling reference `tests/doc-integrity.test.ts` is built to catch.
+
+The failure mode this paragraph documents is therefore carried by what remains, which is stronger
+rather than weaker: pi's `-ne` removes extensions entirely, and `pi config` can disable this package
+without loading it at all, so the child is simply a pi that never ran this extension. A design that
+treated the fallback as decorative would have a primary channel that is
+absent on a meaningful fraction of installs — silently, since nothing reports a missing tool.
 
 This is the acknowledged bet of this ADR: **if models follow the prompt contract poorly, the
 feature is dead and CI will not have said so.** No test can retire it. It is recorded here so the

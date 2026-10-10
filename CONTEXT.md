@@ -150,30 +150,33 @@ scripts (see _MCP auto-enable evidence_). ADR-0025, ADR-0033.
 _Avoid_: "pi's PTC" (it is one implementation of PTC, and "PTC mode"
 below already names ours), "code mode" (the pre-August-2026 DSH name).
 
-**surface mode** — the installed setting that decides which model-facing
-tools this package registers, independent of _PTC mode_ (which decides
-which of the registered tools are _active_). Read from the agent-dir
-`ptc.json` beside `defaultMode`. Three values, in increasing order of what
-this package takes responsibility for: `off`, `subagents`, `full`.
-With no key set it is **detected**, and the detection asks three questions,
-not one. Does this pi ship a `codemode` extension directory, will pi
-actually load it, and will `codemode` be **active** for the model? The
-second one is not redundant: since pi 0.99.0 a user can disable a
-built-in extension, so a pi can ship `codemode` and be told not to run it.
-The third is not redundant either: pi registers `codemode` inactive, and
+**surface mode** — which model-facing tools this package registers,
+independent of _PTC mode_ (which decides which of the registered tools are
+_active_). **Detected, not configured**: there is no key for it, and the
+former `surfaceMode` key in `ptc.json` was removed 2026-10-10 (ADR-0034).
+Two values, in increasing order of what this package takes responsibility
+for: `subagents`, `full`. The detection asks three questions, not one. Does
+this pi ship a `codemode` extension directory, will pi actually load it, and
+will `codemode` be **active** for the model? The second one is not redundant:
+since pi 0.99.0 a user can disable a built-in extension, so a pi can ship
+`codemode` and be told not to run it. The third is not redundant either: pi
+registers `codemode` inactive, and
 since pi 1.0.0 the MCP extension may activate it at runtime (see
 _MCP auto-enable evidence_). Shipped **and** loading **and** active
 resolves to `subagents`; any other combination resolves to `full` -- and a
 probe that cannot answer also resolves to `full` in the safe direction. The
 session names that outcome at startup rather than defaulting in silence,
 because a detection that cannot be seen is indistinguishable from a pi that
-moved its `dist`. ADR-0025, ADR-0026, ADR-0027, ADR-0029, ADR-0033.
+moved its `dist`. ADR-0025 (withdrawn by ADR-0034), ADR-0026, ADR-0027,
+ADR-0029, ADR-0033, ADR-0034.
 _Avoid_: "PTC mode" (that is the hide-the-built-ins
 toggle; the
 two are separate and both exist), "mode" unqualified (ambiguous in this
-repository), "enable" (a surface mode of `off` leaves the package
-installed and doing nothing, which "disabled" would hide), "default"
-(the default is a function of the pi, so call it the detected default).
+repository), "enable" (a surface mode leaves the package
+installed and doing something, so "disabled" would be a different claim), "default"
+(there is no constant default — the answer is a function of the pi, so call
+it the detected surface), "setting" (there is no key; the surface is
+detected).
 
 **codemode activation** — the third question surface-mode detection asks: will
 `codemode` be **active**, i.e. callable by the model? It is distinct from the
@@ -183,7 +186,12 @@ it has two evidence classes that answer independently, because pi activates
 
 - **loadout mirror** — the settings-side answer: the `--tools` allowlist, then
   the merged `defaultTools` (`<cwd>/.pi/settings.json` over `<agentDir>`), then
-  pi's own default, which does not name it.
+  pi's own default, which does not name it. Read in pi's own precedence:
+  `--tools` decides the list and beats `--no-tools`, while `--exclude-tools`
+  vetoes whichever list won, because pi applies the denylist as a filter over
+  that list rather than as another source — so **exclusion beats inclusion**
+  (`sdk.js:148`). `--no-builtin-tools` is deliberately not read: it maps to
+  `noTools: "builtin"` and `codemode` is not one of pi's built-in tools.
 - _MCP auto-enable evidence_ — the file-side answer: pi's MCP extension calls
   `pi.setActiveTools` to activate `codemode` whenever an enabled MCP server's
   tools are only reachable from scripts, which no settings file records.
@@ -207,8 +215,7 @@ before the servers connect_, so whether a server connects is not part of the
 question and this evidence is a pure function of the two files. What it cannot
 see: a server an extension registered through `pi.registerMcpServer()`, which
 activates `codemode` with no `mcp.json` at all -- that case is caught by the
-session's real tool loadout instead (the drift notice), and only when the
-surface was detected rather than pinned. ADR-0033.
+session's real tool loadout instead (the drift notice). ADR-0033.
 _Avoid_: "the activation probe" (see _codemode activation_), "MCP settings"
 (the same file also configures transports; only the auto-enable decision is
 read).
@@ -242,7 +249,7 @@ say which).
 **orchestration surface** — the tool a model uses to compose many tool
 calls into one program. Two exist: `ptc_run_code` / `ptc_workflow` (this
 package, Node worker, real `tools.<name>(args)` bindings) or `codemode` (pi,
-QuickJS). The _surface mode_ picks which one the **model** is offered, and
+QuickJS). The _surface mode_ decides which one the **model** is offered, and
 that is what this term means: having both live in a request is a measured
 defect, not a feature — it is two programming models to choose between.
 
@@ -251,14 +258,16 @@ line the PTC pair IS registered, at `codemode` reach, which makes it callable
 from a pi `codemode` script without declaring it to the model. So the pairing
 there is an orchestrator plus its execution layer, not two orchestrators, and
 it is what makes `pi.dispatch` — which a QuickJS sandbox cannot reach at all —
-available underneath `codemode`. `full` declares the pair instead. The mode
-decides which; exposure is how. ADR-0025 §3 as amended 2026-10-09. _Avoid_:
-"the PTC tool" (there are two, and which one is a mode decision), "code
+available underneath `codemode`. `full` declares the pair instead. The surface
+mode decides which; exposure is how. ADR-0025 §3 as amended 2026-10-09, which
+survives ADR-0034. _Avoid_:
+"the PTC tool" (there are two, and which one is a surface-mode decision),
+"code
 execution" (both are that; the word says nothing about the shape).
 
 **subagent surface** — the top-level tool the model calls directly to
-start a fresh pi subprocess, without writing a program. This is what
-`surface mode: subagents` keeps, and it is the reason that mode exists: the
+start a fresh pi subprocess, without writing a program. This is what the
+detected `subagents` surface keeps, and it is the reason that line exists: the
 _parallel binding_ `pi.dispatch` can only be reached from inside a program,
 so a line that handed the program face to `codemode` needs a top-level entry
 point or the subagent capability would be deleted rather than handed over.
@@ -271,10 +280,11 @@ different thing), "background task" (that is the `ptc_task_*` lifecycle
 face, which can inspect and stop tasks but cannot start one).
 
 **lifecycle face** — the `ptc_task_list` / `ptc_task_output` /
-`ptc_task_stop` trio. Registered in every surface mode except `off`,
-including `subagents`, and outside the _PTC mode_ loadout on purpose:
+`ptc_task_stop` trio. Registered on **every** surface mode, `subagents` included,
+and outside the _PTC mode_ loadout on purpose:
 turning _PTC mode_ off must never hide the lifecycle of a task that is
-still in flight. ADR-0022, ADR-0025. _Avoid_: "task tools", "subagent
+still in flight. ADR-0022, ADR-0025 (withdrawn by ADR-0034, which removed the
+`off` value this entry used to except). _Avoid_: "task tools", "subagent
 tools" (they manage tasks other things started).
 **helper** — a global function injected into a worker's runtime. **Not all
 DSH helpers appear in plain PTC mode** — per R1 (`research/dsh-ptc-behaviour-inventory.md`,

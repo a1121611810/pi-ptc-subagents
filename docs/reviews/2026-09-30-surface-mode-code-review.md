@@ -437,3 +437,39 @@ test observes were weakened to what is established.
   a read point of `dispatchConcurrency`; the session counter is supplied ahead of it.
 - `src/index.ts:381`'s always-on registration comment claims the tools survive every mode loadout
   -- true for `builtins-only`, false for `all-but-ptc`, which is not the shipped strategy.
+
+## Superseded in part (2026-10-10)
+
+This ledger records the review of the `surfaceMode` **setting** ([ADR-0025]) as it stood on
+2026-09-30. That setting no longer exists: the key, the `off` value, and the `/ptc surface`
+command are all removed, and the surface is detected only
+([ADR-0034](./../adr/0034-surface-is-detected-not-set.md)). The rows below are kept as the record
+of what that review found — none of them is rewritten, and none of the findings was wrong.
+
+**What the withdrawal does to specific rows here:**
+
+- **S1, S2, P5, P13** — all four are about the production read path `readSurfaceModeConfig` and the
+  `surfaceMode` key. That function is deleted, so those rows have nothing left to protect. They
+  were real defects when found, and the deletion removes the surface rather than the test's value.
+- **P6** — "the `off` briefing assertion is made by handler count". The `off` surface is gone, so
+  the gap is moot rather than closed: there is no `off` briefing to assert about.
+- **P8** — the OCR rule was amended to name an `off` carve-out in the always-on registration rule.
+  **That carve-out is now wrong**: with `off` gone there is no exception, and the rule overstates
+  the case. It is left unamended here because the rule file is not in this change's scope — flagged
+  for the next pass rather than silently carried.
+- **P8-P11** — "`options.surfaceMode` a seam the spec never asked for" is now **closed by deletion**
+  rather than by a fix: the seam is gone, replaced by the `codemodeActivation` seam that pins one
+  of the three probes instead of the answer.
+- **S7, P3, P7, S12, S14, P4** and the "still open" list — unaffected by the withdrawal; they are
+  about other subjects and stand.
+
+**The two round-5+ entries that cite `src/index.ts:280`** recorded `if (surface.surfaceMode ===
+"off") return;` as the thing being pinned. That line is deleted by this change, so the citation in
+this ledger no longer resolves to what it names. It is a snapshot document and is not edited, which
+is the file-level policy stated in `tests/doc-integrity.test.ts` — but the _normative_ copy of that
+claim, in ADR-0032, is corrected in the same pass.
+
+**What the withdrawal does not change:** every finding about the _detection_ path — the probe, the
+fallback direction, the notices, the seam discipline — is untouched, because detection is now the
+only path. The review's central lesson (S1: a read path with no test, S2: a test that could not
+fail) is also the reason the replacement seam exists at all.

@@ -1,6 +1,20 @@
 ---
 
-status: accepted (2026-10-03)
+status: **withdrawn 2026-10-10** by
+[ADR-0034](./0034-surface-is-detected-not-set.md). The `/ptc surface` command this record is about
+no longer exists — the `surfaceMode` key it wrote is gone — so the whole "switch the surface by
+writing the file and reloading" subject is moot. There is no surface to switch.
+
+Nothing here is left standing, and nothing needs to be carried forward: the reload-on-switch path
+existed only to make an in-session change to a value that no longer exists. The underlying
+observation in §Context — pi has no `unregisterTool`, so a factory-time registration is
+irreversible — is **still true** and still constrains ADR-0026, which is why detection has to
+happen in the factory. That fact outlives this record; the command does not.
+
+Read the record below as history: what was decided on 2026-10-03, and the reload table that
+justified it. None of it describes current behaviour.
+
+status (original): accepted (2026-10-03)
 
 # The surface is switched by writing the file and reloading, not by mutating the loadout
 
@@ -46,14 +60,15 @@ the ORDER, not just the presence: the stub records how many notifications existe
 
 ## What the write has to get right
 
-`setSurfaceMode()` is a pure-ish function over the filesystem, and three of its rules exist because
+`setSurfaceMode()` (since deleted by ADR-0034) is a pure-ish function over the filesystem, and
+three of its rules exist because
 the obvious implementation is wrong in a way that loses data:
 
 - **A malformed file is never overwritten.** An unparseable `ptc.json` is a file someone may be
   mid-edit on. Replacing it with a valid document silently discards whatever was in it, and the
   read side already treats that shape as "report it, do not act on it"
-  (`readSurfaceModeConfig`). The write side refusing is the same rule applied to the other
-  direction, and the test asserts the file is byte-for-byte unchanged.
+  (`readSurfaceModeConfig`, since deleted by ADR-0034). The write side refusing is the same rule
+  applied to the other direction, and the test asserts the file is byte-for-byte unchanged.
 - **`defaultMode` survives.** It is ADR-0010's key and it lives in the same file. Writing
   `{"surfaceMode": …}` wholesale would reset the user's mode preference with no error anywhere.
 - **An unchanged value writes nothing.** A reload replaces every extension instance in the

@@ -74,8 +74,14 @@ async function sessionStartNotices(options: {
     // warnings is reachable -- the `subagents` surface they are about would not be built.
     await writeAgentSettings(dir, ACTIVE_CODEMODE_SETTINGS);
     const stub = makeExtensionStub({
-      surfaceMode: "from-file",
+      // The surface is DETECTED, so the stub pins the three probes that resolve to the `subagents`
+      // line rather than the line itself -- and it pins ALL THREE. Only the activation axis has a
+      // stub default (`inactive`); leaving the switch to run would read the developer's real
+      // `~/.pi/agent/settings.json` and make these three tests' surfaces depend on the machine.
+      // `writeAgentSettings` above is what a REAL install would carry for the same row.
       codemode: { present: true, how: "found" },
+      codemodeSwitch: { switch: "enabled", source: "user" },
+      codemodeActivation: { activation: "active", source: "user" },
       active: options.active,
       ...(options.registeredInactive === undefined
         ? {}
@@ -149,7 +155,12 @@ test("the same pi with codemode ABSENT from the registry does get the cross-chec
   const crosschecks = notices.filter((n) => n.message.includes(REGISTRY_CROSSCHECK));
   expect(crosschecks, "a pi that does not register codemode is reported once").toHaveLength(1);
   expect(crosschecks[0]?.type, "and it is a warning, not a note").toBe("warning");
-  expect(crosschecks[0]?.message, "and it names the fix").toContain('"full"');
+  // The surface NAMED is the one the three probes above resolved to (`detectedSurfaceMode`, row
+  // three), not a hardcoded literal in the notice. Row four is what a probe that cannot answer
+  // gives, so asserting anything else would let a wrong resolution ship silently.
+  expect(crosschecks[0]?.message, "and it names the surface actually in force").toContain(
+    'the surface is "subagents"',
+  );
 });
 
 test("a pi that knows AND activates codemode raises neither warning", async () => {

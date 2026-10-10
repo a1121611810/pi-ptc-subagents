@@ -14,24 +14,20 @@
 import { describe, expect, test } from "vitest";
 import {
   detectedSurfaceMode,
+  detectSurfaceMode,
   probeCodemodePresence,
   readCodemodeSwitch,
-  readSurfaceModeConfig,
   resolveCodemodeSwitch,
-  surfaceModeConflict,
 } from "../../src/mode/ptc-mode.ts";
 import type { CodemodePresence, CodemodeSwitch } from "../../src/mode/ptc-mode.ts";
-import {
-  ACTIVE_CODEMODE_SETTINGS,
-  makeStubInAgentDir,
-  makeTempDir,
-  removeTempDir,
-} from "../helpers/ptc.ts";
+import { makeStubInAgentDir, makeTempDir, removeTempDir } from "../helpers/ptc.ts";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const PRESENT: CodemodePresence = { present: true, how: "found" };
 const ABSENT: CodemodePresence = { present: false, how: "not-found" };
+/** ADR-0029's third axis, stated here because the switch is not enough on its own to reach `subagents`. */
+const ACTIVE = { activation: "active", source: "default" } as const;
 
 /**
  * The SWITCH axis of the table, asserted as a table rather than case by case.
@@ -331,48 +327,65 @@ describe("readCodemodeSwitch over real files", () => {
   });
 });
 
-describe("surfaceModeConflict", () => {
-  test("a pinned value that disagrees with the table is a conflict", () => {
-    expect(surfaceModeConflict("subagents", "full")).toBe(true);
-    expect(surfaceModeConflict("full", "subagents")).toBe(true);
-  });
-
-  test("agreeing values and no value are not conflicts", () => {
-    expect(surfaceModeConflict("full", "full")).toBe(false);
-    expect(surfaceModeConflict("subagents", "subagents")).toBe(false);
-    expect(surfaceModeConflict(undefined, "full")).toBe(false);
-  });
-
-  test("off is never a conflict: it is a statement about the package, not about orchestration", () => {
-    expect(surfaceModeConflict("off", "full")).toBe(false);
-    expect(surfaceModeConflict("off", "subagents")).toBe(false);
-  });
-});
-
-describe("readSurfaceModeConfig carries the table even when the key is pinned", () => {
-  test("an explicit key wins and still reports what the table decided", async () => {
+describe("the switch is what decides, over real files", () => {
+  // The describes this replaces asserted a conflict between a PINNED surface and the table. There
+  // is no pinned surface any more, so there is nothing to disagree with anything: the table is the
+  // only input. What is left to pin is that the table really is reached through the files, which
+  // is the claim these two make in the only form that still exists.
+  test("a user settings file that disables codemode answers `full` with no key to disagree with", async () => {
     const root = await makeTempDir("pi-ptc-switch-");
     try {
-      await writeFile(join(root, "ptc.json"), JSON.stringify({ surfaceMode: "subagents" }));
-      const config = readSurfaceModeConfig(root, PRESENT, { switch: "disabled", source: "user" });
-      expect(config.surfaceMode).toBe("subagents");
-      expect(config.source).toBe("file");
-      expect(config.detected).toBe("full");
-      expect(surfaceModeConflict(config.surfaceMode, config.detected ?? "full")).toBe(true);
+      await writeFile(
+        join(root, "settings.json"),
+        JSON.stringify({ extensions: ["-builtin:codemode"] }),
+      );
+      // `detectSurfaceMode` returns all four fields and nothing else: there is no `source` and no
+      // `detected`, because nothing can override the answer and so nothing needs reporting as
+      // overridden. `toEqual` on the whole object is what pins the absence.
+      expect(detectSurfaceMode(root, PRESENT, undefined, ACTIVE, root)).toEqual({
+        surfaceMode: "full",
+        codemode: PRESENT,
+        codemodeSwitch: { switch: "disabled", source: "user" },
+        codemodeActivation: ACTIVE,
+      });
     } finally {
       await removeTempDir(root);
     }
   });
 
-  test("an absent key resolves through the table and reports no conflict", async () => {
+  test("the same agent dir with codemode enabled answers `subagents`", async () => {
     const root = await makeTempDir("pi-ptc-switch-");
     try {
-      const config = readSurfaceModeConfig(root, PRESENT, { switch: "disabled", source: "user" });
-      expect(config.surfaceMode).toBe("full");
-      expect(config.source).toBe("default");
-      expect(config.codemodeSwitch?.switch).toBe("disabled");
+      await writeFile(
+        join(root, "settings.json"),
+        JSON.stringify({ extensions: ["+builtin:codemode"] }),
+      );
+      expect(detectSurfaceMode(root, PRESENT, undefined, ACTIVE, root).surfaceMode).toBe(
+        "subagents",
+      );
     } finally {
       await removeTempDir(root);
+    }
+  });
+
+  test("a `surfaceMode` key in ptc.json is not an input at all", async () => {
+    // The direct counterfactual: a reader that still honoured the key would answer `subagents`
+    // here, where the switch says `disabled`. Every historical value is stated because the key is
+    // reported as a whole and a filter to one of them would leave the others unannounced.
+    for (const stale of ["off", "subagents", "full"]) {
+      const root = await makeTempDir("pi-ptc-switch-");
+      try {
+        await writeFile(join(root, "ptc.json"), JSON.stringify({ surfaceMode: stale }));
+        await writeFile(
+          join(root, "settings.json"),
+          JSON.stringify({ extensions: ["-builtin:codemode"] }),
+        );
+        expect(detectSurfaceMode(root, PRESENT, undefined, ACTIVE, root).surfaceMode, stale).toBe(
+          "full",
+        );
+      } finally {
+        await removeTempDir(root);
+      }
     }
   });
 });
@@ -383,13 +396,14 @@ describe("the registration the switch actually produces", () => {
     // tools a model can call. Asserting only on `detectedSurfaceMode` would pass even if the
     // factory stopped consulting the switch.
     //
-    // `ACTIVE_CODEMODE_SETTINGS` on purpose: with the switch disabled the answer is `full`
+    // Activation is stated as `active` on purpose: with the switch disabled the answer is `full`
     // whatever the loadout says, so this cell stays `full` even when codemode IS callable. That
-    // makes it the one case where the switch overrides a working activation.
+    // makes it the one case where the switch overrides a working activation — and the only way
+    // that assertion can be reached is by a reader that really read the switch.
     const { stub, dir } = await makeStubInAgentDir({
       codemode: PRESENT,
       codemodeSwitch: { switch: "disabled", source: "user" },
-      agentSettings: ACTIVE_CODEMODE_SETTINGS,
+      codemodeActivation: ACTIVE,
     });
     try {
       const names = [...stub.tools.keys()];
@@ -402,15 +416,16 @@ describe("the registration the switch actually produces", () => {
   });
 
   test("codemode on disk and loaded registers only the subagent face", async () => {
-    // ADR-0029: "loaded" is no longer enough. These cells also need codemode in the LOADOUT, so
-    // each one writes the `defaultTools` a user would -- and does so in a temp agent dir, because
-    // the activation probe reads `settings.json` and a test that left `PI_CODING_AGENT_DIR` alone
-    // would be resolving against the developer's own `~/.pi/agent`.
+    // ADR-0029: "loaded" is no longer enough. These cells also need codemode in the LOADOUT, and
+    // that axis is now STATED rather than written into a settings file the stub would not read —
+    // `makeExtensionStub` always supplies `codemodeActivation`, so a `defaultTools` entry in the
+    // agent dir resolves to nothing here and would leave this passing for the wrong reason if it
+    // were left implicit.
     for (const sw of ["absent", "enabled"] as const) {
       const { stub, dir } = await makeStubInAgentDir({
         codemode: PRESENT,
         codemodeSwitch: { switch: sw, source: "default" },
-        agentSettings: ACTIVE_CODEMODE_SETTINGS,
+        codemodeActivation: ACTIVE,
       });
       try {
         const names = [...stub.tools.keys()];
@@ -452,7 +467,7 @@ describe("the registration the switch actually produces", () => {
     const { stub, dir } = await makeStubInAgentDir({
       codemode: ABSENT,
       codemodeSwitch: { switch: "absent", source: "default" },
-      agentSettings: ACTIVE_CODEMODE_SETTINGS,
+      codemodeActivation: ACTIVE,
     });
     try {
       // Naming a tool pi does not have cannot conjure it: a loadout that says `+codemode` on a pi

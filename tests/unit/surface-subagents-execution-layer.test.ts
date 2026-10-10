@@ -19,11 +19,49 @@ import { describe, expect, test } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type {
+  CodemodeActivationResolution,
+  CodemodePresence,
+  CodemodeSwitchResolution,
+} from "../../src/mode/ptc-mode.ts";
 import { makeExtensionStub } from "../helpers/ptc.ts";
 
+/**
+ * One row of `detectedSurfaceMode`'s table (`src/mode/ptc-mode.ts:1046-1053`), stated as literals.
+ *
+ * `surfaceMode` is gone as an option, so a test reaches a line by naming the three probes that
+ * resolve to it — which makes the surface the OUTPUT of the factory rather than its input, and
+ * these constants the independent source every expectation below points at.
+ *
+ * **All three are pinned in every row, and that is load-bearing rather than tidy.** With no key to
+ * short-circuit it, an unpinned switch or activation axis runs the real probe over the DEVELOPER's
+ * `~/.pi/agent/settings.json`, so the reach this file reports would depend on the machine running
+ * it. Pinning presence alone is not enough either: it only short-circuits the "not on disk" row,
+ * and every other row still reads the other two axes off disk.
+ */
+interface SurfaceAxes {
+  codemode: CodemodePresence;
+  codemodeSwitch: CodemodeSwitchResolution;
+  codemodeActivation: CodemodeActivationResolution;
+}
+
+/** Row four — loaded but not callable, which is the default cell on a real install. Resolves `full`. */
+const FULL_AXES: SurfaceAxes = {
+  codemode: { present: true, how: "found" },
+  codemodeSwitch: { switch: "enabled", source: "user" },
+  codemodeActivation: { activation: "inactive", source: "default" },
+};
+
+/** Row three — the same pi, but the model can call it. Differs from the above in one axis. */
+const SUBAGENTS_AXES: SurfaceAxes = {
+  codemode: { present: true, how: "found" },
+  codemodeSwitch: { switch: "enabled", source: "user" },
+  codemodeActivation: { activation: "active", source: "user" },
+};
+
 /** The reach each tool carries on a line, read off what the factory actually registered. */
-function reachOn(surfaceMode: "full" | "subagents"): Record<string, string> {
-  const stub = makeExtensionStub({ surfaceMode });
+function reachOn(axes: SurfaceAxes): Record<string, string> {
+  const stub = makeExtensionStub(axes);
   const out: Record<string, string> = {};
   for (const [name, definition] of stub.tools) {
     // pi's default when no exposure is named, so a missing field reads as the value in force.
@@ -34,19 +72,19 @@ function reachOn(surfaceMode: "full" | "subagents"): Record<string, string> {
 
 describe("the programming tools' reach per line", () => {
   test("`full` declares them to the model — this package is what orchestrates there", () => {
-    const reach = reachOn("full");
+    const reach = reachOn(FULL_AXES);
     expect(reach.ptc_run_code, "ptc_run_code reach on the full line").toBe("direct");
     expect(reach.ptc_workflow, "ptc_workflow reach on the full line").toBe("direct");
   });
 
   test("`subagents` puts them at codemode reach — callable from a script, not declared to the model", () => {
-    const reach = reachOn("subagents");
+    const reach = reachOn(SUBAGENTS_AXES);
     expect(reach.ptc_run_code, "ptc_run_code reach on the subagents line").toBe("codemode");
     expect(reach.ptc_workflow, "ptc_workflow reach on the subagents line").toBe("codemode");
   });
 
   test("the subagent tool stays `direct` there — it exists to need no orchestrator", () => {
-    const reach = reachOn("subagents");
+    const reach = reachOn(SUBAGENTS_AXES);
     expect(reach.ptc_subagent, "subagent reach on the subagents line").toBe("direct");
     // A `codemode`-reach subagent tool would be callable only by the sandbox that cannot spawn.
   });

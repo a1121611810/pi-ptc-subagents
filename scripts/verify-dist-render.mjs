@@ -8,15 +8,20 @@
  *
  * Exits non-zero on any failure so it can gate a release check.
  *
- * The agent dir is pinned to a throwaway directory holding `{"surfaceMode": "full"}` before the
- * factory runs. Since ADR-0025 the factory reads that file at construction time to decide which
- * tools to register, so without the pin this gate would report a build defect on any machine
- * whose `~/.pi/agent/ptc.json` says `off` or `subagents` -- the artifact would be fine and the
- * assertion red for a reason that has nothing to do with the build. The pin is unconditional: a
- * caller's own `PI_CODING_AGENT_DIR` is shadowed for the duration of the run, because a release
- * gate that reads the machine's settings is not a release gate.
+ * The agent dir is pinned to a throwaway empty directory, and the three detection probes are
+ * stated explicitly at the call site. ADR-0034 removed the `surfaceMode` key, which used to be what
+ * this pin was FOR -- and the pin silently became decorative at that moment: nothing wrote
+ * `ptc.json` into it any more. The gate kept passing, but on a different and much weaker basis --
+ * the presence probe walking out of `process.argv[1]` (this script) and finding no pi next to it.
+ * That is an accident of how the script is invoked, not a property of the artifact, so it is
+ * replaced here rather than left to hold the assertion up.
+ *
+ * The pin is still worth keeping, for the probes that do read the agent dir: activation reads
+ * `<agentDir>/settings.json` and the MCP evidence probe reads `<agentDir>/mcp.json`. It is
+ * unconditional -- a caller's own `PI_CODING_AGENT_DIR` is shadowed for the duration of the run,
+ * because a release gate that reads the machine's settings is not a release gate.
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,20 +29,17 @@ import { fileURLToPath } from "node:url";
 const distUrl = new URL("../dist/index.js", import.meta.url);
 const dist = await import(fileURLToPath(distUrl));
 
-// --- pinned agent dir: the surface mode this gate asserts, not the machine's ------------
-// ADR-0025: the factory reads <agentDir>/ptc.json once, before registering anything, and the set
-// of tools it then registers is the set below. Pointing PI_CODING_AGENT_DIR at a directory this
-// script owns makes the expected set a property of the built artifact instead of a property of
-// whoever is running the gate. The explicit { "surfaceMode": "full" } (rather than an empty dir
-// relying on the default) keeps the gate pinned to the mode the tool list below names. That
-// matters MORE since ADR-0026: with no key at all the surface is detected from the pi that
-// loaded this dist, so a gate run under a pi shipping codemode would resolve to subagents and
-// then fail on a set difference that has nothing to do with the build.
+// --- pinned agent dir: the probes' inputs, not the machine's ------------------------------
+// The factory reads <agentDir>/settings.json (activation) and <agentDir>/mcp.json (ADR-0033
+// evidence), so pointing PI_CODING_AGENT_DIR at a directory this script owns makes those two
+// inputs empty rather than whatever the machine running the gate happens to have. There is no
+// ptc.json written here any more: ADR-0034 removed the surfaceMode key, and a key nothing reads
+// would be a pin in name only. The third axis -- whether this pi ships codemode at all -- cannot
+// be shadowed this way, so it is stated at the call site below instead.
 const agentDir = mkdtempSync(join(tmpdir(), "pi-ptc-verify-dist-"));
 process.on("exit", () => {
   rmSync(agentDir, { recursive: true, force: true });
 });
-writeFileSync(join(agentDir, "ptc.json"), '{ "surfaceMode": "full" }\n');
 process.env.PI_CODING_AGENT_DIR = agentDir;
 
 // --- fake pi that records tool registrations -------------------------------------------
@@ -56,7 +58,15 @@ const fakePi = {
   setActiveTools() {},
   appendEntry() {},
 };
-dist.default(fakePi);
+// The `full` surface the tool list below names, stated rather than inferred: pi ships no
+// codemode, so pi would not load one, so the model would not get one. Naming all three axes is
+// what makes the expected set a property of the built artifact -- before ADR-0034 this line was
+// preceded by a `ptc.json` pin that had quietly stopped deciding anything.
+dist.default(fakePi, {
+  codemode: { present: false, how: "not-found" },
+  codemodeSwitch: { switch: "disabled", source: "default" },
+  codemodeActivation: { activation: "inactive", source: "default" },
+});
 
 // The extension registers the two PTC tools plus the three always-on background-task tools
 // (ADR-0022) -- that is the `full` surface, pinned above. An exact-set assertion is deliberate: a

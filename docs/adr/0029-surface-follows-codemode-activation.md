@@ -22,14 +22,14 @@ nothing was misconfigured at all: `~/.pi/agent/ptc.json` absent, no `extensions`
 `builtin:codemode` in the user settings, no `defaultTools`, no `--tools` on the command line. The
 chain runs:
 
-| step       | fact                                                           | source                                        |
-| ---------- | -------------------------------------------------------------- | --------------------------------------------- |
-| presence   | `dist/extensions/codemode` exists                              | `probeCodemodePresence`                       |
-| switch     | no entry anywhere ⇒ `"absent"` ⇒ pi loads built-ins by default | `resolveCodemodeSwitch`                       |
-| ⇒ surface  | `subagents`                                                    | `detectedSurfaceMode` (`ptc-mode.ts:628-637`) |
-| activation | `codemode` registers with **`defaultActive: false`**           | `dist/extensions/codemode/index.js:26`        |
-| ⇒ loadout  | pi's default active names are `["read","bash","edit","write"]` | `settings-manager.js:35`                      |
-| ⇒ warning  | `getActiveTools()` has no `codemode`                           | `src/index.ts:962`                            |
+| step       | fact                                                           | source                                          |
+| ---------- | -------------------------------------------------------------- | ----------------------------------------------- |
+| presence   | `dist/extensions/codemode` exists                              | `probeCodemodePresence`                         |
+| switch     | no entry anywhere ⇒ `"absent"` ⇒ pi loads built-ins by default | `resolveCodemodeSwitch`                         |
+| ⇒ surface  | `subagents`                                                    | `detectedSurfaceMode` (`ptc-mode.ts:1160-1169`) |
+| activation | `codemode` registers with **`defaultActive: false`**           | `dist/extensions/codemode/index.js:26`          |
+| ⇒ loadout  | pi's default active names are `["read","bash","edit","write"]` | `settings-manager.js:35`                        |
+| ⇒ warning  | `getActiveTools()` has no `codemode`                           | `src/index.ts:856`                              |
 
 So `subagents` hands orchestration to a tool that is loaded, registered, and not callable, and the
 session is left with nothing to orchestrate with ~~because `subagents` deliberately does not
@@ -102,7 +102,7 @@ are not symmetric:
 
 - **Over-reporting activation** — we say `active`, pi does not activate it. The surface is
   `subagents` with no orchestrator, which is the bug this ADR exists to remove. It is caught, and
-  caught by measurement rather than by this probe: the decision-4 warning at `src/index.ts:962`
+  caught by measurement rather than by this probe: the decision-4 warning at `src/index.ts:856`
   asks `pi.getActiveTools()` at `session_start`, where the answer is the real one. The failure
   degrades to exactly the behaviour that exists today, loudly.
 - **Under-reporting activation** — we say `inactive`, pi would have activated it. The surface is
@@ -130,14 +130,26 @@ put a second writer on the loadout that `ptc-mode.ts:27-31` already documents as
 
 **We do not add a notice for the new default.** The default path now resolves to `full` and says
 nothing, on the reasoning ADR-0026 already recorded: a notice on every ordinary session is crying
-wolf. The pinned-disagreement notice is untouched — a user who pins `surfaceMode: "subagents"`
+wolf. ~~The pinned-disagreement notice is untouched — a user who pins `surfaceMode: "subagents"`
 without an active codemode still gets the decision-4 warning, and that is now the only way to
-reach it, which is the correct shape.
+reach it, which is the correct shape.~~ **Withdrawn 2026-10-10 by
+[ADR-0034](./0034-surface-is-detected-not-set.md)**: the key is gone, so there is no pinned value
+and no pinned-disagreement notice. A session with no active `codemode` now reaches the decision-4
+warning on the detected path, which is the only path.
 
-**We do not make `activation` a third seam on the extension options.** `options.codemode` and
-`options.codemodeSwitch` exist so a test can state the pi it is reasoning about; the activation
-probe is reached through `readSurfaceModeConfig` in the same way, and adding a third seam for it
-would be a third place for the three to drift apart.
+**We did not make `activation` a third seam on the extension options — and then we did.**
+`options.codemode` and `options.codemodeSwitch` exist so a test can state the pi it is reasoning
+about; at the time of writing, the activation probe was reached only through
+`readSurfaceModeConfig` (now `detectSurfaceMode`), and a third seam looked like a third place for
+the three to drift apart.
+
+**Reversed 2026-10-10 by [ADR-0034](./0034-surface-is-detected-not-set.md)**, which deleted that
+function along with the `surfaceMode` key it read. With the key gone there is no "explicit" path to
+keep the activation probe off the developer's machine, so `PtcSubagentsOptions.codemodeActivation`
+now exists as a third seam. The drift risk this paragraph named is real and is handled where the
+seam is defined rather than by withholding it: a stub that pins nothing resolves to
+`{ activation: "inactive", source: "default" }`, which is what an unconfigured session does anyway,
+so the unspecified case is the ordinary one rather than the dangerous one.
 
 ## Consequences
 
@@ -151,7 +163,7 @@ would be a third place for the three to drift apart.
   are paid on the explicit-key path too, for the same reason ADR-0027 pays its two: the
   disagreement notice needs the table's own answer.
 - **A message that could now lie.** The `detected.present && !known` notice at
-  `src/index.ts:920` hard-codes the string `"subagents"` as the detected surface. With a fifth
+  `src/index.ts:807` hard-codes the string `"subagents"` as the detected surface. With a fifth
   cell, `detected` can be `full` while `present && !known` still holds (activation predicted
   `active` from a project `defaultTools`, and the project turned out to be untrusted —
   `settings-manager.js:327` drops project settings in that case, which this probe cannot observe).

@@ -1,6 +1,21 @@
 ---
 
-status: accepted (2026-09-30). §3 and decision 3 amended 2026-10-09: `subagents` now also
+status: **withdrawn 2026-10-10** by
+[ADR-0034](./0034-surface-is-detected-not-set.md). The premise below — that the surface is a
+setting — is false: the `surfaceMode` key, the `off` value, and `/ptc surface` are all removed, and
+the surface is detected only.
+
+What survives: the **§3 amendment of 2026-10-09**, which this record does not touch. On `subagents`,
+`ptc_run_code` / `ptc_workflow` register at `codemode` reach — callable from a script, not declared
+to the model — and that is now unconditional, since it is the only `subagents` there is. Also
+surviving: the measured capability comparison this record rests on
+(`docs/research/codemode-vs-ptc-capability-20260930.md`) and the reasons `off` was worth having
+long enough to build, which ADR-0034 answers by deleting it.
+
+Read the decisions below as **history**: they record what was decided on 2026-09-30 and why, not
+what the package does. The current behaviour is ADR-0034 plus ADR-0026/0027/0029/0033.
+
+status (original): accepted (2026-09-30). §3 and decision 3 amended 2026-10-09: `subagents` now also
 registers `ptc_run_code` / `ptc_workflow`, at `codemode` reach.
 
 # The model-facing surface is a setting, not a fixed set

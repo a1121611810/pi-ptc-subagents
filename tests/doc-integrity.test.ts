@@ -434,6 +434,22 @@ const EXTERNAL_VOCABULARY: ReadonlyMap<string, string> = new Map([
     "ALL_TOOLS",
     "pi 内建 codemode 沙箱的全局量，本仓不声明；ADR-0025 §3 引用它是为了陈述实测结果，不是调用它",
   ],
+  // A3. pi 包管理器内部的三个函数。ADR-0034 引用它们是为了说明「个人级 `[]` 与项目级 `[]` 走的是
+  // 两个不同函数」，而这个不对称正是那条记录存在的理由之一。它们是宿主实现细节，本仓既不声明
+  // 也不复制：pi 的 `collectPackageResources` 把项目级分到 `applyPackageDeltaFilter`（空 delta =
+  // 不变），把个人级分到 `applyPackageFilter`（`[]` = 什么都不加载）。
+  [
+    "collectPackageResources",
+    "pi 包管理器内部的资源收集函数，本仓不声明；ADR-0034 引用它是为了定位那条不对称发生在哪个分支",
+  ],
+  [
+    "applyPackageFilter",
+    "pi 包管理器的个人级过滤函数，本仓不声明；ADR-0034 用它与项目级作对照，说明 `[]` 在两处含义不同",
+  ],
+  [
+    "applyPackageDeltaFilter",
+    "pi 包管理器的项目级增量过滤函数，本仓不声明；ADR-0034 用它与个人级作对照，说明空 delta 表示不变",
+  ],
   ["ToolInfo", "pi ExtensionAPI.getAllTools 的返回类型，本仓只在 ADR-0026 里引用（ADR-0026）"],
   [
     "getSettings",
@@ -446,6 +462,41 @@ const EXTERNAL_VOCABULARY: ReadonlyMap<string, string> = new Map([
   ["searchTools", "pi 内建 codemode 沙箱的全局函数，本仓不声明（ADR-0025）"],
   ["max_output_tokens", "pi 内建 codemode 的脚本级输出预算选项，本仓不声明（ADR-0025）"],
   ["timeout_ms", "pi 内建 codemode 的脚本级死线选项；本仓同名概念是 maxTimeoutMs（ADR-0025）"],
+  // A2b. pi 宿主的资源加载器与包管理器。ADR-0027 引用 `DefaultResourceLoader` 来说明 `cwd` 的
+  // baseDir 从哪里解析；ADR-0034 引用 `handleConfigCommand` / `settingsManager` 来说明 `pi config`
+  // 写的是 settingsManager 管理的 `packages[].extensions`。三者都来自已安装的 pi 产物，本仓
+  // 从不声明也从不调用。
+  // **`DefaultResourceLoader` 是本清单漏掉的既有缺陷，不是本轮新增**：它在 ADR-0027 里被点名，
+  // 而清单里一直没有它，于是 doc-integrity 的符号断言在本次改动之前就是红的。这里补上并写明
+  // 理由，让它下一次变红时是「pi 真改名了」而不是「清单漏了」。
+  [
+    "DefaultResourceLoader",
+    "pi 1.0.0 的资源加载器类（dist/core/resource-loader.js）；ADR-0027 引用它是为了说明 resolvePath(options.cwd) 的 baseDir 来源，本仓不声明",
+  ],
+  [
+    "handleConfigCommand",
+    "pi 的 `pi config` 子命令实现（dist/cli 下），写 packages[].extensions 的那个函数；ADR-0034 引用它是为了说明禁用通道落在哪个字段上（ADR-0034）",
+  ],
+  [
+    "settingsManager",
+    "pi 宿主管理 settings.json 的类，packages[].extensions 归它所有；ADR-0034 引用它是为了确认 `pi config` 写的就是该数组（ADR-0034）",
+  ],
+  // A3. **本仓已删除的符号**，只在记录其删除的那一篇 ADR 里以历史名称出现。删除它们是
+  // ADR-0034 的决定；文档必须能说出被删掉的是什么，所以名字要留在文档里，而 src/ 里当然
+  // 没有了。这几条与 A/B/C/D 的区别是：它们曾经属于本仓，现在不属于。
+  // 两条反向守护都仍然成立——它们在 src/ 里不存在（第一条），且在文档里仍被提到（第二条）。
+  [
+    "readSurfaceModeConfig",
+    "本仓已删除的读取函数（ADR-0034 随 surfaceMode 键一并删除，取代它的是 detectSurfaceMode）；0026/0029/0030/0033 保留这个名字是为了记录删除事实",
+  ],
+  // `setSurfaceMode` 曾经也需要一条：ADR-0030 以 `setSurfaceMode()` 的形态提到它（带括号，
+  // 形态过滤器不收，所以断言二从来没报过它）。写这一条时顺手加进清单，随后被「死条目」
+  // 那条反向守护当场抓出来——清单里不该有断言看不见的名字。这条记录留在注释里，
+  // 因为它是「排除清单自己也可能是噪声」的一个实例。
+  [
+    "surfaceModeConflict",
+    "本仓已删除的冲突判定函数（ADR-0034 随 pinned 值通知一并删除）；ADR-0034 点名它是为了说明删掉了哪条提示",
+  ],
   ["SessionShutdownEvent", "pi 宿主生命周期事件，本仓只消费不声明"],
   [
     "RUN_CODE_NAME",
@@ -1164,9 +1215,7 @@ describe("断言三：docs/reviews 账本里的 commit SHA 必须能被 git 解�
       "被豁免的每一条都要有理由跟着，理由缺失就不该豁免",
     ).toEqual([...SNAPSHOT_SHAS].map(([sha, why]) => `${sha} = ${why}`));
     expect(
-      corpusEntries.filter(
-        ([sha, verdict]) => verdict !== "resolves" && !SNAPSHOT_SHAS.has(sha),
-      ),
+      corpusEntries.filter(([sha, verdict]) => verdict !== "resolves" && !SNAPSHOT_SHAS.has(sha)),
       "账本里的唯一 SHA 在批量路径下也必须全部 resolves（已登记的快照 SHA 除外）",
     ).toEqual([]);
     // 混在真实 SHA 里一起判：顺序不能影响结论，missing 的那一个必须被单独标出来。
@@ -1240,11 +1289,43 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       // 32/105→index.ts:962 = decision-4 的 `if (... && !pi.getActiveTools().includes("codemode"))`；
       // 129→ptc-mode.ts:27 = 「## Fail-safe on external loadout changes」段首，27-31 覆盖 setActiveTools 那段；
       // 154→index.ts:920 = `if (detected.present && !known) {`。
+      // **以上四条已于 2026-10-10 全部位移**（见下方第七次复核记录）：本轮删除 surfaceMode 后，
+      // ptc-mode.ts 628→1160、index.ts 962→856、920→807；129 那条 ptc-mode.ts:27 至今未动。
       // 2026-10-03 第四次复核：ADR-0031 引入 1 条。逐条：
       // 105→limits.ts:4 = `* The numbers are DSH's (`dsh-v0.2.0-rc.2`, …` — 即 ADR-0031 §C
       // 讨论的那一行版本自述，本次复核时该行已被本次改动一并更正为 0.2.0-rc.2，所以引用
       // 指到的是**改过之后**的行；这正是「引用能解析」与「引用指对了东西」要分开看的原因，
       // 改文档和改引用在同一批里发生，光看解析通过不足以说明它还指对。
+      //
+      // **2026-10-10 第七次复核（ADR-0034：删除 surfaceMode）**。这次不只复核本轮碰过的文件，
+      // 而是把**全部 24 条重新按内容核对一遍**。前六次的记录都声称做过这件事，而
+      // docs/testing-constraints.md「What the gate does not check」说的正是这一类：门看得见形状，
+      // 看不见引用指向的东西。结果是**六条里有五条此前就指错了，其中四条与本轮改动无关**。
+      //
+      // 逐条（改 = 本轮修正；留 = 核对属实；删 = 引用指向的东西已不存在）：
+      //  0026:235 → dispatch.ts **1096→1501**。改。1096 处是一段 JSDoc 的 `/**`；本 ADR 声称的
+      //    `spawnOptions.sessionId = taskId;` 实际在 1501。**与本轮无关**：dispatch.ts 未被本轮
+      //    修改，HEAD 上的 1096 同样不是它——上一轮「逐行核对」的记录是假的。
+      //  0029:29  → ptc-mode.ts **628→1160**。改。`export function detectedSurfaceMode(`。
+      //  0029:32  → index.ts **962→856**。改。decision-4 的
+      //    `if (surface.surfaceMode === "subagents" && !pi.getActiveTools().includes("codemode"))`。
+      //  0029:105 → index.ts **962→856**。改。同上一行，ADR-0029 正文第二次引用它。
+      //  0029:129 → ptc-mode.ts:27。留。` * ## Fail-safe on external loadout changes` 段首。
+      //  0029:166 → index.ts **920→807**。改。`if (detected.present && !known) {`。
+      //  0030:83  → ptc-mode.ts:27。留。同上；0030 引的是同一段，只是它在**文档里**的行号
+      //    因本轮加的撤回声明从 68 前移到 83，引用目标未动。
+      //  0032:76  → src/index.ts:280。**整条删除**。它指的是
+      //    `if (surface.surfaceMode === "off") return;`——那行已随 `off` 一起删掉，280 处现在是
+      //    BG-14 段落的注释。ADR-0032 正文已就此划线注明撤回，所以这里是**删一条**而非改行号。
+      //  0031:129 → limits.ts:4、0016:39 → dispatcher.ts:438、0032 的 11/20/33/55/123 →
+      //    dispatch.ts:1149/1172/1031、subagent.ts:174/279、ptc-task.ts:229。留，逐行核对属实。
+      //
+      // **仍未修的八条（render.ts）——本轮刻意不碰，理由写在这里免得下一个人以为漏了**：
+      // 78/145/693/834/925/928/930/127 这批 `render.ts:N` 与 render.ts 的实际内容已经对不上
+      // （例：78 处是一段讲 gutter width 的注释，而 `MAX_CODE_LINES_EXPANDED = 3` 实际在 83）。
+      // 它们**与 ADR-0034 无关，是早于本轮的既有漂移**：render.ts 本轮一行未动，而断言四一直
+      // 绿，因为它只校验行号能解析到目标文件、不校验该行写了什么。要修就得逐条重核 ADR-0013
+      // 的渲染论断本身，那超出本轮「记录 surfaceMode 删除」的范围。已作为发现上报，不在此处顺手改。
     ).toEqual([
       "docs/adr/0013-ptc-row-compact-summary.md:140 -> src/tools/render.ts:78",
       "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:145",
@@ -1261,21 +1342,26 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       // counter, since :712 prefers `options.dispatchDeps?.slots ?? dispatchSlots`. ADR-0016 §2
       // names it as where the knob is read when nothing is injected.
       "docs/adr/0016-ptc-dispatch-binding.md:39 -> src/runtime/dispatcher.ts:438",
-      // Hand-confirmed line by line, 2026-09-30 (review round 9). dispatch.ts:1096 is
-      // `spawnOptions.sessionId = taskId;` -- the line that makes a same-id retry unreachable from
-      // the normal path, which is what the session-triple idempotence claim rests on. Qualified for
-      // the same reason as the 438 entry: a bare basename is ambiguous and guessing is worse than
-      // refusing.
-      "docs/adr/0026-surface-default-is-detected.md:226 -> dispatch.ts:1096",
-      "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:628",
-      "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:962",
-      "docs/adr/0029-surface-follows-codemode-activation.md:105 -> src/index.ts:962",
+      // 2026-10-10 第七次复核：**1096 → 1501**。1096 是一段 JSDoc 的开头，不是本 ADR 声称的
+      // `spawnOptions.sessionId = taskId;`（那行在 1501）——而后者正是「同 id 重试从正常路径
+      // 不可达」这个论断的落点。**既有漂移**，dispatch.ts 本轮未改，HEAD 上 1096 同样不是它。
+      "docs/adr/0026-surface-default-is-detected.md:235 -> dispatch.ts:1501",
+      // 2026-10-10 第七次复核：四条全部因本轮删除 surfaceMode 而位移，逐条核对内容后改正。
+      //  29  → 628→1160 = `export function detectedSurfaceMode(`
+      //  32  → 962→856  = decision-4 的 `if (surface.surfaceMode === "subagents" && !pi.getActiveTools()…`
+      //  105 → 962→856  = 同一处（ADR-0029 正文第二次引用它）
+      //  129 → 27 保持    = ` * ## Fail-safe on external loadout changes`，本轮未移动
+      "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:1160",
+      "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:856",
+      "docs/adr/0029-surface-follows-codemode-activation.md:105 -> src/index.ts:856",
       "docs/adr/0029-surface-follows-codemode-activation.md:129 -> ptc-mode.ts:27",
-      "docs/adr/0029-surface-follows-codemode-activation.md:154 -> src/index.ts:920",
-      // 2026-10-03 第四次复核（ADR-0030）：0030:68 指向 `ptc-mode.ts:27-31` 那段「loadout 被外部改写
-      // 时模式如何退让」，27 行是段首。ADR-0030 另外四处引用写的是 pi 宿主的行号而非本仓文件，
+      //  166 → 920→807 = `if (detected.present && !known) {`，即交叉核对那一条
+      "docs/adr/0029-surface-follows-codemode-activation.md:166 -> src/index.ts:807",
+      // 2026-10-03 第四次复核（ADR-0030）：0030 引 ptc-mode.ts:27-31 那段「loadout 被外部改写
+      // 时模式如何退让」，27 行是段首。本轮该引用在**文档里**的行号因撤回声明从 68 前移到 83，
+      // 引用目标（ptc-mode.ts:27）未动。ADR-0030 另外四处引用写的是 pi 宿主的行号而非本仓文件，
       // 解析器不收，因此不进这份基线——它们由 ADR 正文里的表格自带出处。
-      "docs/adr/0030-surface-switch-reloads.md:68 -> ptc-mode.ts:27",
+      "docs/adr/0030-surface-switch-reloads.md:83 -> ptc-mode.ts:27",
       "docs/adr/0031-open-source-and-publish-authority.md:129 -> src/runtime/limits.ts:4",
       // 2026-10-08 **第六次**复核：ADR-0032 的 7 条全部重新逐行核对，且这次是按**内容**核对的。
       //
@@ -1291,19 +1377,25 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       //   27 → dispatch.ts:1172 = `function accumulateUsage(`（usage 的累加点，前景后台共用）
       //   55 → subagent.ts:279 = 把投影写进 `structuredContent:` 的那一行
       //   49 → ptc-task.ts:229/459/618 = 三处 `outputSchema:` 声明
-      //   70 → index.ts:280     = `if (surface.surfaceMode === "off") return;`
       //  117 → dispatch.ts:1031 = `export function childToolList(`，即合并进子进程 --tools 的那个函数
       //
       // 注意 117 这一条**换了目标而不是只移行号**：#101 之前的实现是一句
       // `if (agent.tools && agent.tools.length > 0)` 的 guard，那行现在已经不在分支上了，
       // 替换它的是 childToolList。只把行号从 101 挪到 117 会把一个假的引用钉得更牢。
+      //
+      // 2026-10-10 第七次复核：第六次记在案的**第七条**
+      // `0032:76 -> src/index.ts:280`（= `if (surface.surfaceMode === "off") return;`）
+      // **已从基线中删除**。那一行随 `off` 一起被删掉了，现在 280 处是 BG-14 段落的注释，
+      // 引用指不到它声称的东西；ADR-0032 正文已就此划线注明「该行已不存在」并且**不再引用那个
+      // 行号**——留着一个指向已删行的引用，正是 `tests/doc-integrity.test.ts` 要抓的悬空引用。
+      // 所以这里是**删一条**而不是改行号，本轮唯一的删除项，**新增 0 条**。
+      // 同一次编辑把 ADR-0032 里 123 那条**在文档里**的行号推到 130（引用目标未动，仍是 1031）。
       "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1149",
       "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:174",
       "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1172",
       "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:279",
       "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:229",
-      "docs/adr/0032-child-report.md:76 -> src/index.ts:280",
-      "docs/adr/0032-child-report.md:123 -> src/runtime/dispatch.ts:1031",
+      "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1031",
     ]);
   });
 

@@ -14,7 +14,6 @@
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type {
   ExtensionAPI,
-  ExtensionCommandContext,
   ExtensionContext,
   NormalizedBuildSystemPromptOptions,
 } from "@earendil-works/pi-coding-agent";
@@ -50,24 +49,21 @@ import {
   decideModeEntry,
   DEFAULT_HIDE_STRATEGY,
   detectExternalLoadoutChange,
+  detectSurfaceMode,
   FALLBACK_SURFACE_MODE,
   initialModeState,
-  PTC_MODE_CONFIG_FILE,
   PTC_MODE_ENTRY_TYPE,
   PTC_MODE_STATUS_KEY,
   readDefaultModeConfig,
-  readSurfaceModeConfig,
+  readLegacySurfaceKey,
   resolveBaseOnStart,
-  setSurfaceMode,
-  surfaceModeConflict,
-  SURFACE_MODES,
 } from "./mode/ptc-mode.ts";
 import type {
+  CodemodeActivationResolution,
   CodemodePresence,
   CodemodeSwitchResolution,
   ModeHideStrategy,
   PersistedModeState,
-  SurfaceMode,
 } from "./mode/ptc-mode.ts";
 import { buildPtcSkillsSection, skillsSectionDropped } from "./mode/skills-section.ts";
 import { createPtcSubagentTool } from "./tools/subagent.ts";
@@ -76,9 +72,11 @@ import { createChildReportTool } from "./tools/child-report-tool.ts";
 export {
   bindingSource,
   buildModeInstruction,
+  cliToolFlags,
   decideModeEntry,
   DEFAULT_HIDE_STRATEGY,
   detectExternalLoadoutChange,
+  detectSurfaceMode,
   initialModeState,
   modeLoadout,
   MODE_REQUIRED_TOOL_NAMES,
@@ -89,14 +87,11 @@ export {
   probeCodemodePresence,
   readCodemodeSwitch,
   readDefaultModeConfig,
-  readSurfaceModeConfig,
+  readLegacySurfaceKey,
   resolveBaseOnStart,
   resolveCodemodeActivation,
   resolveCodemodeSwitch,
   sameToolSet,
-  setSurfaceMode,
-  surfaceModeConflict,
-  SURFACE_MODES,
 } from "./mode/ptc-mode.ts";
 export type {
   CodemodePresence,
@@ -104,13 +99,14 @@ export type {
   CodemodeSwitchResolution,
   CodemodeSwitchSource,
   DefaultModeConfig,
+  DetectedSurface,
+  LegacySurfaceKey,
   ModeBlockReason,
   ModeEntryDecision,
   ModeEntryInput,
   ModeHideStrategy,
   PersistedModeState,
   PtcModeState,
-  SurfaceModeConfig,
 } from "./mode/ptc-mode.ts";
 export {
   buildPtcSkillsSection,
@@ -189,15 +185,8 @@ export interface PtcSubagentsOptions {
   /** Use this session-scoped background runtime instead of constructing one. */
   backgroundRuntime?: BackgroundTaskRuntime;
   /**
-   * Test seam for ADR-0025's surface mode. When set it wins over the agent-dir `ptc.json`,
-   * so a test never reads the developer's real settings -- and the four test files that all
-   * build this factory through one stub would otherwise inherit whatever the machine happens
-   * to have. Undefined in production, where the file is the only source.
-   */
-  surfaceMode?: SurfaceMode;
-  /**
    * ADR-0026 test seam: what the codemode probe found. Undefined in production, where the
-   * probe really runs. A test that exercises the DETECTED default states the pi it
+   * probe really runs. A test that exercises the DETECTED surface states the pi it
    * assumes rather than inheriting whatever process.argv the test runner happens to have,
    * which is how the previous version of that test passed for the wrong reason.
    */
@@ -209,22 +198,35 @@ export interface PtcSubagentsOptions {
    * and that is the case this seam exists to state.
    */
   codemodeSwitch?: CodemodeSwitchResolution;
+  /**
+   * ADR-0029 test seam: whether `codemode` will be in the model's tool list. Undefined in
+   * production, where `readCodemodeActivation` reads pi's real settings files AND this
+   * process's `argv`.
+   *
+   * This seam exists because the `surfaceMode` pin it replaced did. That pin was there to keep a
+   * test off the developer's machine: the activation probe reads `defaultTools` out of
+   * `~/.pi/agent/settings.json`, so a test file that pins nothing decides its own surface by
+   * however the machine running it happens to be configured. Removing the pin without adding this
+   * would have moved that failure back in, silently, to every stub-built factory.
+   */
+  codemodeActivation?: CodemodeActivationResolution;
 }
 
 export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOptions = {}): void {
   const mode = initialModeState();
 
   /**
-   * ADR-0025: which model-facing tools this package registers, read ONCE here so the
+   * ADR-0026: which model-facing tools this package registers, read ONCE here so the
    * `registerTool` calls below can act on it. Reading it later would mean the tools already
-   * exist when the setting arrives, and the only way to honour the setting would be to
-   * unregister - which pi has no call for. A malformed value falls back to the DETECTED default,
-   * not to a constant (ADR-0026 decision 5) -- on a pi that ships codemode that means
-   * `subagents`, not `full` -- and is reported at session start, not silently applied.
+   * exist when the answer arrives, and the only way to honour a different one would be to
+   * unregister - which pi has no call for. It is DETECTED, never read from a setting: there is
+   * no `surfaceMode` key and no way to pin a surface, so the only question is what this pi is.
+   * See `detectSurfaceMode` for why the escape hatch that used to be here is not one this
+   * package can replace.
    *
-   * The seam branch pins the surface outright, so it carries no `codemode`: a caller that named
-   * a surface never asked the pi anything, so there is no probe result to report. That is what
-   * makes `surface.codemode !== undefined` the exact test for "the surface was detected" below.
+   * The result is a function of three probes rather than of a file, which is what makes
+   * `surface.codemode !== undefined` no longer a test for "was this detected" -- it is always
+   * defined. The reporting below reads each probe directly instead.
    */
   // ADR-0026 reads the surface once, here, because registration has to happen in the factory and
   // `cwd` only matters for the `!` bucket's globs. It is left at its `process.cwd()` default
@@ -232,10 +234,12 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
   // globs against for a session launched from a shell, and the one case where the two can differ —
   // an SDK embedder passing an explicit `cwd` — is recorded in ADR-0027 as a known limit rather
   // than papered over by threading a value an extension cannot observe.
-  const surface =
-    options.surfaceMode === undefined
-      ? readSurfaceModeConfig(getAgentDir(), options.codemode, options.codemodeSwitch)
-      : { surfaceMode: options.surfaceMode, source: "file" as const };
+  const surface = detectSurfaceMode(
+    getAgentDir(),
+    options.codemode,
+    options.codemodeSwitch,
+    options.codemodeActivation,
+  );
   // Set on entry, cleared after the briefing has been injected, so the instruction lands once
   // per mode entry instead of on every turn.
   let briefingPending = false;
@@ -269,15 +273,6 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
    * travels with each PTC run so a nested `pi.dispatch({ background: true })` records its parent.
    */
   const parentTaskId = resolveParentTaskIdFromEnv();
-
-  /**
-   * ADR-0025 `off`: the user asked for a stock pi session, so this package does nothing at
-   * all. Returning HERE, before the background runtime is built, is the whole point -- an
-   * "off" that still registered handlers and merely injected an empty section would be off in
-   * name only. Everything below this line is unreachable in that mode, and the test asserts it
-   * by looking for the absence of every handler rather than at any output.
-   */
-  if (surface.surfaceMode === "off") return;
 
   /* ------------------------ BG-14: session-scoped background runtime ------------------------ */
 
@@ -508,14 +503,15 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
    * surface, same one-line fix. TUI-only, like every other notice here (`ctx.ui.notify` emits
    * nothing in `--print`) — ADR-0025's known limitation, restated rather than solved.
    *
-   * An explicit `surfaceMode` stands: the user picked this surface, and repeating ADR-0027's
-   * "the pinned value is in force" for a surface they pinned would be noise.
+   * There is no exemption here any more, and there was never much to exempt: a pinned surface set
+   * `source: "file"` and this guard returned early, which is precisely the surface ADR-0034
+   * deleted. What replaced it is the opposite trade — a wrong answer is now REPORTED rather than
+   * suppressed by a value the user wrote, and the only silence left is the once-only latch above.
    */
   let codemodeDriftNotified = false;
   const notifyCodemodeDrift = (ctx: ExtensionContext): void => {
     if (codemodeDriftNotified) return;
-    if (surface.source === "file") return;
-    if (surface.codemodeActivation?.activation !== "inactive") return;
+    if (surface.codemodeActivation.activation !== "inactive") return;
     if (!pi.getActiveTools().includes("codemode")) return;
     codemodeDriftNotified = true;
     ctx.ui.notify(
@@ -524,10 +520,9 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
         "so the surface defaulted to " +
         FALLBACK_SURFACE_MODE +
         ", and your model is being offered two orchestration tools. pi activates codemode at " +
-        "runtime in ways no settings file records (its MCP extension is one). Set an explicit " +
-        '"surfaceMode" in ' +
-        PTC_MODE_CONFIG_FILE +
-        " to pick one.",
+        "runtime in ways no settings file records (its MCP extension is one). Run pi with " +
+        "codemode active (-t codemode, or add it to defaultTools) to get the subagents surface " +
+        "instead.",
       "warning",
     );
   };
@@ -619,95 +614,13 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     return undefined;
   };
 
-  /**
-   * `/ptc surface [off|subagents|full]`.
-   *
-   * The surface is read once, in the factory, and pi has no `unregisterTool` — so a change cannot
-   * take effect in the running session. What CAN take effect is a reload, and that is pi's own
-   * `/reload`: `DefaultResourceLoader.reload()` calls `clearExtensionCache()`
-   * (`resource-loader.js:353`) and re-runs every factory, and `AgentSession.reload()`
-   * (`agent-session.js:2899`) then rebuilds the runner and re-emits `session_start` with reason
-   * `reload` — which is precisely the moment the surface is decided. `ctx.reload()` is the same
-   * path from inside an extension, so the user does not have to type a second command.
-   *
-   * The notification is emitted BEFORE the reload, never after: `ctx.reload()` invalidates this
-   * command context (`runner.js:482` says so in as many words), so anything read from `ctx`
-   * afterwards is stale by contract rather than by accident.
-   */
-  const handleSurfaceCommand = async (
-    value: string,
-    ctx: ExtensionCommandContext,
-  ): Promise<void> => {
-    const agentDir = getAgentDir();
-    if (value === "") {
-      const current = readSurfaceModeConfig(agentDir);
-      const detected =
-        current.detected === undefined || current.detected === current.surfaceMode
-          ? ""
-          : " (detection would say " + JSON.stringify(current.detected) + ")";
-      ctx.ui.notify(
-        "Extension surface: " +
-          JSON.stringify(current.surfaceMode) +
-          ", from " +
-          current.source +
-          detected +
-          ". Set it with /ptc surface " +
-          SURFACE_MODES.join("|") +
-          "; the change needs a reload, which this command performs.",
-        "info",
-      );
-      return;
-    }
-
-    const written = setSurfaceMode(agentDir, value);
-    if (!written.ok) {
-      ctx.ui.notify("pi-ptc-subagents: " + written.error + ". Nothing was changed.", "warning");
-      return;
-    }
-    if (!written.changed) {
-      ctx.ui.notify(
-        "The surface is already " + JSON.stringify(value) + " — nothing written, nothing reloaded.",
-        "info",
-      );
-      return;
-    }
-
-    const lines = [
-      "Surface " +
-        (written.previous === undefined
-          ? "(unset, so detected)"
-          : JSON.stringify(written.previous)) +
-        " → " +
-        JSON.stringify(value) +
-        " in " +
-        written.path +
-        ". Reloading so it takes effect now.",
-    ];
-    // Said before the reload, and only when it is true: the mode needs ptc_run_code or
-    // ptc_workflow to enter at all (`decideModeEntry` policy 3), so a `subagents` or `off`
-    // surface ends a running mode rather than carrying it across.
-    if (mode.enabled && value !== "full") {
-      lines.push("PTC mode was ON and cannot survive this surface — run /ptc on afterwards.");
-    }
-    if (value === "subagents") {
-      lines.push(
-        "subagents hands orchestration to pi's codemode, so it needs codemode in this session's " +
-          "tool list; if it is not there the startup warning will say so.",
-      );
-    }
-    ctx.ui.notify(lines.join("\n"), "info");
-    await ctx.reload();
-  };
-
   pi.registerCommand("ptc", {
-    description:
-      "Show or toggle PTC mode, or set the extension surface (/ptc surface off|subagents|full)",
+    description: "Show or toggle PTC mode",
     handler: async (args, ctx) => {
       const action = args.trim().toLowerCase();
-      if (action === "surface" || action.startsWith("surface ")) {
-        await handleSurfaceCommand(action.slice("surface".length).trim(), ctx);
-        return;
-      }
+      // NOTE: `/ptc off` below turns PTC MODE off, which is unrelated to the extension surface.
+      // The `surface` subcommand that used to sit here went with the `surfaceMode` setting; there
+      // is no surface to set, and the surface in force is reported at `session_start`.
       if (action === "off") {
         if (!mode.enabled) {
           ctx.ui.notify("PTC mode is already off.", "info");
@@ -778,50 +691,60 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     if (config.error !== undefined) {
       ctx.ui.notify(`pi-ptc-subagents: ${config.error}`, "warning");
     }
-    // The surface mode is read in the factory body, before there is a ctx to notify through, so
-    // its problem is reported here rather than dropped. Both readers parse the SAME file, so an
-    // unparseable one produces the same sentence twice -- which reads as two problems when it is
-    // one. Report the surface error only when it says something the mode error did not.
-    if (surface.error !== undefined && surface.error !== config.error) {
-      ctx.ui.notify(`pi-ptc-subagents: ${surface.error}`, "warning");
+    /*
+     * The `surfaceMode` key is gone (ADR-0025 withdrawn), and `ptc.json` may still carry one from a
+     * release that had it. Reading it here is the ONLY thing this package does with that key: it is
+     * not honoured, because honouring `"off"` forever is the switch this change deletes, and a
+     * package that silently came back after being switched off is worse than one that says so.
+     *
+     * The replacement is `pi config`, and it is a strictly better one -- pi does not LOAD the
+     * extension to honour it, so none of this package runs at all, which no value of a key this
+     * package reads could achieve. Measured on pi 1.1.0 against this package's own `dist/index.js`:
+     * a `packages` entry whose `extensions` is `[]` or `["!dist/index.js"]` does not load it, while
+     * `["+dist/index.js"]` and an absent key both do.
+     *
+     * `warning`, not `info`: the key is being ignored and the behaviour it asked for is not in
+     * force. TUI-only, like every other notice here -- a `--print` session gets no line, which is
+     * the same limitation every surface notice in this file carries.
+     */
+    const legacySurface = readLegacySurfaceKey(getAgentDir());
+    if (legacySurface !== undefined) {
+      ctx.ui.notify(
+        "pi-ptc-subagents: " +
+          legacySurface.path +
+          ' still has a "surfaceMode" key (' +
+          JSON.stringify(legacySurface.value) +
+          "), and it is no longer read: the surface is detected from what pi is, and no key pins " +
+          "it. To keep this package out of your sessions entirely, turn it off in pi -- run " +
+          "`pi config` and disable this package's extensions there (its `extensions` entry set to " +
+          "[] stops pi loading it at all). To silence this notice, delete the key.",
+        "warning",
+      );
     }
 
     /*
-     * ADR-0026: the surface was NOT read from the file, so it was DETECTED -- and a detection
-     * that silently came back false is the one failure mode that design has. A pi that
-     * restructures its `dist` makes the probe return `not-found`, the default quietly becomes
-     * `full`, and the user gets zero diagnostics. This is the only reader of
-     * `surface.codemode` in the package, and it is what makes the field carried there real
-     * rather than decorative.
+     * ADR-0026: the surface is DETECTED, so a detection that silently came back false is the one
+     * failure mode that design has. A pi that restructures its `dist` makes the probe return
+     * `not-found`, the surface quietly becomes `full`, and the user gets zero diagnostics.
      *
-     * `!detected.present` is exactly "the probe could not answer". The healthy case -- probe
-     * found codemode, `detectedSurfaceMode` turned that into `subagents` -- is what a modern
-     * pi should resolve to, and a notice on every one of those sessions would be noise, so it
-     * never reaches here. What is left is a probe with a `how` to report, and naming it is the
-     * point: "pi restructured" is then distinguishable from "no pi next to argv[1]" from a shim
-     * that would not resolve.
+     * `!present` is exactly "the probe could not answer". The healthy case -- probe found codemode,
+     * `detectedSurfaceMode` turned that into `subagents` -- never reaches here, because a notice on
+     * every modern-pi session would be noise. What is left is a probe with something to report, and
+     * naming it is the point: "pi restructured" is then distinguishable from "no pi next to
+     * argv[1]" from a shim that would not resolve.
      *
-     * `info`, not `warning`: a pi that genuinely ships no codemode lands here too, and
-     * `full` is the right answer for it, so a warning on every one of those sessions would be
-     * crying wolf. The line states the two things that are actually true -- how the probe came
-     * out, and what the default therefore is -- and points at the one line of JSON that makes
-     * the answer deterministic whatever the pi does.
-     *
-     * TUI-only, like every other notice in this file: `ctx.ui.notify` emits nothing in
-     * `--print`, so a scripted session that detected `full` gets no line at all. ADR-0025
-     * records that as a known limitation of the surface-mode warnings.
+     * `info`, not `warning`: a pi that genuinely ships no codemode lands here too, and `full` is
+     * the right answer for it, so a warning on every one of those sessions would be crying wolf.
+     * TUI-only, like every other notice in this file.
      */
     const detected = surface.codemode;
-    if (detected !== undefined && !detected.present) {
+    if (!detected.present) {
       ctx.ui.notify(
-        "pi-ptc-subagents: no surfaceMode is set, and the codemode probe reported " +
+        "pi-ptc-subagents: the codemode probe reported " +
           detected.how +
-          ", so the surface defaults to " +
+          ", so the surface is " +
           FALLBACK_SURFACE_MODE +
-          ". That is the safe direction, not an error. If this pi really does ship pi's own " +
-          'codemode, set "surfaceMode" in ' +
-          PTC_MODE_CONFIG_FILE +
-          " -- an explicit key always wins over detection.",
+          ". That is the safe direction, not an error.",
         "info",
       );
     }
@@ -848,37 +771,6 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     }
 
     /*
-     * ADR-0027: the explicit key WINS -- that is what an override is for -- so this only
-     * reports. The case worth a warning is the one where the two disagree about who
-     * orchestrates: a user who disabled pi's codemode and pinned `surfaceMode: "subagents"`
-     * has asked for a surface that assumes an orchestrator which is not loaded, and will
-     * find `ptc_run_code` missing with nothing to replace it.
-     *
-     * `info`, not `warning`: the pinned value was honoured, so nothing is broken. `off` never
-     * reaches here (see `surfaceModeConflict`), and agreeing values never reach here either.
-     */
-    if (
-      surface.source === "file" &&
-      surface.detected !== undefined &&
-      surfaceModeConflict(surface.surfaceMode, surface.detected)
-    ) {
-      const sw = surface.codemodeSwitch;
-      ctx.ui.notify(
-        "pi-ptc-subagents: surfaceMode is pinned to " +
-          JSON.stringify(surface.surfaceMode) +
-          ", but this pi resolves to " +
-          JSON.stringify(surface.detected) +
-          (sw === undefined
-            ? ""
-            : " (pi's codemode is on disk and its switch is " + sw.switch + ")") +
-          ". The pinned value is in force. Change it in " +
-          PTC_MODE_CONFIG_FILE +
-          " if that is not what you meant.",
-        "info",
-      );
-    }
-
-    /*
      * The probe's other wrong answer. It walks the FILESYSTEM, so it cannot see the two ways pi
      * offers to withhold a tool it has on disk: `--no-extensions`, and `--exclude-tools codemode`.
      * Either way the probe answers `present`, `detectedSurfaceMode` hands the session to
@@ -889,10 +781,9 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
      * So this asks the filesystem probe cannot: not "is the tool offered" but "does pi know this
      * tool at all". `getAllTools` is available here and only here -- it is a `notInitialized` stub
      * during loading (ADR-0026) -- so this is the first and only point where the two can be
-     * compared. `source === "file"` means the user decided, so their answer stands even if it is
-     * the wrong one for this session.
+     * compared.
      */
-    if (detected !== undefined && surface.source !== "file") {
+    {
       const known = pi.getAllTools().some((tool) => tool.name === "codemode");
       if (!detected.present && known) {
         /*
@@ -910,38 +801,43 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
             detected.how +
             "), so the surface defaulted to " +
             FALLBACK_SURFACE_MODE +
-            ", and your model is being offered two orchestration tools. Set an explicit " +
-            '"surfaceMode" in ' +
-            PTC_MODE_CONFIG_FILE +
-            " to pick one.",
+            ", and your model is being offered two orchestration tools. Enable codemode for " +
+            "real (-t codemode) to get the subagents surface instead.",
           "warning",
         );
       }
       if (detected.present && !known) {
         /*
          * ADR-0029: the surface is REPORTED, not spelled out, and the value reported is
-         * `surface.surfaceMode` rather than `surface.detected`.
+         * `surface.surfaceMode` — which, now that there is no `source: "file"` path to read
+         * `surface.detected` from, is also the only value there is.
          *
-         * Two reasons, both of which the previous hard-coded `"subagents"` got wrong. With the
-         * activation axis added, the detected surface is not always `subagents` in this branch --
-         * activation can be predicted `active` from a project `defaultTools` that pi then ignored
-         * because the project is untrusted (`settings-manager.js:327`), and the table answers
-         * `full` there. And `SurfaceModeConfig.detected` is populated only on the `source: "file"`
-         * path, which this branch is explicitly not, so reading it would print `undefined`.
+         * What can put a session in the `subagents` half of this branch was measured rather than
+         * reasoned about, and the answer is narrower than the comment that used to stand here.
+         * That comment claimed the table answers `full` when a project `defaultTools` names
+         * `codemode` and pi ignored the project because it was untrusted. It does not:
+         * `readSettingsObject` reads `.pi/settings.json` with no trust check, so this package sees
+         * `active` and picks `subagents` exactly as it would have if the project were trusted.
+         * Measured on pi 1.1.0 with a project-only `defaultTools: ["+codemode"]`: `-na` gives
+         * `codemodeActive: false` while this package has chosen `subagents`, and `-a` gives
+         * `codemodeActive: true` with the same choice. That is the residual wrong-way answer, and
+         * it is why the advice below names ways to make `codemode` callable rather than a setting
+         * in this package: there is no setting here any more.
+         *
+         * The two flags this branch used to name no longer describe it either. `--exclude-tools
+         * codemode` IS read now (`cliToolFlags`), so it resolves to `inactive` and the table answers
+         * `full` before reaching here — which is what the real-pi runs show. `--no-extensions` is
+         * still the case that lands here with `codemode` on disk and unregistered.
          */
         ctx.ui.notify(
           "pi-ptc-subagents: the codemode probe found pi's codemode on disk, but this " +
-            "session does not register it (--no-extensions or --exclude-tools codemode), so " +
+            "session does not register it (--no-extensions), so " +
             "the surface is " +
             JSON.stringify(surface.surfaceMode) +
             (surface.surfaceMode === "subagents"
-              ? " with no orchestrator. Set " +
-                JSON.stringify("surfaceMode") +
-                " to " +
-                JSON.stringify(FALLBACK_SURFACE_MODE) +
-                " in " +
-                PTC_MODE_CONFIG_FILE +
-                " to use ptc_run_code instead."
+              ? " with no orchestrator: ptc_run_code and ptc_workflow are reachable only from " +
+                "codemode, and this session has none. Launch with codemode active (pi -t codemode), " +
+                "or turn this package off with pi config."
               : "."),
           "warning",
         );
@@ -975,10 +871,10 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
       // of the sentence would be wrong, so the whole notice is withheld rather than reworded.
       if (!hasDeclaredProgrammingTool) {
         ctx.ui.notify(
-          "pi-ptc-subagents: surfaceMode is subagents, but codemode is not active in this " +
-            "session, so there is no orchestration tool. Add codemode to your pi tool list " +
-            '(the --tools flag or the default tools setting), or set surfaceMode to "full" to ' +
-            "use ptc_run_code instead.",
+          "pi-ptc-subagents: the detected surface is subagents, but codemode is not active in " +
+            "this session, so there is no orchestration tool. Add codemode to your pi tool " +
+            "list (the --tools flag or the default tools setting), or turn this package off " +
+            "with pi config.",
           "warning",
         );
       }

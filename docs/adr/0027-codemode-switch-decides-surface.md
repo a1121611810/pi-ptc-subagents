@@ -113,10 +113,12 @@ Two things are reported at `session_start`, where a `ctx` exists:
 
 - a settings file that could not be read as a JSON object. The switch has already fallen through
   to the next source; the notice names the file. A malformed setting must never half-apply.
-- an explicit `surfaceMode` that disagrees with the table. The pinned value **wins** — that is
+- ~~an explicit `surfaceMode` that disagrees with the table. The pinned value **wins** — that is
   what an override is for — and this only says so. `off` is exempt: it is a statement about the
   package rather than a claim about who orchestrates, and warning about it every session would be
-  crying wolf.
+  crying wolf.~~ **Removed 2026-10-10 by
+  [ADR-0034](./0034-surface-is-detected-not-set.md)**: there is no `surfaceMode` key and no pinned
+  value, so there is no disagreement to report. Only the settings-file notice above remains.
 
 Both are `info` or `warning` about a value that was honoured, never an error about a broken one.
 

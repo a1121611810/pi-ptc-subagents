@@ -146,12 +146,18 @@ notifies once (and once more only if it has not fired yet, on the first turn, be
 extension's own `session_start` may run after ours). `warning`, not `info`: it is the same double
 surface, with the same one-line fix, as the notices ADR-0026 and ADR-0027 already report.
 
-One exemption, and it is the notice's third guard: a session whose surface was **pinned**
+~~One exemption, and it is the notice's third guard: a session whose surface was **pinned**
 (`source: "file"`) is not reported, even when the pinned value is `full` and codemode really is
 active. The user chose that surface, and ADR-0027's pinned-conflict notice already reports a pinned
 value that disagrees with the detection; a second line saying the same thing would be noise on
 every session. The cost is honest and stated: a user who pinned `full` on an MCP session is never
-told that the double surface is live, and the notice does not reach them at all.
+told that the double surface is live, and the notice does not reach them at all.~~
+
+**Withdrawn 2026-10-10 by [ADR-0034](./0034-surface-is-detected-not-set.md)**: the `surfaceMode` key
+is removed, so a session's surface is never pinned and there is no `source: "file"` to exempt. The
+notice's third guard is now always true, so the exemption costs nothing and the notice is reported
+on every MCP session where codemode really is active. The cost this paragraph used to state — "a
+user who pinned `full` on an MCP session is never told" — cannot occur.
 
 ## What we deliberately don't do
 
@@ -163,13 +169,15 @@ told that the double surface is live, and the notice does not reach them at all.
    connections would be _less_ faithful, not more.
 3. **No `--exclude-tools` / `--no-tools` accounting.** Both can only remove tools; ADR-0029's
    reasoning for skipping them is unchanged.
-4. **No third extension-option seam.** `options.codemode` / `options.codemodeSwitch` exist so a
+4. ~~**No third extension-option seam.** `options.codemode` / `options.codemodeSwitch` exist so a
    test can state the pi it is reasoning about; the evidence is reached through
    `readSurfaceModeConfig` in the same way, and another seam is another place for the three to
-   drift.
+   drift.~~ **Reversed 2026-10-10 by [ADR-0034](./0034-surface-is-detected-not-set.md)**: that
+   function is gone with the key it read, and `codemodeActivation` is now a third seam — which this
+   package needed anyway, because the activation probe reads the developer's own `settings.json`.
 5. **No mid-session surface switch.** Registration happens in the factory and pi has no
-   `unregisterTool` (ADR-0029), so the notice is visibility, not a remedy; the remedy is ADR-0030's
-   `surfaceMode` + reload.
+   `unregisterTool` (ADR-0029), so the notice is visibility, not a remedy; the remedy was ADR-0030's
+   `surfaceMode` + reload — **both withdrawn by ADR-0034**, which leaves neither.
 
 ## Consequences
 
@@ -189,11 +197,12 @@ told that the double surface is live, and the notice does not reach them at all.
   whose `mcp.json` IS readable is a different case: the detection then says `subagents` and the
   conflict notice does fire.) Recorded rather than solved: closing it would mean re-reading the
   live server registry, which is exactly the connection-state read this record declines.
-- Two more file reads per probe run, on **every** `readSurfaceModeConfig` call including a pinned
-  one — the probes run even when the key wins, because the conflict notice needs the table's own
-  answer. One detected surface therefore costs four settings reads over two files (each of the two
-  probes reads both) plus these two, which is recorded in `readSurfaceModeConfig`'s docstring
-  rather than optimised: the duplication is pre-existing and keeps each probe a whole copy of pi's.
+- Two more file reads per probe run, on **every** `detectSurfaceMode` call (formerly
+  `readSurfaceModeConfig`, deleted by ADR-0034) — the probes run on every call, which is now the
+  only call, because there is no key that could win. One detected surface therefore costs four
+  settings reads over two files (each of the two probes reads both) plus these two, which is
+  recorded in `detectSurfaceMode`'s docstring rather than optimised: the duplication is pre-existing
+  and keeps each probe a whole copy of pi's.
 - `--print` sessions get none of the new notices (`ctx.ui.notify` is TUI-only), as with every other
   notice in this package (ADR-0025's known limitation).
 

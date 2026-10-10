@@ -251,11 +251,18 @@ describe("always-on registration", () => {
       getActiveTools: () => [...ACTIVE],
     } as unknown as ExtensionAPI;
 
-    // Pinned for the same reason every other factory-driven test is: this one builds the
-    // factory directly, so without an explicit surface it reads the developer's real agent-dir
-    // ptc.json. Found in review round 2 -- a surfaceMode of off in a temp agent dir made this
-    // test fail for a reason unrelated to what it checks.
-    ptcSubagents(api, { surfaceMode: "full" });
+    // Pinned for the same reason every other factory-driven test is: this one builds the factory
+    // directly, and with the `surfaceMode` key gone nothing short-circuits the detection any
+    // more, so an unpinned axis reads the developer's real agent-dir settings. Found in review
+    // round 2 -- a stale surface key in a temp agent dir made this test fail for a reason
+    // unrelated to what it checks, and removing the key moved that failure onto the switch and
+    // activation axes rather than removing it. All three are named, and they name `full`
+    // (`REGISTERED` has no `ptc_subagent`, which only `subagents` registers).
+    ptcSubagents(api, {
+      codemode: { present: true, how: "found" },
+      codemodeSwitch: { switch: "enabled", source: "user" },
+      codemodeActivation: { activation: "inactive", source: "default" },
+    });
 
     expect(calls).toEqual([]);
     expect(registered).toEqual(REGISTERED);

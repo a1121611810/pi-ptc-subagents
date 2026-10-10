@@ -69,8 +69,11 @@ API does work -- is recorded as rejected below. It is the only approach that see
    notice on every healthy session is noise. What is left is a probe that could not answer,
    which is exactly the pi-restructured-its-`dist` case this design is most exposed to.
 
-4. An explicit `surfaceMode` key always wins, whichever way the probe came out. Detection is a
-   default, never an override.
+4. ~~An explicit `surfaceMode` key always wins, whichever way the probe came out. Detection is a
+   default, never an override.~~ **Withdrawn 2026-10-10 by
+   [ADR-0034](./0034-surface-is-detected-not-set.md)**: the `surfaceMode` key is removed, so there
+   is no explicit value and nothing to win. Detection is no longer _a default_ — it is the only
+   path. The rest of this record, which is about what detection answers and how it fails, stands.
 
 5. A malformed file reports `invalid` and falls back to the **detected** default, not to a
    constant. The same argument as decision 3 applies to a broken file: a user who cannot
@@ -83,9 +86,15 @@ API does work -- is recorded as rejected below. It is the only approach that see
    decision 4 and it now fires on a stock pi 0.99.1 session, which is a consequence of
    decision 1 and not a bug in it.
 
-7. `readSurfaceModeConfig` takes the probe result as an **optional parameter**, and the factory
-   takes it as a test seam. Neither a test nor a caller can be surprised by the machine it
-   happens to run on.
+7. ~~`readSurfaceModeConfig` takes the probe result as an **optional parameter**, and the factory
+   takes it as a test seam.~~ **Withdrawn 2026-10-10 by
+   [ADR-0034](./0034-surface-is-detected-not-set.md)**: `readSurfaceModeConfig` is deleted along
+   with the key it read. The seam it describes is now `detectSurfaceMode`, which takes all three
+   probe results, and the activation probe additionally has its own option seam
+   (`codemodeActivation`) because it reads the developer's own `settings.json`. The reasoning below
+   about _where_ the parameter is resolved is kept as history; the surface it protected — that a
+   test never decides its own answer by the machine it runs on — is carried by the new seam's
+   default.
 
    Omitted, the parameter is resolved **inside the fallback branches** rather than in a default
    parameter, because a default parameter is evaluated on every call -- including the ones an
@@ -223,7 +232,7 @@ accept this for now", which is a decision and should not live only in a review l
      ("retry idempotence") is accurate, and it is now measured rather than asserted.
    - **No collision.** Two children with different task ids in one directory get two distinctly named
      files. Same id is the idempotence case above, and is unreachable from the normal path:
-     `sessionId` is the freshly minted `taskId` (`dispatch.ts:1096`) and one task id is one TaskRecord.
+     `sessionId` is the freshly minted `taskId` (`dispatch.ts:1501`) and one task id is one TaskRecord.
    - **Not established by that measurement, and closed by a different argument:** where the child's
      output is _routed_ on our side. That is a different sink — `OutputStorage` and the subscription
      pipeline, ours — from the child's session file. The two do not interact, and the round-8

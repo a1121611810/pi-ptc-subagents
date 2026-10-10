@@ -474,9 +474,10 @@ describe("dispatch() foreground carries the child report", () => {
       // The tool is named first, because it is the channel we PREFER...
       expect(prompt).toContain(CHILD_REPORT_TOOL_NAME);
       // ...and the shape is stated here, because the prompt is the home that survives an install
-      // where this package does not load in the child (`surfaceMode: "off"`, or pi's `-ne`). The
-      // tool exists only in the child; the prompt is written by the host, unconditionally. Move
-      // the shape back into the tool description and the fallback stops being a fallback.
+      // where this package does not load in the child (pi's `-ne`, or the package disabled in
+      // `pi config`). The tool exists only in the child; the prompt is written by the host,
+      // unconditionally. Move the shape back into the tool description and the fallback stops
+      // being a fallback.
       expect(prompt).toContain(CHILD_REPORT_SHAPE);
       expect(prompt).toContain("files_touched");
       expect(prompt).toMatch(/If that tool is not available to you/);
@@ -1019,9 +1020,9 @@ describe("the report tool channel", () => {
 
   test("a transcript where the tool channel never fires still yields a prompt-json report", async () => {
     // ADR-0032's bet, made mechanical: the tool exists in the child only when this package
-    // loads there (`src/index.ts` returns early on `surfaceMode === "off"`, and pi's `-ne`
-    // removes extensions entirely). Whatever the child was told, the host keeps reading a
-    // compliant fenced block, so the fallback is a fallback and not a decoration.
+    // loads there (pi's `-ne` removes extensions entirely, and so does disabling this package
+    // in `pi config`). Whatever the child was told, the host keeps reading a compliant fenced
+    // block, so the fallback is a fallback and not a decoration.
     await withAgent(async (dir) => {
       childTranscript.lines = [...COMPLIANT_TRANSCRIPT];
 
@@ -1042,6 +1043,32 @@ describe("the report tool channel", () => {
 // ---------------------------------------------------------------------------
 //  Seam 7 — activation is load-bearing (ADR-0032, the trap this ticket exists for)
 // ---------------------------------------------------------------------------
+
+/**
+ * The three probes that resolve a pi's surface, as literals from `detectedSurfaceMode`'s table
+ * (`src/mode/ptc-mode.ts:1046-1053`). `surfaceMode` is gone as a factory option, so a stub reaches
+ * a line by naming the probes that produce it.
+ *
+ * **All three are named in both rows on purpose.** With no key to short-circuit the detection, an
+ * unpinned switch or activation axis runs the real probe over the DEVELOPER's
+ * `~/.pi/agent/settings.json` — the invisibility that `makeExtensionStub`'s own doc records — so a
+ * half-pinned stub would decide this seam's surface by whoever is running the suite.
+ *
+ * They differ in ONE axis on purpose, which is what makes the pair a counterfactual rather than
+ * two unrelated setups: same pi, same on-disk codemode, same extension load; only whether the
+ * model can call it differs.
+ */
+const FULL_SURFACE_AXES = {
+  codemode: { present: true, how: "found" },
+  codemodeSwitch: { switch: "enabled", source: "user" },
+  codemodeActivation: { activation: "inactive", source: "default" },
+} as const;
+
+const SUBAGENTS_SURFACE_AXES = {
+  codemode: { present: true, how: "found" },
+  codemodeSwitch: { switch: "enabled", source: "user" },
+  codemodeActivation: { activation: "active", source: "user" },
+} as const;
 
 /** Write a project-scope agent whose frontmatter is exactly `frontmatter`, plus a body. */
 async function withAgentFrontmatter<T>(
@@ -1101,7 +1128,7 @@ describe("the report tool is activated in the child and not in the parent", () =
 
       // The other half, for the child process itself.
       process.env.PI_PTC_DEPTH = "1";
-      const childStub = makeExtensionStub({ surfaceMode: "full" });
+      const childStub = makeExtensionStub(FULL_SURFACE_AXES);
       const childTool = childStub.tools.get(CHILD_REPORT_TOOL_NAME);
       expect(childTool, "the child registers the report tool").toBeDefined();
       expect(childTool?.defaultActive, "and activates it").toBe(true);
@@ -1155,7 +1182,7 @@ describe("the report tool is activated in the child and not in the parent", () =
     // activates a `direct` tool on registration unless this says otherwise, so a parent that
     // registered it plainly would offer every session a tool with no caller and a description
     // that instructs the model to hand over a report it has no way to send anywhere.
-    const parentStub = makeExtensionStub({ surfaceMode: "full" });
+    const parentStub = makeExtensionStub(FULL_SURFACE_AXES);
     const tool = parentStub.tools.get(CHILD_REPORT_TOOL_NAME);
 
     // Registered — so a child pi can be told the name and find it — but never activated.
@@ -1178,7 +1205,7 @@ describe("the report tool is activated in the child and not in the parent", () =
     ] as const) {
       if (depth === undefined) delete process.env.PI_PTC_DEPTH;
       else process.env.PI_PTC_DEPTH = depth;
-      const stub = makeExtensionStub({ surfaceMode: "subagents" });
+      const stub = makeExtensionStub(SUBAGENTS_SURFACE_AXES);
       expect(
         stub.tools.get(CHILD_REPORT_TOOL_NAME)?.defaultActive,
         "PI_PTC_DEPTH=" + String(depth),

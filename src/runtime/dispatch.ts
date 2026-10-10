@@ -322,8 +322,10 @@ export interface DispatchContext {
  *
  * Ticket #101 moved the shape into the tool description, on the one-home rule. That was wrong,
  * and building #101 is what proved it. The tool exists in the child only when this package loads
- * there — `src/index.ts` returns early on `surfaceMode === "off"`, and pi's `-ne` removes
- * extensions — so a child without the tool had nothing left to comply with. The prompt channel
+ * there — a child loads it only if this package loads there, and pi's `-ne` (or a `pi config`
+ * that disables the package) removes extensions — so a child without the tool had nothing left to
+ * comply with. (ADR-0034 removed the `surfaceMode: "off"` value that used to be the other way
+ * this could fail; the surviving way is pi's own.) The prompt channel
  * stopped being a fallback and became dead code that still had tests.
  *
  * The prompt is the home that survives that, because the HOST controls it unconditionally. The
