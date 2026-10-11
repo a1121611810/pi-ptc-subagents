@@ -608,6 +608,18 @@ const EXTERNAL_VOCABULARY: ReadonlyMap<string, string> = new Map([
     "editLink",
     "VitePress 的 themeConfig 键；ADR-0037 的修订记录说明站点**删掉**了它——投影页在站点树里没有可编辑副本，该链接在四篇投影页上全是死链",
   ],
+  // B3. 站点门禁脚本自己声明的两个分区常量。它们是 packages/website/scripts/ 里本仓**自己**写的
+  // 代码，不是第三方配置 schema——但符号断言的扫描面是 `src/`（npm 包的源），站点是 ADR-0036
+  // 划出去的第二个 workspace member，本仓的门禁不在 `src/` 里。与 B2 的区别记在这里，免得后人
+  // 把它当成第三方词表：ADR-0036 的修订记录要说明门禁「不再是单向」就只能点它们的真名。
+  [
+    "MUST_APPEAR",
+    "check-landing-tool-names.mjs 里声明的分区常量（声明在 packages/website/scripts/，不在 src/）；ADR-0036 的 2026-10-11 修订记录点它的真名，是为了让「不是字面双向比较」这句话有可核对的对象",
+  ],
+  [
+    "DECLARED_ABSENT",
+    "同上，与 MUST_APPEAR 是一对分区常量；ADR-0036 的 2026-10-11 修订记录用它说明被豁免的工具名是登记出来的，不是默认放行",
+  ],
   // C. ADR-0022 推迟到 v2 的宿主 PTC 方法（文档自己标注 out of scope）
   ["ptc_parent_query", "ADR-0022 v2 方法，v1 明确 out of scope"],
   ["ptc_query_response", "ADR-0022 v2 方法，v1 明确 out of scope"],

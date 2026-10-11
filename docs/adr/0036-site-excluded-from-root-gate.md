@@ -79,13 +79,46 @@ in the site was silenced to make the gate pass; there is no site-local lint supp
 
 ## What this does not decide
 
+Amended 2026-10-11: the first two items below were decided after this record was accepted. They are
+kept as written because they were true when written; "Amended 2026-10-11" below governs where the
+two read differently.
+
 - The tool-name check is **one-directional**. A page that _invents_ a tool name turns the build red;
   a page that _omits_ one does not. Narrowing it from a whitelist to a two-way set comparison is not
-  done here.
+  done here. **— decided 2026-10-11, see below.**
 - Nothing checks that the **prose** in `docs/` matches the code. The projected documents are checked
-  for structure, not for accuracy.
+  for structure, not for accuracy. **— decided 2026-10-11, see below.**
 - The prototype HTML under `docs/prototypes/**` is excluded from formatting, so it is also excluded
   from any future root-wide HTML gate. It is one-time evidence on a branch that does not merge.
+
+### Amended 2026-10-11: both items left open here are now closed
+
+`732ab68` closed both. This record is **not** withdrawn: its Decision — the site is excluded from the
+repository's root lint and format gate — still holds, and nothing in that change touched it. What
+changed is the list of things it deferred.
+
+**The tool-name check is no longer one-directional, and it is deliberately not a two-way set
+comparison either.** `check-landing-tool-names.mjs` now partitions every registered tool into
+`MUST_APPEAR` (names a reader may invoke) and `DECLARED_ABSENT` (names that must not be claimed).
+`ptc_child_report` is in the second set: it is what a dispatched child calls to return its report
+(ADR-0032), so no reader ever invokes it, and a literal two-way comparison would demand the landing
+page mention it — encoding a wrong requirement as a check that is red on arrival. The enforced claim
+is the part that actually drifts, "nothing is neither required nor excused". A page that invents a
+name still fails, and a page that quietly drops one now fails too.
+
+**The prose in `docs/` is now checked against the code**, which is the gate this record said was
+absent. `check-doc-claims.mjs` binds 19 documented claims to three kinds of named source — a
+`DEFAULT_CONFIG` key, a named exported constant, or a literal inside a named exported function — and
+never by substring search. It runs as part of publishing the site, alongside the other three.
+
+**A correction to the record that carried gap 5 forward.** The external-links boundary was described
+in `docs/reviews/2026-10-10-website-code-review.md` as "a deliberate boundary with a stated reason".
+**There was no stated reason in any record.** Nothing under `docs/adr/` mentions outbound links at
+all; the only other mention in the repository is a comment in the link checker itself. The reason does
+exist — a gate on `pi.dev` or npm's page fails on someone else's outage and on bot protection — but it
+was first written into a pull-request body rather than into a record, which is how a later reader came
+to cite this ADR for a boundary it never made. Whether that boundary deserves its own ADR is an open
+question, listed in the retro brief.
 
 ## Why not keep the site in the gate and format it properly
 
