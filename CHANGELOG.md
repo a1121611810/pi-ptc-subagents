@@ -5,7 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.1.0] - 2026-10-12
+
+### Added
+
+- **The registered agents reach the model before it dispatches, not after it fails.** An agent
+  markdown file's `description` was parsed and then dropped: the listing carried names alone, so
+  the only way a model learned an agent existed was to guess its name, be refused, and read the
+  refusal — a signal it could act on only after it had already spent the call. `ptc_subagent`'s
+  description now leads with the omission, then lists every definition under the effective scope
+  with its description and whether it was found in user or project scope, and says that
+  `agentScope` defaults to `"user"` and will not see the others. An empty registry says so rather
+  than rendering as nothing. The roster is rendered from the same traversal the refusal uses, so
+  the two cannot disagree about what is registered.
 
 ### Changed
 
@@ -91,6 +103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   binding list itself is unchanged, and `powershell` is currently not reachable from PTC
   programs even when enabled (tracked separately).
 
+[2.1.0]: https://github.com/a1121611810/pi-ptc-subagents/compare/v2.0.3...v2.1.0
 [2.0.3]: https://github.com/a1121611810/pi-ptc-subagents/compare/v2.0.2...v2.0.3
 [2.0.2]: https://github.com/a1121611810/pi-ptc-subagents/compare/v2.0.1...v2.0.2
 
