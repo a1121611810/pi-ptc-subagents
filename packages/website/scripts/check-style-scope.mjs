@@ -197,25 +197,60 @@ function main() {
   // (`docs/reviews/2026-10-11-website-gap-closure-code-review.md`, R-w3). Four of the five checks
   // fail on a fresh clone that has not been built, so this path is reached by anyone who follows
   // the README's local-run instructions in order and runs `check` before `build`.
-  if (!existsSync(DIST)) {
+  // Read every built page, and treat every way that can fail as a gate message.
+  //
+  // `existsSync` alone is not enough, and round 2 of the review measured the two states it misses:
+  // `dist/` present but **empty** (VitePress empties the output directory at the start of a build,
+  // so an interrupted build leaves exactly that) and `dist` present as a **file**. Both threw raw
+  // node stacks — `ENOENT … open '…/dist/index.html'` and `ENOTDIR … scandir '…/dist'` — which is
+  // the shape this file's own header forbids. The sibling gate already handles the identical class
+  // by wrapping the read; this now does the same, and treats "no pages at all" as a failure rather
+  // than as a pass.
+  let pages;
+  try {
+    pages = htmlFiles(DIST);
+  } catch (error) {
     console.error(
       `✗ no build output at ${relative(REPO_ROOT, DIST)}\n\n` +
+        `  Reading it failed: ${error.code ?? error.message}\n` +
         '  This check reads the built pages, so it runs after `pnpm --filter website run build`.\n' +
         '  Same for the tool-name check and the internal-link check.',
     );
     process.exit(1);
   }
 
-  const pages = htmlFiles(DIST);
   const landing = 'index.html';
   const docs = pages.filter((f) => f !== landing);
 
-  if (!landing) {
-    console.error('✗ the landing page is not in the build output — cannot check the scope anchor.');
+  // A build output with no documentation pages would make "the anchor is on none of them" true
+  // against zero pages, which is a pass for the wrong reason. VitePress always emits five.
+  const DOC_PAGE_FLOOR = 5;
+  if (!pages.includes(landing)) {
+    console.error(
+      `✗ the landing page is not in the build output at ${relative(REPO_ROOT, join(DIST, landing))}\n\n` +
+        '  Without it there is nothing to check the scope anchor against.',
+    );
+    process.exit(1);
+  }
+  if (docs.length < DOC_PAGE_FLOOR) {
+    console.error(
+      `✗ the build output holds ${docs.length} documentation page(s), expected at least ${DOC_PAGE_FLOOR}\n\n` +
+        '  Checking that the scope anchor is absent from documentation pages against a page set this\n' +
+        '  small would pass for the wrong reason. Re-run `pnpm --filter website run build`.',
+    );
     process.exit(1);
   }
 
-  const landingHtml = readFileSync(join(DIST, landing), 'utf8');
+  let landingHtml;
+  try {
+    landingHtml = readFileSync(join(DIST, landing), 'utf8');
+  } catch (error) {
+    console.error(
+      `✗ could not read the built landing page: ${error.code ?? error.message}\n\n` +
+        '  Run `pnpm --filter website run build` first.',
+    );
+    process.exit(1);
+  }
   const missing = [...anchors].filter((a) => !hasClass(landingHtml, a));
   if (missing.length > 0) {
     console.error('✗ the scope anchor matches nothing in the built landing page:\n');

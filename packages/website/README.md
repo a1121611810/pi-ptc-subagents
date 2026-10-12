@@ -70,11 +70,12 @@ checks — but it reads exactly like four broken checks, which is why `build` is
    `scripts/` is for release and metadata checks and is not on this path — a script left there is
    never found by the runner.
 2. Add it to the list the site runner invokes.
-3. **Add it to the table above**, so the name is in both columns. Step 3 is enforced in one
-   direction only: `tests/website-readme-consistency.test.ts` fails when the runner invokes a check
-   this file does not name, and when this file names one the runner does not invoke. **It does not
-   read the other two columns** — "what it catches" and "what turns it red" are kept true by a
-   reviewer, not by a check.
+3. **Add it to the table in "The checks"**, so the name is in that table's two content columns.
+   `tests/website-readme-consistency.test.ts` enforces the **name**, in both directions — the runner
+   invoking a check this file does not name fails, and this file naming a check the runner does not
+   invoke fails. It reads only that one section and only the name column: the other two columns, and
+   every other table in this file that happens to mention a check, are kept true by a reviewer, not
+   by a check.
 
 ## Deliberate boundaries
 
