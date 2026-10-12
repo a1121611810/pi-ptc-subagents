@@ -171,7 +171,7 @@ describe("the roster a model reads before it decides to dispatch", () => {
     });
   });
 
-  test("with nothing registered the roster says so rather than listing an empty list", async () => {
+  test("with nothing registered the roster still explains the default", async () => {
     await withAgentDirs(async ({ home, project }) => {
       const roster = describeRegisteredAgentRoster({
         cwd: project,
@@ -179,10 +179,16 @@ describe("the roster a model reads before it decides to dispatch", () => {
         homeDir: home,
       });
 
-      // Counterfactual: render "(none)" or an empty bullet list -> the model cannot tell an
-      // empty registry from a rendering failure.
-      expect(roster).toContain("No agents are registered");
-      expect(roster).toContain("refused");
+      /*
+       * The empty registry is the NORMAL state now (#185), so it must not read as a problem.
+       * This branch's job is to say that dispatch still works and what it will do — a caller who
+       * reads "nothing registered" and concludes "I cannot dispatch" is exactly the user the
+       * required argument used to cost.
+       *
+       * Counterfactual: restore the old "nothing to dispatch" phrasing and both go red.
+       */
+      expect(roster).toContain("omit it for a fresh generalist pi");
+      expect(roster).toContain("nothing to name");
     });
   });
 });
@@ -208,10 +214,14 @@ describe("the scope default the model cannot see otherwise", () => {
     expect(description).toContain("<cwd>/.pi/agents");
   });
 
-  test("the agent parameter says there is no default agent", () => {
+  test("the agent parameter says it is optional, and what omitting it produces", () => {
     const description = fieldDescription("agent");
 
+    // The three facts a model needs to skip the argument deliberately rather than by accident:
+    // that it may, what it will get, and that a name narrows rather than enables.
     // Counterfactual: drop the description -> undefined -> red.
-    expect(description).toContain("There is no default");
+    expect(description).toContain("omit it entirely");
+    expect(description).toContain("generalist pi");
+    expect(description).toContain("full toolset");
   });
 });

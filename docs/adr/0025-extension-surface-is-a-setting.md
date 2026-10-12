@@ -56,7 +56,9 @@ values, the _orchestration surface_ it chooses between, and the _subagent surfac
    subprocess, with no program in between. Its arguments are the real `DispatchInput`
    (`agent`, `task`, and the optional `cwd` / `agentScope` / `model` / `thinkingLevel` /
    `background` / `label`), because the schema has to match the binding it fronts, not an
-   invented one. It reuses `dispatch()` unchanged, so `maxDispatchDepth`,
+   invented one. **Amended 2026-10-12 by [ADR-0039](./0039-an-omitted-agent-dispatches-a-generalist.md):
+   the field list is `task` plus the optional `agent`; the rest of this section is unaffected.**
+   It reuses `dispatch()` unchanged, so `maxDispatchDepth`,
    `dispatchConcurrency` and the background registry all keep applying, and a spawned task
    is visible to `ptc_task_list` / `ptc_task_output` / `ptc_task_stop` exactly as one spawned
    from a program is. `dispatchConcurrency` here means the **session** cap, not a per-tool one:

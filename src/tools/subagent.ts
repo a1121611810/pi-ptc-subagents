@@ -260,13 +260,18 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
       // T4 (#181): the model cannot learn where agent definitions come from by reading a tool
       // list, so it goes looking -- and in the session that motivated this it spent twenty-plus
       // tool calls inspecting the install and guessing at argument values. The two directories
-      // and the absence of a default agent are the whole of what it needed.
+      // and what the argument does are the whole of what it needed.
       //
-      // It points at the refusal rather than restating it: the actionable detail (which names are
-      // registered, and what a definition file looks like) is rendered by `describeRegisteredAgents`
-      // from the same resolver a dispatch uses. A copy here would be the copy that goes stale.
-      // Same one-home rule the child-report work already established, applied to the registry.
-      "An agent is a markdown file: ~/.pi/agent/agents/<name>.md for your machine, or <project>/.pi/agents/<name>.md for one project. There is no default agent, so a name with no file behind it is refused; the refusal lists what IS registered and how to write one.",
+      // #185 rewrote the first clause. It used to open with the absence of a default, which was
+      // true and discouraging: the answer to "can I use this?" was "write a file first". The
+      // child is a generalist pi unless a definition narrows it, so the omission is the normal
+      // case and the names are the exception.
+      //
+      // Both sentences point at the refusal rather than restating it: the actionable detail
+      // (which names are registered, and what a definition file looks like) is rendered by
+      // `describeRegisteredAgents` from the same resolver a dispatch uses. A copy here would be
+      // the copy that goes stale. Same one-home rule the child-report work established.
+      "`agent` is optional — omit it and the child is a fresh generalist pi, with pi's own system prompt and pi's full toolset. Name one to narrow the child instead: an agent is a markdown file at ~/.pi/agent/agents/<name>.md for your machine, or <project>/.pi/agents/<name>.md for one project, and naming one can restrict the child's tools, pin its model, or append a role. A name with no file behind it is refused; the refusal lists what IS registered and how to write one.",
       // The pre-decision view (see describeRegisteredAgentRoster): names alone only help
       // someone who already suspects a name, and this reaches the model BEFORE any refusal.
       // Both this and the refusal render from listRegisteredAgentEntries — one traversal, one

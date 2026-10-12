@@ -88,6 +88,22 @@ async function dispatchOnce(cwd: string, agent: string) {
   );
 }
 
+/**
+ * The same dispatch with NO agent named — the shape #185 makes legal.
+ *
+ * Kept beside `dispatchOnce` rather than folded into it with a default, because the difference
+ * between "named a definition" and "named nothing" is the whole subject: a helper that quietly
+ * supplied a default would make the two cases the same call and the test would stop being about
+ * the omission.
+ */
+async function dispatchGeneralist(cwd: string) {
+  return await dispatch(
+    { task: "say PONG", agentScope: "both", cwd },
+    { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
+    { slots: new DispatchSlotCounter(2), taskRegistry: undefined },
+  );
+}
+
 describe("a real dispatch works when an agent is registered", () => {
   test("the child really runs, and its real output comes back", async () => {
     await withFakePi(async (cwd) => {
@@ -137,6 +153,34 @@ describe("a real dispatch works when an agent is registered", () => {
         "rejected",
       );
       expect(userScoped.errorMessage).toContain("unknown agent");
+    });
+  });
+});
+
+describe("an omitted agent dispatches a generalist child", () => {
+  test("with no definition anywhere, the dispatch still runs a real child", async () => {
+    await withFakePi(async (cwd) => {
+      /*
+       * Two things are absent here and both matter: no `.pi/agents/` in the cwd, and no agent in
+       * the redirected HOME (which `withFakePi` guarantees). Under the contract this ticket
+       * replaces, that combination refused before spawning anything -- so an install could not
+       * dispatch at all until its user had first learned the markdown format and written a file.
+       */
+      const result = await dispatchGeneralist(cwd);
+
+      expect(result.status, "a real child process ran to completion").toBe("fulfilled");
+      expect(result.exitCode).toBe(0);
+      expect(result.text, "the child's own stdout came back").toContain("SMOKE-OK");
+      /*
+       * No definition means nothing to narrow with, so no tool allowlist may reach the child --
+       * that is precisely what leaves pi's own full toolset in place. Asserted against what a
+       * REAL process reports it was handed, not against an argv array the test assembled itself.
+       *
+       * Counterfactual: drop the `undefined` branch in `childToolList` so the tool-list merge
+       * always emits a value, and this goes red while every stub-spawn unit test stays green.
+       */
+      expect(result.text, "nothing narrowed the child").toContain("tools=none");
+      expect(result.agentName, "no definition was resolved").toBe("");
     });
   });
 });

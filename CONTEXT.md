@@ -69,7 +69,7 @@ and registers the extension in `~/.pi/agent/settings.json` automatically.
 `tools["<name>"](args)`. Every binding lives in the one `tools` table —
 there is no `pi` global in the worker — so the parallel binding named
 `pi.dispatch` is reached as `tools["pi.dispatch"](args)` and takes a single
-object (`{ agent, task, cwd?, agentScope?, model?, thinkingLevel?, background?, label? }`),
+object (`{ task, agent?, cwd?, agentScope?, model?, thinkingLevel?, background?, label? }`),
 not a positional argument list. Two
 kinds:
 
@@ -83,6 +83,18 @@ kinds:
   fan-out. Currently: `pi.dispatch(...)` (see ADR-0016). It spawns a
   fresh `pi` subprocess per call, so the PTC program gets session-level
   isolation without inventing a new task state machine.
+
+**agent definition** — the optional markdown file that NARROWS a dispatched child:
+`~/.pi/agent/agents/<name>.md` (user scope) or `<cwd>/.pi/agents/<name>.md` (project scope), selected
+by `agentScope`. Naming one is optional — ADR-0039 — because the child is a full pi either way: the
+dispatch prompt is APPENDED to pi's own system prompt, and no `--tools` flag is passed unless the
+definition declares `tools:`. A definition can therefore only take capability away; there is none it
+can add. A dispatch that names none gets the **generalist child** — pi's own system prompt, pi's full
+toolset, no model pin, reported as an empty `agentName`.
+
+_Avoid_: "preset agent" / "default agent" for the generalist. Nothing ships in the package, and the
+generalist is the child pi already is, not a definition this project wrote and installs. Also avoid
+"required": the name is the narrowing path, not the entry fee.
 
 _Avoid_: "subagent" (overloaded; CONTEXT.md §Out-of-glossary), "BINDING_NAMES
 whitelist" (the binding config is a _policy_, not a _filter_; Q1 grill round,

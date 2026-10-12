@@ -423,12 +423,13 @@ describe("dispatch background gates", () => {
     expect(h.slots.active).toBe(0);
   });
 
-  test("a missing agent refuses before any slot is minted, with the actionable message", async () => {
+  test("an unusable agent refuses before any slot is minted, with the actionable message", async () => {
     const h = createHarness();
-    // The wire can deliver an absent `agent`; the field-report case from pitfall #2.
+    // The wire can deliver anything, and `""` is the shape that used to read as "absent" and now
+    // reads as "malformed" — which makes it the case that proves the split held on this front too.
     const result = asResult(
       await dispatch(
-        { task: "x", background: true } as unknown as Parameters<typeof dispatch>[0],
+        { agent: "", task: "x", background: true } as unknown as Parameters<typeof dispatch>[0],
         { callId: 10, cwd: process.cwd(), depth: 0, maxDispatchDepth: 3 },
         h.deps,
       ),
@@ -437,11 +438,38 @@ describe("dispatch background gates", () => {
     expect(result.status).toBe("rejected");
     expect(result.started).toBe(false);
     // Counterfactual: the old "unknown agent: undefined" shape fails both of these.
-    expect(result.errorMessage ?? "").toContain("agent is required (there is no default agent)");
+    expect(result.errorMessage ?? "").toContain("agent, when given, must be a non-empty string");
     expect(result.errorMessage ?? "").toContain("registered agents:");
     expect(result.errorMessage ?? "").toContain("name: <agent-name>");
     expect(h.lifecycle.spawnCount).toBe(0);
     expect(h.slots.active).toBe(0);
+  });
+
+  test("an ABSENT agent spawns the generalist on the background front too", async () => {
+    await withAgent(async (dir) => {
+      const h = createHarness({ start: 1000 });
+      /*
+       * The two fronts must answer an omission the same way. One refusing while the other
+       * dispatched would be worse than both refusing, because nothing in the call tells the model
+       * which front it reached (ADR-0021 section 6, one vocabulary for the whole sub-call tree).
+       *
+       * `withAgent` deliberately leaves a definition in scope: the generalist has to win on the
+       * ABSENCE of a name, not because the directory happened to be empty.
+       */
+      const result = await dispatch(
+        { task: "x", background: true, agentScope: "project" },
+        { callId: 10, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+        h.deps,
+      );
+
+      expect("taskId" in result, "the generalist spawns rather than refusing").toBe(true);
+      const handle = asHandle(result);
+      expect(h.lifecycle.spawnCount).toBe(1);
+      const record = await h.storage.loadTask(handle.taskId);
+      // No definition was resolved, so the record says so rather than borrowing the name of the
+      // one that happens to be sitting in scope.
+      expect(record?.agentName).toBe("");
+    });
   });
 
   test("an unknown background agent lists what is registered under the effective scope", async () => {

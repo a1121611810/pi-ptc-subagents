@@ -36,36 +36,45 @@ A binding is reached as `tools["<name>"]` inside a program; this binding's name 
 
 ### Prerequisites
 
-`agent` must name a **registered agent** — there is no default agent. Registration is an
-agent markdown file at `~/.pi/agent/agents/<name>.md` (user scope) or `<cwd>/.pi/agents/<name>.md`
-(project scope, searched when `agentScope` is `"project"` or `"both"`):
+**None.** `task` is the whole required input — omit `agent` and the dispatch runs a **generalist
+child**: pi's own system prompt, pi's full toolset, no model pin.
+
+That is not a fallback. The dispatch prompt is _appended_ to pi's own system prompt rather than
+substituted for it, and no tool list is passed unless a definition declares one, so the child is a
+full pi either way. Naming an `agent` is how you **narrow** it.
+
+Narrowing is an agent markdown file at `~/.pi/agent/agents/<name>.md` (user scope) or
+`<cwd>/.pi/agents/<name>.md` (project scope, searched when `agentScope` is `"project"` or `"both"`):
 
 ```text
 ---
 name: researcher
 description: Surveys peer implementations and reports what it found, with citations.
+tools: read, grep, find, ls
 ---
 
 You are a research agent. ...
 ```
 
 The file's frontmatter `name:` is the name the dispatch uses (the file name is the fallback).
-`description:` is what the model reads to decide whether to dispatch you at all, so it is worth
-writing as a trigger condition rather than a title.
+`description:` is what the model reads to decide whether to name this agent at all, so it is worth
+writing as a trigger condition rather than a title. `tools:` restricts the child to that list; a
+definition that omits it leaves pi's full toolset in place, exactly as the generalist has it.
 
 Two places list what is registered. The `ptc_subagent` tool description carries a **roster** —
-every registered agent with its description and the scope that reaches it — so a model can choose
-an agent before trying anything. A missing or unknown `agent` still resolves with a refused
-`DispatchResult` whose `errorMessage` names what is registered under the effective scope, both
-lookup paths, and the minimal file shape; read that rather than re-probing the file system.
+every registered definition with its description and the scope that reaches it — so a model can see
+what is available before trying anything. A name that resolves to nothing still produces a refused
+`DispatchResult` whose `errorMessage` names what _is_ registered under the effective scope, both
+lookup paths, and the minimal file shape; read that rather than re-probing the file system. An
+empty registry is not an error: it means everything dispatches as a generalist.
 
 ```ts
 // ptc_run_code
 const handle = await tools["pi.dispatch"]({
-  agent: "researcher", // required: agent markdown name
   task: "survey the peer implementations", // required: the child's task text
   background: true, // switch to the long-lived path
   label: "peer survey", // optional; defaults to task.slice(0, 64)
+  // agent: "researcher", // optional: narrow the child with a definition
 });
 
 // A background spawn returns a DispatchHandle:
@@ -77,7 +86,7 @@ Input fields are the foreground binding's fields plus two:
 
 | field           | type                            | default                  | meaning                                  |
 | --------------- | ------------------------------- | ------------------------ | ---------------------------------------- |
-| `agent`         | `string`                        | — (required)             | agent markdown name                      |
+| `agent`         | `string`                        | omitted = generalist     | optional: narrow the child               |
 | `task`          | `string`                        | — (required)             | task text handed to the child            |
 | `cwd`           | `string`                        | the run's cwd            | child working directory                  |
 | `agentScope`    | `"user" \| "project" \| "both"` | `"user"`                 | which agent directories are searched     |

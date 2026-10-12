@@ -18,6 +18,16 @@ const promptFlag = process.argv.indexOf("--append-system-prompt");
 const promptPath = promptFlag === -1 ? undefined : process.argv[promptFlag + 1];
 const prompt = promptPath ? readFileSync(promptPath, "utf8") : "";
 
+/*
+ * `--tools` is echoed because it is the flag that decides how much child the parent gets. No
+ * flag means pi's own full toolset stays in place; a value means the child was narrowed to that
+ * list. A test can only assert which of those happened if the child reports what it was handed,
+ * and reporting it from inside a real process is what makes the assertion about the spawn rather
+ * than about a string the test itself built.
+ */
+const toolsFlag = process.argv.indexOf("--tools");
+const tools = toolsFlag === -1 ? "none" : process.argv[toolsFlag + 1];
+
 process.stdout.write(
   JSON.stringify({
     type: "message_end",
@@ -26,7 +36,11 @@ process.stdout.write(
       content: [
         {
           type: "text",
-          text: "SMOKE-OK prompt-bytes=" + String(Buffer.byteLength(prompt, "utf8")),
+          text:
+            "SMOKE-OK prompt-bytes=" +
+            String(Buffer.byteLength(prompt, "utf8")) +
+            " tools=" +
+            tools,
         },
       ],
     },

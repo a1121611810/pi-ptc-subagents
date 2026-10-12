@@ -30,14 +30,18 @@ test("the description names both places an agent definition can load from", () =
   expect(text, "names the project-scope directory").toContain(".pi/agents");
 });
 
-test("the description says an unregistered name is refused, and does not invent a default", () => {
+test("the description says an unregistered name is refused, and names the real default", () => {
   const text = description();
-  // ADR-0016 is no default agent, so a model that guesses "default" or "general" is guessing.
-  // Saying so costs a clause and saves the twenty-call hunt.
+  // An unknown name is refused rather than quietly falling back to the generalist. That
+  // distinction -- "you named nothing" versus "you named something that is not there" -- is the
+  // whole of #185, and a description that blurred it would invite exactly the guessing this file
+  // was written to stop.
   expect(text, "states the consequence of an unknown name").toMatch(/refus|reject|not found/i);
-  expect(text, "and does not promise a default that does not exist").not.toMatch(
-    /a default agent|defaults to/,
-  );
+  // The default that DOES exist is the omission, and the description has to name it: a model that
+  // never learns the argument is optional keeps guessing names, which is what the twenty-call
+  // hunt looked like.
+  expect(text, "names the omission as the default").toMatch(/omit it/i);
+  expect(text, "and says what the omission produces").toMatch(/generalist pi/i);
 });
 
 test("the description points outward rather than repeating the refusal", () => {

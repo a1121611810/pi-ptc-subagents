@@ -154,25 +154,37 @@ test(
       const binding = bindings.get(DISPATCH_BINDING_NAME);
       if (binding === undefined) throw new Error("pi.dispatch binding is missing");
 
-      // Missing agent (the field-report case): actionable refusal, same shape dispatch()
-      // itself returns — and no throw, because the binding never throws (ADR-0016 §3).
-      // agentScope "project" puts the temp agent dir in the listing.
-      const missing = (await binding.execute({ task: "t", agentScope: "project" }, call)) as {
+      /*
+       * An unusable agent: actionable refusal, same shape dispatch() itself returns — and no
+       * throw, because the binding never throws (ADR-0016 section 3). `agentScope: "project"`
+       * puts the temp agent dir in the listing.
+       *
+       * Note WHICH case this is, because it changed. An absent agent is no longer a refusal at
+       * all (issue #185) — it dispatches the generalist child — so asserting that here would
+       * spawn a real `pi`, since this file does not stub child_process. The omission is covered
+       * where the spawn IS stubbed (`dispatch-helpers`, `dispatch-background`) and against a real
+       * process in the e2e smoke.
+       */
+      const blank = (await binding.execute(
+        { agent: "  ", task: "t", agentScope: "project" },
+        call,
+      )) as {
         status: string;
         started: boolean;
         errorMessage?: string;
       };
-      expect(missing.status).toBe("rejected");
-      expect(missing.started).toBe(false);
-      expect(missing.errorMessage ?? "").toContain("agent is required (there is no default agent)");
-      expect(missing.errorMessage ?? "").toContain("registered agents: [probe]");
-      // Whitespace-only counts as missing.
-      const blank = (await binding.execute({ agent: "  ", task: "t" }, call)) as {
+      expect(blank.status).toBe("rejected");
+      expect(blank.started).toBe(false);
+      expect(blank.errorMessage ?? "").toContain("agent, when given, must be a non-empty string");
+      expect(blank.errorMessage ?? "").toContain("registered agents: [probe]");
+
+      // An empty string takes the same branch: given, and unusable.
+      const empty = (await binding.execute({ agent: "", task: "t" }, call)) as {
         status: string;
         errorMessage?: string;
       };
-      expect(blank.status).toBe("rejected");
-      expect(blank.errorMessage ?? "").toContain("agent is required");
+      expect(empty.status).toBe("rejected");
+      expect(empty.errorMessage ?? "").toContain("agent, when given");
 
       // A typed-but-invalid field is refused with pi's own validator message.
       const badScope = (await binding.execute(

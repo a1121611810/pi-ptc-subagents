@@ -486,7 +486,7 @@ describe("registered-agent listing + actionable refusals (pitfall #2)", () => {
     }
   });
 
-  test("a missing agent refuses with an actionable message and never spawns", async () => {
+  test("a GIVEN but unusable agent refuses, naming the way out that needs no file", async () => {
     const dir = await makeTempDir();
     try {
       await mkdir(join(dir, ".pi", "agents"), { recursive: true });
@@ -496,30 +496,76 @@ describe("registered-agent listing + actionable refusals (pitfall #2)", () => {
       );
       spawnRecorder.calls.length = 0;
 
-      // The wire can deliver anything; `agent` absent is the field-report case. The project
-      // scope puts the temp agent dir in the listing (the default "user" scope would not).
-      const missing = await dispatch(
-        { task: "ping", agentScope: "project" } as unknown as DispatchInput,
-        { callId: 20, cwd: dir, depth: 0, maxDispatchDepth: 3 },
-      );
-      expect(missing.status).toBe("rejected");
-      expect(missing.started).toBe(false);
-      // Counterfactual: the old "unknown agent: undefined" message fails this prefix, and a
-      // build that skips the listing fails the registered-agents line.
-      expect(missing.errorMessage ?? "").toContain("agent is required (there is no default agent)");
-      expect(missing.errorMessage ?? "").toContain("registered agents: [helper]");
-      expect(missing.errorMessage ?? "").toContain(join(dir, ".pi", "agents"));
-      expect(missing.errorMessage ?? "").toContain("name: <agent-name>");
-      expect(spawnRecorder.calls).toHaveLength(0);
-
-      // Whitespace-only agent is missing too.
+      // The wire can deliver anything. A name that was GIVEN and is unusable is still a caller
+      // bug — and it must never degrade to the unactionable "unknown agent: undefined" that
+      // pitfall #2 was about. The project scope puts the temp agent dir in the listing (the
+      // default "user" scope would not).
       const blank = await dispatch(
         { agent: "   ", task: "ping", agentScope: "project" },
         { callId: 21, cwd: dir, depth: 0, maxDispatchDepth: 3 },
       );
       expect(blank.status).toBe("rejected");
-      expect(blank.errorMessage ?? "").toContain("agent is required");
+      expect(blank.started).toBe(false);
+      // Counterfactual: the old "unknown agent: undefined" message fails this prefix, and a
+      // build that skips the listing fails the registered-agents line.
+      expect(blank.errorMessage ?? "").toContain("agent, when given, must be a non-empty string");
+      expect(blank.errorMessage ?? "").toContain("registered agents: [helper]");
+      expect(blank.errorMessage ?? "").toContain(join(dir, ".pi", "agents"));
+      expect(blank.errorMessage ?? "").toContain("name: <agent-name>");
       expect(spawnRecorder.calls).toHaveLength(0);
+
+      // An empty string, a whitespace string and a non-string are one case, not three: given,
+      // and unusable. Asserted separately because this is the side of the line the ABSENT case
+      // is distinguished from, so losing any of them would blur the distinction rather than
+      // simply drop a branch.
+      const empty = await dispatch(
+        { agent: "", task: "ping", agentScope: "project" },
+        { callId: 22, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+      );
+      expect(empty.status).toBe("rejected");
+      expect(empty.errorMessage ?? "").toContain("agent, when given");
+      expect(spawnRecorder.calls).toHaveLength(0);
+
+      const notAString = await dispatch(
+        { agent: 42, task: "ping", agentScope: "project" } as unknown as DispatchInput,
+        { callId: 23, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+      );
+      expect(notAString.status).toBe("rejected");
+      expect(notAString.errorMessage ?? "").toContain("agent, when given");
+      expect(spawnRecorder.calls).toHaveLength(0);
+    } finally {
+      await removeTempDir(dir);
+    }
+  });
+
+  test("an ABSENT agent is no longer a refusal: it reaches a spawn that narrows nothing", async () => {
+    const dir = await makeTempDir();
+    try {
+      spawnRecorder.calls.length = 0;
+
+      /*
+       * Issue #185, and the distinction this test exists to hold: absent means "I want no
+       * narrowing", which is a legal request, while the cases above mean "the value you sent is
+       * unusable". Collapsing the two is the defect, and it is a silent one — a caller's typo
+       * would dispatch something it did not ask for.
+       *
+       * Counterfactual: put absent back through the malformed gate and this goes red while every
+       * case in the test above stays green. That pair is the whole specification.
+       */
+      const result = await dispatch(
+        { task: "ping", agentScope: "project" } as unknown as DispatchInput,
+        { callId: 20, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+      );
+
+      expect(
+        result.errorMessage ?? "",
+        "the generalist is not the malformed-name refusal",
+      ).not.toContain("agent, when given");
+      expect(spawnRecorder.calls.length, "it got all the way to a spawn").toBeGreaterThan(0);
+      expect(
+        spawnRecorder.calls[0]?.args.join(" "),
+        "no tool allowlist reaches a generalist child",
+      ).not.toContain("--tools");
     } finally {
       await removeTempDir(dir);
     }

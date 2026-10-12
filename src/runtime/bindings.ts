@@ -31,7 +31,7 @@ import type { TBoolean, TLiteral, TObject, TOptional, TSchema, TString, TUnion }
 
 import {
   dispatch as dispatchBinding,
-  isMissingAgentName,
+  isMalformedAgentName,
   missingAgentResult,
   type DispatchDeps,
   type DispatchInput,
@@ -168,11 +168,20 @@ type DispatchParameters = TObject<{
  * two are different call sites for one dispatcher, and a test pins their key sets equal.
  */
 export const DISPATCH_PARAMETERS: DispatchParameters = Type.Object({
-  agent: Type.String({
-    minLength: 1,
-    description:
-      "Name of the registered agent to dispatch — the frontmatter `name:` of its definition file. There is no default, so this must be a name that exists under the chosen agentScope.",
-  }),
+  // Optional (issue #185). The child is already a full-capability pi -- the dispatch prompt is
+  // APPENDED to pi's system prompt, and no `--tools` flag is passed unless a definition declares
+  // one -- so a definition can only narrow. Requiring a name therefore asked every caller to name
+  // a narrowing that does not exist, and a fresh install could not dispatch at all until its user
+  // had written a file first.
+  agent: Type.Optional(
+    Type.String({
+      minLength: 1,
+      description:
+        "Name of a registered agent definition to dispatch, or omit it entirely for a fresh " +
+        "generalist pi with pi's own prompt and its full toolset. A name with no definition " +
+        "behind it is refused; an empty string is refused.",
+    }),
+  ),
   task: Type.String({ minLength: 1 }),
   cwd: Type.Optional(Type.String()),
   // The default is "user", which does NOT see `<cwd>/.pi/agents/`. Without a description here
@@ -347,7 +356,11 @@ export function createBuiltinBindings(options: CreateBuiltinBindingsOptions): Bi
               : undefined;
           const rawAgent = raw?.agent;
           const rawScope = raw?.agentScope;
-          if (isMissingAgentName(rawAgent)) {
+          // Only the GIVEN-but-unusable case lands here (issue #185). An omitted agent validates
+          // cleanly now and reaches `dispatchBinding`, which resolves the generalist child -- so
+          // adding a "no agent given" branch here would be a second, divergent answer to a
+          // question the dispatcher already owns.
+          if (isMalformedAgentName(rawAgent)) {
             return missingAgentResult({
               cwd: options.cwd,
               agentScope:

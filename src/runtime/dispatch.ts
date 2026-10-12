@@ -210,7 +210,16 @@ const PI_COMMAND = "pi";
 
 /** Per-call input. Mirrors pi's subagent extension's parameters (single-mode only). */
 export interface DispatchInput {
-  agent: string;
+  /**
+   * Name of the definition to dispatch, or absent for a generalist child.
+   *
+   * Absent is a legal, meaningful input rather than a missing one (issue #185): the child is
+   * already a full-capability pi, since the dispatch prompt is APPENDED to pi's own system
+   * prompt and no `--tools` flag is passed unless a definition declares `tools:`. A definition
+   * can therefore only narrow the child, so requiring one asked every caller to name a
+   * narrowing that does not exist. Omit it to get pi's own prompt and pi's own toolset.
+   */
+  agent?: string;
   task: string;
   cwd?: string;
   agentScope?: "user" | "project" | "both";
@@ -286,6 +295,29 @@ export interface AgentConfigLike {
    */
   readonly childReport?: boolean;
 }
+
+/**
+ * The config a dispatch uses when the caller named no agent (issue #185).
+ *
+ * Every field is chosen to be inert:
+ *
+ * - `name: ""` is what the result reports as `agentName`, so a caller can see that no definition
+ *   was resolved rather than being told a plausible-sounding one that does not exist.
+ * - `systemPrompt: ""` means the child receives only what the dispatch itself appends (the depth
+ *   hint and the dispatch context) on top of pi's own system prompt. Nothing is substituted.
+ * - `tools` absent means `childToolList` yields `undefined`, so no `--tools` flag reaches the
+ *   child and pi's own full toolset stands. This is the difference between a generalist and a
+ *   narrowed agent, and it is the whole of it: a definition can only ever take tools away.
+ * - `source: "unknown"` is honest — it came from no directory.
+ *
+ * A frozen literal rather than a factory: it has no per-dispatch state, and sharing one object
+ * makes "the generalist is the same everywhere" a fact rather than a convention.
+ */
+export const GENERALIST_AGENT: AgentConfigLike = Object.freeze({
+  name: "",
+  source: "unknown",
+  systemPrompt: "",
+});
 
 /** Per-run context handed to a dispatch binding; same shape as BindingContext. */
 export interface DispatchContext {
@@ -1013,19 +1045,22 @@ export function listRegisteredAgents(input: RegisteredAgentsListInput): string[]
  */
 export function describeRegisteredAgentRoster(input: RegisteredAgentsListInput): string {
   const entries = listRegisteredAgentEntries(input);
+  // Leads with the omission, because that is the answer to "do I need one of these?" -- the
+  // question a model asks when it is deciding whether to dispatch at all (issue #185).
+  const lead =
+    "`agent` is optional: omit it for a fresh generalist pi with pi's own system prompt and its " +
+    "full toolset. Name a definition to NARROW the child instead.";
   if (entries.length === 0) {
-    return (
-      "No agents are registered, so there is nothing to dispatch. A name with no definition " +
-      "behind it is refused."
-    );
+    return lead + " None are registered here, so there is nothing to name.";
   }
   const lines = entries.map((entry) => {
     const purpose = entry.description.length > 0 ? entry.description : "(no description given)";
     return `- ${entry.name} (${entry.source} scope): ${purpose}`;
   });
   return (
-    "Registered agents — pass `agentScope` matching the scope shown, since it defaults to " +
-    '"user" and does not see the others:\n' +
+    lead +
+    "\nRegistered definitions — pass `agentScope` matching the scope shown, since it defaults " +
+    'to "user" and does not see the others:\n' +
     lines.join("\n")
   );
 }
@@ -1049,9 +1084,12 @@ export function describeRegisteredAgents(input: RegisteredAgentsListInput): stri
 }
 
 /**
- * The refusal for a dispatch whose `agent` argument is missing, empty, or not a string.
- * There is no default agent (ADR-0016), so the message says so up front and then gives
- * the same actionable listing the unknown-agent branch appends.
+ * The refusal for a dispatch whose `agent` was GIVEN but is unusable — not a string, or empty.
+ *
+ * Absent is deliberately not this case: an absent name dispatches a generalist child (issue
+ * #185). So the message has to name both ways out, because "the name you gave me is unusable"
+ * and "you did not have to give me one" are different problems and the caller can only tell
+ * which one it has if the refusal says so.
  */
 export function missingAgentResult(input: RegisteredAgentsListInput): DispatchResult {
   return {
@@ -1063,17 +1101,65 @@ export function missingAgentResult(input: RegisteredAgentsListInput): DispatchRe
     exitCode: 1,
     reportChannel: "none",
     errorMessage:
-      "agent is required (there is no default agent) — " + describeRegisteredAgents(input),
+      "agent, when given, must be a non-empty string — omit it entirely to dispatch a " +
+      "generalist child; " +
+      describeRegisteredAgents(input),
   };
 }
 
 /**
- * True when the `agent` argument is missing, empty, or not a string — the wire can
- * deliver anything (field-report pitfall #2). One predicate so every dispatch entry
- * point shares the same guard instead of re-inlining the check.
+ * True when an `agent` value is present but unusable — not a string, or a string that is empty
+ * or all whitespace.
+ *
+ * Distinct from {@link isAbsentAgentName} on purpose, and the distinction is the whole point of
+ * issue #185: **absent** selects the generalist child, while **present but unusable** is a
+ * malformed call and is refused. Collapsing them would make a caller's typo silently dispatch
+ * something it did not ask for — and the wire can deliver anything, which is what the guard was
+ * written for in the first place (field report pitfall #2, 2026-09-29).
  */
-export function isMissingAgentName(agent: unknown): boolean {
-  return typeof agent !== "string" || agent.trim().length === 0;
+export function isMalformedAgentName(agent: unknown): boolean {
+  return agent !== undefined && (typeof agent !== "string" || agent.trim().length === 0);
+}
+
+/**
+ * True when the caller named no agent at all, which dispatches a generalist child.
+ *
+ * `undefined` is the only shape that means "not named". `null` is deliberately NOT included: it
+ * arrives over a wire that can deliver anything, and treating a stray null as an intentional
+ * omission is how a malformed call becomes an invisible one.
+ */
+export function isAbsentAgentName(agent: unknown): agent is undefined {
+  return agent === undefined;
+}
+
+/**
+ * What a dispatch resolved to. A union rather than `AgentConfigLike | null`, because the null
+ * would erase the one fact every caller then needs: "nothing resolved" can only happen when a
+ * name WAS given, and the refusal has to print that name. Carrying it in the type is what keeps
+ * the refusal from having to re-derive it (or worse, reach back to `input.agent` and reintroduce
+ * the `undefined` the union just eliminated).
+ */
+type DispatchAgentResolution =
+  | { readonly kind: "resolved"; readonly agent: AgentConfigLike }
+  | { readonly kind: "unknown"; readonly name: string };
+
+/**
+ * Resolve the definition a dispatch runs as: the named one when a name was given, the
+ * generalist when none was.
+ *
+ * One helper rather than a ternary inlined at each front, because the two fronts disagreeing
+ * about what an omission means is precisely the failure this would otherwise invite -- and they
+ * already share `missingAgentResult` for the same reason.
+ */
+function resolveDispatchAgent(
+  input: DispatchInput,
+  cwd: string,
+  agentScope: "user" | "project" | "both",
+): DispatchAgentResolution {
+  if (isAbsentAgentName(input.agent)) return { kind: "resolved", agent: GENERALIST_AGENT };
+  const found = discoverAgent(input.agent, cwd, agentScope);
+  if (!found) return { kind: "unknown", name: input.agent };
+  return { kind: "resolved", agent: found };
 }
 
 /**
@@ -1543,8 +1629,10 @@ async function dispatchBackground(
     // Background refusal (issue #68 part 4): teach the model to inspect in-flight tasks.
     return backgroundDispatchDepthLimitReached();
   }
-  // Pitfall #2: a missing agent is a caller bug, reported before any slot is minted or held.
-  if (isMissingAgentName(input.agent)) {
+  // Pitfall #2, split by issue #185: a name that was GIVEN and is unusable is a caller bug and
+  // is reported before any slot is minted or held. A name that was NOT given is not a bug at
+  // all — it selects the generalist child, resolved below like any other agent.
+  if (isMalformedAgentName(input.agent)) {
     return missingAgentResult({
       cwd: input.cwd ?? ctx.cwd,
       agentScope: input.agentScope ?? "user",
@@ -1568,15 +1656,20 @@ async function dispatchBackground(
   const registry = resolveTaskRegistry(deps, clock);
   const outputStorage = deps.outputStorage;
 
+  // Resolved OUTSIDE the try, immediately after the slot is taken: the catch below reports the
+  // resolved name, so the resolution has to outlive the block it used to sit in. The ordering
+  // against the other gates is unchanged -- depth, malformed name, acquire, then this -- so a
+  // caller who is at the concurrency cap still hears about the cap.
+  const resolution = resolveDispatchAgent(input, cwd, agentScope);
+  if (resolution.kind === "unknown") {
+    slots.release(taskId);
+    return unknownAgentResult(resolution.name, agentScope, cwd);
+  }
+  const agent = resolution.agent;
+
   let childHandle: ChildHandle | undefined;
   let tmp: { dir: string; filePath: string } | undefined;
   try {
-    const agent = discoverAgent(input.agent, cwd, agentScope);
-    if (!agent) {
-      slots.release(taskId);
-      return unknownAgentResult(input.agent, agentScope, cwd);
-    }
-
     // The registry adopts the already-minted id as the TaskRecord id, so the handle the
     // program carries, the persisted record and the slot token all agree at creation.
     const label = input.label ?? input.task.slice(0, 64);
@@ -1791,12 +1884,15 @@ async function dispatchBackground(
     }
     if (tmp !== undefined) cleanupTmp(tmp);
     slots.release(taskId);
-    logger.warn("background dispatch failed for agent " + input.agent + ": " + message);
+    logger.warn("background dispatch failed for agent " + agent.name + ": " + message);
     return {
       text: "",
       status: "rejected",
       started: childHandle !== undefined,
-      agentName: input.agent,
+      // The RESOLVED name, not `input.agent`: for a generalist there is no input name to report,
+      // and reporting the raw argument would print `undefined` into a field the schema types as a
+      // string.
+      agentName: agent.name,
       durationMs: 0,
       exitCode: -1,
       reportChannel: "none",
@@ -1856,10 +1952,11 @@ export async function dispatch(
   const agentScope = input.agentScope ?? "user";
   const start = Date.now();
 
-  // Pitfall #2 (field report 2026-09-29): without this the missing-agent case surfaced as the
-  // unactionable "unknown agent: undefined"; there is no default agent, so say so and list
-  // what IS registered.
-  if (isMissingAgentName(input.agent)) {
+  // Pitfall #2 (field report 2026-09-29), narrowed by issue #185: the unactionable
+  // "unknown agent: undefined" is still what a GIVEN-but-unusable name must never degrade to.
+  // A name that was not given is no longer an error at all -- it resolves to the generalist
+  // child, which is the default this front shares with the background path.
+  if (isMalformedAgentName(input.agent)) {
     return missingAgentResult({ cwd, agentScope });
   }
 
@@ -1877,11 +1974,12 @@ export async function dispatch(
     return dispatchConcurrencyLimitReached();
   }
 
-  const agent = discoverAgent(input.agent, cwd, agentScope);
-  if (!agent) {
+  const resolution = resolveDispatchAgent(input, cwd, agentScope);
+  if (resolution.kind === "unknown") {
     slots.release();
-    return unknownAgentResult(input.agent, agentScope, cwd, Date.now() - start);
+    return unknownAgentResult(resolution.name, agentScope, cwd, Date.now() - start);
   }
+  const agent = resolution.agent;
 
   // ADR-0032 §The opt-out: one read, used by every place that would otherwise ask the child for
   // a report. An opted-out agent is not asked in the prompt, is not given the tool in its argv,
