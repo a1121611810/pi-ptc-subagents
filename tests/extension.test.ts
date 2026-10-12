@@ -302,18 +302,19 @@ test("subagents mode without codemode warns once, and says what to do about it",
 
 test("the warning does not fire when codemode is active", async () => {
   /*
-   * HOME is isolated for the same reason the e2e smoke test now isolates it: this session
-   * registers `ptc_subagent`, so `session_start` enumerates the agent registry, and
-   * `resolveAgentDirs` answers the USER axis from `os.homedir()` — which `PI_CODING_AGENT_DIR`
-   * does not touch. Without the redirect the enumeration reads the developer's real
-   * `~/.pi/agent/agents`, and the assertion below is decided by whatever agents that machine
-   * happens to have.
+   * HOME is isolated because this file's stores and resolvers read it, and a test that lets the
+   * developer's real `~/.pi` decide its outcome is not green, it is unmeasured.
    *
-   * It was passing by accident: this repository's own machine had one `__smoke_echo.md` left
-   * over from a 2026-09-22 manual smoke run, so "no warning" happened to hold. Deleting that
-   * file — which the T5 ticket asked for, since it is what the automated smoke test replaced —
-   * turned it red, which is how the missing isolation surfaced at all. A test that passes only
-   * because of undeclared machine state is not green, it is unmeasured.
+   * The redirect was added for a narrower reason, now history: this session registers
+   * `ptc_subagent`, so `session_start` used to enumerate the agent registry, and
+   * `resolveAgentDirs` answers the USER axis from `os.homedir()` — which `PI_CODING_AGENT_DIR`
+   * does not touch. #187 removed that enumeration with the notice it fed, so the specific reason
+   * is gone; the discipline stays.
+   *
+   * It was passing by accident before the redirect: this repository's own machine had one
+   * `__smoke_echo.md` left over from a 2026-09-22 manual smoke run, so "no warning" happened to
+   * hold. Deleting that file — which the T5 ticket asked for, since it is what the automated smoke
+   * test replaced — turned it red, which is how the missing isolation surfaced at all.
    */
   const previousHome = process.env.HOME;
   const previousUserProfile = process.env.USERPROFILE;
@@ -325,22 +326,55 @@ test("the warning does not fire when codemode is active", async () => {
       active: ["read", "bash", "edit", "write", "codemode", "ptc_subagent"],
     });
     /*
-     * Scoped to THIS notice, and the scoping is now load-bearing rather than decorative.
+     * Scoped to THIS notice.
      *
-     * This session registers `ptc_subagent` in an isolated-but-EMPTY agent registry, so the
-     * agent-availability warning fires for real — and correctly. Asserting "no warning of any
-     * kind" would be asserting a false thing about the product: a subagent tool with nothing to
-     * dispatch SHOULD say so. What this test is about is the OTHER warning — the one that fires
-     * when `subagents` has lost its orchestrator — and that is what must be absent now that
-     * `codemode` is in the tool list.
-     *
-     * It was passing by accident before: on a machine whose `~/.pi/agent/agents` happened to
-     * hold something, the availability warning never fired and the blanket assertion held. See
-     * the note above on HOME.
+     * The scoping was load-bearing when this test was written: the session registers
+     * `ptc_subagent` against an isolated-but-empty agent registry, so the agent-availability
+     * warning fired here — correctly, at the time — and a blanket "no warning of any kind" would
+     * have been asserting a false thing about the product. That warning is gone (#187: an empty
+     * registry stopped being a problem once an omitted `agent` began dispatching a generalist
+     * child), so nothing else fires here now and the narrowing is no longer load-bearing. It is
+     * kept anyway: this file asserts ONE notice per test, and that rule should not depend on which
+     * notices happen to exist in a given week.
      */
     expect(
       stub.notifications.filter((n) => n.message.includes("no orchestration tool")),
       "the missing-orchestrator warning is the subject, and codemode is present",
+    ).toEqual([]);
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = previousUserProfile;
+  }
+});
+
+test("a subagents session with no agent definitions says nothing about it", async () => {
+  /*
+   * The inverse of the notice #178 added and #187 retires, asserted rather than merely deleted.
+   *
+   * That notice reported that no agent was registered, and therefore that `ptc_subagent` had
+   * nothing to dispatch. That was true only while `agent` was required; an omitted `agent` now
+   * dispatches a generalist child, so an empty registry is the normal state of a fresh install and
+   * the notice was a false alarm about a tool that works.
+   *
+   * Deleting the tests that asserted it FIRES would leave this absence unheld — re-adding the
+   * block in `session_start` would turn nothing red. HOME is redirected for the same reason the
+   * sibling test redirects it: without an empty registry the assertion holds for the wrong reason,
+   * and its counterfactual (restore the notice) would not bite.
+   */
+  const previousHome = process.env.HOME;
+  const previousUserProfile = process.env.USERPROFILE;
+  process.env.HOME = await makeTempDir();
+  process.env.USERPROFILE = process.env.HOME;
+  try {
+    const stub = await makeExtensionStub({
+      ...SUBAGENTS_AXES,
+      active: ["read", "bash", "edit", "write", "codemode", "ptc_subagent"],
+    });
+    expect(
+      stub.notifications.filter((n) => /registered agent|nothing to dispatch/i.test(n.message)),
+      "an empty registry is the normal state, not a problem to report",
     ).toEqual([]);
   } finally {
     if (previousHome === undefined) delete process.env.HOME;

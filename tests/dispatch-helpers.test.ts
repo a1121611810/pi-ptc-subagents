@@ -281,17 +281,18 @@ describe("registered-agent listing + actionable refusals (pitfall #2)", () => {
     // is the SPEC case, so it must stay silent — the warn assertion below pins the dual
     // path against the genuine-read-failure test that follows.
     //
-    // **The silence is HERE and not further up, and that is worth saying (story 20 of #177).**
-    // This test is the one that pins "an empty registry is not an error", and on its own it
-    // reads like a green tick that means "quiet is correct" everywhere. It is not: the listing
-    // is a lister, and a lister that failed on an empty directory would be wrong. What makes the
-    // silence safe is that `session_start` now CONSUMES this empty list and tells the user —
-    // `tests/unit/agent-availability-notice.test.ts` is that half. So the rule this test was
-    // about to be an example of ("we asserted it must be quiet, therefore quiet is right") is
-    // false here, and the reason is one line below in this comment.
+    // **The silence is HERE and not further up, and what makes it safe changed (story 20 of #177,
+    // re-decided by #187).** This test is the one that pins "an empty registry is not an error",
+    // and on its own it reads like a green tick that means "quiet is correct" everywhere. It is
+    // not: the listing is a lister, and a lister that failed on an empty directory would be wrong.
     //
-    // If that consumer is ever removed, this test's silence becomes a defect again — and it will
-    // stay green while it is one.
+    // For a while the reason the silence was safe was that `session_start` CONSUMED the empty list
+    // and told the user about it — the silence was one half of a pair, and the comment here said
+    // so. That consumer is gone, and the silence is still right, for a better reason: an empty
+    // registry is not a degraded state. A dispatch that names nothing runs a generalist child
+    // (ADR-0039), so there is nothing to report and nothing to compensate for. The pair is no
+    // longer needed because the thing it guarded against — a quiet, unusable tool — is no longer
+    // reachable: an install with no agent definitions is a working install.
     const empty = await makeTempDir();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {

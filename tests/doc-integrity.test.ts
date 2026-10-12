@@ -1382,17 +1382,17 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // Confirmed line by line 2026-10-12: line 506 is
     // `pi.registerTool(createChildReportTool(ptcDepth > 0));` -- the depth gate the ADR cites to
     // explain why a generalist still gets the report tool.
-    "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:120 -> src/index.ts:506":
+    "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:118 -> src/index.ts:505":
       "createChildReportTool(ptcDepth > 0)",
     "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:985":
       "export function detectedSurfaceMode(",
-    "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:969":
+    "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:928":
       'getActiveTools().includes("codemode")',
-    "docs/adr/0029-surface-follows-codemode-activation.md:120 -> src/index.ts:969":
+    "docs/adr/0029-surface-follows-codemode-activation.md:120 -> src/index.ts:928":
       'getActiveTools().includes("codemode")',
     "docs/adr/0029-surface-follows-codemode-activation.md:151 -> ptc-mode.ts:27":
       "## Fail-safe on external loadout changes",
-    "docs/adr/0029-surface-follows-codemode-activation.md:188 -> src/index.ts:918":
+    "docs/adr/0029-surface-follows-codemode-activation.md:188 -> src/index.ts:877":
       "if (detected.present && !known) {",
     "docs/adr/0030-surface-switch-reloads.md:94 -> ptc-mode.ts:27":
       "## Fail-safe on external loadout changes",
@@ -1446,11 +1446,11 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     //  105 → 962→856  = 同一处（ADR-0029 正文第二次引用它）
     //  129 → 27 保持    = ` * ## Fail-safe on external loadout changes`，本轮未移动
     "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:985",
-    "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:969",
-    "docs/adr/0029-surface-follows-codemode-activation.md:120 -> src/index.ts:969",
+    "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:928",
+    "docs/adr/0029-surface-follows-codemode-activation.md:120 -> src/index.ts:928",
     "docs/adr/0029-surface-follows-codemode-activation.md:151 -> ptc-mode.ts:27",
     //  166 → 920→807 = `if (detected.present && !known) {`，即交叉核对那一条
-    "docs/adr/0029-surface-follows-codemode-activation.md:188 -> src/index.ts:918",
+    "docs/adr/0029-surface-follows-codemode-activation.md:188 -> src/index.ts:877",
     // 2026-10-03 第四次复核（ADR-0030）：0030 引 ptc-mode.ts:27-31 那段「loadout 被外部改写
     // 时模式如何退让」，27 行是段首。本轮该引用在**文档里**的行号因撤回声明从 68 前移到 83，
     // 引用目标（ptc-mode.ts:27）未动。ADR-0030 另外四处引用写的是 pi 宿主的行号而非本仓文件，
@@ -1491,7 +1491,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:229",
     "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1232",
     // 新增 1 条（2026-10-12，ADR-0039）：目标行已逐条核对。
-    "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:120 -> src/index.ts:506",
+    "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:118 -> src/index.ts:505",
   ];
 
   test("仓库内引用清单是钉住的基线：新增一条就要有人重新确认一次", () => {

@@ -84,13 +84,11 @@ thing being described should not have been a preset.
    required; an empty registry is now the normal state of a fresh install, and a notice that fires
    on the normal state is the noise that teaches people to stop reading notices.
 
-   **This decision is carried by issue #187, not by the change that made `agent` optional.** They
-   are separate tickets, and #187 is blocked on the first one; folding its work into that review
-   would have put two subjects through one set of acceptance criteria. Until #187 lands, the notice
-   is still live in `src/index.ts` and its message is **false** for the new default — it says the
-   tool "has nothing to dispatch" at a moment when the tool dispatches fine. That is a stated,
-   bounded false alarm rather than an oversight, and it is recorded here so the interval is a
-   decision rather than a discovery.
+   It went with issue #187, which was blocked on this change and landed with it. The `ptc-mode`
+   status marker that mirrored the notice for the rest of the session went too — same subject,
+   same reason. The interval between the two tickets is on the record rather than hidden: while it
+   was open, a fresh install was told the tool "has nothing to dispatch" at a moment when the tool
+   dispatched fine.
 
 ## What this amends
 
@@ -117,7 +115,7 @@ differently about `agent`, this one governs** — that is the only field either 
   its child.
 - **The generalist has no report opt-out.** With no definition there is no `childReport: false` to
   read, so the child-report contract is on, and because pi's full toolset stays in place the report
-  tool is registered in the child — the registration is depth-gated (`src/index.ts:506`,
+  tool is registered in the child — the registration is depth-gated (`src/index.ts:505`,
   `createChildReportTool(ptcDepth > 0)`), and a dispatched child always runs above depth zero.
   Measured on a real dispatch with the argument omitted: `report_channel: "tool"`, with the child
   filing a summary and findings. Same channels as any other dispatch; only the opt-out is

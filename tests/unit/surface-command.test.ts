@@ -123,6 +123,18 @@ describe("the legacy surfaceMode key is inert", () => {
         "the session still enters PTC mode",
       ).toMatchObject([{ data: { enabled: true } }]);
       expect(status?.key, "so it also publishes the mode status").toBe(PTC_MODE_STATUS_KEY);
+      /*
+       * And it carries the mode's own text. `.key` alone says a key was SET, not that anything
+       * readable is in it — blanking the status text leaves a published key with an empty value
+       * and the assertion above still passes.
+       *
+       * This came from the retired `agent-availability-status` file, which was the only test
+       * holding the status line's CONTENT. Its subject was a marker that shared this line with the
+       * mode text, and #187 removed the marker because an empty agent registry stopped being a
+       * problem. What survives is the half that was always about the mode: the literal is "PTC"
+       * (`MODE_STATUS_TEXT`, private to the factory).
+       */
+      expect(status?.text, "and the status says which mode").toContain("PTC");
     });
   });
 });

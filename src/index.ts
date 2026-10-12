@@ -37,7 +37,6 @@ import {
   type BackgroundTaskRuntime,
 } from "./runtime/background-runtime.ts";
 import { createULID } from "./runtime/child-process-lifecycle.ts";
-import { describeRegisteredAgents, listRegisteredAgents } from "./runtime/dispatch.ts";
 import {
   renderTaskNotifications,
   shouldDeliverTaskNotification,
@@ -68,7 +67,7 @@ import type {
   PersistedModeState,
 } from "./mode/ptc-mode.ts";
 import { buildPtcSkillsSection, skillsSectionDropped } from "./mode/skills-section.ts";
-import { createPtcSubagentTool, SUBAGENT_TOOL_NAME } from "./tools/subagent.ts";
+import { createPtcSubagentTool } from "./tools/subagent.ts";
 import { createChildReportTool } from "./tools/child-report-tool.ts";
 
 export {
@@ -579,29 +578,18 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
   });
 
   /*
-   * T2 (#179): the agent-availability marker, readable long after the notice that announced it.
+   * The PTC status line: one key, painted from the mode's state, and nothing else.
    *
-   * A startup notification is a moment. It fires once and it is gone, and if the user was looking
-   * at something else when it fired -- the normal case, since you start a session and then go and
-   * do the thing the session is for -- there is nothing left to go back to. Someone who realises
-   * "the subagent never ran" twenty minutes later should not have to re-derive it from a
-   * transcript.
-   *
-   * Derived ONCE in `session_start` and read from here, so the status cannot drift from the notice:
-   * there is one enumeration and one decision, and this renders what it already said. That is the
-   * repo's own observability rule -- a state visible only while it happens is not observable.
-   *
-   * Appended to the existing PTC status rather than given a key of its own: a second key is a
-   * second thing to learn to read, and this one only ever says something when something is wrong.
+   * It carried a second part until #187 -- an agent-availability marker that outlived the startup
+   * notice it mirrored, so that "the subagent never ran" stayed readable twenty minutes later
+   * instead of having to be re-derived from a transcript. The marker went with the notice, because
+   * both reported an empty agent registry as a problem and it stopped being one the moment an
+   * omitted `agent` began dispatching a generalist child. The observability rule that produced it
+   * still holds; it simply has no subject here now.
    */
-  let agentAvailabilityWarning: string | undefined;
-
   const paintStatus = (ctx: ExtensionContext): void => {
     const parts: string[] = [];
     if (mode.enabled) parts.push(ctx.ui.theme.fg("accent", MODE_STATUS_TEXT));
-    if (agentAvailabilityWarning !== undefined) {
-      parts.push(ctx.ui.theme.fg("warning", agentAvailabilityWarning));
-    }
     ctx.ui.setStatus(PTC_MODE_STATUS_KEY, parts.length > 0 ? parts.join("  ") : undefined);
   };
 
@@ -821,44 +809,15 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     }
 
     /*
-     * T1 (#178): the subagent face's PRECONDITION, reported when it is unmet.
+     * #187 removed the agent-availability notice that used to sit here. It reported that no agent
+     * was registered and therefore that `ptc_subagent` had nothing to dispatch -- which was true
+     * only while `agent` was required, and became a false alarm about a working tool the moment an
+     * omitted `agent` started dispatching a generalist child.
      *
-     * `listRegisteredAgents` used to have exactly one production caller -- inside
-     * `describeRegisteredAgents`, which runs only AFTER a dispatch has already been refused. So
-     * on the success path nothing asked whether `ptc_subagent` could do anything at all, and a
-     * registered-but-uncallable tool was indistinguishable from a working one: a session burned
-     * 520 tool calls with none of them to it, and the model spent twenty-plus of them hunting
-     * the install for agent definitions that were never there.
-     *
-     * The asymmetry with the notice above is the point. A `subagents` session that lost its
-     * `codemode` orchestrator WARNS; a session with no agent definition at all said nothing --
-     * and the second is the one a fresh install actually hits, because a fresh install has no
-     * agent definitions either.
-     *
-     * `both` scopes, not the dispatch default of `user`: a project-scoped agent is a normal
-     * setup, and asking about the user scope alone would warn at a session that IS configured.
-     * The enumeration is the SAME one a dispatch resolves through, so the set reported here and
-     * the set that works cannot drift.
-     *
-     * Gated on this session actually registering the tool. A `full` surface has `ptc_run_code`
-     * and no `ptc_subagent`, and telling it about a tool it was never given is the same defect
-     * in a different costume. TUI-only, like every other notice in this file.
+     * Nothing replaced it, deliberately. An empty registry is the normal state of a fresh install,
+     * and a notice that fires on the normal state is what teaches people to stop reading notices.
+     * `tests/extension.test.ts` holds the absence, so re-adding a check here turns that test red.
      */
-    if (pi.getAllTools().some((tool) => tool.name === SUBAGENT_TOOL_NAME)) {
-      const agentsInput = { cwd: ctx.cwd ?? process.cwd(), agentScope: "both" as const };
-      if (listRegisteredAgents(agentsInput).length === 0) {
-        agentAvailabilityWarning = "no registered agent";
-        ctx.ui.notify(
-          "pi-ptc-subagents: no registered agent was found, so " +
-            SUBAGENT_TOOL_NAME +
-            " has nothing to dispatch this session -- " +
-            describeRegisteredAgents(agentsInput),
-          "warning",
-        );
-        // Same decision, second surface: the notice is for the moment, this for later.
-        paintStatus(ctx);
-      }
-    }
 
     if (surface.codemodeSwitch?.error !== undefined) {
       ctx.ui.notify(`pi-ptc-subagents: ${surface.codemodeSwitch.error}`, "warning");
