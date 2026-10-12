@@ -873,8 +873,32 @@ function isSilentReaddirMiss(dir: string, boundary: string, error: unknown): boo
 }
 
 /**
- * The agent names registered under the effective scope — the same two directories
- * `discoverAgent` searches. A file's name is its frontmatter `name:` field, falling back
+ * One registered agent, carrying the two things the bare name cannot: what the definition
+ * says the agent is FOR, and which lookup directory it came from.
+ *
+ * The description is the field that decides whether a model ever dispatches an agent, and
+ * until {@link describeRegisteredAgentRoster} existed nothing in production read it. The
+ * parser fills it, `discoverAgent` copies only `name`/`model`/`tools`/`childReport`/
+ * `systemPrompt`, and the lister returned bare names — so a definition could describe
+ * itself perfectly and still be invisible to the one party that could act on it. The model
+ * only learned an agent existed after guessing its name, failing, and reading the refusal.
+ */
+export interface RegisteredAgentEntry {
+  name: string;
+  /** The frontmatter `description`, trimmed; `""` when the definition declares none. */
+  description: string;
+  /**
+   * Which lookup directory it was found in. `discoverAgent` tries user before project, so
+   * a name present in both resolves to the user copy — the listing must say the same thing,
+   * or the roster would advertise a scope that does not resolve it.
+   */
+  source: "user" | "project";
+}
+
+/**
+ * The agents registered under the effective scope — the same two directories
+ * `discoverAgent` searches — each with its description and source. A file's name is its
+ * frontmatter `name:` field, falling back
  * to the file name (minus `.md`), mirroring how pi's own agent listers present agents
  * whose frontmatter is missing or malformed. Per lookup directory:
  *
@@ -899,20 +923,24 @@ function isSilentReaddirMiss(dir: string, boundary: string, error: unknown): boo
  * (testing-constraints #3). The result is sorted and de-duplicated so the message built
  * from it is deterministic.
  */
-export function listRegisteredAgents(input: RegisteredAgentsListInput): string[] {
+export function listRegisteredAgentEntries(
+  input: RegisteredAgentsListInput,
+): RegisteredAgentEntry[] {
   const { userDir, projectDir, userRoot, projectRoot } = resolveAgentDirs(input);
-  const dirs: Array<{ dir: string; boundary: string }> = [];
+  const dirs: Array<{ dir: string; boundary: string; source: "user" | "project" }> = [];
   if (input.agentScope === "user" || input.agentScope === "both") {
-    dirs.push({ dir: userDir, boundary: userRoot });
+    dirs.push({ dir: userDir, boundary: userRoot, source: "user" });
   }
   if (input.agentScope === "project" || input.agentScope === "both") {
-    dirs.push({ dir: projectDir, boundary: projectRoot });
+    dirs.push({ dir: projectDir, boundary: projectRoot, source: "project" });
   }
-  const names = new Set<string>();
-  for (const { dir, boundary } of dirs) {
-    let entries: string[];
+  // Keyed by name so a name present in both directories lists once, holding the user copy —
+  // the same precedence `discoverAgent` applies when it resolves a dispatch.
+  const entries = new Map<string, RegisteredAgentEntry>();
+  for (const { dir, boundary, source } of dirs) {
+    let names: string[];
     try {
-      entries = fs.readdirSync(dir);
+      names = fs.readdirSync(dir);
     } catch (error) {
       if (!isSilentReaddirMiss(dir, boundary, error)) {
         const code = errnoCode(error);
@@ -923,7 +951,7 @@ export function listRegisteredAgents(input: RegisteredAgentsListInput): string[]
       }
       continue;
     }
-    for (const entry of entries) {
+    for (const entry of names) {
       if (!entry.endsWith(".md")) continue;
       const fallback = entry.slice(0, -".md".length);
       const filePath = path.join(dir, entry);
@@ -935,15 +963,71 @@ export function listRegisteredAgents(input: RegisteredAgentsListInput): string[]
         console.warn(
           `pi.dispatch: cannot read agent file ${filePath}: ${detail}; falling back to the filename`,
         );
-        names.add(fallback);
+        if (!entries.has(fallback))
+          entries.set(fallback, { name: fallback, description: "", source });
         continue;
       }
       const parsed = parseAgentMarkdown(raw);
       const name = parsed?.name ?? fallback;
-      if (name.length > 0) names.add(name);
+      if (name.length === 0) continue;
+      // `parseAgentMarkdown` yields `""` — not undefined — for an absent `description`, so the
+      // trim here is what separates "declares none" from "declares only whitespace".
+      if (entries.has(name)) continue;
+      entries.set(name, {
+        name,
+        description: (parsed?.description ?? "").trim(),
+        source,
+      });
     }
   }
-  return [...names].sort();
+  return [...entries.values()];
+}
+
+/**
+ * The agent NAMES registered under the effective scope. Derived from
+ * {@link listRegisteredAgentEntries} rather than walking the directories a second time: two
+ * traversals would be two places for the user/project precedence to be spelled slightly
+ * differently, and the refusal that lists names would then disagree with the roster.
+ */
+export function listRegisteredAgents(input: RegisteredAgentsListInput): string[] {
+  return listRegisteredAgentEntries(input)
+    .map((entry) => entry.name)
+    .sort();
+}
+
+/**
+ * The roster a model reads BEFORE it decides whether to dispatch: every registered agent,
+ * what its definition says it is for, and which scope reaches it.
+ *
+ * This is the outlet `description` never had. `listRegisteredAgents` answers "which names
+ * exist", which is only useful to someone who already suspects a name — it reaches the
+ * model through a refusal, i.e. after a wrong guess. A model cannot pick an agent it has
+ * never heard of, so the pre-decision channel has to carry the descriptions too.
+ *
+ * The scope label is not decoration. `agentScope` defaults to `"user"`, so a project agent
+ * silently fails to resolve unless the caller passes the matching scope; a roster that
+ * listed names without it would be a table of things to call that mostly do not work.
+ *
+ * Rendered from {@link listRegisteredAgentEntries} — the same traversal the refusal uses —
+ * so the roster and the refusal cannot disagree about what is registered.
+ */
+export function describeRegisteredAgentRoster(input: RegisteredAgentsListInput): string {
+  const entries = listRegisteredAgentEntries(input);
+  if (entries.length === 0) {
+    return (
+      "No agents are registered, so there is nothing to dispatch. A name with no definition " +
+      "behind it is refused."
+    );
+  }
+  const lines = entries.map((entry) => {
+    const purpose = entry.description.length > 0 ? entry.description : "(no description given)";
+    return `- ${entry.name} (${entry.source} scope): ${purpose}`;
+  });
+  return (
+    "Registered agents — pass `agentScope` matching the scope shown, since it defaults to " +
+    '"user" and does not see the others:\n' +
+    lines.join("\n")
+  );
 }
 
 /**

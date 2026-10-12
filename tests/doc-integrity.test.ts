@@ -1377,7 +1377,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       "The failure text is the reason",
     "docs/adr/0016-ptc-dispatch-binding.md:39 -> src/runtime/dispatcher.ts:438":
       "new DispatchSlotCounter(",
-    "docs/adr/0026-surface-default-is-detected.md:258 -> dispatch.ts:1521":
+    "docs/adr/0026-surface-default-is-detected.md:258 -> dispatch.ts:1605":
       "spawnOptions.sessionId = taskId;",
     "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:985":
       "export function detectedSurfaceMode(",
@@ -1393,15 +1393,15 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       "## Fail-safe on external loadout changes",
     "docs/adr/0031-open-source-and-publish-authority.md:129 -> src/runtime/limits.ts:4":
       "The numbers are DSH's",
-    "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1169": "function assistantText(",
-    "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:184":
+    "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1253": "function assistantText(",
+    "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:192":
       "export const SUBAGENT_OUTPUT_SCHEMA",
-    "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1192": "function accumulateUsage(",
-    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:337":
+    "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1276": "function accumulateUsage(",
+    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:358":
       "structuredContent: structured,",
     "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:229":
       "outputSchema: LIST_OUTPUT_SCHEMA,",
-    "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1051":
+    "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1135":
       "export function childToolList(",
   };
 
@@ -1434,7 +1434,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // 2026-10-10 第七次复核：**1096 → 1501**。1096 是一段 JSDoc 的开头，不是本 ADR 声称的
     // `spawnOptions.sessionId = taskId;`（那行在 1501）——而后者正是「同 id 重试从正常路径
     // 不可达」这个论断的落点。**既有漂移**，dispatch.ts 本轮未改，HEAD 上 1096 同样不是它。
-    "docs/adr/0026-surface-default-is-detected.md:258 -> dispatch.ts:1521",
+    "docs/adr/0026-surface-default-is-detected.md:258 -> dispatch.ts:1605",
     // 2026-10-10 第七次复核：四条全部因本轮删除 surfaceMode 而位移，逐条核对内容后改正。
     //  29  → 628→1160 = `export function detectedSurfaceMode(`
     //  32  → 962→856  = decision-4 的 `if (surface.surfaceMode === "subagents" && !pi.getActiveTools()…`
@@ -1461,10 +1461,10 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // 说的那一类：门能看见形状，看不见引用指向的东西。
     //
     // 逐条内容（写在这里，是为了让下一个复核者不必重跑一遍就能知道每条该是什么）：
-    //   11 → dispatch.ts:1149 = `function assistantText(event: ParsedAgentEvent)`
-    //   20 → subagent.ts:184  = `export const SUBAGENT_OUTPUT_SCHEMA: SubagentOutputSchema`
-    //   27 → dispatch.ts:1172 = `function accumulateUsage(`（usage 的累加点，前景后台共用）
-    //   55 → subagent.ts:337 = 把投影写进 `structuredContent:` 的那一行
+    //   11 → dispatch.ts:1253 = `function assistantText(event: ParsedAgentEvent)`
+    //   20 → subagent.ts:192  = `export const SUBAGENT_OUTPUT_SCHEMA: SubagentOutputSchema`
+    //   27 → dispatch.ts:1276 = `function accumulateUsage(`（usage 的累加点，前景后台共用）
+    //   55 → subagent.ts:358 = 把投影写进 `structuredContent:` 的那一行
     //   49 → ptc-task.ts:229/459/618 = 三处 `outputSchema:` 声明
     //  117 → dispatch.ts:1031 = `export function childToolList(`，即合并进子进程 --tools 的那个函数
     //
@@ -1479,12 +1479,12 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // 行号**——留着一个指向已删行的引用，正是 `tests/doc-integrity.test.ts` 要抓的悬空引用。
     // 所以这里是**删一条**而不是改行号，本轮唯一的删除项，**新增 0 条**。
     // 同一次编辑把 ADR-0032 里 123 那条**在文档里**的行号推到 130（引用目标未动，仍是 1031）。
-    "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1169",
-    "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:184",
-    "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1192",
-    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:337",
+    "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1253",
+    "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:192",
+    "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1276",
+    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:358",
     "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:229",
-    "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1051",
+    "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1135",
   ];
 
   test("仓库内引用清单是钉住的基线：新增一条就要有人重新确认一次", () => {

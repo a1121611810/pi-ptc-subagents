@@ -43,15 +43,21 @@ agent markdown file at `~/.pi/agent/agents/<name>.md` (user scope) or `<cwd>/.pi
 ```text
 ---
 name: researcher
+description: Surveys peer implementations and reports what it found, with citations.
 ---
 
 You are a research agent. ...
 ```
 
 The file's frontmatter `name:` is the name the dispatch uses (the file name is the fallback).
-A missing or unknown `agent` resolves with a refused `DispatchResult` whose `errorMessage`
-lists the agents currently registered under the effective scope, both lookup paths, and the
-minimal file shape — read it instead of re-probing the file system.
+`description:` is what the model reads to decide whether to dispatch you at all, so it is worth
+writing as a trigger condition rather than a title.
+
+Two places list what is registered. The `ptc_subagent` tool description carries a **roster** —
+every registered agent with its description and the scope that reaches it — so a model can choose
+an agent before trying anything. A missing or unknown `agent` still resolves with a refused
+`DispatchResult` whose `errorMessage` names what is registered under the effective scope, both
+lookup paths, and the minimal file shape; read that rather than re-probing the file system.
 
 ```ts
 // ptc_run_code

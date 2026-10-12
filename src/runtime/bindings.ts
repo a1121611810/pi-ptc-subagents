@@ -168,11 +168,21 @@ type DispatchParameters = TObject<{
  * two are different call sites for one dispatcher, and a test pins their key sets equal.
  */
 export const DISPATCH_PARAMETERS: DispatchParameters = Type.Object({
-  agent: Type.String({ minLength: 1 }),
+  agent: Type.String({
+    minLength: 1,
+    description:
+      "Name of the registered agent to dispatch — the frontmatter `name:` of its definition file. There is no default, so this must be a name that exists under the chosen agentScope.",
+  }),
   task: Type.String({ minLength: 1 }),
   cwd: Type.Optional(Type.String()),
+  // The default is "user", which does NOT see `<cwd>/.pi/agents/`. Without a description here
+  // the model cannot know that, so it dispatches a project agent by name and gets a refusal —
+  // the roster in the tool description labels each agent's scope for exactly this reason.
   agentScope: Type.Optional(
-    Type.Union([Type.Literal("user"), Type.Literal("project"), Type.Literal("both")]),
+    Type.Union([Type.Literal("user"), Type.Literal("project"), Type.Literal("both")], {
+      description:
+        'Which agent directories to search: "user" (~/.pi/agent/agents, the default), "project" (<cwd>/.pi/agents), or "both". Defaults to "user", which cannot see project agents.',
+    }),
   ),
   model: Type.Optional(Type.String()),
   thinkingLevel: Type.Optional(Type.String()),

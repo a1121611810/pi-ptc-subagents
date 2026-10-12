@@ -36,7 +36,7 @@ import { Type } from "typebox";
 import type { TArray, TNumber, TObject, TOptional, TString } from "typebox";
 import { DISPATCH_PARAMETERS } from "../runtime/bindings.ts";
 import type { DispatchDeps, DispatchInput, DispatchResult } from "../runtime/dispatch.ts";
-import { dispatch } from "../runtime/dispatch.ts";
+import { dispatch, describeRegisteredAgentRoster } from "../runtime/dispatch.ts";
 import type { DispatchHandle } from "../runtime/task-registry.ts";
 import type { ULID } from "../runtime/task-storage.ts";
 import { renderChildReportText } from "./render.ts";
@@ -55,6 +55,14 @@ export interface CreatePtcSubagentToolOptions {
   parentTaskId?: ULID;
   /** Session-scoped deps, so a background spawn lands in the session registry. */
   getDispatchDeps?: () => DispatchDeps;
+  /**
+   * Scope the roster in the tool description is built from. Defaults to `"both"` because the
+   * roster's job is to show what the model COULD dispatch, and a dispatch may still narrow the
+   * scope per call — the description labels each agent, so a narrower call is informed.
+   */
+  agentRosterScope?: "user" | "project" | "both";
+  /** Overrides `os.homedir()` when building the roster. Tests only. */
+  homeDir?: string;
 }
 
 /**
@@ -236,6 +244,14 @@ function handleTaskId(outcome: SubagentOutcome): string | undefined {
   return typeof taskId === "string" ? taskId : undefined;
 }
 export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): AnyTool {
+  // Built at registration, so it is a snapshot: an agent file added or edited after this point
+  // is not in the description until the next session. That staleness is the accepted cost of
+  // giving the model a pre-decision view — the alternative is no view at all until a refusal.
+  const roster = describeRegisteredAgentRoster({
+    cwd: options.cwd,
+    agentScope: options.agentRosterScope ?? "both",
+    ...(options.homeDir === undefined ? {} : { homeDir: options.homeDir }),
+  });
   return defineTool({
     name: SUBAGENT_TOOL_NAME,
     label: "PTC Subagent",
@@ -251,6 +267,11 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
       // from the same resolver a dispatch uses. A copy here would be the copy that goes stale.
       // Same one-home rule the child-report work already established, applied to the registry.
       "An agent is a markdown file: ~/.pi/agent/agents/<name>.md for your machine, or <project>/.pi/agents/<name>.md for one project. There is no default agent, so a name with no file behind it is refused; the refusal lists what IS registered and how to write one.",
+      // The pre-decision view (see describeRegisteredAgentRoster): names alone only help
+      // someone who already suspects a name, and this reaches the model BEFORE any refusal.
+      // Both this and the refusal render from listRegisteredAgentEntries — one traversal, one
+      // home for the data — they are two moments (registration vs. failure), not two sources.
+      roster,
     ].join("\n"),
     promptSnippet: "Start a fresh pi agent as a child process (foreground or background)",
     promptGuidelines: [
