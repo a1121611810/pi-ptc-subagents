@@ -67,6 +67,16 @@ Two supporting details, both of which exist because the obvious alternative is w
 - **No preview deployments.** Every push to `main` replaces the live site. There is no per-PR preview
   URL.
 
+> **Amended 2026-10-12.** The merge gate this section declined now exists, as
+> `.github/workflows/website.yml` — issue #174, `c43b7c8`, and see ADR-0036's amendment. The
+> reasoning above about `pages.yml` is unchanged and still governs the deploy path: `pages.yml` runs
+> after `main` moves, and it guarantees a bad site is never _published_. What changed is that the
+> repository now also accepts the GitHub-hosted merge gate this bullet called out as a reason not to
+> have one, so that a red site check surfaces on the pull request rather than after the merge. Two
+> bullets below this note are correspondingly narrower than they read in isolation: a site check that
+> turns red no longer reaches `main` at all, and a push that breaks the build is now a push that
+> cannot have merged. **No preview deployments** still holds — `website.yml` publishes nothing.
+
 ## Why not tag-triggered, with a release when docs change
 
 Because that reintroduces the staleness it is meant to prevent, in a slower form: a tag now has to be

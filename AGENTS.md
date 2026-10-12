@@ -16,8 +16,10 @@ Single-context: one `CONTEXT.md` at the repo root and `docs/adr/` for ADRs. See 
 
 `packages/website/` is a second workspace member with **its own five checks and its own deployment**,
 excluded from the root gate by ADR-0036. Before changing anything under it, read
-`packages/website/README.md` — it lists every check, what turns each one red, and the one fact that
-surprises people: those checks never run on a pull request.
+`packages/website/README.md` — it lists every check, what turns each one red, and where each one
+runs. The five site checks run on a pull request (`.github/workflows/website.yml`) as the **same
+command** the deploy runs, which is what keeps the merge-gating set and the deploy-gating set from
+drifting apart.
 
 ## Code review tooling
 

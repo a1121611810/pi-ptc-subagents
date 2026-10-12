@@ -99,17 +99,71 @@ function triggersOnPullRequest(source: string): boolean {
  *
  * 只看 `pull_request` 那一节的下一层缩进，不是整个 `on:` 块：给 `push` 加过滤与本断言无关，
  * 而把它算进来会让一次与 PR 无关的合法改动把门禁弄红。
+ *
+ * **按缩进终止，不按空行终止。** YAML 映射里的空行没有语义，所以
+ *
+ *     on:
+ *       pull_request:
+ *
+ *         paths:
+ *           - 'packages/website/**'
+ *
+ * 与不隔空行写法**完全等价**。早先这里以空行收尾，那种排版能让断言静默通过（实测 5 passed），
+ * 而它守的正是「别用 paths 过滤掉 src/ 驱动的文档漂移」—— 静默放行是它最坏的失效方向。
  */
 function pullRequestHasPathFilter(source: string): boolean {
   const block = topLevelBlock(source, "on");
   const lines = block.split("\n");
   const start = lines.findIndex((line) => /^ {2}pull_request:/.test(line));
   if (start < 0) return false;
-  // `pull_request:` 之后的所有行，直到 `on:` 块结束（空行或下一个顶层键）。
-  const rest = lines.slice(start + 1);
-  const end = rest.findIndex((line) => TOP_LEVEL_KEY.test(line) || line.trim() === "");
-  const section = (end < 0 ? rest : rest.slice(0, end)).join("\n");
-  return /^ {4}paths(-ignore)?:/m.test(section);
+  // 收集 `pull_request:` 之后所有缩进 > 2 的行，直到遇到缩进 <= 2 的非空行（下一个同级键）
+  // 或 `on:` 块结束。空行被跳过而不是当作终止符。
+  const section: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (line.trim() === "") continue;
+    const indent = line.length - line.trimStart().length;
+    if (indent <= 2) break;
+    section.push(line);
+  }
+  return /^ {4}paths(-ignore)?:/m.test(section.join("\n"));
+}
+
+/**
+ * `jobs.<job>.permissions` 里授予的权限，按 job 分组。
+ *
+ * GitHub 的权限优先级是 job 级覆盖顶层，且未列出的键在该 job 内被置为 `none` —— 所以顶层块
+ * 不是上界。只读顶层会漏掉一个 job 自己声明的 `id-token: write`（实测：这样加仍全绿）。
+ *
+ * 返回 Map 而非扁平数组：合并之后报错信息会丢掉是哪个 job 声明的，而那正是复现时要找的东西。
+ */
+function jobLevelPermissions(source: string): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  const lines = source.split("\n");
+  const jobsStart = lines.findIndex((line) => /^jobs:\s*$/.test(line));
+  if (jobsStart < 0) throw new Error("no jobs: block — the extraction is broken, not the workflow");
+  let current: string | null = null;
+  const rest = lines.slice(jobsStart + 1);
+  for (let i = 0; i < rest.length; i++) {
+    const line = rest[i] as string;
+    const jobHeader = /^ {2}([A-Za-z_][\w-]*):\s*$/.exec(line);
+    if (jobHeader) {
+      current = jobHeader[1] as string;
+      out.set(current, []);
+      continue;
+    }
+    if (/^ {4}permissions:\s*$/.test(line) && current !== null) {
+      // 往下吃掉该 permissions 块的成员，直到遇到缩进 <= 4 的非空行。
+      for (const member of rest.slice(i + 1)) {
+        if (member.trim() === "") continue;
+        const indent = member.length - member.trimStart().length;
+        if (indent <= 4) break;
+        const name = /^ {6}([\w-]+):/.exec(member);
+        if (name) out.get(current)?.push(name[1] as string);
+      }
+      continue;
+    }
+  }
+  return out;
 }
 
 /** `permissions:` 块里被授予的权限名。 */
@@ -139,7 +193,16 @@ function readWorkflows(): Workflow[] {
 const workflows = readWorkflows();
 const byName = new Map(workflows.map((w) => [w.file, w]));
 
-/** 会跑站点构建、且由 pull request 触发的工作流。 */
+/**
+ * 跑站点构建、**且**由 pull_request 触发的工作流 —— 也就是门禁真正审的对象。
+ *
+ * 集合刻意只用两个谓词定义，而下面每条断言再去检查**别的**性质（无 `paths:` 过滤、无部署
+ * 凭据）。早先这里把「跑那条命令」也放进定义，于是断言在复述自己的定义 —— 不可证伪，那是
+ * `docs/testing-constraints.md` 约束 #4 禁的同义反复。
+ *
+ * 不能用「跑构建的全部」当集合：`pages.yml` 跑同一条命令，而它**持有** `pages` / `id-token`
+ * 是完全正确的 —— 它就是部署工作流。凭据那条断言的对象是 PR 路径，不是部署路径。
+ */
 const siteChecksOnPullRequest = workflows.filter(
   (w) => triggersOnPullRequest(w.source) && runCommands(w.source).includes(DEPLOY_COMMAND),
 );
@@ -153,14 +216,27 @@ describe("the site's checks run on a pull request (#174)", () => {
   });
 
   test("a pull request runs the same site build the deploy runs", () => {
-    // 这一条是全套断言的承重点：`siteChecksOnPullRequest` 非空。后面两条 `for` 循环断言的
-    // 集合由它钉住，空集合就是红而不是空转（约束 #5）。
-    expect(siteChecksOnPullRequest.length).toBeGreaterThan(0);
-    for (const w of siteChecksOnPullRequest)
-      expect(
-        runCommands(w.source),
-        `${w.file} must run the site build on a pull request`,
-      ).toContain(DEPLOY_COMMAND);
+    // 两个方向分开断言，因为它们的集合**不同**：
+    //
+    //   (a) 存在性：`siteChecksOnPullRequest` 非空 —— #174 的原样回归（删掉 website.yml，
+    //       或撤掉它的 pull_request 触发）会让这一半红。这是全套断言的承重点。
+    //   (b) 完备性：每个跑站点构建的工作流都要么由 PR 触发，要么是 pages.yml 那个已知的
+    //       部署侧 —— 防止将来新增一个「跑构建却只在 main 上跑」的工作流，那会重新打开一个
+    //       和 #174 同形状的缺口。
+    //
+    // 不能写成「每个 PR 工作流都跑站点构建」—— `ci.yml` / `oxlint.yml` / `test.yml` 由 PR
+    // 触发但**不该**跑站点构建，那是要求无关工作流做没有理由的事。
+    expect(
+      siteChecksOnPullRequest.length,
+      `no workflow runs \`${DEPLOY_COMMAND}\` on a pull_request — this is issue #174`,
+    ).toBeGreaterThan(0);
+    expect(
+      workflows
+        .filter((w) => runCommands(w.source).includes(DEPLOY_COMMAND))
+        .map((w) => w.file)
+        .filter((f) => !siteChecksOnPullRequest.some((w) => w.file === f)),
+      "a workflow runs the site build but is not covered by a pull_request trigger",
+    ).toEqual([DEPLOY_WORKFLOW]);
   });
 
   test("the deploy command this test compares against is still what pages.yml runs", () => {
@@ -174,8 +250,8 @@ describe("the site's checks run on a pull request (#174)", () => {
     // `check-doc-claims.mjs` 把文档声明绑到 `src/` 的具名常量上，所以改 `src/` 而不碰站点的
     // PR 也能让站点检查变红。按站点路径过滤会漏掉这一整类漂移。
     //
-    // 集合的来源是上面那条测试钉住的全局不变量；这里断言的是集合里**每个**元素的性质，
-    // 不重复「非空」——重复的断言无法被证伪，因此不是门禁，是装饰。
+    // 非空由上一条钉住，这里断言集合里**每个**元素的性质，不重复「非空」——重复的断言无法被
+    // 证伪，因此不是门禁，是装饰。
     for (const w of siteChecksOnPullRequest)
       expect(
         pullRequestHasPathFilter(w.source),
@@ -187,14 +263,25 @@ describe("the site's checks run on a pull request (#174)", () => {
   test("the pull request job holds no deploy credentials", () => {
     // `pages.yml` mints the OIDC token Pages deployment trusts. A pull request — a fork one
     // included — must never reach those permissions to run a check.
+    //
+    // **job 级与顶层都要看。** GitHub 文档：job 内的 `permissions` 覆盖顶层，未列出的键在该
+    // job 内被置为 `none` —— 也就是说顶层的 `contents: read` 并不封顶 job 自己声明的
+    // `id-token: write`。只读顶层块的门禁在一个三行复制粘贴面前形同虚设（实测：加 job 级
+    // `id-token: write` 时旧版本仍 5 passed）。
     for (const w of siteChecksOnPullRequest) {
-      const granted = grantedPermissions(w.source);
-      expect(granted, `${w.file} requests deploy credentials on a pull request`).not.toContain(
-        "pages",
-      );
-      expect(granted, `${w.file} requests deploy credentials on a pull request`).not.toContain(
-        "id-token",
-      );
+      // 顶层
+      for (const scope of grantedPermissions(w.source))
+        expect(
+          scope,
+          `${w.file} grants \`${scope}\` at the top level; a pull request runs with it`,
+        ).not.toMatch(/^(pages|id-token)$/);
+      // job 级（每个 job 一组）
+      for (const [job, perms] of jobLevelPermissions(w.source))
+        for (const scope of perms)
+          expect(
+            scope,
+            `${w.file} grants \`${scope}\` to job \`${job}\`; a pull request runs that job`,
+          ).not.toMatch(/^(pages|id-token)$/);
     }
   });
 });

@@ -5,13 +5,14 @@ command you can run, not a policy you have to interpret.
 
 ## The gate your PR has to pass
 
-CI runs three workflows on every pull request, and all three must be green:
+CI runs four workflows on every pull request, and all four must be green:
 
-| Check  | What it runs                                        |
-| ------ | --------------------------------------------------- |
-| `CI`   | `pnpm run fmt:check`                                |
-| `Lint` | `pnpm run lint`                                     |
-| `Test` | `pnpm run typecheck`, `pnpm run build`, `pnpm test` |
+| Check     | What it runs                                                          |
+| --------- | --------------------------------------------------------------------- |
+| `CI`      | `pnpm run fmt:check`                                                  |
+| `Lint`    | `pnpm run lint`                                                       |
+| `Test`    | `pnpm run typecheck`, `pnpm run build`, `pnpm test`                   |
+| `Website` | `pnpm --filter website run build` — the site's five checks (ADR-0036) |
 
 Run the whole thing locally before you push — it is the same release gate, and it is what a
 release is cut from:

@@ -71,7 +71,16 @@ it. A round that produces findings only in its own output is the signal to stop;
 ## What is still open, on purpose
 
 - **The site's five checks never run on a pull request.** Found while writing the README, measured,
-  filed as **#174**, and deliberately not fixed here. Changing which workflows run where is a
-  different change with a different risk, and folding it in would make this one unreviewable.
+  filed as **#174**, and deliberately not fixed _in this change_. Changing which workflows run where
+  is a different change with a different risk, and folding it in would make this one unreviewable.
+  **— closed 2026-10-12 in `c43b7c8`, on branch `ci/site-checks-on-pr`.** `.github/workflows/website.yml`
+  runs `pnpm --filter website run build` on `pull_request`: the same command `pages.yml` runs, so
+  the merge-gating and deploy-gating sets are equal by construction rather than by a second gate
+  that would need its own counterfactual. **Counterfactual:** deleting `website.yml` turns
+  `tests/site-checks-on-pr.test.ts` red (`a pull request runs the same site build the deploy runs`,
+  expected 0 workflows to run the site build on a pull_request) — which is this finding stated as a
+  test. `tests/website-readme-consistency.test.ts` sits here for the placement reason this ledger
+  argued earlier, and that argument is unaffected by the fix: the site runner is still a deploy-path
+  tool. **Not yet run by a real runner** — the workflow has never executed on GitHub.
 - **No test pins any website gate's failure message.** That is this repository's recorded position
   for these gates: counterfactuals are kept as records rather than as tests that rewrite `src/`.
