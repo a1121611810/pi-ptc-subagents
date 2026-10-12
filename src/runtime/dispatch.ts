@@ -609,10 +609,28 @@ export function parseAgentMarkdown(content: string): {
   childReport?: boolean;
   systemPrompt: string;
 } | null {
-  const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  /*
+   * T3 (#180): the delimiter is matched LINE-ENDING-AGNOSTIC, and the file is not re-encoded to
+   * make it match.
+   *
+   * The previous pattern spelled `\n` literally, so it accepted exactly one file shape. An agent
+   * saved with CRLF (any Windows editor, or a repo with `core.autocrlf`), with a UTF-8 BOM, or
+   * with a blank line before the delimiter parsed to `null` -- and `null` reads, from every layer
+   * above, as "no such agent". A good definition silently stopped being an agent.
+   *
+   * The BODY is normalised after the match rather than inside it, because the frontmatter
+   * extractors match with the `m` flag and trim what they capture: leaving `\r` in the captured
+   * group would be harmless to them and corrosive to the prompt, which is handed to a child as a
+   * system prompt where a trailing `\r` on every line is not.
+   */
+  const fmMatch = content.match(
+    /^\uFEFF?[ \t]*(?:\r?\n)?---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n([\s\S]*))?$/,
+  );
   if (!fmMatch) return null;
-  const frontmatter = fmMatch[1] ?? "";
-  const body = fmMatch[2] ?? "";
+  // `[^]` above can leave a leading blank line in the frontmatter when the file had one; the
+  // extractors are anchored per-key so a stray blank line is inert, and the body is trimmed below.
+  const frontmatter = (fmMatch[1] ?? "").replace(/\r\n/g, "\n");
+  const body = (fmMatch[2] ?? "").replace(/\r\n/g, "\n");
   const name = extractYamlString(frontmatter, "name");
   if (!name) return null;
   const description = extractYamlString(frontmatter, "description") ?? "";
