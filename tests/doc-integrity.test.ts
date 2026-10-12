@@ -1382,7 +1382,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // Confirmed line by line 2026-10-12: line 506 is
     // `pi.registerTool(createChildReportTool(ptcDepth > 0));` -- the depth gate the ADR cites to
     // explain why a generalist still gets the report tool.
-    "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:112 -> src/index.ts:506":
+    "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:120 -> src/index.ts:506":
       "createChildReportTool(ptcDepth > 0)",
     "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:985":
       "export function detectedSurfaceMode(",
@@ -1491,7 +1491,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:229",
     "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1232",
     // 新增 1 条（2026-10-12，ADR-0039）：目标行已逐条核对。
-    "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:112 -> src/index.ts:506",
+    "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:120 -> src/index.ts:506",
   ];
 
   test("仓库内引用清单是钉住的基线：新增一条就要有人重新确认一次", () => {

@@ -71,6 +71,14 @@ thing being described should not have been a preset.
    session, and that its output is the deliverable. Appended for named definitions too, so a
    definition does not have to restate what the dispatch already knows.
 
+   **This decision is carried by issue #186.** What ships today is the existing PTC context block:
+   depth, remaining budget, and the report clause. That block already tells the child it is a
+   dispatched run, but neither of the other two clauses is in it — so stating all three here as
+   though they were is the same over-claim Decision 5 carried, a record describing work a different
+   ticket owns. A generalist needs those two sentences more than a named child did: a definition's
+   own body used to be where a child learned what it was, and with no definition there is nothing
+   else to say it.
+
 5. **The startup availability warning goes.** It reported that no agent was registered, and
    therefore that `ptc_subagent` had nothing to dispatch. That was true only while a name was
    required; an empty registry is now the normal state of a fresh install, and a notice that fires
