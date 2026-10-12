@@ -34,12 +34,18 @@
  *      is reported as such instead of being credited with catching the mutation;
  *   3. a gate with no case is listed as unproven, and the list of gates is read from `checks.mjs`
  *      rather than written here, so a gate added there shows up as unproven the day it is added;
- *   4. the repository must be byte-identical when the run finishes.
+ *   4. the repository must be unchanged when the run finishes — same paths, same kinds, same
+ *      contents, same symlink targets.
  *
  * Property 3 currently has nothing to print: all five gates have a case. It was not written
  * speculatively — this file started with three cases, and the missing two were what made property 3
  * worth having. Adding a sixth gate to `checks.mjs` by hand and re-running was how it was checked:
  * `no counterfactual yet for: check-sixth.mjs`, as it should be.
+ *
+ * Every case runs against a copy of **your working tree**, not of `HEAD`. That is deliberate and it
+ * was wrong first: `git archive HEAD` meant a gate you had just broken in your working tree still
+ * reported as having caught its mutation. The whole question here is whether the gate in front of
+ * you has teeth.
  *
  * ## Running it
  *
@@ -52,9 +58,18 @@
 
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  readlinkSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CHECK_SCRIPTS } from '../checks.mjs';
 
@@ -126,12 +141,12 @@ const CASES = [
     mutate(dir) {
       const file = join(dir, 'docs', 'usage', 'counterfactual-probe.md');
       write(file, '# A reader-facing document nobody decided about\n\nBody.\n');
-      // Re-run the projection so the gate sees a file the manifest does not account for. Writing
-      // the file alone would not be enough: the gate reads the manifest, not the directory.
-      spawnSync(process.execPath, [join(dir, 'packages', 'website', 'scripts', 'project-docs.mjs')], {
-        cwd: dir,
-        encoding: 'utf8',
-      });
+      // No re-projection step, and the comment that used to justify one was wrong. The gate
+      // enumerates `docs/usage/` itself and compares that list against the manifest, so writing
+      // the file is sufficient: measured, file-only goes red (exit 1), while re-running
+      // `project-docs.mjs` alone changes nothing at all. An earlier version ran it anyway and threw
+      // the result away — a broken projection step reported nothing, which is constraint #3's
+      // silent failure.
       return 'added a document under docs/usage/ without projecting or excusing it';
     },
   },
@@ -149,66 +164,114 @@ function findFirst(dir, rel) {
 }
 
 /**
- * A content hash of every file under `dir`.
+ * A content hash of everything under `dir`.
  *
  * This started out as a total byte count, which is a **wrong** change detector and was caught by
  * the harness itself: a mutation turning `dispatchConcurrency: 8` into `9` changes real content and
  * not one byte of length, so the runner reported "the mutation changed no bytes" for a mutation
  * that worked. A length is not an identity; hash the contents.
  *
- * `ignore` is a set of directory names to prune at any depth. Scanning the real repository needs it:
- * `node_modules` is 492 MB of files that no counterfactual can plausibly mutate and that a stray
- * background install would otherwise turn into a false "the repository changed" — a harness that
- * cries wolf about its own safety check stops being read. Symlinks are hashed by path without being
- * followed, so the set of them is still covered.
+ * Four corrections after review, all of them about things this first version claimed or missed:
+ *
+ * - **Directories are hashed, not just files.** Creating an empty directory was invisible, so
+ *   "byte-identical" was really "same non-empty path set with the same contents".
+ * - **Entries are separated.** Concatenating path and content with no delimiter hashes
+ *   `["ab", "c"]` and `["a", "bc"]` identically.
+ * - **Symlinks are hashed as links, never followed.** An earlier comment claimed this and the code
+ *   did the opposite: `readFileSync` resolves the target, so editing a file outside the tree changed
+ *   the digest, and a regular file and a symlink to an identical file hashed the same. The link
+ *   target and the entry's kind both go into the hash now.
+ * - **`ignore` prunes by relative path**, and is deliberately narrow. `node_modules` is 492 MB that
+ *   no counterfactual can plausibly mutate; `coverage/` is a test artifact. `.git/objects` is pruned
+ *   but **the rest of `.git` is not** — `.git/hooks` is exactly where a mutation that reached here
+ *   would do damage, and pruning all of `.git` left that reachable. Cost of hashing the rest of
+ *   `.git` is tens of files.
  */
 function treeDigest(dir, ignore = new Set()) {
   const hash = createHash('sha256');
+  const pruned = (rel) => [...ignore].some((p) => rel === p || rel.endsWith(`/${p}`));
 
   const walk = (current) => {
     const found = [];
     for (const entry of readdirSync(current, { withFileTypes: true })) {
-      if (entry.isSymbolicLink()) found.push([join(current, entry.name), null]);
-      else if (entry.isDirectory()) {
-        if (ignore.has(entry.name)) continue;
-        found.push(...walk(join(current, entry.name)));
-      } else if (entry.isFile()) found.push([join(current, entry.name), null]);
+      const full = join(current, entry.name);
+      if (entry.isDirectory()) {
+        const rel = relative(dir, full).split(sep).join('/');
+        if (pruned(rel)) continue;
+        found.push([full, 'dir', '']);
+        found.push(...walk(full));
+      } else if (entry.isSymbolicLink()) {
+        found.push([full, 'link', readlinkSync(full)]);
+      } else if (entry.isFile()) {
+        found.push([full, 'file', readFileSync(full)]);
+      }
     }
     return found;
   };
 
-  for (const [file] of walk(dir).sort()) {
-    hash.update(file.slice(dir.length));
-    hash.update(readFileSync(file));
+  for (const [path, kind, content] of walk(dir).sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+    hash.update(path.slice(dir.length));
+    hash.update('\0');
+    hash.update(kind);
+    hash.update('\0');
+    hash.update(content);
+    hash.update('\0');
   }
   return hash.digest('hex');
 }
 
+/** Directories no counterfactual can mutate, pruned from the copy and from the digest. */
+const SKIP_COPY = new Set(['.git', 'node_modules', 'coverage', '.pnpm-store']);
+
 /**
- * A throwaway copy: tracked files, plus the build output and the projected documents.
+ * A throwaway copy of **your working tree**.
  *
- * Both extra pieces are gitignored build products, so `git archive` alone would hand every case a
- * copy in which three of the five gates are red for a missing build — a case that then "passes"
- * because it was already broken.
+ * This used to be `git archive HEAD`, which measured the *committed* tree. That is the wrong tree:
+ * the question this harness answers is "does the gate in front of me still have teeth", and the gate
+ * in front of me is the one in the working tree, not the one from the last commit. Measured: with
+ * `check-style-scope.mjs`'s own detection disabled in the working tree and uncommitted, the harness
+ * still reported `✓ caught` and exited 0. Copying the working tree also brings the build output and
+ * the projected documents along for free — they are gitignored, so `git archive` never had them and
+ * every case was running against a tree where three of five gates were red for a missing build.
+ *
+ * `.git` is skipped because a copy of the object store is not what is being measured, and
+ * `node_modules` because it is 492 MB. Everything else, including uncommitted work, is copied.
  */
 function makeWorkdir() {
   const dir = mkdtempSync(join(tmpdir(), 'ptc-site-counterfactual-'));
-  const archive = spawnSync('git', ['archive', 'HEAD'], { cwd: REPO_ROOT, maxBuffer: 64 * 1024 * 1024 });
-  if (archive.status !== 0) throw new Error(`git archive failed: ${archive.stderr?.toString().trim()}`);
-  spawnSync('tar', ['-x', '-C', dir], { input: archive.stdout, stdio: ['pipe', 'ignore', 'pipe'] });
-  cpSync(join(SITE, '.vitepress', 'dist'), join(dir, 'packages', 'website', '.vitepress', 'dist'), {
-    recursive: true,
-  });
-  cpSync(join(SITE, 'docs'), join(dir, 'packages', 'website', 'docs'), { recursive: true });
+  try {
+    cpSync(REPO_ROOT, dir, {
+      recursive: true,
+      dereference: false,
+      filter: (src) => !SKIP_COPY.has(basename(src)),
+    });
+  } catch (error) {
+    // A copy that half-succeeded is worse than none: it would look like a clean starting point.
+    rmSync(dir, { recursive: true, force: true });
+    throw new Error(`could not copy the working tree into ${dir}: ${error.message}`);
+  }
   return dir;
 }
 
+/**
+ * Run one gate and report how it ended.
+ *
+ * A gate that died on a signal returns `status: null`, and `null !== 0` used to read as "caught" —
+ * so an OOM-killed or SIGSEGV'd gate was credited with detecting the mutation and the harness exited
+ * 0, printing `✓ caught (exit null)`. A crash is not a detection. `run.error` is the same case for
+ * "never managed to run at all".
+ */
 function runGate(dir, gate) {
   const run = spawnSync(process.execPath, [join(dir, 'packages', 'website', 'scripts', gate)], {
     cwd: dir,
     encoding: 'utf8',
   });
-  return { code: run.status, out: `${run.stdout ?? ''}${run.stderr ?? ''}`.trim() };
+  const out = `${run.stdout ?? ''}${run.stderr ?? ''}`.trim();
+  if (run.error) return { code: null, out: out || run.error.message, died: run.error.message };
+  if (run.status === null) {
+    return { code: null, out: out || '(no output)', died: `killed by signal ${run.signal}` };
+  }
+  return { code: run.status, out, died: null };
 }
 
 // ── main ────────────────────────────────────────────────────────────────────────────────────
@@ -221,17 +284,26 @@ if (only && selected.length === 0) {
   process.exit(1);
 }
 
-if (!existsSync(join(SITE, '.vitepress', 'dist', 'index.html'))) {
-  console.error(
-    '✗ the site has not been built.\n\n' +
-      '  Three of the five gates read the build output, and every case would otherwise fail for\n' +
-      '  the missing build rather than for its mutation. Run `pnpm --filter website run build` first.',
-  );
+// Both required inputs, named, before any workdir is created. A missing one used to surface as an
+// ENOENT stack trace from deep inside `cpSync`, after a temporary directory had already been made —
+// so a plain mistake reported as a crash and leaked the directory behind it.
+const REQUIRED_INPUTS = [
+  [join(SITE, '.vitepress', 'dist', 'index.html'), 'the built landing page',
+    'Run `pnpm --filter website run build` first.'],
+  [join(SITE, 'docs'), 'the projected documents',
+    'Run `pnpm --filter website run project` first, or the site build, which does it for you.'],
+];
+const missing = REQUIRED_INPUTS.filter(([path]) => !existsSync(path));
+if (missing.length > 0) {
+  console.error('✗ the site is not in a state this harness can measure.\n');
+  for (const [, what, fix] of missing) console.error(`  missing ${what} — ${fix}\n`);
+  console.error('  Three of the five gates read the build output, so every case would otherwise fail\n');
+  console.error('  for the missing input rather than for its mutation.\n');
   process.exit(1);
 }
 
-/** Directories pruned when hashing the real repository; see `treeDigest`. */
-const REPO_SCAN_IGNORE = new Set(['.git', 'node_modules']);
+/** Pruned when hashing the real repository; see `treeDigest` for why `.git` is only half-pruned. */
+const REPO_SCAN_IGNORE = new Set(['node_modules', 'coverage', '.pnpm-store', '.git/objects']);
 
 const before = treeDigest(REPO_ROOT, REPO_SCAN_IGNORE);
 let failed = 0;
@@ -274,7 +346,15 @@ for (const testCase of selected) {
   const mutated = runGate(work, testCase.gate);
   rmSync(work, { recursive: true, force: true });
 
-  if (mutated.code === 0) {
+  if (mutated.died) {
+    // A gate that crashed did not detect anything. Counting it as a catch is the one false pass
+    // this harness exists to avoid, so it is named as what it is.
+    failed += 1;
+    console.log(`── ${label}`);
+    console.log(`   ✗ the gate did not finish — ${mutated.died}. A crash is not a detection:`);
+    console.log(`${mutated.out.split('\n').map((l) => `     ${l}`).join('\n')}`);
+    console.log('');
+  } else if (mutated.code === 0) {
     failed += 1;
     console.log(`── ${label}`);
     console.log(`   ✗ NOT CAUGHT — the gate still exits 0 after: ${what}`);

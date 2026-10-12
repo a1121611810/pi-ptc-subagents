@@ -24,11 +24,12 @@
 # check" from "there was something to check and it passed" has to say so rather than pick the
 # convenient answer.
 #
-# ## Five ways this hook has been wrong, and what closes each
+# ## Seven ways this hook has been wrong, and what closes each
 #
 # A hook that reads correctly and refuses nothing is worse than no hook, because it looks like
-# protection. Four of these were found in review; the fifth was found by re-testing the fix for
-# the first one. Each is closed by construction rather than by a claim.
+# protection. Four of these were found in review of the first version; the fifth was found by
+# re-testing that version's fix for the first one; the last two were found by reviewing the repair.
+# Each is closed by construction rather than by a claim.
 #
 # 1. **`git diff --cached --name-only` quotes non-ASCII paths.** A file named `笔记.ts` came back as
 #    `"\347\254\224\350\256\260\346\226\207\344\273\266.ts"`, nothing matched, and an unformatted
@@ -41,22 +42,40 @@
 #    without unstaging passed. The two are indistinguishable from the message alone, so this hook
 #    checks the paths itself: a staged path that is not on disk is refused outright.
 # 4. **The formatter reads the working tree; the commit records the index.** Stage a file, fix it,
-#    then commit, and the bytes checked are not the bytes committed. Closed by refusing on
-#    drift — see "One deliberate limit" below.
+#    then commit, and the bytes checked are not the bytes committed. Closed by refusing on drift.
 # 5. **`xargs` does not pass its child's exit code through.** On macOS it collapses 1 and 2 alike
-#    to 1, so routing the paths through `xargs -0` to fix (2) silently disabled the exit-2 branch
-#    of this very script: every commit touching only `packages/website/**` — a normal state, since
+#    to 1, so routing the paths through `xargs -0` to fix (2) silently disabled the exit-2 branch of
+#    this very script: every commit touching only `packages/website/**` — a normal state, since
 #    ADR-0036 keeps that tree out of the root formatter — was refused as "not formatted" while
 #    printing the formatter's own "excluded by ignore rules" line as evidence. The branch was
-#    unreachable and nothing said so. Closed by not using `xargs`: the paths go to the formatter as
-#    a bash array, so its exit code arrives intact.
+#    unreachable and nothing said so. Closed by not using `xargs`: the paths go to the formatter as a
+#    bash array, so its exit code arrives intact.
+# 6. **`--diff-filter=ACM` silently drops renames.** Git detects renames by default, so a `git mv`
+#    reports status `R`, which is not in the filter — the moved-in path never entered `CHECKABLE`
+#    and the commit exited 0 with unformatted content in it. Measured at `R097`:
+#    `git show :src/final.ts` held `export const   value10   =   999;` and `oxfmt --check` on the
+#    same file exited 1. Closed with `--no-renames`, which makes the move an ordinary add plus a
+#    delete and puts the new path back in the set. (`-M0` does **not** work here — it yields an
+#    empty set.)
+# 7. **The drift guard cost more than the check it was guarding.** One `git diff --quiet` per staged
+#    path made a 250-file `git add -A` spend 32.7 s in this hook, of which 16.9 s was the guard and
+#    6.3 s was the formatter — against the header's own reason for refusing to run lint here. Closed
+#    by one batched call, 0.06 s on the same set.
 #
-# ## One deliberate limit, stated rather than papered over
+# ## Three deliberate limits, stated rather than papered over
 #
-# A filename containing a newline would still break the staged-set walk, because the guard refuses
-# to hand a newline-bearing argument to the formatter on the chance it is read as two paths. No
-# such file exists in this repository and none of the refusals below depend on it; the limit is
-# written down rather than engineered around.
+# - **A filename containing a newline** would break the staged-set walk, because the guard refuses
+#   to hand a newline-bearing argument to the formatter on the chance it is read as two paths. No
+#   such file exists in this repository.
+# - **`git update-index --skip-worktree` on a staged path disables the drift guard**, because git
+#   then reports no difference for that path regardless of what is on disk. Ordinary drift is
+#   refused; this needs a deliberate flag, and a sparse checkout sets it implicitly. The formatter
+#   would then check the working tree while the commit records the index — the situation (4) exists
+#   to prevent. Nothing here sets it, and nothing in this repository is sparse.
+# - **A partially staged file is refused.** `git add -p` leaves worktree content that differs from
+#   the index, so (4) refuses it. That is the intended direction, but it makes `git add -p`
+#   unusable with this hook installed; stage the whole file, or bypass deliberately with
+#   `--no-verify`.
 #
 # bash 3.2 is what macOS ships and what `/usr/bin/env bash` finds here, so this uses `read -d ''`
 # and `array+=(...)` and deliberately avoids `mapfile`.
@@ -104,7 +123,7 @@ while IFS= read -r -d '' path; do
       CHECKABLE+=("$path")
       ;;
   esac
-done < <(git -c core.quotePath=false diff --cached --name-only --diff-filter=ACM -z)
+done < <(git -c core.quotePath=false diff --cached --name-only --diff-filter=ACM --no-renames -z)
 
 # ── 1. a packaged artifact ───────────────────────────────────────────────────────────────────
 
@@ -128,9 +147,9 @@ if [ ${#CHECKABLE[@]} -eq 0 ]; then
   exit 0
 fi
 
-# Every staged path this hook is about to check must exist on disk and must be byte-identical
-# between the index and the working tree. The formatter reads the working tree, so either failure
-# means the check and the commit would be looking at different bytes.
+# Every staged path this hook is about to check must exist on disk. The formatter's message for a
+# missing file is identical to the one it gives for a file excluded by config, so this is checked
+# rather than inferred.
 for path in "${CHECKABLE[@]}"; do
   if [ ! -e "$path" ]; then
     fail "a staged file is not on disk, so the formatter cannot check it." \
@@ -140,16 +159,31 @@ for path in "${CHECKABLE[@]}"; do
       "excluded by config, so this hook refuses instead of guessing from the message. Restore" \
       "the file, or unstage it."
   fi
-
-  # `git diff` without --cached compares the working tree against the index.
-  if ! git -c core.quotePath=false diff --quiet -- "$path"; then
-    fail "a staged file has changed on disk since it was staged." \
-      "$path" \
-      "" \
-      "The formatter reads the working tree, so it would be checking different bytes from the" \
-      "ones this commit will record. Re-stage the change (git add) and commit again."
-  fi
 done
+
+# Drift: the working tree must not have moved away from what the index holds, or the formatter reads
+# different bytes from the ones this commit will record.
+#
+# One batched call answers "did anything move". Naming the culprit takes a call per path, so the
+# loop below runs only when there is something to name. The first version asked per path
+# unconditionally and cost 16.9 s of the 32.7 s a 250-file `git add -A` spent in this hook, against
+# 6.3 s for the formatter it was guarding — which is the "a slow hook gets --no-verify'd" outcome
+# this file exists to avoid. The batched call measures 0.06 s on the same set.
+#
+# `git diff` without --cached compares the working tree against the index.
+if ! git -c core.quotePath=false diff --quiet -- "${CHECKABLE[@]}"; then
+  for path in "${CHECKABLE[@]}"; do
+    if ! git -c core.quotePath=false diff --quiet -- "$path"; then
+      fail "a staged file has changed on disk since it was staged." \
+        "$path" \
+        "" \
+        "The formatter reads the working tree, so it would be checking different bytes from the" \
+        "ones this commit will record. Re-stage it (git add -- <path>) and commit again. A" \
+        "partially staged file will be reported here too: this hook checks what is staged, and a" \
+        "half-staged file has two versions."
+    fi
+  done
+fi
 
 set +e
 FORMAT_OUT="$(pnpm exec oxfmt --check "${CHECKABLE[@]}" 2>&1)"
