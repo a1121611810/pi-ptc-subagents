@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.3] - 2026-10-12
+
+### Fixed
+
+- **`ptc_subagent` was registered, described to the model, and still uncallable — with nothing
+  saying so.** On a `subagents` surface the tool needs at least one agent definition under
+  `~/.pi/agent/agents/<name>.md` or `<project>/.pi/agents/<name>.md`, and there is no default agent
+  (ADR-0016). With an empty registry the tool was live and inert: a real 920-message session made
+  520 tool calls and used it zero times, the model decided subagents were right, spent twenty-plus
+  calls hunting the install for definitions that were not there, and gave up. `session_start` now
+  reports it — naming both directories and the file shape — and the same fact is painted on the
+  `ptc-mode` status, so it is still readable after the notice is gone.
+- **Agent files saved with CRLF, a UTF-8 BOM, or a blank line before the delimiter parsed as
+  "no such agent".** The frontmatter pattern matched exactly one shape, and a `null` return reads,
+  from every layer above, as an unregistered name. The body is normalised after the match rather
+  than inside it, so the system prompt handed to a child carries no stray carriage returns. A file
+  that exists but cannot be parsed is now also distinguishable from one that is absent.
+- **`ptc_subagent`'s description states where definitions load from**, and that there is no default
+  agent — it points at the refusal rather than restating it, so the actionable detail keeps one
+  home (the renderer, wired to the same resolver a dispatch uses).
+
+### Added
+
+- **A real-process smoke test**, with a fake `pi` on `PATH` rather than a stubbed lifecycle: the
+  spawn, the `--append-system-prompt` materialisation, the stdout parsing and the exit code are
+  all exercised. Both directions are asserted — an empty registry reports, and a registered agent
+  dispatches to completion — because either alone passes against a build that is broken in the
+  other direction.
+- **A `能力的可用前提` review dimension**, asking when a user learns a tool's precondition is
+  unmet, with "never" as the answer that blocks.
+
 ## [2.0.2] - 2026-10-10
 
 ### Changed
@@ -23,6 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   binding list itself is unchanged, and `powershell` is currently not reachable from PTC
   programs even when enabled (tracked separately).
 
+[2.0.3]: https://github.com/a1121611810/pi-ptc-subagents/compare/v2.0.2...v2.0.3
 [2.0.2]: https://github.com/a1121611810/pi-ptc-subagents/compare/v2.0.1...v2.0.2
 
 ## [2.0.1] - 2026-10-10
