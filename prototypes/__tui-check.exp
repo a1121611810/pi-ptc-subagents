@@ -1,0 +1,130 @@
+#!/usr/bin/expect -f
+#
+# PROTOTYPE — throwaway. Drives pi's REAL TUI behind a pty and captures what it renders.
+#
+# Why this exists: every previous check of the #184 work ran in `--print`/JSON mode, where
+# `ui.notify` and `ui.setStatus` are invisible by construction — they are the TUI channel. So the
+# notice and the status line have never been observed in a real pi at all. This is the only rig
+# that can see them.
+#
+# A prior attempt in this repo failed for a reason worth recording: a pty capture "showed neither
+# the notice nor a control marker", because a TUI quits on stdin EOF before a toast renders. The
+# fix is a driver that OWNS stdin (`expect`), rather than a pipe that closes.
+#
+#
+# ── VERDICT (run 2026-10-12, real pi TUI behind a pty) ────────────────────────────
+#
+#   scenario                 build      toast   status marker   startup finished
+#   boot (empty registry)    A local    no      0               yes
+#   boot (empty registry)    B 2.0.3    YES     1               yes
+#   configured (1 agent)     A local    no      0               yes
+#   configured (1 agent)     B 2.0.3    no      0               yes
+#
+# #187 is confirmed end to end in a real TUI, BOTH halves: 2.0.3 renders the toast AND paints
+# `no registered agent` as its own line below the bottom bar, and the local build renders neither.
+# The `configured` rows are what make that difference mean something — with one agent definition in
+# the cwd, 2.0.3 stops warning too, so the pair of boot rows is about SUPPRESSION rather than about
+# a build that happens never to warn.
+#
+# This had never been observed by any means. The repo's own notes said a pty capture "showed
+# neither the notice nor a control marker" — the cause was stdin EOF, and the fix is a driver that
+# OWNS stdin.
+#
+# NOT OBTAINED: a dispatch driven from inside the TUI. Typing does not reach it — pi negotiates the
+# kitty keyboard protocol (it emits `ESC[?u` and pushes `ESC[ >7u`) under BOTH `TERM=xterm-256color`
+# and `TERM=dumb`, so it expects CSI-u encoded keys and discards raw bytes. Measured: 4 self-verified
+# attempts, 0 landed. Driving text would mean implementing enough of that protocol to be a terminal
+# client, which is out of proportion to what it would add: the dispatch itself already has a
+# decisive A/B in `--print` mode (`fulfilled` vs `refused`), and the TUI would only add how the
+# result is DRAWN.
+#
+# Harness failures worth keeping, because each produced a confident wrong answer first:
+#   - a fixed 14s wait, then a 50s wait, both sometimes left the startup panel owning the screen,
+#     where typed input is swallowed. The run then looks like "the model chose not to dispatch".
+#     Fixed by removing the variable (`--offline`) rather than guessing a bigger number.
+#   - the first liveness check asked whether "Startup is still in progress" appeared ANYWHERE in the
+#     capture. That is wrong for a raw stream: a string from an early frame stays in the bytes after
+#     it leaves the screen. The check that works asks whether the thing you SENT arrived.
+#
+# Usage:  expect prototypes/__tui-check.exp <scenario> <ext-path> <out-file>
+#   scenario  boot | dispatch
+#   ext-path  a package dir (`-e <dir>`) — the local tree, or the installed 2.0.3
+#
+# Not production. Delete when answered.
+
+set scenario  [lindex $argv 0]
+set extPath   [lindex $argv 1]
+set outFile   [lindex $argv 2]
+
+set timeout 240
+
+# An optional working directory. The notice's condition is "the registry is empty", and the
+# registry's PROJECT half is answered from the session cwd — so pointing the session at a cwd that
+# holds one definition is how to test the CONDITION rather than only its absence.
+if {[info exists env(TUI_CWD)]} { cd $env(TUI_CWD) }
+log_user 0
+log_file -a $outFile
+set env(TERM) "xterm-256color"
+
+# `-ne` plus an explicit `-e builtin:codemode`: codemode activation is what makes surface
+# detection register `ptc_subagent` at all, so without it neither build has a face to inspect.
+# `--offline`: startup's package-update check is a network call, and while the startup panel owns
+# the screen typed input is swallowed. Measured twice: a 14s wait and a 50s wait BOTH sometimes
+# left the panel up, so the dispatch scenario silently did nothing. Removing the variable beats
+# guessing a longer sleep.
+spawn -noecho pi --tui-mode regular --offline -ne -e builtin:codemode -e $extPath \
+    --provider deepseek --model deepseek-flash
+
+# The startup screen is where a `session_start` notice lands. Long enough for the toast, the
+# status line and the startup panel to have been written at least once.
+# Startup does network work (a package-update check) and renders a panel that owns the screen
+# until it finishes; typed input is swallowed while it is up. Measured: 14s is not enough — the
+# capture still read "Startup is still in progress" and the prompt went nowhere. Overridable so
+# the wait can be probed rather than guessed.
+set bootWait 14
+if {[info exists env(TUI_WAIT)]} { set bootWait $env(TUI_WAIT) }
+sleep $bootWait
+
+if {$scenario eq "dispatch"} {
+    # A dispatch with NO `agent` argument: the local build runs a generalist child, 2.0.3 refuses
+    # it at the tool schema.
+    #
+    # Kept SHORT on purpose — the verification below greps this exact text out of the TUI's own
+    # input-box render, and a long line would wrap and never match.
+    set prompt "Use ptc_subagent with NO agent; task: reply PONG"
+    set landed 0
+    for {set attempt 1} {$attempt <= 3} {incr attempt} {
+        send -- "$prompt\r"
+        sleep 10
+        # Self-verifying send. Typing into a TUI whose startup panel still owns the screen is
+        # silently swallowed — measured twice, and the first run looked like "the model chose not
+        # to dispatch" rather than "nothing was ever typed". Retrying is safe precisely because
+        # this checks whether the text ARRIVED.
+        if {![catch {exec grep -c "ptc_subagent with NO agent" $outFile} n]} {
+            if {[string trim $n] ne "0"} { set landed 1; break }
+        }
+        sleep 20
+    }
+    puts "  typed prompt landed: $landed (after $attempt attempt(s))"
+    if {$landed} {
+        set afterSend 90
+        if {[info exists env(TUI_AFTER)]} { set afterSend $env(TUI_AFTER) }
+        sleep $afterSend
+    }
+}
+
+# Quit: the startup help advertises ctrl+c/ctrl+d as clear/exit. Send both, with a second round
+# in case the first is swallowed by a dialog.
+send "\003"
+sleep 3
+send "\004"
+sleep 3
+send "\003"
+
+expect {
+    eof { }
+    timeout {
+        send "\003"
+        sleep 2
+    }
+}
