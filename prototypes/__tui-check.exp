@@ -12,42 +12,68 @@
 # fix is a driver that OWNS stdin (`expect`), rather than a pipe that closes.
 #
 #
-# ── VERDICT (run 2026-10-12, real pi TUI behind a pty) ────────────────────────────
+# ── VERDICT (2026-10-12, real pi, DEFAULT fullscreen TUI, build is the only variable) ────────────
 #
-#   scenario                 build      toast   status marker   startup finished
-#   boot (empty registry)    A local    no      0               yes
-#   boot (empty registry)    B 2.0.3    YES     1               yes
-#   configured (1 agent)     A local    no      0               yes
-#   configured (1 agent)     B 2.0.3    no      0               yes
+# Fullscreen has been the default since 1.0 ("Fullscreen by default", vendor CHANGELOG). An earlier
+# pass drove `--tui-mode regular` — the NON-default renderer — so it was measuring the wrong surface.
 #
-# #187 is confirmed end to end in a real TUI, BOTH halves: 2.0.3 renders the toast AND paints
-# `no registered agent` as its own line below the bottom bar, and the local build renders neither.
-# The `configured` rows are what make that difference mean something — with one agent definition in
-# the cwd, 2.0.3 stops warning too, so the pair of boot rows is about SUPPRESSION rather than about
-# a build that happens never to warn.
+#   scenario                  A local                       B installed 2.0.3
+#   ------------------------  ---------------------------  -------------------------------------------
+#   boot, empty registry      no notice, no status marker   notice in startup panel + status marker
+#   configured, 1 definition  no notice, no status marker   no notice, no status marker
+#   codemode, after a call    no status marker              status marker, row 45, warning colour
+#   dispatch, no `agent`      tool call WITHOUT `agent`,    tool call forced to carry `agent`,
+#                             fulfilled, PONG returned     refused: `must not have fewer than 1`
 #
-# This had never been observed by any means. The repo's own notes said a pty capture "showed
-# neither the notice nor a control marker" — the cause was stdin EOF, and the fix is a driver that
-# OWNS stdin.
+# Reads, one per row:
 #
-# NOT OBTAINED: a dispatch driven from inside the TUI. Typing does not reach it — pi negotiates the
-# kitty keyboard protocol (it emits `ESC[?u` and pushes `ESC[ >7u`) under BOTH `TERM=xterm-256color`
-# and `TERM=dumb`, so it expects CSI-u encoded keys and discards raw bytes. Measured: 4 self-verified
-# attempts, 0 landed. Driving text would mean implementing enough of that protocol to be a terminal
-# client, which is out of proportion to what it would add: the dispatch itself already has a
-# decisive A/B in `--print` mode (`fulfilled` vs `refused`), and the TUI would only add how the
-# result is DRAWN.
+#   The `configured` row is what makes the `boot` row mean something. With one definition present
+#   2.0.3 stops warning too, so the boot difference is SUPPRESSION — not a build that never warns.
 #
-# Harness failures worth keeping, because each produced a confident wrong answer first:
-#   - a fixed 14s wait, then a 50s wait, both sometimes left the startup panel owning the screen,
-#     where typed input is swallowed. The run then looks like "the model chose not to dispatch".
-#     Fixed by removing the variable (`--offline`) rather than guessing a bigger number.
-#   - the first liveness check asked whether "Startup is still in progress" appeared ANYWHERE in the
-#     capture. That is wrong for a raw stream: a string from an early frame stays in the bytes after
-#     it leaves the screen. The check that works asks whether the thing you SENT arrived.
+#   #187 has TWO faces, rendered in two different places. The notice is a long
+#   `Warning: pi-ptc-subagents: no registered agent was found…` line inside the STARTUP PANEL. The
+#   status marker is a short `no registered agent` painted on the row BELOW the bottom bar — raw
+#   bytes, present at boot and still present after codemode activation:
+#   `ESC[45;1H ESC[2K ESC[38;5;172m no registered agent ESC[39m`.
+#
+#   The status half went unobserved for one reason, and it was the search term: `ptc-mode` is the
+#   status KEY, and a key is never rendered. Grepping captures for it returns 0 on BOTH builds —
+#   including 2.0.3 with the marker plainly on screen. Counting one marker while looking for the
+#   other is the whole error. An earlier draft of this header claimed the boot scenario "cannot see
+#   this face at all, the setter only runs on activation"; the measurement contradicts that — under
+#   `-e builtin:codemode` 2.0.3 paints it at boot too.
+#
+#   #185 in the TUI: the local build's tool call renders as `ptc_subagent  task="reply PONG"` —
+#   no `agent` key at all — and the child's PONG comes back. 2.0.3 cannot omit it, so the model
+#   GUESSED `"agent": ""`, and the TUI shows pi rejecting it at the schema. That accidentally
+#   exercised the branch #185 exists for: absent is legal, empty is a mistake, and the two must not
+#   be conflated.
+#
+# The wrong turn worth keeping: "typing does not reach pi's TUI, it wants the kitty keyboard
+# protocol" was WRONG. The kitty protocol is real — pi emits `ESC[?u` and pushes `ESC[>7u` under
+# every TERM — but it was not the cause. The cause was one level up: a bare pty is not a terminal.
+# Fullscreen mode asks the terminal for its colours (`OSC 10;?` / `OSC 11;?` / `OSC 4;N;?`), its
+# identity (`ESC[c`) and its size, and a bare pty answers none — so the renderer waits, the editor
+# is never drawn, and an undrawn editor has nowhere to receive input. Give the pty a viewport and
+# answer those queries and text lands: measured ~1.5 KB → ~15 KB of capture, typed text on screen.
+#
+# Harness failures. Four of them, each of which first produced a confident wrong answer — the shape
+# this repo keeps paying for: a check that reports a result about the thing it never observed.
+#   - a fixed 14s wait, then 50s, left the startup panel owning the screen where input is swallowed.
+#     Removed as a variable (`--offline`) rather than guessed at; 25s is the measured value.
+#   - the first liveness check asked whether a string appeared ANYWHERE in the capture, wrong for a
+#     raw stream — an early frame stays in the bytes. Ask whether what you SENT arrived.
+#   - the check then grepped the capture FILE, which expect had not flushed: it read 0 three times
+#     while the capture held the prompt four times and a running turn (`Working`, `1.4%/1.0M`), so
+#     the script skipped its wait and tore a live dispatch down. Fixed by matching the incoming
+#     stream instead — no file, no flush, no lag.
+#   - the arrival needle was an UNESCAPED regex, so the codemode prompt containing `21*2` could
+#     never match itself: three runs reported "landed: 0" while the capture plainly showed the
+#     prompt in the input box and the tool call going through. A prompt that fails its own arrival
+#     check is worse than no check — it turns a working run into a "could not drive it" claim.
 #
 # Usage:  expect prototypes/__tui-check.exp <scenario> <ext-path> <out-file>
-#   scenario  boot | dispatch
+#   scenario  boot | configured | dispatch | codemode
 #   ext-path  a package dir (`-e <dir>`) — the local tree, or the installed 2.0.3
 #
 # Not production. Delete when answered.
@@ -68,22 +94,74 @@ set env(TERM) "xterm-256color"
 
 # `-ne` plus an explicit `-e builtin:codemode`: codemode activation is what makes surface
 # detection register `ptc_subagent` at all, so without it neither build has a face to inspect.
+# The pty must be a TERMINAL, not just a pipe. Two things were missing, and each was measured:
+#
+#   * a viewport — fullscreen mode reads terminal rows/cols;
+#   * ANSWERS to the queries pi sends before it draws. `PI_TUI_WRITE_LOG` (the vendor's own
+#     diagnostic for the raw ANSI stream) shows it asking for foreground/background colours
+#     (`OSC 10;?` / `OSC 11;?`), the 16-colour palette (`OSC 4;N;?`), and DA1 (`ESC[c`). A bare pty
+#     never replies, and fullscreen mode waits before laying out the editor.
+#
+# Measured, same build and same scenario: without the answers the capture is ~1.5 KB and typed
+# text never lands; with them it is ~15 KB, the alternate screen is entered, and the text lands.
+# Without an editor there is nowhere for input to go — which is the actual reason typing "did not
+# work", not the keyboard protocol this was first blamed on.
+set stty_init "rows 45 columns 140"
+
 # `--offline`: startup's package-update check is a network call, and while the startup panel owns
-# the screen typed input is swallowed. Measured twice: a 14s wait and a 50s wait BOTH sometimes
-# left the panel up, so the dispatch scenario silently did nothing. Removing the variable beats
-# guessing a longer sleep.
-spawn -noecho pi --tui-mode regular --offline -ne -e builtin:codemode -e $extPath \
+# the screen typed input is swallowed — measured twice, at 14s and at 50s, so the wait was removed
+# as a variable rather than guessed at.
+spawn -noecho pi --offline -ne -e builtin:codemode -e $extPath \
     --provider deepseek --model deepseek-flash
 
-# The startup screen is where a `session_start` notice lands. Long enough for the toast, the
-# status line and the startup panel to have been written at least once.
-# Startup does network work (a package-update check) and renders a panel that owns the screen
-# until it finishes; typed input is swallowed while it is up. Measured: 14s is not enough — the
-# capture still read "Startup is still in progress" and the prompt went nowhere. Overridable so
-# the wait can be probed rather than guessed.
-set bootWait 14
+# Bound this loop separately: pi sends all four queries within the first moments of startup, so
+# after they are answered nothing else will ever match and the block would otherwise sit out the
+# full global timeout. Measured cost of leaving it unbounded: ~240s dead per run, ~4min each.
+set timeout 20
+expect {
+    -re "\x1b\\[c"               { send -- "\x1b\\[?62;22c"; exp_continue }
+    -re "\x1b\\]10;\\?\x07"      { send -- "\x1b\\]10;rgb:ffff/ffff/ffff\x07"; exp_continue }
+    -re "\x1b\\]11;\\?\x07"      { send -- "\x1b\\]11;rgb:0000/0000/0000\x07"; exp_continue }
+    -re "\x1b\\]4;\\d+;\\?\x07"  { send -- "\x1b\\]4;0;rgb:0000/0000/0000\x07"; exp_continue }
+    timeout { }
+}
+set timeout 240
+
+# The startup screen is where a `session_start` notice lands, and the panel that owns the screen
+# until it finishes swallows typed input. How long to wait has been probed three times — 14s, then
+# 50s, then removing the variable with `--offline` — because startup does a network call whose
+# latency moves the panel's exit. 25s is the value that carried the known-good baseline
+# (`answer-probe.exp`, whose typed text reached the screen); overridable so it can be re-probed.
+set bootWait 25
+#
+# Note what a SMALL capture does NOT mean: an idle TUI stops redrawing, so a capture that stops
+# growing proves nothing either way — it is not evidence that pi died. The question to ask is
+# whether the text ARRIVED, not whether bytes kept coming.
 if {[info exists env(TUI_WAIT)]} { set bootWait $env(TUI_WAIT) }
 sleep $bootWait
+
+# Wait for the typed text to appear in what the TUI actually writes, WITHOUT going through the
+# capture file.
+#
+# Two earlier checks tried the file and both were wrong. Grepping the file saw 0 three times while
+# the capture in fact held the prompt four times and a running turn (`Working`, `1.4%/1.0M`) —
+# expect's log_file had not flushed, so the check reported a result about the thing it was
+# measuring while never having observed it. Forcing a flush via `log_file ""` does not work either
+# (expect answers "cannot start logging without first stopping logging"). Matching on the incoming
+# stream removes the whole class: no file, no flush, no lag.
+proc awaitText {text seconds} {
+    # The needle is matched as a REGEX, so it has to be escaped. Measured: the codemode prompt
+    # contains `21*2`, and an unescaped `*` made the pattern mean something else — the run reported
+    # "landed: 0" three times while the capture plainly showed the prompt sitting in the input box
+    # and the tool call going through. A prompt that fails its own arrival check is worse than no
+    # check: it silently converts a working run into a "could not drive it" claim.
+    regsub -all {[\^\$\|\?\*\+\(\)\[\]\{\}\\.-]} $text {\\&} pattern
+    set timeout $seconds
+    expect {
+        -re $pattern { return 1 }
+        timeout { return 0 }
+    }
+}
 
 if {$scenario eq "dispatch"} {
     # A dispatch with NO `agent` argument: the local build runs a generalist child, 2.0.3 refuses
@@ -95,26 +173,57 @@ if {$scenario eq "dispatch"} {
     set landed 0
     for {set attempt 1} {$attempt <= 3} {incr attempt} {
         send -- "$prompt\r"
-        sleep 10
-        # Self-verifying send. Typing into a TUI whose startup panel still owns the screen is
-        # silently swallowed — measured twice, and the first run looked like "the model chose not
-        # to dispatch" rather than "nothing was ever typed". Retrying is safe precisely because
-        # this checks whether the text ARRIVED.
-        if {![catch {exec grep -c "ptc_subagent with NO agent" $outFile} n]} {
-            if {[string trim $n] ne "0"} { set landed 1; break }
-        }
-        sleep 20
+        sleep 12
+        # Self-verifying send: typing into a TUI whose startup panel still owns the screen is
+        # silently swallowed, and the first run of this read as "the model chose not to dispatch"
+        # rather than "nothing was ever typed".
+        if {[awaitText "Use ptc_subagent with NO agent; task: reply PONG" 12]} { set landed 1; break }
+        sleep 18
     }
     puts "  typed prompt landed: $landed (after $attempt attempt(s))"
-    if {$landed} {
-        set afterSend 90
-        if {[info exists env(TUI_AFTER)]} { set afterSend $env(TUI_AFTER) }
-        sleep $afterSend
+    # Wait for the turn REGARDLESS. A successful submit starts a real turn that spawns a child pi;
+    # tearing down early reports "no dispatch happened" for a dispatch that was still running.
+    set afterSend 120
+    if {[info exists env(TUI_AFTER)]} { set afterSend $env(TUI_AFTER) }
+    if {$landed} { sleep $afterSend }
+}
+
+# The `codemode` scenario exists because #187 has TWO faces and only one of them had ever been
+# observed. Reading 2.0.3's bundle says why the other one is invisible at boot:
+#
+#   let S = () => { ... ui.setStatus("ptc-mode", parts.join("  ") || undefined) }
+#   let C = (...) => { enabled = true; ...; S(warning) }
+#
+# So the status key is `ptc-mode` but the PAINTED text is `PTC` + the warning — `ptc-mode` is an
+# internal key and never appears on screen, which is why grepping the capture for it returned 0 on
+# both builds and looked like "the marker was never removed". Worse, `S` only runs inside `C`,
+# which is codemode ACTIVATION: a boot capture cannot see it by construction. Loading the codemode
+# extension with `-e builtin:codemode` is not activation.
+#
+# Activation needs a `ptc_run_code` call. So this scenario types one, waits for the turn to finish,
+# and then the capture can be read for `PTC`.
+if {$scenario eq "codemode"} {
+    set prompt "Use ptc_run_code to compute 21*2 and print the result"
+    set landed 0
+    for {set attempt 1} {$attempt <= 3} {incr attempt} {
+        send -- "$prompt\r"
+        if {[awaitText "Use ptc_run_code to compute 21*2 and print the result" 12]} { set landed 1; break }
+        sleep 18
     }
+    puts "  typed prompt landed: $landed (after $attempt attempt(s))"
+    set afterSend 100
+    if {[info exists env(TUI_AFTER)]} { set afterSend $env(TUI_AFTER) }
+    if {$landed} { sleep $afterSend }
 }
 
 # Quit: the startup help advertises ctrl+c/ctrl+d as clear/exit. Send both, with a second round
 # in case the first is swallowed by a dialog.
+#
+# The global timeout is 240s and it also governs THIS block, so a pi that does not exit parks the
+# whole run for four minutes after the capture is already complete and the verdict already
+# readable. Bound the teardown separately — measured cost of getting this wrong: one run reported
+# nothing for 240s and had to be killed even though its capture was finished.
+set timeout 12
 send "\003"
 sleep 3
 send "\004"
