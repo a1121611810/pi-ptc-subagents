@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+#
+# Pre-commit guardrail: refuse two things at the moment they would enter history.
+#
+# Install by setting the hooks path in a clone:
+#
+#     git config core.hooksPath .githooks
+#
+# The setting is per-clone and cannot be committed; this file is committed so the clone has
+# something to point at. Both are needed, neither is sufficient.
+#
+# ## Scope: exactly two refusals, on purpose
+#
+# A third would be lint, typecheck or test. Those are slow, and a slow hook gets `--no-verify`'d,
+# and a bypassed hook protects nothing. The release gate already runs all of them on `main`; this
+# only moves two failures from `main` back to the commit that caused them.
+#
+# ## What each refusal is for
+#
+# 1. **A packaged artifact.** `git add -A` once swept a 100 KB npm tarball into this repository's
+#    history in this project. Nothing about that is subtle, and nothing caught it until the history
+#    was rewritten.
+# 2. **A staged file that the repository's own formatter would reformat.** Formatting is the one
+#    check that is both cheap and purely mechanical, so it is the one worth running here.
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+# Added, Copied or Modified. A deleted file has no content to check.
+STAGED="$(git diff --cached --name-only --diff-filter=ACM)"
+
+fail() {
+  echo "" >&2
+  echo "pre-commit: $1" >&2
+  shift
+  for line in "$@"; do
+    echo "  $line" >&2
+  done
+  echo "" >&2
+  exit 1
+}
+
+# ── 1. a packaged artifact ────────────────────────────────────────────────────────────────
+
+# Matched on the path, not the extension list, so a nested or oddly named build output is caught
+# too. Node's `packageManager` cache, `.yarn/cache`, and coverage output are the same mistake.
+ARTIFACTS="$(printf '%s\n' "$STAGED" | grep -Ei '(^|/)([^/]*\.(tgz|tar\.gz|zip|whl)|node_modules/|coverage/|\.DS_Store)' || true)"
+if [ -n "$ARTIFACTS" ]; then
+  fail "refusing a packaged artifact in the commit." \
+    "Found in the staged set:" \
+    "$(printf '%s\n' "$ARTIFACTS" | sed 's/^/    /')" \
+    "" \
+    "These belong in .gitignore, not in history. Unstage them, add the pattern to" \
+    ".gitignore, and commit that instead."
+fi
+
+# ── 2. formatting ──────────────────────────────────────────────────────────────────────────
+
+# Only extensions the formatter knows how to check. Handing it a binary is a coin flip on whether
+# it reports a formatting problem or a parse error, and this hook has no reason to find out.
+CHECKABLE="$(printf '%s\n' "$STAGED" \
+  | grep -E '\.(ts|mts|cts|tsx|js|mjs|cjs|jsx|json|jsonc|css|scss|html|vue|md|markdown)$' \
+  || true)"
+
+if [ -z "$CHECKABLE" ]; then
+  exit 0
+fi
+
+# Check the **working-tree** content of the staged paths, which is what oxfmt reads. This is the
+# common case and it is honest about itself: a file that was staged and then edited again is
+# checked in its newest state. Checking the staged blob instead would need a temporary checkout,
+# which is a lot of machinery for a guardrail whose job is to be fast and un-bypassable.
+set +e
+FORMAT_OUT="$(pnpm exec oxfmt --check $CHECKABLE 2>&1)"
+FORMAT_CODE=$?
+set -e
+
+if [ "$FORMAT_CODE" -eq 0 ]; then
+  exit 0
+fi
+
+# Measured on this repository: `oxfmt --check` exits **2** — not 0, and not 1 — when every file it
+# was handed is excluded by `.oxfmtrc.json`'s ignore rules, which is a normal state for a commit
+# touching only `packages/website/**` (ADR-0036 keeps that directory out of the root formatter on
+# purpose). Exit 2 is otherwise a hard error, so it is resolved by reading the message rather than
+# by the code alone.
+if [ "$FORMAT_CODE" -eq 2 ] && printf '%s' "$FORMAT_OUT" | grep -q 'excluded by ignore rules'; then
+  exit 0
+fi
+
+if [ "$FORMAT_CODE" -eq 2 ]; then
+  fail "the formatter failed in a way this hook does not recognise, so it is refusing rather" \
+    "than passing a check it did not perform. Raw output:" \
+    "$(printf '%s\n' "$FORMAT_OUT" | sed 's/^/    /')"
+fi
+
+fail "a staged file is not formatted." \
+  "Run: pnpm exec oxfmt $CHECKABLE" \
+  "" \
+  "Raw output:" \
+  "$(printf '%s\n' "$FORMAT_OUT" | sed 's/^/    /')"

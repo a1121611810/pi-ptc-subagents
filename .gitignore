@@ -8,3 +8,9 @@ coverage/
 # Projected at build time from docs/** by packages/website/scripts/project-docs.mjs.
 # Never committed: a committed copy is the second copy this design exists to avoid.
 packages/website/docs/
+
+# Package-manager build output. `npm pack` / `pnpm pack` writes one into the repository root,
+# and a blanket `git add` has swept one into history before. `.githooks/pre-commit` refuses a
+# staged artifact; this line is the cheaper half of the same mistake.
+*.tgz
+*.tar.gz
