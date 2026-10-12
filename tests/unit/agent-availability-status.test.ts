@@ -142,6 +142,11 @@ test("the mode state still reads the way it did", async () => {
     });
     const status = statuses(stub);
     expect(status, "the status carries something").toBeTruthy();
-    expect(status).toContain("agent");
+    // `toContain("agent")` was here and was worthless: that substring lives inside
+    // "no registered agent", the very marker this file asserts two tests up. Measured — blanking
+    // MODE_STATUS_TEXT, and dropping the mode state from `paintStatus` outright, both left this
+    // green. `MODE_STATUS_TEXT` is the literal "PTC", which the availability marker does not
+    // contain, so this holds only when the mode state is actually still being painted.
+    expect(status).toContain("PTC");
   });
 });

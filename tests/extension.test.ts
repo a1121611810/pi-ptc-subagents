@@ -301,14 +301,53 @@ test("subagents mode without codemode warns once, and says what to do about it",
 });
 
 test("the warning does not fire when codemode is active", async () => {
-  const stub = await makeExtensionStub({
-    ...SUBAGENTS_AXES,
-    active: ["read", "bash", "edit", "write", "codemode", "ptc_subagent"],
-  });
-  expect(
-    stub.notifications.filter((n) => n.type === "warning"),
-    "no false alarm",
-  ).toEqual([]);
+  /*
+   * HOME is isolated for the same reason the e2e smoke test now isolates it: this session
+   * registers `ptc_subagent`, so `session_start` enumerates the agent registry, and
+   * `resolveAgentDirs` answers the USER axis from `os.homedir()` — which `PI_CODING_AGENT_DIR`
+   * does not touch. Without the redirect the enumeration reads the developer's real
+   * `~/.pi/agent/agents`, and the assertion below is decided by whatever agents that machine
+   * happens to have.
+   *
+   * It was passing by accident: this repository's own machine had one `__smoke_echo.md` left
+   * over from a 2026-09-22 manual smoke run, so "no warning" happened to hold. Deleting that
+   * file — which the T5 ticket asked for, since it is what the automated smoke test replaced —
+   * turned it red, which is how the missing isolation surfaced at all. A test that passes only
+   * because of undeclared machine state is not green, it is unmeasured.
+   */
+  const previousHome = process.env.HOME;
+  const previousUserProfile = process.env.USERPROFILE;
+  process.env.HOME = await makeTempDir();
+  process.env.USERPROFILE = process.env.HOME;
+  try {
+    const stub = await makeExtensionStub({
+      ...SUBAGENTS_AXES,
+      active: ["read", "bash", "edit", "write", "codemode", "ptc_subagent"],
+    });
+    /*
+     * Scoped to THIS notice, and the scoping is now load-bearing rather than decorative.
+     *
+     * This session registers `ptc_subagent` in an isolated-but-EMPTY agent registry, so the
+     * agent-availability warning fires for real — and correctly. Asserting "no warning of any
+     * kind" would be asserting a false thing about the product: a subagent tool with nothing to
+     * dispatch SHOULD say so. What this test is about is the OTHER warning — the one that fires
+     * when `subagents` has lost its orchestrator — and that is what must be absent now that
+     * `codemode` is in the tool list.
+     *
+     * It was passing by accident before: on a machine whose `~/.pi/agent/agents` happened to
+     * hold something, the availability warning never fired and the blanket assertion held. See
+     * the note above on HOME.
+     */
+    expect(
+      stub.notifications.filter((n) => n.message.includes("no orchestration tool")),
+      "the missing-orchestrator warning is the subject, and codemode is present",
+    ).toEqual([]);
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = previousUserProfile;
+  }
 });
 
 test("the warning is withheld when the program tools ARE declared — the 0.86 cell", async () => {

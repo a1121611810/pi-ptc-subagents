@@ -46,8 +46,14 @@ test("the description points outward rather than repeating the refusal", () => {
   // rendered by `describeRegisteredAgents` at refusal time. Restating it here would be the second
   // copy, and it is the copy that goes stale: the renderer is the one wired to the same resolver
   // a dispatch uses.
-  expect(text, "does not inline the registered-agents listing").not.toContain("registered agents:");
-  expect(text, "does not inline the file-shape guidance").not.toContain("frontmatter");
+  //
+  // Case-insensitive, and deliberately so. This was `not.toContain("registered agents:")` and it
+  // was inert: appending `"Registered agents: name, other."` — exactly the duplication the test
+  // exists to prevent — left every test in this file green. Matching the RENDERED SHAPE rather
+  // than one casing of it is what makes the guard mean what it says.
+  expect(text, "does not inline the registered-agents listing").not.toMatch(/registered agents/i);
+  expect(text, "nor the bracketed name list the renderer produces").not.toMatch(/\[[a-z_]+, /i);
+  expect(text, "does not inline the file-shape guidance").not.toMatch(/frontmatter/i);
 });
 
 test("the description still describes the tool, and the guidance survives", () => {

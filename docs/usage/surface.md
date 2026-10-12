@@ -100,7 +100,13 @@ second notice is issued when the probe and pi's own tool registry disagree, whic
 the probe structurally cannot see: it walks the filesystem, so under `--exclude-tools codemode`
 it answers `present` for a tool this session does not have (and the mirror: a restructured
 `dist` answers `not-found` for one pi plainly registers). A third notice covers ADR-0027: a
-settings file that could not be read. What is **not** established is that either line actually
+settings file that could not be read. A fourth notice covers a tool that is registered but has
+nothing to work with: on a `subagents` surface `ptc_subagent` needs at least one agent definition
+under `~/.pi/agent/agents/<name>.md` or `<project>/.pi/agents/<name>.md`, and a session with an
+empty registry gets a warning naming both directories, because a registered-but-uncallable tool is
+indistinguishable from a working one. The same fact is also painted on the `ptc-mode` status, so
+it is still readable after the notice has gone — a state visible only while it happens is not
+observable. What is **not** established is that either line actually
 paints in a real pi TUI: a pty capture at review time showed neither the notice nor a control
 marker, and a TUI quits on stdin EOF before a toast renders, so that is an unmeasured end to
 end rather than a broken one. No test in this repository observes a notice through a real TUI.

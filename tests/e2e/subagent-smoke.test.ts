@@ -150,10 +150,14 @@ describe("an unusable install says so instead of pretending", () => {
       // the pieces a user or model needs to fix it without reading our source.
       expect(result.errorMessage).toContain("unknown agent");
       expect(result.errorMessage).toContain("registered agents");
+      // The `(none)` branch. Its counterpart is the `[broken]` branch asserted below, and the pair
+      // is what makes "the file is there but unparseable" distinguishable from "there is no
+      // file" — either substring alone holds for both.
+      expect(result.errorMessage, "an empty directory lists nothing").toContain("(none)");
     });
   });
 
-  test("a file that exists but cannot be parsed is not the same as a file that is absent", async () => {
+  test("a file that exists but cannot be parsed shows up in the registry, unlike an absent one", async () => {
     await withFakePi(async (cwd) => {
       await mkdir(join(cwd, ".pi", "agents"), { recursive: true });
       await writeFile(
@@ -161,12 +165,31 @@ describe("an unusable install says so instead of pretending", () => {
         "name: broken\n---\nno leading delimiter\n",
         "utf8",
       );
+
       const result = await dispatchOnce(cwd, "broken");
       expect(result.status, "an unparseable definition does not dispatch").toBe("rejected");
-      // The distinction T3 exists for: the name was FOUND and could not be read as a definition.
-      // Without this a user who re-saved a file would have no way to tell which half is true.
       expect(result.errorMessage).toContain("unknown agent");
-      expect(result.errorMessage).toContain("broken");
+
+      /*
+       * The previous version of this test asserted `errorMessage` contains "broken" and called
+       * that the distinction. It is not one: the refusal embeds the REQUESTED name, so an agent
+       * called `broken` that does not exist anywhere produces the same substring. Measured:
+       * making `listRegisteredAgents` skip unparseable files — which makes the two cases literally
+       * identical — left this test green.
+       *
+       * What actually differs, and what a user needs: the refusal's registry listing. A file that
+       * is there but unparseable is still a file the directory holds, so it appears in the list
+       * the refusal prints. An absent one leaves the list empty. That is the line that has to be
+       * asserted for the distinction to be observable at all, and it is what turns red when the
+       * listing stops surfacing unparseable files.
+       */
+      expect(result.errorMessage, "the registry lists the file that is there").toContain(
+        "[broken]",
+      );
+      expect(
+        result.errorMessage,
+        "and an absent agent is the other branch — verified by the case above",
+      ).toContain("registered agents:");
     });
   });
 });

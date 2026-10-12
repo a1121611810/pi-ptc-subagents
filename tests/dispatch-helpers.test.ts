@@ -280,6 +280,18 @@ describe("registered-agent listing + actionable refusals (pitfall #2)", () => {
     // agent dirs is the normal case, and the listing must quietly yield nothing. Absence
     // is the SPEC case, so it must stay silent — the warn assertion below pins the dual
     // path against the genuine-read-failure test that follows.
+    //
+    // **The silence is HERE and not further up, and that is worth saying (story 20 of #177).**
+    // This test is the one that pins "an empty registry is not an error", and on its own it
+    // reads like a green tick that means "quiet is correct" everywhere. It is not: the listing
+    // is a lister, and a lister that failed on an empty directory would be wrong. What makes the
+    // silence safe is that `session_start` now CONSUMES this empty list and tells the user —
+    // `tests/unit/agent-availability-notice.test.ts` is that half. So the rule this test was
+    // about to be an example of ("we asserted it must be quiet, therefore quiet is right") is
+    // false here, and the reason is one line below in this comment.
+    //
+    // If that consumer is ever removed, this test's silence becomes a defect again — and it will
+    // stay green while it is one.
     const empty = await makeTempDir();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
