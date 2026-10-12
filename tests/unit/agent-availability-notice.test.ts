@@ -54,17 +54,32 @@ function agentNotices(stub: { notifications: readonly { message: string }[] }): 
     .map((n) => n.message);
 }
 
-/** Point HOME and cwd at fresh empty dirs, so `os.homedir()` cannot see a real agent file. */
+/**
+ * Point HOME and cwd at fresh empty dirs, so neither `os.homedir()` nor `process.cwd()` can see
+ * a real agent file.
+ *
+ * The cwd half used to be missing: a temp dir was created and never used, so every one of these
+ * tests read the REPOSITORY root as the project dir. That stayed invisible until this repo grew
+ * its own `.pi/agents/research.md` — at which point the "no registered agent" notice correctly
+ * stopped firing and three tests in two files went red. A test that only isolates HOME is a test
+ * whose result depends on which project it runs from.
+ */
 async function withIsolatedAgentDirs<T>(body: () => Promise<T>): Promise<T> {
   const home = await makeTempDir();
   const cwd = await makeTempDir();
   const previousHome = process.env.HOME;
   const previousUserProfile = process.env.USERPROFILE;
+  const previousCwd = process.cwd();
   process.env.HOME = home;
   process.env.USERPROFILE = home;
+  // Create the dirs rather than relying on their absence: `isSilentReaddirMiss` treats a missing
+  // agents dir as the normal no-agents case, and this test wants that case to be a decision.
+  await mkdir(join(cwd, ".pi", "agents"), { recursive: true });
+  process.chdir(cwd);
   try {
     return await body();
   } finally {
+    process.chdir(previousCwd);
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;
     if (previousUserProfile === undefined) delete process.env.USERPROFILE;

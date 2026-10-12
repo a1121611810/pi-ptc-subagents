@@ -54,20 +54,35 @@ function notices(stub: { notifications: readonly { message: string }[] }): strin
     .map((n) => n.message);
 }
 
+/**
+ * Point HOME and cwd at fresh empty dirs, so neither `os.homedir()` nor `process.cwd()` can see
+ * a real agent file.
+ *
+ * The cwd half used to be missing entirely: isolating HOME alone left the project dir as the
+ * REPOSITORY root, so this test read the repo's own `.pi/agents/` and reported agents that its
+ * own fixture never created. A test whose outcome depends on which project it runs from is a
+ * test that will go red the day the repo ships its first agent.
+ */
 async function withIsolatedAgentDirs<T>(body: () => Promise<T>): Promise<T> {
   const home = await makeTempDir();
+  const cwd = await makeTempDir();
   const previousHome = process.env.HOME;
   const previousUserProfile = process.env.USERPROFILE;
+  const previousCwd = process.cwd();
   process.env.HOME = home;
   process.env.USERPROFILE = home;
+  await mkdir(join(cwd, ".pi", "agents"), { recursive: true });
+  process.chdir(cwd);
   try {
     return await body();
   } finally {
+    process.chdir(previousCwd);
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;
     if (previousUserProfile === undefined) delete process.env.USERPROFILE;
     else process.env.USERPROFILE = previousUserProfile;
     await removeTempDir(home);
+    await removeTempDir(cwd);
   }
 }
 
