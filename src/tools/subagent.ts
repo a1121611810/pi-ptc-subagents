@@ -57,6 +57,16 @@ export interface CreatePtcSubagentToolOptions {
   getDispatchDeps?: () => DispatchDeps;
 }
 
+/**
+ * The tool's registered name, in one place.
+ *
+ * `session_start` has to ask "does this surface register `ptc_subagent`?" before it reports on
+ * agent availability, and the session handler must not carry a second copy of the string: a
+ * rename that updated the registration here but not there would leave the notice describing a
+ * tool the session does not have.
+ */
+export const SUBAGENT_TOOL_NAME = "ptc_subagent";
+
 const HANDLE_TEXT = "Started background task ";
 
 /** One shape for both dispatch outcomes, so the tool's result type has a single form. */
@@ -227,7 +237,7 @@ function handleTaskId(outcome: SubagentOutcome): string | undefined {
 }
 export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): AnyTool {
   return defineTool({
-    name: "ptc_subagent",
+    name: SUBAGENT_TOOL_NAME,
     label: "PTC Subagent",
     description: [
       "Start a fresh pi agent as a child process: it gets its own context, its own model and its own tools, and it cannot see or change this session except through what it returns. Use it for work that would otherwise flood this context: a survey, a second opinion, or a task that can run while you do something else.",

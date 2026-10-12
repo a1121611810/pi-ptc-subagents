@@ -1381,23 +1381,23 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       "spawnOptions.sessionId = taskId;",
     "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:985":
       "export function detectedSurfaceMode(",
-    "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:914":
+    "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:946":
       'getActiveTools().includes("codemode")',
-    "docs/adr/0029-surface-follows-codemode-activation.md:120 -> src/index.ts:914":
+    "docs/adr/0029-surface-follows-codemode-activation.md:120 -> src/index.ts:946":
       'getActiveTools().includes("codemode")',
     "docs/adr/0029-surface-follows-codemode-activation.md:151 -> ptc-mode.ts:27":
       "## Fail-safe on external loadout changes",
-    "docs/adr/0029-surface-follows-codemode-activation.md:188 -> src/index.ts:863":
+    "docs/adr/0029-surface-follows-codemode-activation.md:188 -> src/index.ts:895":
       "if (detected.present && !known) {",
     "docs/adr/0030-surface-switch-reloads.md:94 -> ptc-mode.ts:27":
       "## Fail-safe on external loadout changes",
     "docs/adr/0031-open-source-and-publish-authority.md:129 -> src/runtime/limits.ts:4":
       "The numbers are DSH's",
     "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1151": "function assistantText(",
-    "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:174":
+    "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:184":
       "export const SUBAGENT_OUTPUT_SCHEMA",
     "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1174": "function accumulateUsage(",
-    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:279":
+    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:289":
       "structuredContent: structured,",
     "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:229":
       "outputSchema: LIST_OUTPUT_SCHEMA,",
@@ -1441,11 +1441,11 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     //  105 → 962→856  = 同一处（ADR-0029 正文第二次引用它）
     //  129 → 27 保持    = ` * ## Fail-safe on external loadout changes`，本轮未移动
     "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:985",
-    "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:914",
-    "docs/adr/0029-surface-follows-codemode-activation.md:120 -> src/index.ts:914",
+    "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:946",
+    "docs/adr/0029-surface-follows-codemode-activation.md:120 -> src/index.ts:946",
     "docs/adr/0029-surface-follows-codemode-activation.md:151 -> ptc-mode.ts:27",
     //  166 → 920→807 = `if (detected.present && !known) {`，即交叉核对那一条
-    "docs/adr/0029-surface-follows-codemode-activation.md:188 -> src/index.ts:863",
+    "docs/adr/0029-surface-follows-codemode-activation.md:188 -> src/index.ts:895",
     // 2026-10-03 第四次复核（ADR-0030）：0030 引 ptc-mode.ts:27-31 那段「loadout 被外部改写
     // 时模式如何退让」，27 行是段首。本轮该引用在**文档里**的行号因撤回声明从 68 前移到 83，
     // 引用目标（ptc-mode.ts:27）未动。ADR-0030 另外四处引用写的是 pi 宿主的行号而非本仓文件，
@@ -1462,9 +1462,9 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     //
     // 逐条内容（写在这里，是为了让下一个复核者不必重跑一遍就能知道每条该是什么）：
     //   11 → dispatch.ts:1149 = `function assistantText(event: ParsedAgentEvent)`
-    //   20 → subagent.ts:174  = `export const SUBAGENT_OUTPUT_SCHEMA: SubagentOutputSchema`
+    //   20 → subagent.ts:184  = `export const SUBAGENT_OUTPUT_SCHEMA: SubagentOutputSchema`
     //   27 → dispatch.ts:1172 = `function accumulateUsage(`（usage 的累加点，前景后台共用）
-    //   55 → subagent.ts:279 = 把投影写进 `structuredContent:` 的那一行
+    //   55 → subagent.ts:289 = 把投影写进 `structuredContent:` 的那一行
     //   49 → ptc-task.ts:229/459/618 = 三处 `outputSchema:` 声明
     //  117 → dispatch.ts:1031 = `export function childToolList(`，即合并进子进程 --tools 的那个函数
     //
@@ -1480,9 +1480,9 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // 所以这里是**删一条**而不是改行号，本轮唯一的删除项，**新增 0 条**。
     // 同一次编辑把 ADR-0032 里 123 那条**在文档里**的行号推到 130（引用目标未动，仍是 1031）。
     "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1151",
-    "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:174",
+    "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:184",
     "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1174",
-    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:279",
+    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:289",
     "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:229",
     "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1033",
   ];

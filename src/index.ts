@@ -37,6 +37,7 @@ import {
   type BackgroundTaskRuntime,
 } from "./runtime/background-runtime.ts";
 import { createULID } from "./runtime/child-process-lifecycle.ts";
+import { describeRegisteredAgents, listRegisteredAgents } from "./runtime/dispatch.ts";
 import {
   renderTaskNotifications,
   shouldDeliverTaskNotification,
@@ -67,7 +68,7 @@ import type {
   PersistedModeState,
 } from "./mode/ptc-mode.ts";
 import { buildPtcSkillsSection, skillsSectionDropped } from "./mode/skills-section.ts";
-import { createPtcSubagentTool } from "./tools/subagent.ts";
+import { createPtcSubagentTool, SUBAGENT_TOOL_NAME } from "./tools/subagent.ts";
 import { createChildReportTool } from "./tools/child-report-tool.ts";
 
 export {
@@ -800,11 +801,42 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     }
 
     /*
-     * ADR-0027: a settings file we could not read is reported the same way a broken `ptc.json`
-     * is -- as a warning that names the file -- rather than being allowed to change which
-     * tools exist silently. The switch it describes has already fallen through to the next
-     * source by the time this runs.
+     * T1 (#178): the subagent face's PRECONDITION, reported when it is unmet.
+     *
+     * `listRegisteredAgents` used to have exactly one production caller -- inside
+     * `describeRegisteredAgents`, which runs only AFTER a dispatch has already been refused. So
+     * on the success path nothing asked whether `ptc_subagent` could do anything at all, and a
+     * registered-but-uncallable tool was indistinguishable from a working one: a session burned
+     * 520 tool calls with none of them to it, and the model spent twenty-plus of them hunting
+     * the install for agent definitions that were never there.
+     *
+     * The asymmetry with the notice above is the point. A `subagents` session that lost its
+     * `codemode` orchestrator WARNS; a session with no agent definition at all said nothing --
+     * and the second is the one a fresh install actually hits, because a fresh install has no
+     * agent definitions either.
+     *
+     * `both` scopes, not the dispatch default of `user`: a project-scoped agent is a normal
+     * setup, and asking about the user scope alone would warn at a session that IS configured.
+     * The enumeration is the SAME one a dispatch resolves through, so the set reported here and
+     * the set that works cannot drift.
+     *
+     * Gated on this session actually registering the tool. A `full` surface has `ptc_run_code`
+     * and no `ptc_subagent`, and telling it about a tool it was never given is the same defect
+     * in a different costume. TUI-only, like every other notice in this file.
      */
+    if (pi.getAllTools().some((tool) => tool.name === SUBAGENT_TOOL_NAME)) {
+      const agentsInput = { cwd: ctx.cwd ?? process.cwd(), agentScope: "both" as const };
+      if (listRegisteredAgents(agentsInput).length === 0) {
+        ctx.ui.notify(
+          "pi-ptc-subagents: no registered agent was found, so " +
+            SUBAGENT_TOOL_NAME +
+            " has nothing to dispatch this session -- " +
+            describeRegisteredAgents(agentsInput),
+          "warning",
+        );
+      }
+    }
+
     if (surface.codemodeSwitch?.error !== undefined) {
       ctx.ui.notify(`pi-ptc-subagents: ${surface.codemodeSwitch.error}`, "warning");
     }
