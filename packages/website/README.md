@@ -69,13 +69,21 @@ checks — but it reads exactly like four broken checks, which is why `build` is
 1. Write the script under `packages/website/scripts/`, named `check-<what-it-catches>.mjs`. The root
    `scripts/` is for release and metadata checks and is not on this path — a script left there is
    never found by the runner.
-2. Add it to the list the site runner invokes.
+2. Add it to `CHECKS` in `packages/website/scripts/checks.mjs`. That is the list
+   `run-checks.mjs` runs and the list the counterfactual harness reads, so there is one place and a
+   new gate cannot be half-registered. Importing `run-checks.mjs` to read the list instead would run
+   all five checks as a side effect of asking about it.
 3. **Add it to the table in "The checks"**, so the name is in that table's two content columns.
    `tests/website-readme-consistency.test.ts` enforces the **name**, in both directions — the runner
    invoking a check this file does not name fails, and this file naming a check the runner does not
    invoke fails. It reads only that one section and only the name column: the other two columns, and
    every other table in this file that happens to mention a check, are kept true by a reviewer, not
    by a check.
+4. **Prove the new gate has teeth.** `node packages/website/scripts/counterfactuals/run.mjs` breaks
+   each gate in a throwaway copy and requires it to go red; a gate with no case is listed as
+   unproven, so adding a gate here without adding its case shows up on the next run rather than never.
+   It needs the site built, and it is not part of `pnpm test` — nothing in this repository's test
+   suite rewrites source files, and a run killed halfway would leave a modified tree behind.
 
 ## Deliberate boundaries
 

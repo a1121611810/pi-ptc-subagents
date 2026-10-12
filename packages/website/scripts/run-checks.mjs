@@ -19,17 +19,10 @@
 import { spawnSync } from "node:child_process";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { CHECKS } from "./checks.mjs";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const REPO_ROOT = join(HERE, "..", "..", "..");
-
-const CHECKS = [
-  ["documented claims", "check-doc-claims.mjs"],
-  ["projection coverage", "check-projection-coverage.mjs"],
-  ["landing page tool names", "check-landing-tool-names.mjs"],
-  ["internal links", "check-internal-links.mjs"],
-  ["landing style scope", "check-style-scope.mjs"],
-];
 
 const results = [];
 let failed = 0;

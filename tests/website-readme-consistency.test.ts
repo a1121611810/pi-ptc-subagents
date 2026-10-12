@@ -21,9 +21,14 @@
  * requests, so this sits beside it.
  *
  * 口径 (why the numbers below are what they are, and not chosen):
- *   - 5 是实测值，不是估计。`run-checks.mjs` 的 CHECKS 数组在 2026-10-12 有 5 项，README 的表
- *     同样 5 行。两个下界都写 5：**抽取器失效时必须红**。全称断言在抽取器坏掉时会静默恒真，
- *     那正是 `docs/testing-constraints.md` 约束 #5 要防的东西 —— 把「空集合 == 空集合」判成通过。
+ *   - 5 是实测值，不是估计。2026-10-12 有 5 项检查，README 的表同样 5 行。两个下界都写 5：
+ *     **抽取器失效时必须红**。全称断言在抽取器坏掉时会静默恒真，那正是
+ *     `docs/testing-constraints.md` 约束 #5 要防的东西 —— 把「空集合 == 空集合」判成通过。
+ *   - 检查清单读的是 `packages/website/scripts/checks.mjs`，不是 `run-checks.mjs`。清单本来内联在
+ *     runner 里，2026-10-12 搬到了 `checks.mjs`，因为反事实 harness 要读同一份清单来判断
+ *     「哪道门禁没人试过弄坏它」，而 `run-checks.mjs` 在模块顶层就把五道检查跑了一遍 ——
+ *     为了问一句清单是什么而把整条链跑红，那不是可接受的代价。搬完当天这条测试立刻转红，
+ *     正是下面那条「字面量找不到必须抛错」起的作用。
  *   - 只从**表格行**里取 `check-*.mjs`，不扫全文。README 正文里还提到
  *     `check-external-links.mjs` 和 `check-repo-metadata.mjs`，它们是真实存在但**不在**检查链
  *     里的东西：前者永远不失败且不进 CI，后者是仓库级检查。按全文扫描会把它们判成
@@ -38,7 +43,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
 const REPO_ROOT = fileURLToPath(new URL("../", import.meta.url));
-const RUNNER = join(REPO_ROOT, "packages", "website", "scripts", "run-checks.mjs");
+/** 站点 runner 真正会跑的那份清单；`run-checks.mjs` 与反事实 harness 都从它取。 */
+const CHECKS_MODULE = join(REPO_ROOT, "packages", "website", "scripts", "checks.mjs");
 const README = join(REPO_ROOT, "packages", "website", "README.md");
 
 /** 实测下界：2026-10-12 时 runner 有 5 项检查、README 表有 5 行。 */
@@ -51,24 +57,26 @@ const TABLE_ROW = /^\|\s*`(check-[a-z0-9-]+\.mjs)`/gm;
 const CHECKS_HEADING = "## The checks";
 
 /**
- * 抽出 runner 真正会跑的那些检查。
+ * 抽出站点 runner 真正会跑的那些检查。
  *
- * 读源码而不是 import，理由是 runner 在模块顶层就调用 `main()`，import 它会把五道检查跑一遍 ——
- * 而其中三道读构建产物，在测试环境里会红。这不是「实现细节」，是避免测试反过来依赖被测物的副作用。
+ * 读源码而不是 import，理由是 `checks.mjs` 与 `run-checks.mjs` 都按可执行脚本写，跑 `node
+ * run-checks.mjs` 会在顶层执行整条链 —— 而其中三道读构建产物，在测试环境里会红。这不是
+ * 「实现细节」，是避免测试反过来依赖被测物的副作用。（`checks.mjs` 本身可以安全 import，但
+ * 同一个抽取器服务两个来源时，指向那个有副作用的来源更容易在未来重构里悄悄失效。）
  *
  * 代价是要解析文本，所以抽取结果必须带下界断言（见上）。数组字面量本身找不到时也必须红，
  * 否则下面那条 `FLOOR` 断言会被一个空数组静默满足的一半绕过去。
  */
-function runnerChecks(source: string): string[] {
+function invokedChecks(source: string): string[] {
   const start = source.indexOf("const CHECKS = [");
   if (start < 0)
     throw new Error(
-      "runner has no CHECKS array literal — the extraction is broken, not the README",
+      "checks.mjs has no CHECKS array literal — the extraction is broken, not the README",
     );
 
   const end = source.indexOf("];", start);
   if (end < 0)
-    throw new Error("the CHECKS array literal is not closed — the runner was restructured");
+    throw new Error("the CHECKS array literal is not closed — checks.mjs was restructured");
 
   return [...source.slice(start, end).matchAll(SCRIPT_NAME)]
     .map((m) => m[1])
@@ -104,9 +112,9 @@ function readmeChecks(markdown: string): string[] {
     .filter((name): name is string => name !== undefined);
 }
 
-const runnerSource = readFileSync(RUNNER, "utf8");
+const checksSource = readFileSync(CHECKS_MODULE, "utf8");
 const readmeMarkdown = readFileSync(README, "utf8");
-const fromRunner = runnerChecks(runnerSource);
+const fromRunner = invokedChecks(checksSource);
 const fromReadme = readmeChecks(readmeMarkdown);
 
 describe("断言：站点的 README 与 runner 必须点名同一批检查（#173）", () => {
@@ -114,7 +122,7 @@ describe("断言：站点的 README 与 runner 必须点名同一批检查（#17
   test("口径守卫：两个抽取器都非空且达到实测下界", () => {
     expect(
       fromRunner.length,
-      `runner 里抽到的检查数：${fromRunner.length}。若 runner 重构过，先更新本测试的抽取器再更新下界`,
+      `checks.mjs 里抽到的检查数：${fromRunner.length}。若清单重构过，先更新本测试的抽取器再更新下界`,
     ).toBeGreaterThanOrEqual(FLOOR);
     expect(
       fromReadme.length,
@@ -144,7 +152,7 @@ describe("断言：站点的 README 与 runner 必须点名同一批检查（#17
 // 约束 #5：把实现改成显然错误但符合断言的版本，这条必须红。
 // 这两条不碰文件系统 —— 抽取器是纯函数，所以可以直接喂合成语料，代价为零。
 describe("反事实：抽取器认得出两种漂移（约束 #5）", () => {
-  const runnerFixture = `const CHECKS = [
+  const checksFixture = `const CHECKS = [
   ["a", "check-alpha.mjs"],
   ["b", "check-beta.mjs"],
 ];`;
@@ -153,7 +161,7 @@ describe("反事实：抽取器认得出两种漂移（约束 #5）", () => {
     const listed = readmeChecks(
       `${CHECKS_HEADING}\n\n| check | catches | red |\n| --- | --- | --- |\n| \`check-alpha.mjs\` | x | y |`,
     );
-    const running = runnerChecks(runnerFixture);
+    const running = invokedChecks(checksFixture);
 
     expect(running.filter((name) => !listed.includes(name))).toEqual(["check-beta.mjs"]);
   });
@@ -162,7 +170,7 @@ describe("反事实：抽取器认得出两种漂移（约束 #5）", () => {
     const listed = readmeChecks(
       `${CHECKS_HEADING}\n\n| \`check-alpha.mjs\` | x | y |\n| \`check-ghost.mjs\` | x | y |`,
     );
-    const running = runnerChecks(runnerFixture);
+    const running = invokedChecks(checksFixture);
 
     expect(listed.filter((name) => !running.includes(name))).toEqual(["check-ghost.mjs"]);
   });
@@ -202,7 +210,7 @@ describe("反事实：抽取器认得出两种漂移（约束 #5）", () => {
     const listed = readmeChecks(readme);
     expect(listed).toEqual(["check-alpha.mjs"]);
 
-    const running = runnerChecks(runnerFixture);
+    const running = invokedChecks(checksFixture);
     expect(running.filter((name) => !listed.includes(name))).toEqual(["check-beta.mjs"]);
   });
 
@@ -214,6 +222,6 @@ describe("反事实：抽取器认得出两种漂移（约束 #5）", () => {
   test("runner 的数组字面量找不到时必须抛错，不能返回空数组", () => {
     // 抽取器坏掉时返回空数组，会让上面那条 FLOOR 断言变成「0 >= 5」的红，
     // 而如果有人同时把下界调成 0，这条路径就静默恒真了。抛错让重构被看见。
-    expect(() => runnerChecks("const somethingElse = [];")).toThrow(/CHECKS/);
+    expect(() => invokedChecks("const somethingElse = [];")).toThrow(/CHECKS/);
   });
 });
