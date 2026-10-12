@@ -49,17 +49,32 @@ pnpm --filter website run build
 
 That projects the documents, builds the site, and runs all five checks.
 
-`pnpm --filter website run check` runs the checks alone, and **three of the five read build output**
-— `check-landing-tool-names.mjs`, `check-internal-links.mjs` and `check-style-scope.mjs`. Without a
-build they all turn red, which reads as three broken checks rather than a missing build.
+`pnpm --filter website run check` runs the checks alone, and **four of the five need something
+`build` produces**:
+
+| Check | Needs | Because |
+| --- | --- | --- |
+| `check-projection-coverage.mjs` | `pnpm --filter website run project` | it reads the manifest `project-docs.mjs` writes, and `docs/` is gitignored |
+| `check-landing-tool-names.mjs` | the built landing page | it reads the emitted HTML |
+| `check-internal-links.mjs` | the build output | it resolves links against the pages that were actually built |
+| `check-style-scope.mjs` | the build output | it checks the scope anchor against the built pages |
+
+On a freshly cloned repository that has never been built, running `check` therefore turns **four** of
+the five red and leaves only `check-doc-claims.mjs` green. That is a missing build, not four broken
+checks — but it reads exactly like four broken checks, which is why `build` is the command above and
+`check` is the one to reach for afterwards.
 
 ## Adding a check
 
-1. Write the script under `scripts/`, named `check-<what-it-catches>.mjs`.
+1. Write the script under `packages/website/scripts/`, named `check-<what-it-catches>.mjs`. The root
+   `scripts/` is for release and metadata checks and is not on this path — a script left there is
+   never found by the runner.
 2. Add it to the list the site runner invokes.
-3. **Add it to the table above.** This step is not optional and not a matter of discipline:
-   `tests/website-readme-consistency.test.ts` fails in both directions — a check the runner invokes
-   that this file does not name, and a check this file names that the runner does not invoke.
+3. **Add it to the table above**, so the name is in both columns. Step 3 is enforced in one
+   direction only: `tests/website-readme-consistency.test.ts` fails when the runner invokes a check
+   this file does not name, and when this file names one the runner does not invoke. **It does not
+   read the other two columns** — "what it catches" and "what turns it red" are kept true by a
+   reviewer, not by a check.
 
 ## Deliberate boundaries
 

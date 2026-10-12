@@ -40,7 +40,7 @@
  * Exit code is 1 on any failure, and every failure names what to change.
  */
 
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -189,6 +189,21 @@ function main() {
   const anchors = new Set();
   for (const selector of scoped) {
     for (const m of selector.matchAll(/:has\(\s*\.([A-Za-z0-9_-]+)/g)) anchors.add(m[1]);
+  }
+
+  // A missing build output is a gate message, never a stack trace. `readdirSync` on an absent
+  // directory throws ENOENT with a raw node stack, which names neither this check nor what to do —
+  // the one failure shape a gate must never produce, and already recorded once in this repository
+  // (`docs/reviews/2026-10-11-website-gap-closure-code-review.md`, R-w3). Four of the five checks
+  // fail on a fresh clone that has not been built, so this path is reached by anyone who follows
+  // the README's local-run instructions in order and runs `check` before `build`.
+  if (!existsSync(DIST)) {
+    console.error(
+      `✗ no build output at ${relative(REPO_ROOT, DIST)}\n\n` +
+        '  This check reads the built pages, so it runs after `pnpm --filter website run build`.\n' +
+        '  Same for the tool-name check and the internal-link check.',
+    );
+    process.exit(1);
   }
 
   const pages = htmlFiles(DIST);
