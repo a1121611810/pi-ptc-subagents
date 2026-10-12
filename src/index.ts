@@ -578,11 +578,31 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     await draining.drain();
   });
 
+  /*
+   * T2 (#179): the agent-availability marker, readable long after the notice that announced it.
+   *
+   * A startup notification is a moment. It fires once and it is gone, and if the user was looking
+   * at something else when it fired -- the normal case, since you start a session and then go and
+   * do the thing the session is for -- there is nothing left to go back to. Someone who realises
+   * "the subagent never ran" twenty minutes later should not have to re-derive it from a
+   * transcript.
+   *
+   * Derived ONCE in `session_start` and read from here, so the status cannot drift from the notice:
+   * there is one enumeration and one decision, and this renders what it already said. That is the
+   * repo's own observability rule -- a state visible only while it happens is not observable.
+   *
+   * Appended to the existing PTC status rather than given a key of its own: a second key is a
+   * second thing to learn to read, and this one only ever says something when something is wrong.
+   */
+  let agentAvailabilityWarning: string | undefined;
+
   const paintStatus = (ctx: ExtensionContext): void => {
-    ctx.ui.setStatus(
-      PTC_MODE_STATUS_KEY,
-      mode.enabled ? ctx.ui.theme.fg("accent", MODE_STATUS_TEXT) : undefined,
-    );
+    const parts: string[] = [];
+    if (mode.enabled) parts.push(ctx.ui.theme.fg("accent", MODE_STATUS_TEXT));
+    if (agentAvailabilityWarning !== undefined) {
+      parts.push(ctx.ui.theme.fg("warning", agentAvailabilityWarning));
+    }
+    ctx.ui.setStatus(PTC_MODE_STATUS_KEY, parts.length > 0 ? parts.join("  ") : undefined);
   };
 
   const enterMode = (
@@ -827,6 +847,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     if (pi.getAllTools().some((tool) => tool.name === SUBAGENT_TOOL_NAME)) {
       const agentsInput = { cwd: ctx.cwd ?? process.cwd(), agentScope: "both" as const };
       if (listRegisteredAgents(agentsInput).length === 0) {
+        agentAvailabilityWarning = "no registered agent";
         ctx.ui.notify(
           "pi-ptc-subagents: no registered agent was found, so " +
             SUBAGENT_TOOL_NAME +
@@ -834,6 +855,8 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
             describeRegisteredAgents(agentsInput),
           "warning",
         );
+        // Same decision, second surface: the notice is for the moment, this for later.
+        paintStatus(ctx);
       }
     }
 
