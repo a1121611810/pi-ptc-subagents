@@ -24,6 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refusal now also says that omitting the argument is an option. The `ptc_subagent` description and
   the agent roster it carries lead with the omission, so a model can choose it deliberately.
 
+### Removed
+
+- **The startup warning that said `ptc_subagent` had nothing to dispatch.** It fired whenever no
+  agent definition was registered, which 2.0.3 had just started reporting as a problem — and it
+  stopped being one in the same release: with `agent` optional, a dispatch that names nothing runs
+  a generalist child, so an install with an empty registry is a **working** install. The warning was
+  a false alarm about a working tool on exactly the fresh install it was written for. The `ptc-mode`
+  status marker that mirrored it for the rest of the session is gone too. See ADR-0039.
+
 ## [2.0.3] - 2026-10-12
 
 ### Fixed

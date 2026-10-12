@@ -1379,7 +1379,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       "new DispatchSlotCounter(",
     "docs/adr/0026-surface-default-is-detected.md:258 -> dispatch.ts:1709":
       "spawnOptions.sessionId = taskId;",
-    // Confirmed line by line 2026-10-12: line 506 is
+    // Confirmed line by line 2026-10-12 (re-checked after #187 moved it): line 505 is
     // `pi.registerTool(createChildReportTool(ptcDepth > 0));` -- the depth gate the ADR cites to
     // explain why a generalist still gets the report tool.
     "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:118 -> src/index.ts:505":
@@ -1399,10 +1399,10 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     "docs/adr/0031-open-source-and-publish-authority.md:129 -> src/runtime/limits.ts:4":
       "The numbers are DSH's",
     "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1350": "function assistantText(",
-    "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:192":
+    "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:197":
       "export const SUBAGENT_OUTPUT_SCHEMA",
     "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1373": "function accumulateUsage(",
-    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:363":
+    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:368":
       "structuredContent: structured,",
     "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:229":
       "outputSchema: LIST_OUTPUT_SCHEMA,",
@@ -1485,9 +1485,9 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // 所以这里是**删一条**而不是改行号，本轮唯一的删除项，**新增 0 条**。
     // 同一次编辑把 ADR-0032 里 123 那条**在文档里**的行号推到 130（引用目标未动，仍是 1031）。
     "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1350",
-    "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:192",
+    "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:197",
     "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1373",
-    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:363",
+    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:368",
     "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:229",
     "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1232",
     // 新增 1 条（2026-10-12，ADR-0039）：目标行已逐条核对。

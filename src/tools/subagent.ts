@@ -68,10 +68,15 @@ export interface CreatePtcSubagentToolOptions {
 /**
  * The tool's registered name, in one place.
  *
- * `session_start` has to ask "does this surface register `ptc_subagent`?" before it reports on
- * agent availability, and the session handler must not carry a second copy of the string: a
- * rename that updated the registration here but not there would leave the notice describing a
- * tool the session does not have.
+ * It had a second consumer until #187: `session_start` asked "does this surface register
+ * `ptc_subagent`?" before reporting on agent availability, and that check was the reason the
+ * string could not be spelled twice — a rename that updated the registration but not the check
+ * would have left a notice describing a tool the session does not have. The check went with the
+ * notice it fed.
+ *
+ * It stays a constant rather than being inlined even though the registration is now its only
+ * production reader: a test pins it as the tool's public name, and the next cross-module reference
+ * to that name should not have to re-introduce one.
  */
 export const SUBAGENT_TOOL_NAME = "ptc_subagent";
 

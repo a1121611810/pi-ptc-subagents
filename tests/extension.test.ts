@@ -9,7 +9,7 @@ import ptcSubagents, {
   runPtcProgram,
   WORKER_FRAME_KIND,
 } from "../src/index.ts";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   captureRegisteredTools,
@@ -359,14 +359,27 @@ test("a subagents session with no agent definitions says nothing about it", asyn
    * the notice was a false alarm about a tool that works.
    *
    * Deleting the tests that asserted it FIRES would leave this absence unheld — re-adding the
-   * block in `session_start` would turn nothing red. HOME is redirected for the same reason the
-   * sibling test redirects it: without an empty registry the assertion holds for the wrong reason,
-   * and its counterfactual (restore the notice) would not bite.
+   * block in `session_start` would turn nothing red.
    */
   const previousHome = process.env.HOME;
   const previousUserProfile = process.env.USERPROFILE;
-  process.env.HOME = await makeTempDir();
-  process.env.USERPROFILE = process.env.HOME;
+  const previousCwd = process.cwd();
+  const home = await makeTempDir();
+  const cwd = await makeTempDir();
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
+  /*
+   * BOTH axes of the registry, not just the user one. `resolveAgentDirs` answers the project axis
+   * from the session cwd and `session_start` reads `ctx.cwd ?? process.cwd()`, which the stub does
+   * not set — so without this the project half is the REPOSITORY root. That is empty today and the
+   * assertion bites; it stops biting the moment this repo ships its own `.pi/agents/*.md`, which
+   * is not hypothetical: commit `1f133e8` exists because `dd8cda4` added one and three tests went
+   * red on a machine whose verdict had been decided by the checkout it ran in. The directory is
+   * created rather than left absent, so "there are no agents" is a state this test makes rather
+   * than one it inherits.
+   */
+  await mkdir(join(cwd, ".pi", "agents"), { recursive: true });
+  process.chdir(cwd);
   try {
     const stub = await makeExtensionStub({
       ...SUBAGENTS_AXES,
@@ -376,7 +389,18 @@ test("a subagents session with no agent definitions says nothing about it", asyn
       stub.notifications.filter((n) => /registered agent|nothing to dispatch/i.test(n.message)),
       "an empty registry is the normal state, not a problem to report",
     ).toEqual([]);
+    /*
+     * And the STATUS surface, which nothing else holds. Measured: a build whose marker paints
+     * `"PTC  no registered agent"` while emitting no notification at all left the whole suite
+     * green — the assertion above cannot see the status line, and `ptc-mode.test.ts` pins equality
+     * only for a session the marker was never painted into.
+     */
+    expect(
+      stub.statuses.filter((s) => /registered agent/i.test(s.text ?? "")),
+      "and the status line does not carry it either",
+    ).toEqual([]);
   } finally {
+    process.chdir(previousCwd);
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;
     if (previousUserProfile === undefined) delete process.env.USERPROFILE;

@@ -128,11 +128,11 @@ describe("the legacy surfaceMode key is inert", () => {
        * readable is in it — blanking the status text leaves a published key with an empty value
        * and the assertion above still passes.
        *
-       * This came from the retired `agent-availability-status` file, which was the only test
-       * holding the status line's CONTENT. Its subject was a marker that shared this line with the
-       * mode text, and #187 removed the marker because an empty agent registry stopped being a
-       * problem. What survives is the half that was always about the mode: the literal is "PTC"
-       * (`MODE_STATUS_TEXT`, private to the factory).
+       * Migrated from the retired `agent-availability-status` file. It is NOT the only holder of
+       * this fact and should not claim to be: `tests/ptc-mode.test.ts` already asserts the exact
+       * status equality for a full-surface session. This one is kept because it holds in THIS
+       * session's configuration, where the retired marker used to share the line. The literal is
+       * "PTC" (`MODE_STATUS_TEXT`, private to the factory).
        */
       expect(status?.text, "and the status says which mode").toContain("PTC");
     });
