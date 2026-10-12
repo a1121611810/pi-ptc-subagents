@@ -17,7 +17,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { dirname, join, relative } from "node:path";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CHECKS } from "./checks.mjs";
 

@@ -26,14 +26,20 @@
  * ## How it decides it has proved anything
  *
  * A harness that reports green without having mutated anything is worse than no harness, because it
- * is indistinguishable from a gate that stopped working. Three properties, each checkable:
+ * is indistinguishable from a gate that stopped working. Four properties, each checkable:
  *
- *   1. every case must actually change a file — the runner reports the byte delta and refuses a
- *      case whose mutation was a no-op;
+ *   1. every case must actually change a file — the runner hashes the tree before and after and
+ *      refuses a case whose mutation was a no-op;
  *   2. every case must be run against the **unmutated** copy first, so a gate that is already red
  *      is reported as such instead of being credited with catching the mutation;
- *   3. a gate with no case is listed as unproven. Three of the five have one; two do not, and
- *      saying so is the point.
+ *   3. a gate with no case is listed as unproven, and the list of gates is read from `checks.mjs`
+ *      rather than written here, so a gate added there shows up as unproven the day it is added;
+ *   4. the repository must be byte-identical when the run finishes.
+ *
+ * Property 3 currently has nothing to print: all five gates have a case. It was not written
+ * speculatively — this file started with three cases, and the missing two were what made property 3
+ * worth having. Adding a sixth gate to `checks.mjs` by hand and re-running was how it was checked:
+ * `no counterfactual yet for: check-sixth.mjs`, as it should be.
  *
  * ## Running it
  *
@@ -46,9 +52,9 @@
 
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CHECK_SCRIPTS } from '../checks.mjs';
 

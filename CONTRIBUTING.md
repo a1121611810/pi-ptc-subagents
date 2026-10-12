@@ -33,6 +33,23 @@ Two things about that list are easy to miss:
   once passed three review rounds and 696 tests, then broke `verify:dist` on the built bundle.
   If your change touches rendering, the worker, or the bindings, that failure is real.
 
+## Turning on the commit-time guardrail
+
+This repository ships `.githooks/pre-commit`, which refuses two things at the moment they would enter
+history: a packaged artifact such as `*.tgz`, and a staged file the repository's own formatter would
+reformat. It is not in CI and it is not a replacement for the gate above — it moves those two
+failures from `main` back to the commit that caused them.
+
+It does nothing until you point git at it, because that setting is per-clone and cannot be committed:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Nothing else is needed and nothing else is optional — the file is committed so the clone has
+something to point at. If a commit is refused and you believe it is wrong, the hook's header says what
+it checks and why, and every check it ran is a command you can run yourself.
+
 ## House style
 
 The repository carries its own rules in [`AGENTS.md`](./AGENTS.md), and they are the short version
