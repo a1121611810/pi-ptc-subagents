@@ -14,7 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   message is the deliverable. Nothing in pi's own system prompt says any of it, which left a child
   able to ask a question nobody would answer or to narrate its process where an answer was wanted.
   It applies to named definitions too, so a definition does not have to restate what the dispatch
-  already knows. For a child with no definition the block is its entire system prompt. See ADR-0039.
+  already knows. For a child with no definition the prompt file holds nothing but that block — pi's
+  own system prompt is still underneath it, which is precisely why the block has to say what the
+  child is. See ADR-0039.
 
 - **`agent` is no longer required by `ptc_subagent` or `pi.dispatch`.** Omitting it dispatches a
   generalist child — pi's own system prompt, pi's full toolset, nothing narrowed — so a fresh

@@ -41,12 +41,17 @@ process.stdout.write(
             String(Buffer.byteLength(prompt, "utf8")) +
             " tools=" +
             tools +
-            // The prompt itself, folded to one line so a test can assert what the child was
-            // actually handed rather than only how big it was. `prompt-bytes` alone proves a file
-            // was passed; it cannot tell a prompt carrying the dispatch context from one that is
-            // missing it, and #186's acceptance criterion is about the content.
+            // The prompt itself, so a test can assert what the child was actually handed rather
+            // than only how big it was. `prompt-bytes` alone proves a file was passed; it cannot
+            // tell a prompt carrying the dispatch context from one that is missing it, and #186's
+            // acceptance criterion is about the content.
+            //
+            // Verbatim, newlines and all: JSON escapes them, and the assertion compares against a
+            // multi-line literal. Folding it to one line here would silently make that comparison
+            // impossible — measured, it reddened the test for a reason that had nothing to do with
+            // the behaviour under test.
             " prompt=" +
-            prompt.replace(/\s+/g, " ").trim(),
+            prompt,
         },
       ],
     },

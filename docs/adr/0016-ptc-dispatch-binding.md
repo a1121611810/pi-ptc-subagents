@@ -84,7 +84,7 @@ The first pass left this as an unstated hole. The decision is to make it explici
 
 The shape mirrors DSH's existing subagent-context injection (@deepseek-ai/dsh-tools) so the general pattern is one the field already recognises; the only difference is the depth / max-depth attributes, which are pi-ptc-specific.
 
-**The block carries a second thing as of 2026-10-12** (ADR-0039 §Decision 4, issue #186): what the child IS — that it was dispatched, that it cannot see the dispatching session, and that its final message is the deliverable. Same tag, same append site. The code above is this record's own subject rather than a live excerpt of the block; for a child with no agent definition the block is now its entire system prompt.
+**The block carries a second thing as of 2026-10-12** (ADR-0039 §Decision 4, issue #186): what the child IS — that it was dispatched, that it cannot see the dispatching session, and that its final message is the deliverable. Same tag, same append site. The code above is this record's own subject rather than a live excerpt of the block; for a child with no agent definition the block is the whole of what the prompt file adds.
 
 **Why not forbid it.** Disallowing the child from writing PTC programs would close off the natural multi-level pattern (orchestrator PTC -> scout agent PTC -> sub-scout PTC) and would also force pi-ptc to inject counter-prompts (do not write PTC programs) that the field at large does not write. The chosen design lets the child do whatever its agent markdown tells it to do, while making recursion observable (the hint) and bounded (the cap).
 

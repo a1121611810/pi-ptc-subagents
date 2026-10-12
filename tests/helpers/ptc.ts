@@ -706,3 +706,25 @@ export async function installRecordingPi(
     },
   };
 }
+
+/**
+ * The dispatch context `appendDepthHint` appends to every child, as a LITERAL.
+ *
+ * This is the specification, not a copy of the implementation — `docs/testing-constraints.md`
+ * constraint #4 names a literal as a legal oracle, and for text a model reads the words ARE the
+ * behaviour: a paraphrase changes what the child does.
+ *
+ * It lives in one place because two seams assert it: the unit tests that own the contract, and the
+ * e2e that proves the payload reached a real process. The first version of both asserted
+ * word-matches — `/dispatched by another/`, `/cannot see/`, `/deliverable/` — and could not tell a
+ * claim from its negation: measured, inserting one `NOT` satisfied all three while inverting every
+ * instruction ("You were NOT dispatched by another pi session … do not answer from context you
+ * cannot see … nothing you write is a deliverable").
+ */
+export const DISPATCH_CONTEXT: string = [
+  "You were dispatched by another pi session as a fresh context. You cannot see that session's",
+  "conversation and you cannot ask it anything, so if the task you were given is underspecified,",
+  "say which part is underspecified and answer the rest rather than inventing the missing",
+  "context. Your final message is the deliverable: it is what the caller receives, so put the",
+  "answer there rather than narrating how you found it.",
+].join("\n");

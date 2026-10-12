@@ -413,11 +413,13 @@ limit reached" }`. Aligns with dsh's `SubagentCapabilities.depthLimit`
 and codex's `agent_max_depth`. ADR-0016 Recursive dispatch section.
 
 **`pi-ptc-context` hint** — the `<pi-ptc-context depth="N" max-depth="M">...</pi-ptc-context>`
-block that pi-ptc appends to a dispatched child subprocess's system prompt. It carries two unrelated
-things: how much recursion room the child has (`depth` / `max-depth`), and **what the child IS** —
-that it was dispatched, that it cannot see the dispatching session, and that its final message is
-the deliverable (ADR-0039 §Decision 4, issue #186). For a child with no agent definition the block
-is its entire system prompt, which is the case the second half exists for. Shape mirrors
+block that pi-ptc appends to a dispatched child subprocess's system prompt. It carries three
+unrelated things: how much recursion room the child has (`depth` / `max-depth`), **what the child
+IS** — that it was dispatched, that it cannot see the dispatching session, and that its final
+message is the deliverable (ADR-0039 §Decision 4, issue #186) — and, unless the definition opts
+out, the child-report clause (ADR-0032). Everything in it is pi-ptc's, and it is _appended_ to pi's
+own system prompt rather than substituted for it: for a child with no agent definition the block is
+the whole of what the prompt file adds, with pi's own prompt still underneath. Shape mirrors
 DSH's `subagent-context` injection; the only difference is the depth /
 max-depth attributes, which are pi-ptc-specific. ADR-0016 Recursive section, ADR-0039.
 

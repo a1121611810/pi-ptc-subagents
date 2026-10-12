@@ -376,18 +376,6 @@ const CHILD_REPORT_PROMPT_CLAUSE =
   "you must not report usage or token counts — those are measured by the host.";
 
 /**
- * Compose the system prompt handed to the child subprocess.
- *
- * The agent's own markdown body is the user-supplied content; pi-ptc appends a
- * `<pi-ptc-context depth="N" max-depth="M">...</pi-ptc-context>` hint so the child
- * agent can see how much recursion room it has. The shape mirrors DSH's existing
- * subagent-context injection so the field recognises it.
- *
- * `options.reportContract` is the ADR-0032 opt-out: `false` leaves the clause out entirely,
- * because an agent that opted out is never asked for a report. It defaults to on, so an agent
- * whose markdown says nothing about it gets the contract (ticket #102).
- */
-/**
  * Build the context block appended to every dispatched child's system prompt, after whatever the
  * definition contributed.
  *
@@ -395,11 +383,20 @@ const CHILD_REPORT_PROMPT_CLAUSE =
  * occupant, and by #186 the block also carries what the child IS. Renaming it is a change of its
  * own rather than a passenger on a ticket about the content.
  *
+ * The first job is the recursion hint. The agent's own markdown body is the user-supplied content;
+ * pi-ptc appends a `<pi-ptc-context depth="N" max-depth="M">...</pi-ptc-context>` block so the
+ * child agent can see how much recursion room it has. The shape mirrors DSH's existing
+ * subagent-context injection so the field recognises it.
+ *
  * Three claims are made here, and each exists because pi's own system prompt makes the opposite
  * one true of a session the user is talking to: that this is a dispatched child rather than that
  * session, that it cannot see or ask the dispatcher anything, and that its final message is what
  * the caller receives. The middle one is what stops a child asking a question nobody will answer;
  * the last is what stops it narrating where an answer was wanted.
+ *
+ * `options.reportContract` is the ADR-0032 opt-out: `false` leaves the clause out entirely,
+ * because an agent that opted out is never asked for a report. It defaults to on, so an agent
+ * whose markdown says nothing about it gets the contract (ticket #102).
  */
 export function appendDepthHint(
   systemPrompt: string,
@@ -2083,7 +2080,7 @@ export async function dispatch(
       // NOT swallowed silently. Constraint 3 is about exactly this shape -- a failure that leaves
       // no trace -- and an injected lifecycle is free to treat `exit()` as the thing that releases
       // an OS resource, in which case a silent reject is a silent leak with no signal at all. The
-      // background branch resolves the same logger at dispatch.ts:1026; this is that, on the other
+      // background branch resolves the same logger at dispatch.ts:1678; this is that, on the other
       // front.
       //
       // The cost of fire-and-forget: `await dispatch()` can return before the delete lands, so a

@@ -25,6 +25,7 @@ import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DISPATCH_CONTEXT } from "../helpers/ptc.ts";
 import { dispatch } from "../../src/runtime/dispatch.ts";
 import { DispatchSlotCounter } from "../../src/runtime/dispatch.ts";
 
@@ -188,11 +189,11 @@ describe("an omitted agent dispatches a generalist child", () => {
        * assertion about a string this test assembled.
        *
        * The generalist is the case that matters: with no definition there is nothing else to tell
-       * the child what it is, so the context block IS its entire system prompt.
+       * the child what it is, so the block is the whole of the prompt file.
        */
-      expect(result.text, "the child was told it was dispatched").toMatch(/dispatched by another/i);
-      expect(result.text, "and that it cannot see the dispatcher").toMatch(/cannot see/i);
-      expect(result.text, "and that its output is the deliverable").toMatch(/deliverable/i);
+      expect(result.text, "the child received the dispatch context, verbatim").toContain(
+        DISPATCH_CONTEXT,
+      );
     });
   });
 });
