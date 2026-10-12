@@ -5,7 +5,7 @@
  * Issue #174 recorded a finding rather than fixing it: the five checks execute only in
  * `.github/workflows/pages.yml`, which triggers on a push to `main` and on manual dispatch, so a
  * pull request that turned one of them red merged cleanly and the failure surfaced afterwards as a
- * failed deploy. This test is the fix's regression guard. It asserts three things, each of which is
+ * failed deploy. This test is the fix's regression guard. It asserts five things, each of which is
  * a way the fix can rot:
  *
  *   1. **Something runs the site build on `pull_request`.** The bare existence of the fix. Without
@@ -13,7 +13,7 @@
  *      notices — the gates all still pass, the site still builds on `main`, and the only symptom is
  *      a failed deploy that no one was told to expect.
  *   2. **That job runs the same command `pages.yml` runs.** This is the assertion that earns the
- *      other two. Two sets — one guarding a merge, one guarding a deploy — can drift apart, and a
+ *      rest. Two sets — one guarding a merge, one guarding a deploy — can drift apart, and a
  *      drift is *worse* than the gap it replaced: it is silent, it reinstates the original bug for
  *      whichever check fell out of the merge-side set, and it does so while every gate stays green.
  *      Identity of the command makes the sets equal by construction instead of by a second gate that
@@ -24,6 +24,15 @@
  *      inside named exported functions). A pull request that changes `src/runtime/limits.ts` and no
  *      file under `packages/website/` can turn a site check red, so `paths: [packages/website/**]`
  *      would skip exactly the class of drift the gate exists to catch, and skip it silently.
+ *   4. **The pull request job holds no deploy credentials, at either level.** `pages.yml` mints the
+ *      OIDC token Pages deployment trusts. GitHub documents that a job-level `permissions` block
+ *      *overrides* the top level rather than being capped by it, so reading only the top level
+ *      leaves a three-line copy-paste from `pages.yml` — `permissions: {id-token: write}` on the
+ *      job — passing while the PR job holds the credential. This one carries the most security
+ *      weight of the five.
+ *   5. **The extractors still see what they claim to.** `workflows.length` has a floor, and the
+ *      deploy workflow is named by path. Without this, a broken extractor makes every universal
+ *      assertion below compare the empty set against itself and pass.
  *
  * Why this sits in `tests/` rather than in the site's own runner: the site runner executes on the
  * deploy path, so a consistency check placed there lets the drift it exists to prevent reach `main`
@@ -38,8 +47,9 @@
  *   - 每处抽取都带下界断言。抽取器坏掉时，`过滤后的集合` 与 `空集合` 比较会**静默恒真** ——
  *     那正是 `docs/testing-constraints.md` 约束 #5（反事实判据）要防的东西。一个断言如果无法在
  *     实现被改坏时变红，它就不是门禁，是装饰。
- *   - 命令比较是**逐字符相等**，不是「包含」。「包含」会让 pages.yml 跑 `build`、PR 侧跑
- *     `build --no-check` 也算通过，而那正是断言 2 要防的分叉。
+ *   - 命令比较是**精确字面量相等**：`toContain(DEPLOY_COMMAND)` 里的 `DEPLOY_COMMAND` 是一个
+ *     完整命令的字面量，不是子串模式、不是正则。所以 `build --no-check` 不算命中，
+ *     `prebuild && …build` 也不算 —— 集合分叉正是从这里开始的。
  */
 
 import { readFileSync, readdirSync } from "node:fs";

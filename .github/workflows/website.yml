@@ -10,8 +10,9 @@
 # bug for whichever check fell out. Running the identical script makes the sets equal by
 # construction instead of by a second gate that would need its own counterfactual test.
 #
-# `pnpm --filter website run build` and not `… run check`: four of the five checks read the build
-# output, so the build is the cheapest way to get all five, and it is the chain that is already
+# `pnpm --filter website run build` and not `… run check`: three of the five checks read
+# `.vitepress/dist` directly and a fourth reads `projected.json`, the manifest the projection step
+# writes. So `build` is the shortest command that gets all five, and it is the chain already
 # load-bearing in `pages.yml`.
 name: Website checks
 
