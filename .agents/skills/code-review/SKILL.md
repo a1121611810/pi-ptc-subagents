@@ -153,8 +153,8 @@ ocr review --from <base> --to HEAD --background-file <spec.md> \
 
 ## 触发式维度卡点(命中才强制;tooling 已强制的不报)
 
-**载体已迁到 `.opencodereview/rules/general.md`**(catch-all 兜底层),那里有完整的 5 维表:
-错误处理与日志 / 多轨·兜底·降级设计 / 性能 / 数据迁移与 schema / 安全与隐私。
+**载体已迁到 `.opencodereview/rules/general.md`**(catch-all 兜底层),那里有完整的 6 维表:
+错误处理与日志 / 多轨·兜底·降级设计 / 性能 / 数据迁移与 schema / 能力的可用前提 / 安全与隐私。
 逐文件走 checklist 时以 OCR 下发的 general.md 文本为准,本表只作索引:
 
 | 维度                   | 触发信号                               | 承载规则                                                           |
@@ -163,6 +163,7 @@ ocr review --from <base> --to HEAD --background-file <spec.md> \
 | 多轨 / 兜底 / 降级设计 | 双轨降级、迁移期新旧键双读、独立计数器 | `general.md`;输入源缺读点转 `ptc-config-wiring.md`                 |
 | 性能                   | 热路径 / 大输出 / 大列表               | `general.md`(本仓 `maxOutputBytes` 是 67 MB 量级)                  |
 | 数据迁移与 schema      | 枚举转换 / 键迁移 / backfill           | `general.md`                                                       |
+| 能力的可用前提         | 注册给模型的工具 / 用户可配置的输入源  | `general.md`(用户何时知道前提不满足;「永远不会」按未接线阻塞)      |
 | 安全与隐私             | 子进程环境 / argv / 日志 / 渲染        | `general.md`(`WORKER_ENV_ALLOW_LIST` 之外不得进 worker)            |
 | 并发 / 竞态            | 并行代码 / 定时器 / 共享状态           | 只能人审:仔细读并发逻辑,跑不出来                                   |
 | 依赖                   | 新增/替换依赖                          | `general.md`                                                       |

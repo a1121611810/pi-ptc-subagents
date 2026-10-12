@@ -174,11 +174,19 @@ test("a full-surface session says nothing: it has no ptc_subagent to be unusable
   expect(agentNotices(stub), "no tool, no notice").toEqual([]);
 });
 
-test("a print-mode session says nothing, matching every other TUI-only notice here", async () => {
-  // `ctx.ui.notify` emits nothing a print session can carry, so asserting on it would be
-  // asserting on a path that does not exist. What this pins is that gating is deliberate rather
-  // than incidental: the notice reads the same resolved state in either mode, and only the
-  // surface differs.
+test("a print-mode session carries no notification, because notify is TUI-only", async () => {
+  /*
+   * The previous version of this test asserted the same `[]` while its comment claimed "matching
+   * every other TUI-only notice here" — and there is no such product-side gate: `grep '"print"'`
+   * in `src/` returns zero. TUI-only is a property of `ctx.ui.notify` itself, not of this
+   * extension. So the old assertion was true for every possible product behaviour, including one
+   * that emitted the notice in print mode: vacuous, and its comment described a gate that does not
+   * exist.
+   *
+   * What is real and worth pinning is the STATUS marker: `paintStatus` is not a notify, so in
+   * print mode the decision still ran and the degradation is still recorded. That is the honest
+   * statement of what the mode does here, and it fails the moment the check stops firing.
+   */
   const stub = await withIsolatedAgentDirs(() =>
     makeExtensionStub({
       ...SUBAGENTS_AXES,
@@ -186,5 +194,10 @@ test("a print-mode session says nothing, matching every other TUI-only notice he
       mode: "print",
     }),
   );
-  expect(agentNotices(stub), "print mode carries no notices at all").toEqual([]);
+  // Counterfactual: gating on print mode, or removing the availability check, empties this.
+  const status = stub.statuses
+    .filter((s) => s.key === "ptc-mode" && s.text !== undefined)
+    .map((s) => s.text)
+    .join(" ");
+  expect(status, "the decision still ran and is still recorded").toContain("no registered agent");
 });

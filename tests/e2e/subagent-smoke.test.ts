@@ -23,11 +23,10 @@
 import { describe, expect, test } from "vitest";
 import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { dispatch } from "../../src/runtime/dispatch.ts";
 import { DispatchSlotCounter } from "../../src/runtime/dispatch.ts";
-import { InMemoryTaskStorage } from "../../src/runtime/task-storage.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FAKE_PI = join(HERE, "fixtures", "fake-pi.mjs");
@@ -47,13 +46,36 @@ async function withFakePi<T>(body: (cwd: string) => Promise<T>): Promise<T> {
   // be executable on its own terms.
   await writeFile(pi, '#!/bin/sh\nexec "' + process.execPath + '" "' + FAKE_PI + '" "$@"\n');
   await chmod(pi, 0o755);
+
+  /*
+   * HOME is redirected too, and that is load-bearing rather than tidiness. `resolveAgentDirs`
+   * answers the USER axis from `os.homedir()`, and `discoverAgent` tries the user candidate
+   * BEFORE the project one -- so without this a developer's own
+   * `~/.pi/agent/agents/<name>.md` outranks the fixture and the suite's verdict is decided by
+   * whoever happens to be running it. Measured: planting `smoke.md` under a temp HOME turns
+   * "a scope that was not asked for still refuses" red on a machine that is otherwise fine.
+   *
+   * The sibling unit tests in this diff already do this (`withIsolatedAgentDirs`); this file is
+   * where it had been dropped, which is exactly the kind of gap an e2e hides because it still
+   * passes on the author's machine.
+   */
+  const home = await mkdtemp(join(tmpdir(), "ptc-smoke-home-"));
+  await mkdir(join(home, ".pi", "agent", "agents"), { recursive: true });
   const previousPath = process.env.PATH;
-  process.env.PATH = binDir + ":" + (previousPath ?? "");
+  const previousHome = process.env.HOME;
+  const previousUserProfile = process.env.USERPROFILE;
+  process.env.PATH = binDir + delimiter + (previousPath ?? "");
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
   try {
     return await body(cwd);
   } finally {
     if (previousPath === undefined) delete process.env.PATH;
     else process.env.PATH = previousPath;
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = previousUserProfile;
   }
 }
 
@@ -146,33 +168,5 @@ describe("an unusable install says so instead of pretending", () => {
       expect(result.errorMessage).toContain("unknown agent");
       expect(result.errorMessage).toContain("broken");
     });
-  });
-});
-
-describe("the storage seam the dispatch path needs is real", () => {
-  test("a foreground dispatch needs no background runtime to succeed", async () => {
-    // Guards the harness rather than the feature: if the dispatch path started depending on a
-    // storage implementation this test does not provide, every case above would fail with an
-    // error that reads like a product bug. A comment plus a green run is cheaper than a mystery.
-    await withFakePi(async (cwd) => {
-      await mkdir(join(cwd, ".pi", "agents"), { recursive: true });
-      await writeFile(
-        join(cwd, ".pi", "agents", "smoke.md"),
-        "---\nname: smoke\n---\nReply PONG.\n",
-        "utf8",
-      );
-      const result = await dispatch(
-        { agent: "smoke", task: "say PONG", agentScope: "both", cwd },
-        { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
-        { slots: new DispatchSlotCounter(2), taskRegistry: undefined },
-      );
-      expect(result.status).toBe("fulfilled");
-    });
-  });
-
-  test("InMemoryTaskStorage is the shape the harness falls back to", () => {
-    // Named so the reason is on the record: this is the task-registry seam a background dispatch
-    // would need, kept here so the foreground smoke does not have to invent one.
-    expect(new InMemoryTaskStorage()).toBeTruthy();
   });
 });

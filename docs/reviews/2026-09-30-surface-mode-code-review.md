@@ -104,7 +104,7 @@ specific enough to act on.
 
 `docs/testing-constraints.md:151` said the sync was complete while the line above it still
 said the OCR rule carries F1/F2/F3, and three more sites (`test-discipline.md`'s missing F4
-section, `test-discipline-oracle.md:45,51`, `general.md:169`) still list F1/F2/F3 only. The
+section, `test-discipline-oracle.md:45,51`, `general.md:196`) still list F1/F2/F3 only. The
 paragraph now names each site and says which are done and which are deliberately not: the F4
 section in `test-discipline.md` would have to cite an instance, and the only real one so far
 is this ledger.
