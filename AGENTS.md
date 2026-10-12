@@ -12,6 +12,13 @@ The five canonical triage roles, used as label strings directly. See `docs/agent
 
 Single-context: one `CONTEXT.md` at the repo root and `docs/adr/` for ADRs. See `docs/agents/domain.md`.
 
+## The website
+
+`packages/website/` is a second workspace member with **its own five checks and its own deployment**,
+excluded from the root gate by ADR-0036. Before changing anything under it, read
+`packages/website/README.md` — it lists every check, what turns each one red, and the one fact that
+surprises people: those checks never run on a pull request.
+
 ## Code review tooling
 
 This repo has both **CodeGraph** and **open-code-review (ocr)** initialized and ready to use:

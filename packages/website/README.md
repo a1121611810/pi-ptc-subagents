@@ -1,0 +1,76 @@
+# pi-ptc-subagents — the site
+
+The published site is <https://a1121611810.github.io/pi-ptc-subagents/>. It is a second workspace
+member in this repository, not part of the npm package: nothing in `dist/` comes from it, and
+ADR-0036 keeps it out of the root lint and format gate for the same reason — coupling "can this
+package be published" to "does a Vue template parse" is a release ceremony carrying a second
+project's failures.
+
+This file is the operational reference for it. The decisions live in `docs/adr/0036`, `0037` and
+`0038`; this is what exists now and what to do when it goes red.
+
+## The checks
+
+All five run from the site's own runner. None of them runs in the root release chain.
+
+| Check | What it catches | What turns it red |
+| --- | --- | --- |
+| `check-doc-claims.mjs` | Prose in the projected documents describing code that no longer exists | A default moves, a literal is reworded, a key is renamed — 19 bindings over 4 documents, each anchored to a named constant rather than a text search |
+| `check-projection-coverage.mjs` | A reader-facing document that is neither projected onto the site nor excused | A new document under `docs/*.md` or `docs/usage/*.md` that nobody decided about; an exclusion naming a path that no longer exists; a projected source that was deleted |
+| `check-landing-tool-names.mjs` | A tool name the landing page shows that the package does not register, or one nobody decided to show | A registered tool landing in neither `MUST_APPEAR` nor `DECLARED_ABSENT`; a `DECLARED_ABSENT` entry naming a tool that has since been removed |
+| `check-internal-links.mjs` | A link that leaves the site, including repository links whose file is not there | A root-relative `href` in the built HTML pointing at a page that was not built; a `/blob/`, `/edit/` or `/tree/` link whose target is missing from the working tree |
+| `check-style-scope.mjs` | The landing stylesheet restyling the documentation pages | A rule touching VitePress's own shell without the landing scope; the scope anchor renamed so it matches nothing; the anchor leaking onto a documentation page |
+
+`check-external-links.mjs` is **not** in that table because it is not a gate. It reports, never
+exits non-zero, and is never wired into CI: a check against someone else's host fails on their
+outage and on bot protection. Run it by hand when you want to know.
+
+## Where the checks run
+
+This is the part that surprises people.
+
+| Path | Trigger | What runs |
+| --- | --- | --- |
+| Site deployment (`.github/workflows/pages.yml`) | push to `main` | The build is the gate: the five checks run as part of `pnpm --filter website run build`, before anything is uploaded |
+| npm release (`.github/workflows/publish.yml`) | push of a `v*` tag | The root release chain, then `check-published-manifest.mjs` reading back what the registry actually serves |
+| Repository metadata (`.github/workflows/ci.yml`) | push to `main` only | `check-repo-metadata.mjs` — the About panel's description, topics and homepage against the manifest |
+
+**The five site checks never run on a pull request.** Measured 2026-10-12: the root release chain
+does not include the website (its build step packages the npm artifact only), and none of the other
+three workflows has a website step. A pull request that turns one of them red merges cleanly, and
+the failure surfaces afterwards as a failed deploy. That finding is filed as
+[#174](https://github.com/a1121611810/pi-ptc-subagents/issues/174) and is not fixed by this file.
+
+## Running them locally
+
+```bash
+pnpm --filter website run build
+```
+
+That projects the documents, builds the site, and runs all five checks.
+
+`pnpm --filter website run check` runs the checks alone, and **three of the five read build output**
+— `check-landing-tool-names.mjs`, `check-internal-links.mjs` and `check-style-scope.mjs`. Without a
+build they all turn red, which reads as three broken checks rather than a missing build.
+
+## Adding a check
+
+1. Write the script under `scripts/`, named `check-<what-it-catches>.mjs`.
+2. Add it to the list the site runner invokes.
+3. **Add it to the table above.** This step is not optional and not a matter of discipline:
+   `tests/website-readme-consistency.test.ts` fails in both directions — a check the runner invokes
+   that this file does not name, and a check this file names that the runner does not invoke.
+
+## Deliberate boundaries
+
+Not gaps. Do not "fix" them without reading the reason.
+
+- **Outbound links are reported, never gated.** The reason is real but was not recorded anywhere
+  until 2026-10-12, which is why a later reader could cite a decision record that never made this
+  boundary. It now lives here.
+- **The site is excluded from the repository's root lint and format gate** (ADR-0036). The formatter
+  aborts the whole tree on a malformed HTML file, and the site is the only part of the tree that
+  owns HTML on purpose.
+- **The site deploys on every push to `main`, not on release tags** (ADR-0038). Its content is a
+  rendering of the working tree, so a tag-triggered deploy would answer "how do I use this" with
+  instructions from weeks ago.
