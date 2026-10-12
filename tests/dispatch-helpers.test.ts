@@ -509,6 +509,12 @@ describe("registered-agent listing + actionable refusals (pitfall #2)", () => {
       // Counterfactual: the old "unknown agent: undefined" message fails this prefix, and a
       // build that skips the listing fails the registered-agents line.
       expect(blank.errorMessage ?? "").toContain("agent, when given, must be a non-empty string");
+      // The way OUT, not just the way it went wrong. Nothing pinned this clause before: deleting
+      // "omit it entirely…" from the refusal left the suite green, so the half of the message that
+      // tells a caller it never had to name anything could have been dropped unnoticed — and a
+      // refusal that only describes the error teaches a model to keep guessing names.
+      expect(blank.errorMessage ?? "").toContain("omit it entirely");
+      expect(blank.errorMessage ?? "").toContain("generalist child");
       expect(blank.errorMessage ?? "").toContain("registered agents: [helper]");
       expect(blank.errorMessage ?? "").toContain(join(dir, ".pi", "agents"));
       expect(blank.errorMessage ?? "").toContain("name: <agent-name>");

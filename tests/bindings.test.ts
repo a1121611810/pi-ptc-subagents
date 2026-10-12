@@ -1,11 +1,13 @@
 import { expect, test } from "vitest";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { validateToolArguments } from "@earendil-works/pi-ai";
 import {
   BUILTIN_BINDING_NAMES,
   createBuiltinBindings,
   DEFAULT_BINDING_NAMES,
   DISPATCH_BINDING_NAME,
+  DISPATCH_PARAMETERS,
 } from "../src/runtime/bindings.ts";
 import { resolveBindingNames } from "../src/tools/common.ts";
 import { makeTempDir, removeTempDir, RUN_TIMEOUT_MS } from "./helpers/ptc.ts";
@@ -135,6 +137,51 @@ test(
   },
   options,
 );
+
+test("the schema itself accepts an omitted agent, and refuses an unusable one", () => {
+  /*
+   * The OPTIONALITY, asserted through pi's own validator rather than through prose about it.
+   *
+   * Nothing held this before. Measured 2026-10-12: reverting the field to the pre-#185
+   * `Type.String({ minLength: 1 })` — keeping the description and both runtime guards — left
+   * `tsc` green and the whole suite green. The three tests that read `DISPATCH_PARAMETERS` look at
+   * key sets (`tests/unit/ptc-subagent.test.ts`) or at description text
+   * (`tests/unit/agent-roster.test.ts`), so a one-line revert that would turn every omitted
+   * dispatch into a validation failure had nothing standing in its way.
+   *
+   * `validateToolArguments` is the same helper `bindings.ts` uses, imported from the same module,
+   * so this measures the real contract rather than a paraphrase of it.
+   *
+   * Counterfactual: the revert above fails the first assertion. The other three fail if the
+   * requirement moves onto `agent`, or if the `minLength: 1` goes away.
+   */
+  const tool = {
+    name: DISPATCH_BINDING_NAME,
+    description: "probe",
+    parameters: DISPATCH_PARAMETERS,
+  };
+  const accepts = (args: unknown): boolean => {
+    try {
+      validateToolArguments(
+        tool as never,
+        {
+          type: "toolCall",
+          id: "probe",
+          name: DISPATCH_BINDING_NAME,
+          arguments: args,
+        } as never,
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  expect(accepts({ task: "t" }), "an omitted agent is a valid call").toBe(true);
+  expect(accepts({}), "task is still required").toBe(false);
+  expect(accepts({ task: "t", agent: "" }), "an empty name is not").toBe(false);
+  expect(accepts({ task: "t", agent: "x" }), "a name is").toBe(true);
+});
 
 test(
   "the pi.dispatch binding validates arguments and refuses bad calls without throwing",

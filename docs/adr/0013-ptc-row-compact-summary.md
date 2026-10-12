@@ -171,15 +171,15 @@ eight_", never "this repository has no other unrecorded caps".
 
 **The failure block is the one bound that is not a `MAX_*`.** `MAX_ERROR_CHARS` (120) is not
 that bound. It reaches exactly one line: the collapsed `failed: …` row,
-through `firstLine()` (`render.ts:146`) ← `errorText()` (`render.ts:902`) ← `render.ts:1047` — and,
+through `firstLine()` (`render.ts:146`) ← `errorText()` (`render.ts:902`) ← `render.ts:1059` — and,
 expanded, only as the fallback source for a result that carries no text block at all
-(`render.ts:1141`). Expanded, the failure block is bounded twice, and neither bound is a width
-constant: the line count is cut at `MAX_LOG_LINES_EXPANDED` (12, `render.ts:1143`), and every line
+(`render.ts:1153`). Expanded, the failure block is bounded twice, and neither bound is a width
+constant: the line count is cut at `MAX_LOG_LINES_EXPANDED` (12, `render.ts:1155`), and every line
 that survives is cut to the viewport by `alignRow` (`render.ts:130`).
 
 The absent per-line cap is intentional: the renderer says the failure text is "the reason the
 reader expanded the row at all" and gives it the full width under the summary instead of a cap of
-its own (`render.ts:1138-1139`). §3's "expanded is never unbounded" therefore holds for this block
+its own (`render.ts:1150-1139`). §3's "expanded is never unbounded" therefore holds for this block
 as **lines + viewport**, not as a `MAX_*` constant — it is bounded, just not by the kind of bound
 the other seven rows in the table carry, and a reader auditing that table should not go looking for
 a width constant here. Writing the deviation down is the point: every other block's bound is a

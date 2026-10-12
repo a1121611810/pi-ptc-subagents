@@ -177,9 +177,9 @@ export const DISPATCH_PARAMETERS: DispatchParameters = Type.Object({
     Type.String({
       minLength: 1,
       description:
-        "Name of a registered agent definition to dispatch, or omit it entirely for a fresh " +
-        "generalist pi with pi's own prompt and its full toolset. A name with no definition " +
-        "behind it is refused; an empty string is refused.",
+        "Optional. Name a registered agent definition to narrow the child, or omit it entirely " +
+        "for a fresh generalist pi with pi's own prompt and its full toolset. A name with no " +
+        "definition behind it is refused; an empty string is refused.",
     }),
   ),
   task: Type.String({ minLength: 1 }),
@@ -373,7 +373,12 @@ export function createBuiltinBindings(options: CreateBuiltinBindingsOptions): Bi
             text: "",
             status: "rejected",
             started: false,
-            agentName: rawAgent,
+            // The name the caller gave, or `""` when this refusal is about some OTHER field.
+            // `rawAgent` is `unknown` here and `agentName` is typed `string`: returning the raw
+            // value put `undefined` into a string field on the now-reachable path where a
+            // different field fails validation and no agent was named (issue #185 made that path
+            // reachable by removing the early missing-agent guard).
+            agentName: typeof rawAgent === "string" ? rawAgent : "",
             durationMs: 0,
             exitCode: 1,
             // ADR-0032: the total channel field, for the same reason every other refusal has

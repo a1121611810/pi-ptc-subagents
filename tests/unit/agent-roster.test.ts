@@ -223,5 +223,14 @@ describe("the scope default the model cannot see otherwise", () => {
     expect(description).toContain("omit it entirely");
     expect(description).toContain("generalist pi");
     expect(description).toContain("full toolset");
+    /*
+     * The PROPERTY the other three only imply. All three survive a description that says the
+     * opposite — "The `agent` argument is required — omit it entirely and you do not get a
+     * generalist pi; pi's full toolset is what you lose" contains every phrase above. This field
+     * is a model-visible channel, so the word carrying the permission has to be asserted.
+     * Counterfactual: the rewrite above turns this pair red.
+     */
+    expect(description, "states that the argument is optional").toMatch(/optional/i);
+    expect(description, "and does not call it required").not.toMatch(/required/i);
   });
 });

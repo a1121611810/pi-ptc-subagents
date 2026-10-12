@@ -1124,9 +1124,20 @@ export function isMalformedAgentName(agent: unknown): boolean {
 /**
  * True when the caller named no agent at all, which dispatches a generalist child.
  *
- * `undefined` is the only shape that means "not named". `null` is deliberately NOT included: it
- * arrives over a wire that can deliver anything, and treating a stray null as an intentional
- * omission is how a malformed call becomes an invisible one.
+ * `undefined` is the only shape that means "not named" at THIS layer, and that is a statement about
+ * the value the predicate is handed rather than about what a client sent. Measured 2026-10-12,
+ * because the distinction is easy to get backwards:
+ *
+ * pi's validator runs `normalizeOptionalNulls` over the arguments of every tool call
+ * (`validateToolArguments`, `@earendil-works/pi-ai`), and it runs on BOTH fronts — the tool front
+ * through pi's own tool dispatch, the binding front through our call inside `bindings.ts`. So
+ * `{ task, agent: null }` is delivered to our code as `{ task }`. A null on an optional field is
+ * the platform's encoding of "not provided", and by the time either front sees it there is no null
+ * left to refuse. Reading this predicate alone would suggest a stray null is malformed; it is
+ * in-process, and it cannot arrive from a wire.
+ *
+ * A non-null non-string does reach us and IS refused (see {@link isMalformedAgentName}); the
+ * validator coerces a number to its string form, which then fails to resolve as an agent name.
  */
 export function isAbsentAgentName(agent: unknown): agent is undefined {
   return agent === undefined;

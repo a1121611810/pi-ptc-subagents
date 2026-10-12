@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **`agent` is no longer required by `ptc_subagent` or `pi.dispatch`.** Omitting it dispatches a
+  generalist child — pi's own system prompt, pi's full toolset, nothing narrowed — so a fresh
+  install can delegate without first learning the agent-markdown format and writing a file. Naming
+  one is now how you _narrow_ a child, which is all a definition could ever do: the dispatch prompt
+  is appended to pi's own rather than substituted for it, and no tool list is passed unless the
+  definition declares one. See ADR-0039.
+
+### Fixed
+
+- **A dispatch that named nothing was refused as if it were a mistake.** Both fronts answered an
+  omitted `agent` with _"agent is required (there is no default agent)"_. A name that is _given_
+  and unusable is still refused — a typo must not silently dispatch something else — but the
+  refusal now also says that omitting the argument is an option. The `ptc_subagent` description and
+  the agent roster it carries lead with the omission, so a model can choose it deliberately.
+
 ## [2.0.3] - 2026-10-12
 
 ### Fixed

@@ -42,6 +42,18 @@ test("the description says an unregistered name is refused, and names the real d
   // hunt looked like.
   expect(text, "names the omission as the default").toMatch(/omit it/i);
   expect(text, "and says what the omission produces").toMatch(/generalist pi/i);
+  /*
+   * The PROPERTY, not just the phrases around it. The three assertions above are all satisfied by
+   * a description that says the opposite — measured: rewriting the sentence to "The `agent`
+   * argument is **required** — omit it and you do not get a generalist pi; pi's full toolset is
+   * what you lose" keeps every one of them green, because it still contains "omit it" and
+   * "generalist pi". A model reads this text to decide whether it may skip the argument, so the
+   * word that carries that fact has to be the thing under test.
+   *
+   * Counterfactual: the rewrite above turns this pair red (no "optional", and it says "required").
+   */
+  expect(text, "states that the argument is optional").toMatch(/optional/i);
+  expect(text, "and does not call it required").not.toMatch(/required/i);
 });
 
 test("the description points outward rather than repeating the refusal", () => {

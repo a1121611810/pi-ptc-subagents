@@ -985,6 +985,38 @@ describe("sub-call tree in collapsed view (ADR-0021)", () => {
     expect(fgTagsUsed(theme)).toContain("warning");
   });
 
+  test("a pi.dispatch row with no agent names the generalist rather than dumping the args", () => {
+    const theme = makeTheme();
+    const subCalls: SubCallRecord[] = [
+      {
+        callId: 1,
+        name: "pi.dispatch",
+        // No `agent`. This is the shape #185 made legal, and it is now the common one.
+        args: { task: "survey the peer implementations end to end" },
+        status: "ok",
+        startMs: 0,
+        endMs: 500,
+        durationMs: 500,
+      },
+    ];
+    const result = { details: makeDetails({ result: "hello", subCalls }) };
+    const out = lines(renderPtcToolResultCollapsed(result, false, theme), 200);
+
+    /*
+     * The selector's guard was `"agent" in args`, which was safe only while the argument was
+     * required. The moment it became optional the guard stopped matching on the DEFAULT path, and
+     * the row fell through to the JSON preview — capped at 40 characters, so it read
+     * `{"task":"survey the peer implement…`. A named dispatch kept its clean `→ <name>`, which
+     * made the odd one out the common case.
+     *
+     * Counterfactual: restore the `"agent" in args` guard and this goes red — the row carries the
+     * JSON preview instead of the marker asserted below.
+     */
+    expect(out[1]).toMatch(/^   [├└]─ pi\.dispatch/);
+    expect(out[1]).toContain("→ (generalist)");
+    expect(out[1], "no raw-args dump in the row").not.toContain('{"task"');
+  });
+
   test("rejected with no errorMessage falls back to 'rejected: concurrency'", () => {
     const theme = makeTheme();
     const subCalls: SubCallRecord[] = [

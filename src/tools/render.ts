@@ -918,8 +918,20 @@ function errorText(result: PtcRenderResult): string {
  * keys are already known.
  */
 function previewArgs(name: string, args: unknown): string {
-  if (name === "pi.dispatch" && typeof args === "object" && args !== null && "agent" in args) {
-    return `→ ${String((args as { agent: unknown }).agent)}`;
+  if (name === "pi.dispatch" && typeof args === "object" && args !== null) {
+    const agent = (args as { agent?: unknown }).agent;
+    // A usable name is what the row is for: it says which agent the call reached. Anything else
+    // is one of two different situations and they must not read the same.
+    if (typeof agent === "string" && agent.trim().length > 0) return `→ ${agent}`;
+    // Absent: the generalist child (#185). This is the common case now, so falling through to the
+    // JSON preview — which is capped at 40 characters and dumps the task text — would make the
+    // default path the illegible one.
+    if (agent === undefined) return "→ (generalist)";
+    // Present but unusable: a value the dispatch will refuse. Rendered with `JSON.stringify`
+    // rather than `String`, so an object-shaped value shows its contents instead of
+    // `[object Object]` — and showing it is the point, since the refusal does not put the value
+    // on this row.
+    return `→ ${JSON.stringify(agent)}`;
   }
   if (typeof args === "object" && args !== null) {
     const a = args as Record<string, unknown>;

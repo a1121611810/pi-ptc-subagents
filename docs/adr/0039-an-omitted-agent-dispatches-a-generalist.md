@@ -71,10 +71,18 @@ thing being described should not have been a preset.
    session, and that its output is the deliverable. Appended for named definitions too, so a
    definition does not have to restate what the dispatch already knows.
 
-5. **The startup availability warning is removed.** It reported that no agent was registered, and
+5. **The startup availability warning goes.** It reported that no agent was registered, and
    therefore that `ptc_subagent` had nothing to dispatch. That was true only while a name was
-   required. An empty registry is now the normal state of a fresh install, and a notice that fires
+   required; an empty registry is now the normal state of a fresh install, and a notice that fires
    on the normal state is the noise that teaches people to stop reading notices.
+
+   **This decision is carried by issue #187, not by the change that made `agent` optional.** They
+   are separate tickets, and #187 is blocked on the first one; folding its work into that review
+   would have put two subjects through one set of acceptance criteria. Until #187 lands, the notice
+   is still live in `src/index.ts` and its message is **false** for the new default — it says the
+   tool "has nothing to dispatch" at a moment when the tool dispatches fine. That is a stated,
+   bounded false alarm rather than an oversight, and it is recorded here so the interval is a
+   decision rather than a discovery.
 
 ## What this amends
 
@@ -85,7 +93,8 @@ thing being described should not have been a preset.
 - **ADR-0025** — it restates the required-field list; that restatement is superseded for `agent`.
 
 Both records keep their text. This one carries the reversal, by the rule that kept ADR-0025's own
-reasoning intact when ADR-0034 withdrew it.
+reasoning intact when ADR-0034 withdrew it. **Where ADR-0016 or ADR-0025 and this record read
+differently about `agent`, this one governs** — that is the only field either record is amended on.
 
 ## Consequences
 
@@ -98,9 +107,13 @@ reasoning intact when ADR-0034 withdrew it.
 - **Existing definitions are unaffected.** Tool restriction, model pins, appended role text and the
   child-report opt-out all behave as before, and a definition that declares `tools:` still narrows
   its child.
-- **The generalist has no report opt-out.** No declared tool list means no `--tools` flag, so a
-  generalist child returns prose with `report_channel: "none"` — the same shape any definition
-  without a declared tool list already produced.
+- **The generalist has no report opt-out.** With no definition there is no `childReport: false` to
+  read, so the child-report contract is on, and because pi's full toolset stays in place the report
+  tool is registered in the child — the registration is depth-gated (`src/index.ts:506`,
+  `createChildReportTool(ptcDepth > 0)`), and a dispatched child always runs above depth zero.
+  Measured on a real dispatch with the argument omitted: `report_channel: "tool"`, with the child
+  filing a summary and findings. Same channels as any other dispatch; only the opt-out is
+  unavailable.
 
 ## Rejected alternatives
 
