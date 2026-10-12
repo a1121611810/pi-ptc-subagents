@@ -387,6 +387,20 @@ const CHILD_REPORT_PROMPT_CLAUSE =
  * because an agent that opted out is never asked for a report. It defaults to on, so an agent
  * whose markdown says nothing about it gets the contract (ticket #102).
  */
+/**
+ * Build the context block appended to every dispatched child's system prompt, after whatever the
+ * definition contributed.
+ *
+ * The name is narrower than the job and is kept deliberately: the depth hint was its first
+ * occupant, and by #186 the block also carries what the child IS. Renaming it is a change of its
+ * own rather than a passenger on a ticket about the content.
+ *
+ * Three claims are made here, and each exists because pi's own system prompt makes the opposite
+ * one true of a session the user is talking to: that this is a dispatched child rather than that
+ * session, that it cannot see or ask the dispatcher anything, and that its final message is what
+ * the caller receives. The middle one is what stops a child asking a question nobody will answer;
+ * the last is what stops it narrating where an answer was wanted.
+ */
 export function appendDepthHint(
   systemPrompt: string,
   depth: number,
@@ -406,6 +420,11 @@ export function appendDepthHint(
       depth +
       ". Beyond it, pi.dispatch rejects with",
     '{ status: "rejected", errorMessage: "dispatch depth limit reached" }.',
+    "You were dispatched by another pi session as a fresh context. You cannot see that session's",
+    "conversation and you cannot ask it anything, so if the task you were given is underspecified,",
+    "say which part is underspecified and answer the rest rather than inventing the missing",
+    "context. Your final message is the deliverable: it is what the caller receives, so put the",
+    "answer there rather than narrating how you found it.",
     ...(reportContract ? [CHILD_REPORT_PROMPT_CLAUSE] : []),
     "</pi-ptc-context>",
   ].join("\n");

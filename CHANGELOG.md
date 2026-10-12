@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A dispatched child is told what it is.** Every child's context block now says that it was
+  dispatched by another session, that it cannot see or ask that session anything, and that its final
+  message is the deliverable. Nothing in pi's own system prompt says any of it, which left a child
+  able to ask a question nobody would answer or to narrate its process where an answer was wanted.
+  It applies to named definitions too, so a definition does not have to restate what the dispatch
+  already knows. For a child with no definition the block is its entire system prompt. See ADR-0039.
+
 - **`agent` is no longer required by `ptc_subagent` or `pi.dispatch`.** Omitting it dispatches a
   generalist child — pi's own system prompt, pi's full toolset, nothing narrowed — so a fresh
   install can delegate without first learning the agent-markdown format and writing a file. Naming

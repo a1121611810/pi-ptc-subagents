@@ -152,6 +152,36 @@ describe("appendDepthHint", () => {
     const out = appendDepthHint("", 2, 3);
     expect(out.startsWith("<pi-ptc-context")).toBe(true);
   });
+
+  test("a dispatched child is told what it is, and what its output is for", () => {
+    /*
+     * Three facts a child cannot get from pi's own prompt (#186). Without them a child can ask a
+     * question nobody will answer, or narrate its process where an answer was wanted.
+     *
+     * Asserted as properties rather than as sentences: the wording is ours to change, and a test
+     * pinned to a phrase has to be re-pointed every time it is reworded — which is how a test
+     * stops being about the fact and becomes about the string. Each pattern below is one the rest
+     * of this block cannot satisfy by accident: the depth text talks about *calling* pi.dispatch,
+     * never about having been dispatched, and it says nothing about seeing a session or about what
+     * the caller receives.
+     */
+    const out = appendDepthHint("You are a scout.", 1, 3);
+    expect(out, "it was dispatched by another session").toMatch(/dispatched by another/i);
+    expect(out, "and cannot see that session").toMatch(/cannot see/i);
+    expect(out, "and its output is the deliverable").toMatch(/deliverable/i);
+    // Appended, never substituted: the definition's own body still leads.
+    expect(out.startsWith("You are a scout.")).toBe(true);
+  });
+
+  test("the same context reaches a child that has no definition of its own", () => {
+    // The generalist case (#185). The context block IS the whole system prompt here, so a clause
+    // that only rendered alongside a definition's body would be missing for every default
+    // dispatch — which is exactly the child that has nothing else to tell it what it is.
+    const out = appendDepthHint("", 1, 3);
+    expect(out).toMatch(/dispatched by another/i);
+    expect(out).toMatch(/cannot see/i);
+    expect(out).toMatch(/deliverable/i);
+  });
 });
 
 describe("buildArgv", () => {

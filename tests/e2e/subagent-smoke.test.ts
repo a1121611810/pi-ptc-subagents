@@ -181,6 +181,18 @@ describe("an omitted agent dispatches a generalist child", () => {
        */
       expect(result.text, "nothing narrowed the child").toContain("tools=none");
       expect(result.agentName, "no definition was resolved").toBe("");
+      /*
+       * #186 acceptance criterion 4: what the child received is observable in a REAL subprocess,
+       * not only in a unit test. The fake `pi` echoes the prompt it was handed, so this is a fact
+       * about the file the dispatcher wrote and passed, read back by a separate process — not an
+       * assertion about a string this test assembled.
+       *
+       * The generalist is the case that matters: with no definition there is nothing else to tell
+       * the child what it is, so the context block IS its entire system prompt.
+       */
+      expect(result.text, "the child was told it was dispatched").toMatch(/dispatched by another/i);
+      expect(result.text, "and that it cannot see the dispatcher").toMatch(/cannot see/i);
+      expect(result.text, "and that its output is the deliverable").toMatch(/deliverable/i);
     });
   });
 });

@@ -40,7 +40,13 @@ process.stdout.write(
             "SMOKE-OK prompt-bytes=" +
             String(Buffer.byteLength(prompt, "utf8")) +
             " tools=" +
-            tools,
+            tools +
+            // The prompt itself, folded to one line so a test can assert what the child was
+            // actually handed rather than only how big it was. `prompt-bytes` alone proves a file
+            // was passed; it cannot tell a prompt carrying the dispatch context from one that is
+            // missing it, and #186's acceptance criterion is about the content.
+            " prompt=" +
+            prompt.replace(/\s+/g, " ").trim(),
         },
       ],
     },
