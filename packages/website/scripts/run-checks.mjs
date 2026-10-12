@@ -2,11 +2,11 @@
 /**
  * Run every site check, then report all of them together.
  *
- * These four checks are **independent**: each reads the build output and compares it against
- * something else (the source, the projection manifest, the registered tools, the working tree).
- * None is a precondition for another. They were chained with `&&`, which meant the first red gate
- * hid the other three — so a developer fixing them one run at a time discovered one per run, and
- * a change that broke two gates looked like it had broken one.
+ * These five checks are **independent**: each reads the build output or the source and compares it
+ * against something else (the projection manifest, the registered tools, the working tree, the
+ * rendered page's own stylesheet). None is a precondition for another. They were chained with `&&`,
+ * which meant the first red gate hid the rest — so a developer fixing them one run at a time
+ * discovered one per run, and a change that broke two gates looked like it had broken one.
  *
  * `prepublishOnly` uses `&&` and is right to: typecheck gates lint, which gates build. That is a
  * dependency chain. This is not.
@@ -28,6 +28,7 @@ const CHECKS = [
   ["projection coverage", "check-projection-coverage.mjs"],
   ["landing page tool names", "check-landing-tool-names.mjs"],
   ["internal links", "check-internal-links.mjs"],
+  ["landing style scope", "check-style-scope.mjs"],
 ];
 
 const results = [];
