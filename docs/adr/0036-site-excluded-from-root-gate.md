@@ -133,3 +133,36 @@ If the site ever became **version-specific documentation** — pages pinned to a
 dead links triaged against the API surface of that version rather than of `main` — the calculus
 changes. Version-specific docs are versioned content, and a versioned artifact's gate is exactly the
 kind this repository already runs. Nothing about the site's current content requires that.
+
+## Amended 2026-10-12: the site's gate now runs before the merge, not only after it
+
+`pages.yml` was the only place the five site checks executed, and it triggers on a push to `main`.
+So a pull request that turned one of them red merged cleanly and the failure surfaced afterwards as
+a failed deploy ([#174](https://github.com/a1121611810/pi-ptc-subagents/issues/174)). The sentence
+above — "the site's own build is already a required step of publishing the site" — was true, and
+was the whole reason nobody noticed: a gate that only runs at publish time is a gate that reports
+its verdict after the decision it could have informed.
+
+**This record's Decision is unchanged.** The site stays out of the repository's root lint and format
+gate, and `prepublishOnly` is still not widened to cover a directory that ships nothing. What changed
+is _where the site's own gate runs_: `.github/workflows/website.yml` now runs
+`pnpm --filter website run build` on `pull_request`, the identical command `pages.yml` runs. The
+root gate's meaning is still "is this package safe to publish"; the site's gate is still the site's
+own build. What is new is that the site's gate answers before the merge rather than after it — which
+is the same correction ADR-0018 § Consequences records for the test suite, applied to the site.
+
+**Both sides invoke the same command, deliberately.** Running a merge-side subset chosen for speed
+would create two sets — one guarding a merge, one guarding a deploy — and a drift between them is a
+worse failure than the gap it replaced: it is silent, it reinstates the original bug for whichever
+check fell out, and it does so while every gate stays green. Command identity makes the sets equal by
+construction rather than by a second gate that would need its own counterfactual test.
+`tests/site-checks-on-pr.test.ts` holds that, and also holds the two properties that would undo it
+quietly: a `paths:` filter on the `pull_request` trigger (`check-doc-claims.mjs` binds 19 documented
+claims to named constants in `src/`, so a `src/`-only change can turn a site check red and a
+site-scoped filter would skip exactly that), and deploy credentials (`pages: write`,
+`id-token: write`) leaking into a job a fork's pull request can reach.
+
+**A permission difference that is not a divergence in the checks.** `pages.yml` mints the OIDC token
+Pages deployment trusts, so it holds `pages: write` and `id-token: write`; `website.yml` holds
+`contents: read` and nothing else. The two jobs check the same five things with the same command and
+different privileges, which is the intended direction.

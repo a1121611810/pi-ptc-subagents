@@ -13,12 +13,14 @@
  *   - a check the README names that the runner does not invoke → the README is advertising a
  *     guard that does not run, which is the failure mode this repository keeps meeting head-on.
  *
- * Where it lives, and why not in the site's own runner: the site's five checks execute only in
- * `.github/workflows/pages.yml`, which triggers on a push to `main` and **never** on
- * `pull_request` (measured 2026-10-12; see issue #174). A consistency check placed there would let
- * the exact drift it exists to prevent reach `main` first, and only be discovered by the failure of
- * something else. `tests/doc-integrity.test.ts` is the same shape of job and does run on pull
- * requests, so this sits beside it.
+ * Where it lives, and why not in the site's own runner: the site's own runner executes on the
+ * deploy path, so a consistency check placed there would let the exact drift it exists to prevent
+ * reach `main` first, and only be discovered by the failure of something else. That was the whole
+ * argument while the checks ran in `pages.yml` alone (issue #174, 2026-10-12); it survives the fix
+ * for the same reason — the runner is still a deploy-path tool. `.github/workflows/website.yml` now
+ * runs those checks on a pull request too, which makes it *possible* to put this here, but the
+ * placement argument is unchanged and does not depend on it. `tests/doc-integrity.test.ts` is the
+ * same shape of job and does run on pull requests, so this sits beside it.
  *
  * 口径 (why the numbers below are what they are, and not chosen):
  *   - 5 是实测值，不是估计。2026-10-12 有 5 项检查，README 的表同样 5 行。两个下界都写 5：

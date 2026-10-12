@@ -31,15 +31,24 @@ This is the part that surprises people.
 
 | Path | Trigger | What runs |
 | --- | --- | --- |
+| Pull request (`.github/workflows/website.yml`) | `pull_request` | The same build, as the same command: `pnpm --filter website run build`. This is what makes a red check visible before the merge instead of after it |
 | Site deployment (`.github/workflows/pages.yml`) | push to `main` | The build is the gate: the five checks run as part of `pnpm --filter website run build`, before anything is uploaded |
 | npm release (`.github/workflows/publish.yml`) | push of a `v*` tag | The root release chain, then `check-published-manifest.mjs` reading back what the registry actually serves |
 | Repository metadata (`.github/workflows/ci.yml`) | push to `main` only | `check-repo-metadata.mjs` — the About panel's description, topics and homepage against the manifest |
 
-**The five site checks never run on a pull request.** Measured 2026-10-12: the root release chain
-does not include the website (its build step packages the npm artifact only), and none of the other
-three workflows has a website step. A pull request that turns one of them red merges cleanly, and
-the failure surfaces afterwards as a failed deploy. That finding is filed as
-[#174](https://github.com/a1121611810/pi-ptc-subagents/issues/174) and is not fixed by this file.
+**The pull request runs the same command the deploy does, not a subset of it.** Until 2026-10-12 it
+ran nowhere — the five checks executed only in `pages.yml`, so a pull request that turned one of
+them red merged cleanly and the failure surfaced afterwards as a failed deploy
+([#174](https://github.com/a1121611810/pi-ptc-subagents/issues/174)). Both sides now invoke
+`pnpm --filter website run build` rather than a merge-side selection, because two sets — one
+guarding a merge, one guarding a deploy — can drift apart, and a drift is worse than the gap it
+replaced: it is silent, it reinstates the original bug for whichever check fell out, and it does so
+while every gate stays green. `tests/site-checks-on-pr.test.ts` holds both properties in place.
+
+**Do not narrow the `pull_request` trigger with `paths:`.** `check-doc-claims.mjs` binds 19
+documented claims to named constants in `src/`, so a pull request that changes
+`src/runtime/limits.ts` and nothing under `packages/website/` can still turn a site check red. A
+filter scoped to the site would skip exactly that class of drift, and skip it silently.
 
 ## Running them locally
 
