@@ -33,7 +33,7 @@ import {
   SURFACE_MODES,
 } from "../src/mode/ptc-mode.ts";
 import { PTC_SKILL_LOAD_INSTRUCTION } from "../src/mode/skills-section.ts";
-import { BUILTIN_BINDING_NAMES } from "../src/runtime/bindings.ts";
+import { BUILTIN_BINDING_NAMES, DEFAULT_BINDING_NAMES } from "../src/runtime/bindings.ts";
 import { resolveBindingNames } from "../src/tools/common.ts";
 import type { ExtensionStub } from "./helpers/ptc.ts";
 import {
@@ -421,8 +421,11 @@ test("a default four-tool session enters the mode (the seven bindable names are 
   expect(MODE_REQUIRED_TOOL_NAMES).toEqual([...DEFAULT_SESSION_TOOLS]);
   expect(decision.enter).toBe(true);
   if (!decision.enter) throw new Error("unreachable");
-  // Bindings follow the session, so a default session binds four tools — not seven.
-  expect(resolveBindingNames(decision.base)).toEqual([...DEFAULT_SESSION_TOOLS]);
+  // Bindings follow the session, so a default session binds what it has — minus anything the
+  // opt-in gate withholds (#73). `bash` is in the session's own tool list and still does not
+  // arrive: the two are separate questions, and this is where they are visibly separate.
+  expect(resolveBindingNames(decision.base)).toEqual(["read", "edit", "write"]);
+  expect(resolveBindingNames(decision.base, ["bash"])).toEqual([...DEFAULT_SESSION_TOOLS]);
 
   // Dropping any one of them does read as a restriction.
   for (const dropped of DEFAULT_SESSION_TOOLS) {
@@ -450,7 +453,7 @@ test("bindings derive from the base snapshot while the mode is on, and from the 
   // This is the trap the mode exists to survive: the live loadout no longer holds the built-ins,
   // but the binding table must still see them.
   expect(bindingSource(on, narrowed)).toEqual(active);
-  expect(resolveBindingNames(bindingSource(on, narrowed))).toEqual([...BUILTIN_BINDING_NAMES]);
+  expect(resolveBindingNames(bindingSource(on, narrowed))).toEqual([...DEFAULT_BINDING_NAMES]);
   // …and a restricted session stays restricted even when the mode is on.
   const restricted = { enabled: true, base: ["read"], ourLoadout: [...PTC_TOOLS] };
   expect(resolveBindingNames(bindingSource(restricted, narrowed))).toEqual(["read"]);
@@ -533,7 +536,7 @@ test("session_start narrows the loadout, persists the record, paints the status 
     const modeNotices = stub.notifications.filter((n) => n.message.includes("PTC mode on"));
     expect(modeNotices.length, "announced once").toBe(1);
     expect(modeNotices[0]?.message).toContain("/ptc off");
-    expect(modeNotices[0]?.message).toContain("read, bash");
+    expect(modeNotices[0]?.message).toContain("read, edit, write.");
   });
 });
 
@@ -673,7 +676,7 @@ test("/ptc with no argument reports the current state without changing anything"
 
     expect(stub.activeWrites.length).toBe(writes);
     expect(stub.notifications.at(-1)?.message).toContain("PTC mode is ON");
-    expect(stub.notifications.at(-1)?.message).toContain("read, bash");
+    expect(stub.notifications.at(-1)?.message).toContain("Bindings: read, edit, write");
   });
 });
 

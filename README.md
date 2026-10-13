@@ -47,8 +47,9 @@ Documentation site: **[pi-ptc-subagents on GitHub Pages](https://a1121611810.git
   capability is the `pi.dispatch` binding inside a program.
 - `ptc_run_code` — run a JS/TS program that composes tool calls; the program reaches the
   session's enabled built-in tools as `tools.read(...)`, `tools.write(...)`, etc.
-  (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`), plus `tools["pi.dispatch"]`;
-  its return value and `console.log` output are reported back.
+  (`read`, `edit`, `write`, `grep`, `find`, `ls`), plus `tools["pi.dispatch"]`;
+  its return value and `console.log` output are reported back. `tools.bash(...)` is an
+  **opt-in** — see [Trust posture](#trust-posture-read-me).
 - `ptc_workflow` — structured variant with `meta` + plain-JSON `args`, plus the workflow
   helpers (`log`, `phase`, `parallel`, `pipeline`). There is no `agent()` helper on either
   surface.
@@ -201,8 +202,21 @@ untrusted projects) live in [docs/usage/surface.md](./docs/usage/surface.md).
   extension: PTC programs run as **you**, with no OS-level sandbox (ADR-0007).
 - Bindings mirror the session's **enabled** built-in tools (`pi.getActiveTools()`):
   a session started with `--tools …` / `--no-builtin-tools` can only reach those
-  tools from inside a PTC program (a default session has `read`, `bash`, `edit`,
-  `write` — enable more to bind more).
+  tools from inside a PTC program (a default session has `read`, `edit`,
+  `write`, `grep`, `find`, `ls` — enable more to bind more).
+- **`tools.bash(...)` is not in that default.** A PTC program runs as you, so a
+  default shell binding hands every model-written program a shell with your own
+  identity. It is granted explicitly, per install, in `~/.pi/agent/ptc.json`:
+
+  ```json
+  { "optInBindings": ["bash"] }
+  ```
+
+  An absent or unreadable file grants nothing, and a name in that list that is not
+  an opt-in binding is reported at session start rather than ignored. The opt-in is
+  separate from the session's tool set on purpose: **enabled is not granted** — pi
+  having `bash` enabled says nothing about whether you agreed to hand it to a program.
+
 - Tool calls made from inside a PTC program execute directly and **bypass**
   pi's `tool_call` hooks (permission gates, path guards) — see ADR-0005. Do not
   rely on those guards to constrain tool use while this extension is enabled.

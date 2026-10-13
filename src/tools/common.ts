@@ -20,7 +20,11 @@
  */
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import { applyAdr0015Truncation } from "../runtime/adr0015-truncation.ts";
-import { BUILTIN_BINDING_NAMES } from "../runtime/bindings.ts";
+import {
+  BUILTIN_BINDING_NAMES,
+  DEFAULT_BINDING_NAMES,
+  resolveOptInBindingNames,
+} from "../runtime/bindings.ts";
 import type {
   AgentToolResult,
   AgentToolUpdateCallback,
@@ -54,6 +58,13 @@ export interface PtcToolOptions {
    * asserts the full built-in surface.
    */
   getBindingSourceNames?: () => readonly string[];
+  /**
+   * Opt-in bindings granted for this run (#73), read fresh per execute like
+   * {@link PtcToolOptions.getBindingSourceNames} so a session that edits its config between runs
+   * picks the change up. Omitting it grants nothing, which keeps `bash` out of the default
+   * surface — the same direction an unreadable config takes in `readOptInBindingsConfig`.
+   */
+  getOptInBindings?: () => readonly string[];
   /**
    * Depth baseline for PTC runs this tool starts inside a child pi process: the depth of
    * the run that dispatched them, 0 for the parent turn's run (ADR-0016 Recursive
@@ -111,19 +122,32 @@ export function resolveParentTaskIdFromEnv(
 }
 
 /**
- * Binding names for one run: the built-ins this session actually has enabled (T7, #21).
+ * Binding names for one run: the built-ins this session actually has enabled (T7, #21), minus
+ * the opt-in bindings nobody asked for (#73).
  *
  * A PTC program must never reach further than the session it runs in — a session started
  * with `--tools read` or `--no-builtin-tools` must not be escapable through `tools.<name>`
  * calls. Names outside the built-in factory set are ignored: only tools this package can
  * build adapters for can be bound.
+ *
+ * This is the ONE read point that feeds both the binding table and the model-facing binding
+ * list, which is why the opt-in gate lives here rather than in `createBuiltinBindings`: a table
+ * that dropped `bash` while the prompt still advertised `tools.bash` would hand the model a tool
+ * it cannot call and hide the reason. `activeToolNames === undefined` still asserts the full
+ * built-in set before the gate, so "no session context" means "every builtin pi has", narrowed by
+ * what was opted into — not "nothing".
  */
 export function resolveBindingNames(
   activeToolNames: readonly string[] | undefined,
+  optIns?: readonly string[],
 ): readonly string[] {
-  if (activeToolNames === undefined) return BUILTIN_BINDING_NAMES;
-  const active = new Set(activeToolNames);
-  return BUILTIN_BINDING_NAMES.filter((name) => active.has(name));
+  const active = activeToolNames === undefined ? undefined : new Set(activeToolNames);
+  const granted = new Set(resolveOptInBindingNames(optIns));
+  return BUILTIN_BINDING_NAMES.filter(
+    (name) =>
+      (active === undefined || active.has(name)) &&
+      (DEFAULT_BINDING_NAMES.includes(name) || granted.has(name)),
+  );
 }
 
 /**

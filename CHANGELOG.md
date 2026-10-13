@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **BREAKING: `tools.bash(...)` is no longer bound by default; it is an explicit opt-in.** A PTC
+  program runs with the user's own machine identity and its binding calls bypass pi's `tool_call`
+  guards, so a default shell binding hands every model-written program a shell with your identity —
+  the largest single thing a program can reach, granted by nothing more than installing this package.
+  `bash` is now an _opt-in_ binding: it stays in the known binding set, and a program only gets it
+  when the install grants it in `~/.pi/agent/ptc.json`:
+
+  ```json
+  { "optInBindings": ["bash"] }
+  ```
+
+  **Migration:** a program that calls `tools.bash(...)` and was relying on the default now fails with
+  `no binding named "bash"`. Either add the key above (restart pi to pick it up), or, for a
+  narrower change, pass an explicit `names` list to `createBuiltinBindings` — a caller-curated list
+  is honoured verbatim and needs no second key. The error names the bindings that _are_ available,
+  so the fix is readable from the refusal.
+
+  Two properties worth knowing: the opt-in is **separate from the session's tool set** — pi having
+  `bash` enabled does not grant it, because "enabled" and "you agreed to give a model-written program
+  a shell" are different questions; and the file is read with a **fail-closed** direction, so an
+  absent, unparseable or misspelled key grants nothing and reports why at session start rather than
+  falling back to the old default. Note this narrows relative to DSH, whose PTC preset mounts
+  `tool-bash`/`tool-pwsh`; a program written against DSH that wants its shell back needs the key.
+
 ## [2.1.0] - 2026-10-12
 
 ### Added

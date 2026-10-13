@@ -90,3 +90,7 @@ once you add it to your tool list:
 ```
 
 Without it, a `subagents`-surface session has `ptc_subagent` and no orchestrator to call it from.
+
+That list is pi's own tool set, which is not the same question as what a PTC program may bind:
+`bash` being in `defaultTools` enables it for pi, but binding `tools.bash` to a program is a
+separate opt-in — see [Trust posture](../../README.md#trust-posture-read-me).

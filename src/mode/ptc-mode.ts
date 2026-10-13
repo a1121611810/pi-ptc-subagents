@@ -39,7 +39,11 @@
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { minimatch } from "minimatch";
-import { BUILTIN_BINDING_NAMES } from "../runtime/bindings.ts";
+import {
+  BUILTIN_BINDING_NAMES,
+  type BuiltinBindingName,
+  resolveOptInBindingNames,
+} from "../runtime/bindings.ts";
 
 /** The two surfaces this package exposes. `/ptc on` needs at least one of them active. */
 export const PTC_MODE_TOOL_NAMES: readonly string[] = ["ptc_run_code", "ptc_workflow"];
@@ -155,6 +159,84 @@ export function readDefaultModeConfig(agentDir: string): DefaultModeConfig {
     };
   }
   return { defaultMode: value, source: "file" };
+}
+
+/** Result of reading the opt-in binding config, with enough detail to warn about a broken file. */
+export interface OptInBindingsConfig {
+  optInBindings: readonly BuiltinBindingName[];
+  source: "file" | "default" | "invalid";
+  error?: string;
+}
+
+/**
+ * Read `optInBindings` from the agent-dir config file — the user-facing half of #73.
+ *
+ * Absent file, or a file with no `optInBindings` key, grants nothing: `bash` stays out of the
+ * default surface. A key that is present but wrong is reported as `invalid` **and still grants
+ * nothing**, which is the safe direction — a typo in a list whose whole purpose is to widen the
+ * surface must never be the thing that widens it. The caller surfaces `error` rather than silently
+ * running a narrower surface than the user asked for.
+ *
+ * **A file too broken to parse is not this function's to report.** A non-object or unparseable
+ * `ptc.json` is a parse failure of the FILE, and {@link readDefaultModeConfig} — the reader that
+ * owns `defaultMode` in the same file — already reports it at session start. Reporting it here too
+ * would put the identical sentence on screen twice for one broken file, which trains the user to
+ * ignore the notice that matters. The boundary is the same one `readLegacySurfaceKey` draws: no
+ * key to be stale about means nothing to say. What this function reports is only what is wrong with
+ * the `optInBindings` KEY specifically.
+ *
+ * The name check lives in {@link resolveOptInBindingNames} so the config path and the programmatic
+ * path cannot disagree about what a valid opt-in is; this function's job is only to turn a thrown
+ * TypeError into a reportable string.
+ */
+export function readOptInBindingsConfig(agentDir: string): OptInBindingsConfig {
+  const path = join(agentDir, PTC_MODE_CONFIG_FILE);
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch {
+    return { optInBindings: [], source: "default" };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { optInBindings: [], source: "default" };
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { optInBindings: [], source: "default" };
+  }
+  const value = (parsed as { optInBindings?: unknown }).optInBindings;
+  if (value === undefined) {
+    return { optInBindings: [], source: "default" };
+  }
+  if (!Array.isArray(value)) {
+    return {
+      optInBindings: [],
+      source: "invalid",
+      error: `${path}: "optInBindings" must be an array of binding names, received ${typeof value}`,
+    };
+  }
+  const nonString = value.find((entry) => typeof entry !== "string");
+  if (nonString !== undefined) {
+    return {
+      optInBindings: [],
+      source: "invalid",
+      error: `${path}: "optInBindings" entries must be strings, received ${typeof nonString}`,
+    };
+  }
+  try {
+    return {
+      optInBindings: resolveOptInBindingNames(value as readonly string[]),
+      source: "file",
+    };
+  } catch (error) {
+    return {
+      optInBindings: [],
+      source: "invalid",
+      error: `${path}: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 }
 
 /**

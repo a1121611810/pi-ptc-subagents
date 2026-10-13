@@ -15,24 +15,80 @@ import { makeTempDir, removeTempDir, RUN_TIMEOUT_MS } from "./helpers/ptc.ts";
 const options = RUN_TIMEOUT_MS;
 const call = { callId: 1, depth: 0, maxDispatchDepth: 3 };
 
-test("bash is part of the default binding set on purpose", () => {
-  expect([...DEFAULT_BINDING_NAMES]).toEqual([...BUILTIN_BINDING_NAMES]);
-  expect(DEFAULT_BINDING_NAMES).toContain("bash");
+test("bash is opt-in, not in defaults", () => {
+  // Closure criterion for #73. The obvious "fix" for a program that wanted `tools.bash` is to
+  // revert `DEFAULT_BINDING_NAMES` to the full known set — that is what turns this red. The known
+  // set is asserted in the same test so that DELETING `bash` from BUILTIN_BINDING_NAMES cannot
+  // pass here: that would satisfy "not in defaults" while breaking every opt-in that asks for it.
+  expect(DEFAULT_BINDING_NAMES).not.toContain("bash");
+  expect(BUILTIN_BINDING_NAMES).toContain("bash");
   for (const name of ["read", "edit", "write", "grep", "find", "ls"]) {
     expect(DEFAULT_BINDING_NAMES).toContain(name as never);
   }
+  // Exactly the known set minus the opt-in names — not a hand-written list that could drift.
+  expect([...DEFAULT_BINDING_NAMES]).toEqual(
+    BUILTIN_BINDING_NAMES.filter((name) => name !== "bash"),
+  );
 });
 
-test("createBuiltinBindings builds every built-in by default and honours an explicit subset", () => {
-  const all = createBuiltinBindings({ cwd: process.cwd() });
-  expect(new Set(all.keys())).toEqual(new Set([...BUILTIN_BINDING_NAMES, DISPATCH_BINDING_NAME]));
-  for (const binding of all.values()) expect(typeof binding.execute).toBe("function");
+test("createBuiltinBindings builds the default set, and optIns re-adds bash in BUILTIN order", () => {
+  const defaults = createBuiltinBindings({ cwd: process.cwd() });
+  expect(new Set(defaults.keys())).toEqual(
+    new Set([...DEFAULT_BINDING_NAMES, DISPATCH_BINDING_NAME]),
+  );
+  expect(defaults.has("bash")).toBe(false);
+  for (const binding of defaults.values()) expect(typeof binding.execute).toBe("function");
+
+  // Order, not set membership: the model-facing list renders this sequence, so `bash` belongs back
+  // where pi's native order puts it rather than appended at the end.
+  const optedIn = createBuiltinBindings({ cwd: process.cwd(), optIns: ["bash"] });
+  expect([...optedIn.keys()]).toEqual([...BUILTIN_BINDING_NAMES, DISPATCH_BINDING_NAME]);
+  expect(typeof optedIn.get("bash")?.execute).toBe("function");
 
   const readOnly = createBuiltinBindings({ cwd: process.cwd(), names: ["read", "grep"] });
   expect([...readOnly.keys()]).toEqual(["read", "grep"]);
 
   const none = createBuiltinBindings({ cwd: process.cwd(), names: [] });
   expect(none.size).toBe(0);
+});
+
+test("an unknown opt-in name throws the dedicated opt-in TypeError", () => {
+  // Its own message, distinct from the `names` rejection: a typo in `ptc.json` and a typo in a
+  // programmatic `names` list are different mistakes with different fixes, and a caller that
+  // matched on `/unknown PTC binding/` would swallow this one.
+  let caught: unknown;
+  try {
+    createBuiltinBindings({ cwd: process.cwd(), optIns: ["teleport"] });
+  } catch (e) {
+    caught = e;
+  }
+  expect(caught).toBeInstanceOf(TypeError);
+  expect((caught as Error).message).toMatch(/unknown PTC opt-in binding "teleport"/);
+  expect((caught as Error).message).not.toMatch(/^unknown PTC binding/);
+
+  // A known builtin that is not an opt-in is refused too. Accepting `["read"]` would make
+  // `optIns` silently no-op for every name a caller already had by default, and the mistake would
+  // read as "the opt-in does not work" rather than "that name was never opt-in".
+  let alsoCaught: unknown;
+  try {
+    createBuiltinBindings({ cwd: process.cwd(), optIns: ["read"] });
+  } catch (e) {
+    alsoCaught = e;
+  }
+  expect(alsoCaught).toBeInstanceOf(TypeError);
+  expect((alsoCaught as Error).message).toMatch(/unknown PTC opt-in binding "read"/);
+});
+
+test("a caller-curated names list is honoured verbatim, opt-in gate included", () => {
+  // The gate applies to the DEFAULT surface. A caller that passes `names` has already decided its
+  // surface, so `bash` in an explicit list is taken at face value — that is the documented escape
+  // hatch for a program that genuinely needs a shell, and it must not need a second key to work.
+  const curated = createBuiltinBindings({
+    cwd: process.cwd(),
+    names: ["read", "bash"],
+    includeDispatch: true,
+  });
+  expect([...curated.keys()]).toEqual(["read", "bash", DISPATCH_BINDING_NAME]);
 });
 
 test("createBuiltinBindings rejects unknown binding names", () => {

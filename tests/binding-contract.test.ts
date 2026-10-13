@@ -454,7 +454,7 @@ describe("the contract is true of the runtime it describes", () => {
   test("bash really does reject on a non-zero exit, and resolve on a zero one", async () => {
     // Both paths of one IO boundary, and the failure path is the one the note
     // promises, so a pi release that starts resolving would turn this red.
-    const bindings = createBuiltinBindings({ cwd: process.cwd() });
+    const bindings = createBuiltinBindings({ cwd: process.cwd(), optIns: ["bash"] });
     const ok = (await bindings.get("bash")?.execute({ command: "exit 0" }, CALL)) as {
       content: Array<{ type: string; text: string }>;
     };
@@ -486,7 +486,7 @@ describe("the contract is true of the runtime it describes", () => {
     const TAIL_MARKER = "PTCTAIL9999";
     const payload = HEAD_MARKER + "x".repeat(5000) + TAIL_MARKER;
 
-    const bindings = createBuiltinBindings({ cwd: process.cwd() });
+    const bindings = createBuiltinBindings({ cwd: process.cwd(), optIns: ["bash"] });
     let message = "";
     try {
       await bindings
@@ -532,7 +532,7 @@ describe("the contract is true of the runtime it describes", () => {
     const TAIL_MARKER = "SHORTTAIL";
     const payload = HEAD_MARKER + "y".repeat(1000) + TAIL_MARKER;
 
-    const bindings = createBuiltinBindings({ cwd: process.cwd() });
+    const bindings = createBuiltinBindings({ cwd: process.cwd(), optIns: ["bash"] });
     let message = "";
     try {
       await bindings?.get("bash")?.execute({ command: `printf '%s' '${payload}'; exit 3` }, CALL);

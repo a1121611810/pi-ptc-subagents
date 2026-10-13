@@ -244,7 +244,10 @@ export function createPtcWorkflowTool(
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       validateWorkflowArgs(params.args);
       const cwd = resolveToolCwd(ctx);
-      const names = resolveBindingNames(options.getBindingSourceNames?.());
+      const names = resolveBindingNames(
+        options.getBindingSourceNames?.(),
+        options.getOptInBindings?.(),
+      );
       const startedAt = Date.now();
       const pool = options.getPool?.();
       // ADR-0022 R1: hand the host session dir to background children (same seam as

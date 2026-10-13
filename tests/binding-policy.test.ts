@@ -9,7 +9,7 @@ import { expect, test } from "vitest";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AgentToolResult, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { BUILTIN_BINDING_NAMES } from "../src/runtime/bindings.ts";
+import { BUILTIN_BINDING_NAMES, DEFAULT_BINDING_NAMES } from "../src/runtime/bindings.ts";
 import {
   resolveBindingNames,
   resolveDepthFromEnv,
@@ -20,10 +20,26 @@ import { createPtcRunCodeTool } from "../src/tools/run-code.ts";
 import { RUN_TIMEOUT_MS, makeTempDir, removeTempDir, toolContext } from "./helpers/ptc.ts";
 
 test("resolveBindingNames intersects the active set with the built-in factories", () => {
-  expect([...resolveBindingNames(undefined)]).toEqual([...BUILTIN_BINDING_NAMES]);
+  expect([...resolveBindingNames(undefined)]).toEqual([...DEFAULT_BINDING_NAMES]);
   expect([...resolveBindingNames([])]).toEqual([]);
   expect([...resolveBindingNames(["read", "grep"])]).toEqual(["read", "grep"]);
-  expect([...resolveBindingNames(["read", "teleport", "bash"])]).toEqual(["read", "bash"]);
+  expect([...resolveBindingNames(["read", "teleport", "bash"])]).toEqual(["read"]);
+});
+
+test("resolveBindingNames withholds an opt-in binding until it is granted (#73)", () => {
+  // The session has `bash` enabled, and it is still withheld: enabled is not granted. These two
+  // are different questions — the first is what pi has, the second is what this operator agreed to
+  // hand a model-written program — and collapsing them is the whole defect this ticket fixes.
+  expect(BUILTIN_BINDING_NAMES).toContain("bash");
+  expect([...resolveBindingNames([...BUILTIN_BINDING_NAMES])]).not.toContain("bash");
+
+  // Granted, it comes back in BUILTIN order — and the intersection still applies, so a session
+  // without `bash` enabled does not gain it back from the opt-in.
+  expect([...resolveBindingNames([...BUILTIN_BINDING_NAMES], ["bash"])]).toEqual([
+    ...BUILTIN_BINDING_NAMES,
+  ]);
+  expect([...resolveBindingNames(["read"], ["bash"])]).toEqual(["read"]);
+  expect([...resolveBindingNames(undefined, ["bash"])]).toEqual([...BUILTIN_BINDING_NAMES]);
 });
 
 test("resolveDepthFromEnv parses PI_PTC_DEPTH (positive integer; invalid or absent → 0)", () => {
@@ -121,6 +137,52 @@ test(
       const bare = await executeTool(tool, `console.log("no-tools"); return 40 + 2;`, dir);
       expect(bare.details.result).toBe(42);
       expect(textOf(bare)).toMatch(/no-tools/);
+    } finally {
+      await removeTempDir(dir);
+    }
+  },
+  RUN_TIMEOUT_MS,
+);
+
+/**
+ * The end-to-end half of #73: the gate is observed by a REAL program running in a REAL worker, not
+ * only by the table object.
+ *
+ * Both halves run the same program against the same tool with the same fully-enabled session. The
+ * only difference is whether an opt-in was granted. That is what makes this a counterfactual rather
+ * than two unrelated tests: a session with every pi builtin enabled is the strongest case for bash
+ * being available, so if the gate can be defeated anywhere it is defeated here. The success half
+ * matters as much as the refusal — an implementation that simply broke `tools.bash` would pass a
+ * refusal-only test, and would ship a PTC surface with no shell for the programs that asked for one.
+ */
+test(
+  "bash is refused in a fully-enabled session until it is opted in, then it really runs",
+  async () => {
+    const dir = await makeTempDir();
+    try {
+      const enabled = () => [...BUILTIN_BINDING_NAMES];
+
+      const withheld = createPtcRunCodeTool({ getBindingSourceNames: enabled });
+      await expect(
+        executeTool(withheld, `return await tools.bash({ command: "echo pwned" });`, dir),
+      ).rejects.toThrow(/no binding named "bash"/);
+
+      // The refusal must name what IS available, or a program that legitimately wanted a shell has
+      // no way to learn that the way to get one is a config key rather than a different tool.
+      await expect(
+        executeTool(withheld, `return await tools.bash({ command: "echo pwned" });`, dir),
+      ).rejects.toThrow(/available bindings: read, edit, write, grep, find, ls, pi\.dispatch/);
+
+      const granted = createPtcRunCodeTool({
+        getBindingSourceNames: enabled,
+        getOptInBindings: () => ["bash"],
+      });
+      const ran = await executeTool(
+        granted,
+        `return await tools.bash({ command: "echo granted" });`,
+        dir,
+      );
+      expect(textOf(ran)).toMatch(/granted/);
     } finally {
       await removeTempDir(dir);
     }

@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import {
-  BUILTIN_BINDING_NAMES,
+  DEFAULT_BINDING_NAMES,
   createBuiltinBindings,
   DISPATCH_BINDING_NAME,
 } from "../src/runtime/bindings.ts";
@@ -341,7 +341,7 @@ test(
     });
     expect(outcome.error).toBeUndefined();
     expect(outcome.value).toEqual({
-      names: [...BUILTIN_BINDING_NAMES, DISPATCH_BINDING_NAME],
+      names: [...DEFAULT_BINDING_NAMES, DISPATCH_BINDING_NAME],
       frozen: true,
     });
   },

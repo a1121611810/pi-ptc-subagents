@@ -53,15 +53,59 @@ export type BuiltinBindingName = (typeof BUILTIN_BINDING_NAMES)[number];
 export const DISPATCH_BINDING_NAME = "pi.dispatch" as const;
 
 /**
- * Bindings exposed when the caller does not pass an explicit name list.
+ * Bindings that are known but NOT exposed unless someone asks for them (#73).
  *
- * `bash` is included on purpose: DSH's PTC preset still mounts `tool-bash`/`tool-pwsh`
- * (R1 §2 — PTC mode hides the tools from the wire list and re-exposes the same registry
- * as bindings), so a PTC program written against DSH may run shell commands. Leaving it
- * out would silently shrink the surface relative to DSH. Callers that want a read-only
- * PTC surface pass an explicit subset.
+ * `bash` is here rather than deleted from {@link BUILTIN_BINDING_NAMES} because DSH's PTC preset
+ * still mounts `tool-bash`/`tool-pwsh` (R1 §2 — PTC mode hides the tools from the wire list and
+ * re-exposes the same registry as bindings), so a PTC program written against DSH may run shell
+ * commands. Removing it outright would break those programs; leaving it on by default hands every
+ * model-written program a shell with the user's own identity, which is the larger risk. An explicit
+ * opt-in is what makes the second case a decision instead of a default.
  */
-export const DEFAULT_BINDING_NAMES: readonly BuiltinBindingName[] = BUILTIN_BINDING_NAMES;
+export const OPT_IN_BINDING_NAMES = ["bash"] as const;
+export type OptInBindingName = (typeof OPT_IN_BINDING_NAMES)[number];
+
+/** Whether `name` is one of the {@link OPT_IN_BINDING_NAMES}. */
+export function isOptInBindingName(name: string): name is OptInBindingName {
+  return (OPT_IN_BINDING_NAMES as readonly string[]).includes(name);
+}
+
+/**
+ * Validate a caller's opt-in list and return it in {@link BUILTIN_BINDING_NAMES} order.
+ *
+ * Order is normalised rather than kept as given so that a table built with and without an opt-in
+ * lists the same bindings in the same sequence — the model-facing prompt renders this list, and two
+ * spellings of the same surface would be two things to drift.
+ *
+ * A name that is not an opt-in is refused, including a name that IS a known builtin: `["read"]` is
+ * a configuration mistake, not a request, and accepting it would mean `optIns` silently no-ops for
+ * every name a caller already had by default.
+ */
+export function resolveOptInBindingNames(
+  optIns: readonly string[] | undefined,
+): readonly BuiltinBindingName[] {
+  if (optIns === undefined) return [];
+  const requested = new Set(optIns);
+  for (const name of requested) {
+    if (!isOptInBindingName(name)) {
+      throw new TypeError(
+        `unknown PTC opt-in binding "${name}"; opt-in bindings: ${OPT_IN_BINDING_NAMES.join(", ")}`,
+      );
+    }
+  }
+  return BUILTIN_BINDING_NAMES.filter((name) => requested.has(name));
+}
+
+/**
+ * Bindings exposed when the caller does not pass an explicit name list and does not opt in.
+ *
+ * The known set minus {@link OPT_IN_BINDING_NAMES}, in native order. Both resolution paths emit
+ * {@link BUILTIN_BINDING_NAMES} order, so adding an opt-in re-inserts the binding where the model
+ * expects it rather than at the end.
+ */
+export const DEFAULT_BINDING_NAMES: readonly BuiltinBindingName[] = BUILTIN_BINDING_NAMES.filter(
+  (name) => !isOptInBindingName(name),
+);
 
 export interface BindingContext {
   /** Aborted when the run is cancelled, times out, or settles. */
@@ -210,8 +254,20 @@ const DISPATCH_TOOL_LIKE = {
 export interface CreateBuiltinBindingsOptions {
   /** Per-run working directory: the F4 `RunConfig.cwd`, used to build every tool. */
   cwd: string;
-  /** Subset of {@link BUILTIN_BINDING_NAMES}; defaults to all of them (bash included). */
+  /**
+   * Subset of {@link BUILTIN_BINDING_NAMES}; defaults to {@link DEFAULT_BINDING_NAMES} plus any
+   * {@link CreateBuiltinBindingsOptions.optIns}. A list passed here is honoured VERBATIM: a caller
+   * that curates names has already decided its surface, so an opt-in name in an explicit list is
+   * taken at face value and the default gate does not apply to it.
+   */
   names?: readonly string[];
+  /**
+   * Opt-in bindings to add to the default surface (#73). Each must be an
+   * {@link OPT_IN_BINDING_NAMES} member or {@link resolveOptInBindingNames} throws. Omitted means
+   * "none granted", which is the safe direction: an unreadable or absent opt-in list narrows the
+   * surface rather than widening it.
+   */
+  optIns?: readonly string[];
   /**
    * Whether the parallel binding `pi.dispatch` (ADR-0016) joins the table. Defaults to
    * "did the caller curate the surface": `true` when `names` is omitted, `false` when an
@@ -276,7 +332,14 @@ function bindingFailureMessage(toolName: string, text: string): string {
  * the intended granularity).
  */
 export function createBuiltinBindings(options: CreateBuiltinBindingsOptions): BindingTable {
-  const names = options.names ?? DEFAULT_BINDING_NAMES;
+  // Resolved before the branch below, so an unknown opt-in name is refused on every call path —
+  // including the curated-`names` one, where the opt-in list is not consulted for membership.
+  const granted = new Set(resolveOptInBindingNames(options.optIns));
+  const names =
+    options.names ??
+    BUILTIN_BINDING_NAMES.filter(
+      (name) => DEFAULT_BINDING_NAMES.includes(name) || granted.has(name),
+    );
   // ADR-0016: `pi.dispatch` joins the table unless the caller curated an explicit name list.
   const includeDispatch = options.includeDispatch ?? options.names === undefined;
   const table = new Map<string, Binding>();

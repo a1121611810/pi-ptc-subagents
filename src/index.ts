@@ -37,6 +37,7 @@ import {
   type BackgroundTaskRuntime,
 } from "./runtime/background-runtime.ts";
 import { createULID } from "./runtime/child-process-lifecycle.ts";
+import { OPT_IN_BINDING_NAMES } from "./runtime/bindings.ts";
 import {
   renderTaskNotifications,
   shouldDeliverTaskNotification,
@@ -56,6 +57,7 @@ import {
   PTC_MODE_STATUS_KEY,
   readDefaultModeConfig,
   readLegacySurfaceKey,
+  readOptInBindingsConfig,
   resolveBaseOnStart,
 } from "./mode/ptc-mode.ts";
 import type {
@@ -64,6 +66,7 @@ import type {
   CodemodeSwitchResolution,
   DetectedSurface,
   ModeHideStrategy,
+  OptInBindingsConfig,
   PersistedModeState,
 } from "./mode/ptc-mode.ts";
 import { buildPtcSkillsSection, skillsSectionDropped } from "./mode/skills-section.ts";
@@ -88,6 +91,7 @@ export {
   readCodemodeSwitch,
   readDefaultModeConfig,
   readLegacySurfaceKey,
+  readOptInBindingsConfig,
   resolveBaseOnStart,
   resolveCodemodeActivation,
   resolveCodemodeSwitch,
@@ -105,6 +109,7 @@ export type {
   ModeEntryDecision,
   ModeEntryInput,
   ModeHideStrategy,
+  OptInBindingsConfig,
   PersistedModeState,
   PtcModeState,
 } from "./mode/ptc-mode.ts";
@@ -129,14 +134,18 @@ const MODE_HIDE_STRATEGY: ModeHideStrategy = DEFAULT_HIDE_STRATEGY;
  * part that surprises people — and the binding list, because that is the part they need in order
  * to know what a program can still do.
  */
-function describeEntry(base: readonly string[], hide: ModeHideStrategy): string {
+function describeEntry(
+  base: readonly string[],
+  hide: ModeHideStrategy,
+  optIns?: readonly string[],
+): string {
   const hidden =
     hide === "all-but-ptc"
       ? "all other tools"
       : "built-in tools (now reachable only as tools.<name> inside a program)";
   return [
     `PTC mode on — ${hidden} hidden.`,
-    `Bindings available inside a program: ${resolveBindingNames(base).join(", ") || "(none)"}.`,
+    `Bindings available inside a program: ${resolveBindingNames(base, optIns).join(", ") || "(none)"}.`,
     "Run /ptc off to restore the normal tool set.",
   ].join("\n");
 }
@@ -145,12 +154,16 @@ export {
   BUILTIN_BINDING_NAMES,
   createBuiltinBindings,
   DEFAULT_BINDING_NAMES,
+  isOptInBindingName,
+  OPT_IN_BINDING_NAMES,
+  resolveOptInBindingNames,
 } from "./runtime/bindings.ts";
 export type {
   Binding,
   BindingContext,
   BindingTable,
   CreateBuiltinBindingsOptions,
+  OptInBindingName,
 } from "./runtime/bindings.ts";
 export { runPtcProgram } from "./runtime/dispatcher.ts";
 export type { PtcRunOutcome, PtcImage, RunPtcProgramOptions } from "./runtime/dispatcher.ts";
@@ -260,6 +273,19 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
    * `tools.<name>(...)` call fail.
    */
   const getBindingSourceNames = (): readonly string[] => bindingSource(mode, pi.getActiveTools());
+
+  /**
+   * #73: opt-in bindings, read ONCE at extension load rather than per run.
+   *
+   * The file lives at a fixed path (`~/.pi/agent/ptc.json`) and is a grant the operator edits
+   * deliberately, not a per-session negotiation — reading it per run would mean a program could see
+   * a different surface from the prompt that described it. An unreadable or malformed file grants
+   * nothing (see `readOptInBindingsConfig`); the problem is reported at `session_start` rather than
+   * swallowed, because a user who asked for `bash` and did not get it needs to be told why.
+   */
+  const optInConfig: OptInBindingsConfig = readOptInBindingsConfig(getAgentDir());
+  const optInBindings = optInConfig.optInBindings;
+  const getOptInBindings = (): readonly string[] => optInBindings;
 
   /**
    * Depth baseline for PTC runs this pi process starts (ADR-0016 Recursive section).
@@ -422,6 +448,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
       pi.registerTool(
         createPtcRunCodeTool({
           getBindingSourceNames,
+          getOptInBindings,
           getPool: () => turnPools.get("run_code"),
           depth: ptcDepth,
           exposure: programmingToolExposure,
@@ -432,6 +459,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
       pi.registerTool(
         createPtcWorkflowTool({
           getBindingSourceNames,
+          getOptInBindings,
           getPool: () => turnPools.get("workflow"),
           depth: ptcDepth,
           exposure: programmingToolExposure,
@@ -662,7 +690,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
       if (action !== "on") {
         ctx.ui.notify(
           mode.enabled
-            ? `PTC mode is ON — run /ptc off to restore built-in tools.\nBindings: ${resolveBindingNames(mode.base).join(", ") || "(none)"}`
+            ? `PTC mode is ON — run /ptc off to restore built-in tools.\nBindings: ${resolveBindingNames(mode.base, optInBindings).join(", ") || "(none)"}`
             : "PTC mode is OFF — run /ptc on to enter it.",
           "info",
         );
@@ -694,7 +722,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
         decision.base,
         decision.loadout,
         ctx,
-        describeEntry(decision.base, MODE_HIDE_STRATEGY),
+        describeEntry(decision.base, MODE_HIDE_STRATEGY, optInBindings),
       );
     },
   });
@@ -749,6 +777,23 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     const config = readDefaultModeConfig(getAgentDir());
     if (config.error !== undefined) {
       ctx.ui.notify(`pi-ptc-subagents: ${config.error}`, "warning");
+    }
+    /*
+     * #73: an `optInBindings` list that does not parse grants nothing, which is safe but silent —
+     * and a user who wrote `"optInBindings": ["bash"]` and still finds no `tools.bash` has no other
+     * way to learn that the key was the problem. The notice names the valid names, because the
+     * failure mode this guards is a typo or a name that was never an opt-in in the first place.
+     *
+     * Read from the value captured at extension load rather than re-read here: `optInConfig` is the
+     * single read of this file's opt-in key, and re-reading it would mean the surface a run builds
+     * and the one this message describes could come from two different reads.
+     */
+    if (optInConfig.error !== undefined) {
+      ctx.ui.notify(
+        `pi-ptc-subagents: ${optInConfig.error}. No opt-in binding was granted, so \`bash\` stays ` +
+          `out of the PTC surface. Opt-in bindings: ${OPT_IN_BINDING_NAMES.join(", ")}.`,
+        "warning",
+      );
     }
     /*
      * The `surfaceMode` key is gone (ADR-0025 withdrawn), and `ptc.json` may still carry one from a
@@ -973,7 +1018,12 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     const wantMode = persisted?.enabled ?? decision.enter;
 
     if (decision.enter && wantMode) {
-      enterMode(base, decision.loadout, ctx, describeEntry(base, MODE_HIDE_STRATEGY));
+      enterMode(
+        base,
+        decision.loadout,
+        ctx,
+        describeEntry(base, MODE_HIDE_STRATEGY, optInBindings),
+      );
       return;
     }
     paintStatus(ctx);
@@ -1052,7 +1102,10 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     return {
       message: {
         customType: "ptc-mode-briefing",
-        content: buildModeInstruction(resolveBindingNames(mode.base), MODE_HIDE_STRATEGY),
+        content: buildModeInstruction(
+          resolveBindingNames(mode.base, optInBindings),
+          MODE_HIDE_STRATEGY,
+        ),
         display: false,
       },
     };
