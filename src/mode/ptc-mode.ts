@@ -15,10 +15,11 @@
  *
  * ## Why bindings need a base snapshot (the trap this module exists to avoid)
  *
- * `resolveBindingNames()` computes bindings as `pi.getActiveTools() ∩ DEFAULT_BINDING_NAMES`
- * plus any opted-in binding (T7, ADR-0005 addendum; ADR-0040). But `pi.getActiveTools()` reads the
- * *live* loadout — the very set this mode narrows. Hiding the built-ins therefore empties the
- * binding table, and every `tools.read(...)` fails with "not bound": the extension would neuter
+ * `resolveBindingNames()` computes bindings as `pi.getActiveTools() ∩ (DEFAULT_BINDING_NAMES ∪
+ * granted)` (T7, ADR-0005 addendum; ADR-0040) — the intersection comes FIRST, so an opt-in adds a
+ * binding the session has enabled and cannot conjure one it has not. But `pi.getActiveTools()`
+ * reads the *live* loadout — the very set this mode narrows. Hiding the built-ins therefore empties
+ * the binding table, and every `tools.read(...)` fails with "not bound": the extension would neuter
  * itself.
  *
  * The fix is a **base snapshot**. `base` is captured *before* the mode hides anything, and

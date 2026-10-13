@@ -135,16 +135,25 @@ const SUBAGENTS_AXES_FROM_DISK = {
  * `session_start`, so the redirect has to still hold when the event fires.
  *
  * `ptc` is the file body, or `null` for no file at all.
+ *
+ * Pass `raw` to write the body VERBATIM instead of serialising `ptc`. Without it there is no way to
+ * produce an unparseable file at all: JSON-stringifying the text `not json` yields a quoted string,
+ * which is a perfectly valid JSON value — so a test asking for an unparseable file silently got a
+ * parseable one. Round 2 had three "broken file" bodies collapse into that single non-object path,
+ * and the unparseable branch was never reached end to end while the test claimed to cover it.
  */
 async function emitSessionStartInAgentDir(
   ptc: unknown,
   options: Parameters<typeof makeExtensionStub>[0],
+  raw?: string,
 ): Promise<ExtensionStub> {
   const dir = await makeTempDir();
   const previous = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = dir;
   try {
-    if (ptc !== null) {
+    if (raw !== undefined) {
+      await writeFile(join(dir, "ptc.json"), raw, "utf8");
+    } else if (ptc !== null) {
       await writeFile(join(dir, "ptc.json"), JSON.stringify(ptc), "utf8");
     }
     const stub = await makeExtensionStub(options);
@@ -247,8 +256,10 @@ test("a wrong `optInBindings` key is reported once, and grants nothing", async (
     expect(notices.length, `one notice for ${JSON.stringify(bad)}, not a stream`).toBe(1);
     expect(notices[0]?.type, "the grant was refused, so it is a warning").toBe("warning");
     // It names the valid names, because the notice is the only place the user learns what to type.
+    // And it names no particular binding: the message used to hard-write `bash`, which goes wrong
+    // the moment a second opt-in exists. Everything it says now comes from the constant.
     expect(notices[0]?.message).toContain(OPT_IN_BINDING_NAMES.join(", "));
-    expect(notices[0]?.message).toMatch(/bash` stays out of the PTC surface/);
+    expect(notices[0]?.message).toMatch(/No opt-in binding was granted.*stays narrowed/);
   }
 });
 
@@ -256,12 +267,29 @@ test("a broken ptc.json is reported once, never once per reader", async () => {
   // The shapes `readOptInBindingsConfig` deliberately does NOT report — the file-level parse
   // failures belong to `readDefaultModeConfig`. If either reader starts reporting them again, one
   // broken file prints the same sentence twice and this turns red.
-  for (const body of ["{ not json", '["bash"]', '"nope"']) {
-    const stub = await emitSessionStartInAgentDir(body, { codemode: NO_CODEMODE });
-    expect(optInNotice(stub).length, `no opt-in notice for the broken file ${body}`).toBe(0);
+  //
+  // Three bodies that are genuinely THREE reader branches. Round 2 passed all three through
+  // `JSON.stringify`, which turned the unparseable one into a valid JSON string — so every case
+  // took the same non-object branch and the unparseable branch was never reached while the test
+  // claimed to cover it. The distinctness assertion below is what stops that silent collapse from
+  // coming back.
+  const bodies: ReadonlyArray<{ label: string; ptc: unknown; raw?: string }> = [
+    { label: "unparseable", ptc: null, raw: "{ not json" },
+    { label: "non-object array", ptc: ["bash"] },
+    { label: "JSON scalar", ptc: "nope" },
+  ];
+  const messages: string[] = [];
+  for (const body of bodies) {
+    const stub = await emitSessionStartInAgentDir(body.ptc, { codemode: NO_CODEMODE }, body.raw);
+    expect(optInNotice(stub).length, `no opt-in notice for ${body.label}`).toBe(0);
     const ptcNotices = stub.notifications.filter((n) => /ptc\.json/.test(n.message));
-    expect(ptcNotices.length, `exactly one notice for ${body}, not one per reader`).toBe(1);
+    expect(ptcNotices.length, `exactly one notice for ${body.label}, not one per reader`).toBe(1);
+    messages.push(ptcNotices[0]?.message ?? "");
   }
+  expect(
+    new Set(messages).size,
+    `each failure mode reports differently, got: ${JSON.stringify(messages)}`,
+  ).toBe(bodies.length);
 });
 
 test("a working `optInBindings` grant is silent", async () => {
@@ -277,29 +305,121 @@ test("a working `optInBindings` grant is silent", async () => {
   }
 });
 
-test("the extension threads the grant into BOTH PTC surfaces", () => {
-  // Behavioural coverage of the grant stops at `createPtcRunCodeTool({ getOptInBindings })` /
-  // `createPtcWorkflowTool({ getOptInBindings })`, which `tests/binding-policy.test.ts` drives for
-  // `ptc_run_code` only. Removing the option from BOTH registrations in `src/index.ts` left the
-  // whole suite green — measured, not assumed — because the tools default to "no opt-ins" and the
-  // default session needs none.
+/**
+ * Source-scan helpers, shared by the wiring tests below.
+ *
+ * Comments are stripped for the reason `tests/config-read-points.test.ts` gives for itself: a name
+ * that appears only in a comment is not a read point. Round 2's version of this scan did not strip,
+ * and that was measured — a TODO comment inside the options object satisfied a check for an option
+ * that was deliberately not passed.
+ */
+function strippedSource(path: string): string {
+  return readFileSync(path, "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/^[ \t]*\/\/.*$/gm, " ");
+}
+
+/**
+ * Every call of `name(` in `source`, as the slice from the identifier to its matching close paren.
+ *
+ * Balanced rather than windowed. Round 2 used a fixed 400-character window, which is arbitrary:
+ * measured on this file the option sat 67 characters in, the window reached 15 characters into the
+ * NEXT registration, and that registration's own copy of the option fell 52 characters outside — so
+ * the scan passed for the right reason by luck of the current formatting, and would have read the
+ * wrong registration once the formatting changed. A wrong test that passes today is the same defect
+ * as one that fails for the wrong reason.
+ *
+ * A declaration is skipped — `function describeEntry(` has no arguments to check.
+ */
+function callSlices(source: string, name: string): string[] {
+  const found: string[] = [];
+  for (let i = source.indexOf(name); i !== -1; i = source.indexOf(name, i + name.length)) {
+    if (/function\s+$/.test(source.slice(Math.max(0, i - 12), i))) continue;
+    const open = source.indexOf("(", i);
+    if (open === -1) continue;
+    let depth = 0;
+    for (let k = open; k < source.length; k++) {
+      if (source[k] === "(") depth++;
+      else if (source[k] === ")" && --depth === 0) {
+        found.push(source.slice(i, k + 1));
+        break;
+      }
+    }
+  }
+  return found;
+}
+
+/** Top-level argument count of a call slice, ignoring commas nested in brackets or strings. */
+function argCount(call: string): number {
+  const inner = call.slice(call.indexOf("(") + 1, call.lastIndexOf(")"));
+  if (inner.trim() === "") return 0;
+  let depth = 0;
+  let args = 1;
+  for (const ch of inner) {
+    if ("([{".includes(ch)) depth++;
+    else if (")]}".includes(ch)) depth--;
+    else if (ch === "," && depth === 0) args++;
+  }
+  return args;
+}
+
+test("every place src/index.ts builds a binding list passes the grant through", () => {
+  // **Self-extending on purpose.** Round 1 fixed "the two registrations"; round 2 measured that the
+  // grant has six hops in `src/index.ts` and only two were held, leaving the mode-entry
+  // announcement, the `/ptc` status line and the PTC-mode briefing able to lose the grant behind a
+  // green suite. Enumerating sites fixes the ones you already know about and goes stale the moment
+  // someone adds another, which is how the gap survived one round. So the assertion is a property of
+  // EVERY call site: a new binding-list call that drops the grant turns this red with no further
+  // review round needed.
   //
-  // So this is a source scan, and deliberately the repo's own idiom: `ptc-config-wiring.md` treats
-  // "the declaration has no read point" as exactly the class a source-scan fixture exists to catch,
-  // and `tests/config-read-points.test.ts` is the precedent. The scan is narrow — one option name,
-  // two call sites — and it fails with the count, not a bare boolean.
-  const source = readFileSync(join(SRC_DIR, "index.ts"), "utf8");
-  const registrations = ["createPtcRunCodeTool(", "createPtcWorkflowTool("].map((factory) => {
+  // The property is "the opt-ins argument is present", NOT "the identifier `optInBindings` appears":
+  // `describeEntry` forwards its own `optIns` parameter, which is the correct forwarding and would
+  // fail an identifier check. Missing the argument is the defect; which variable carries it is not.
+  //
+  // The announcement also has a behavioural test (`tests/ptc-mode.test.ts > a granted opt-in reaches
+  // the mode-entry announcement`). This scan covers what that cannot reach — the briefing, emitted
+  // from `before_agent_start`, which the stub cannot drive — and keeps the property true for call
+  // sites that do not exist yet.
+  const source = strippedSource(join(SRC_DIR, "index.ts"));
+  const sites = [
+    ...callSlices(source, "resolveBindingNames("),
+    ...callSlices(source, "describeEntry("),
+  ];
+  expect(sites.length, "there are binding-list call sites to check").toBeGreaterThan(0);
+  for (const site of sites) {
+    expect(
+      argCount(site),
+      `a binding-list call omits the opt-ins argument: ${site}`,
+    ).toBeGreaterThan(1);
+  }
+});
+
+test("the grant reaches BOTH registered PTC tools", () => {
+  // Behavioural coverage stops at `createPtcRunCodeTool({ getOptInBindings })` /
+  // `createPtcWorkflowTool({ getOptInBindings })`, which `tests/binding-policy.test.ts` drives for
+  // `ptc_run_code` only. The two tools are the only consumers of the value the extension read.
+  //
+  // The earlier comment here claimed the removal "left the whole suite green — measured, not
+  // assumed". **It did not, and round 2 caught the over-claim:** deleting both lines turns FOUR
+  // tests red — this one, the announcement test in `tests/ptc-mode.test.ts`, and two line-pinned
+  // gates (`doc-integrity`, `ocr-anchor-coverage`) that move because `src/index.ts` loses two lines.
+  // The guard was always genuine; only the measurement was stated wrong, so the correction stays.
+  const source = strippedSource(join(SRC_DIR, "index.ts"));
+  for (const factory of ["createPtcRunCodeTool({", "createPtcWorkflowTool({"]) {
     const at = source.indexOf(factory);
     expect(at, `${factory} is still registered in src/index.ts`).toBeGreaterThan(-1);
-    const body = source.slice(at, at + 400);
-    return { factory, wired: /getOptInBindings,/.test(body) };
-  });
-  for (const { factory, wired } of registrations) {
-    expect(
-      wired,
-      `${factory} does not pass getOptInBindings — the grant cannot reach the worker`,
-    ).toBe(true);
+    let depth = 0;
+    let end = source.length;
+    for (let k = at + factory.length - 1; k < source.length; k++) {
+      if (source[k] === "{") depth++;
+      else if (source[k] === "}" && --depth === 0) {
+        end = k + 1;
+        break;
+      }
+    }
+    expect(source.slice(at, end), `${factory} does not pass getOptInBindings`).toMatch(
+      /getOptInBindings/,
+    );
   }
 });
 

@@ -52,7 +52,7 @@
 | `WORKER_ENV_ALLOW_LIST`    | PATH/PATHEXT/SYSTEMROOT/WINDIR/TEMP/TMP | `index.ts:143`(对外导出)、`limits.ts:129`(`createWorkerEnv`)                                                                                                           | worker 唯一可继承的环境变量集合                                                         |
 
 并行旁注:`BUILTIN_BINDING_NAMES`(`bindings.ts:41`,消费点 `ptc-mode.ts:41`、`common.ts:124`、
-`dispatcher.ts:586`)与 `DEFAULT_BINDING_NAMES`(`bindings.ts:64`,消费点 `index.ts:121`、`bindings.ts:187`)
+`dispatcher.ts:569`)与 `DEFAULT_BINDING_NAMES`(`bindings.ts:106`,消费点 `common.ts:155`、`bindings.ts:341`)
 属于同一承诺面:「暴露哪些 binding」也是配置承诺, 改动必须报读点。
 
 ## 必查

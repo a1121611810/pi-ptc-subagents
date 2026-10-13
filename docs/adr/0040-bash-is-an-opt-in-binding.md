@@ -87,7 +87,7 @@ are different questions, and collapsing them is the defect this record removes.
 - **Two more model-facing surfaces exist, and both had to change with this one.** The PTC mode
   briefing / entry / status strings, _and_ the registered `description` of `ptc_run_code`. The
   description is static and cannot know whether a run granted the opt-in, so it may offer only what
-  is bound by default; `tools/binding-policy.test.ts` pins that. A narrowed table with prose that
+  is bound by default; `tests/binding-policy.test.ts` pins that. A narrowed table with prose that
   still advertises `tools.bash` is the failure mode ADR-0005 §2 already warns about, one layer out
   from where anyone was looking.
 

@@ -26,7 +26,7 @@ chain runs:
 | ---------- | -------------------------------------------------------------- | ----------------------------------------------- |
 | presence   | `dist/extensions/codemode` exists                              | `probeCodemodePresence`                         |
 | switch     | no entry anywhere ⇒ `"absent"` ⇒ pi loads built-ins by default | `resolveCodemodeSwitch`                         |
-| ⇒ surface  | `subagents`                                                    | `detectedSurfaceMode` (`ptc-mode.ts:1071-1080`) |
+| ⇒ surface  | `subagents`                                                    | `detectedSurfaceMode` (`ptc-mode.ts:1072-1081`) |
 | activation | `codemode` registers with **`defaultActive: false`**           | `dist/extensions/codemode/index.js:26`          |
 | ⇒ loadout  | pi's default active names are `["read","bash","edit","write"]` | `settings-manager.js:35`                        |
 | ⇒ warning  | `getActiveTools()` has no `codemode`                           | `src/index.ts:973`                              |
@@ -148,7 +148,7 @@ the real loadout — and it arrives too late. Registration happens in the factor
 wrong cannot be corrected in place. Deciding later would mean registering both surfaces and
 narrowing with `setActiveTools` at `session_start`, which changes which tools this package
 _registers_ — a much larger change to the contract this package publishes, and one that would also
-put a second writer on the loadout that `ptc-mode.ts:31-35` already documents as contested.
+put a second writer on the loadout that `ptc-mode.ts:32-36` already documents as contested.
 
 **We do not add a notice for the new default.** The default path now resolves to `full` and says
 nothing, on the reasoning ADR-0026 already recorded: a notice on every ordinary session is crying

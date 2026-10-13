@@ -91,7 +91,7 @@ the obvious implementation is wrong in a way that loses data:
 **We do not switch the loadout in place.** The obvious alternative is to register both surfaces and
 let `setActiveTools` choose visibility, which needs no reload and feels instant. It is rejected for
 the reason ADR-0029 gives: it puts a **second writer** on the loadout, and
-`ptc-mode.ts:31-35` already documents that axis as contested — the mode's fail-safe is a
+`ptc-mode.ts:32-36` already documents that axis as contested — the mode's fail-safe is a
 fingerprint of the exact array it wrote, and a surface switch from another writer would trip it
 into exiting and restoring `base`. Two features that both narrow one loadout, with no shared
 ownership rule, is the failure this repo has already paid for once in this file.

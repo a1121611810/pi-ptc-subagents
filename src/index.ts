@@ -790,8 +790,8 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
      */
     if (optInConfig.error !== undefined) {
       ctx.ui.notify(
-        `pi-ptc-subagents: ${optInConfig.error}. No opt-in binding was granted, so \`bash\` stays ` +
-          `out of the PTC surface. Opt-in bindings: ${OPT_IN_BINDING_NAMES.join(", ")}.`,
+        `pi-ptc-subagents: ${optInConfig.error}. No opt-in binding was granted, so the PTC surface ` +
+          `stays narrowed. Opt-in bindings: ${OPT_IN_BINDING_NAMES.join(", ")}.`,
         "warning",
       );
     }

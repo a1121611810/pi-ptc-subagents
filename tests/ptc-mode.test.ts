@@ -515,6 +515,36 @@ test("the injected briefing lists the bindings of this session, not a hardcoded 
 // Wiring, driven through the extension stub
 // --------------------------------------------------------------------------------------
 
+test("a granted opt-in reaches the mode-entry announcement, not just the binding table", async () => {
+  // **The value link** (ADR-0040). Four hops carry the grant from the config file to what the model
+  // is told: `readOptInBindingsConfig` → the extension's closure → `describeEntry` →
+  // `resolveBindingNames(base, optIns)`. The tools receive it too, but on the PTC line a default
+  // session needs none — so discarding it narrows the announcement and widens nothing. Measured on
+  // round 2: `const optInBindings = []` at the extension entry left the entire suite identical to
+  // baseline. That is why this is asserted on the ANNOUNCEMENT rather than on the table: the table
+  // cannot tell the difference, so only the announcement can.
+  const announcementOf = (stub: { notifications: ReadonlyArray<{ message: string }> }): string => {
+    const modeNotices = stub.notifications.filter((n) => n.message.includes("PTC mode on"));
+    expect(modeNotices.length, "announced once").toBe(1);
+    return modeNotices[0]?.message ?? "";
+  };
+
+  await withAgentDir(async (dir) => {
+    await writeFile(join(dir, "ptc.json"), JSON.stringify({ optInBindings: ["bash"] }), "utf8");
+    // pi's default session has `bash` ENABLED; the grant is what makes it a BINDING. Stating both
+    // halves is the point of the test — "enabled" and "granted" are different questions.
+    expect(DEFAULT_SESSION_TOOLS).toContain("bash" as never);
+    expect(announcementOf(await makeExtensionStub())).toContain("read, bash, edit, write");
+  });
+
+  // The negative half, so the positive cannot pass on a string that merely happens to contain
+  // "bash" elsewhere.
+  await withAgentDir(async () => {
+    expect(announcementOf(await makeExtensionStub())).toContain("read, edit, write.");
+    expect(announcementOf(await makeExtensionStub())).not.toContain("bash");
+  });
+});
+
 test("session_start narrows the loadout, persists the record, paints the status and announces", async () => {
   await withAgentDir(async () => {
     // `makeExtensionStub` fires `session_start` itself, in tui mode, before it returns — so the

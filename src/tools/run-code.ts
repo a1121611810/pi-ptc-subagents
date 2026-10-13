@@ -2,7 +2,8 @@
  * `ptc_run_code` — the unstructured PTC surface.
  *
  * The model writes the body of an async function; inside it, pi's built-in tools are reachable as
- * `tools.<name>(args)` (all seven: read, bash, edit, write, grep, find, ls — ADR-0005's set), plus
+ * `tools.<name>(args)` (ADR-0005's set, minus anything the install has not opted in — see
+ * ADR-0040; the registered `description` says which), plus
  * the parallel binding `pi.dispatch` under its literal dot name (`tools["pi.dispatch"](args)`,
  * ADR-0016 — the shipped surface always binds it), and the program's return value plus
  * `console.log` output are what come back. There are no helpers
