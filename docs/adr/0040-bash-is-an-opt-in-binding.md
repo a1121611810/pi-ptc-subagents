@@ -72,9 +72,9 @@ are different questions, and collapsing them is the defect this record removes.
 ## What this costs
 
 - **A program that called `tools.bash` by default now fails** with
-  `no binding named "bash"; available bindings: …`. The refusal names what _is_ available, so the
-  fix is readable from the error. This is a breaking change; the migration is one line of config,
-  or an explicit `names` list for embedders.
+  `no binding named "bash" in this run; available bindings: …`. The refusal names what _is_
+  available, so the fix is readable from the error. This is a breaking change; the migration is one
+  line of config, or an explicit `names` list for embedders.
 - **`BUILTIN_BINDING_NAMES` must stay at seven.** `dispatcher.ts` ships the full known set as the
   worker's `bindingCandidates`, and the worker installs a **throwing stub** per unbound candidate —
   that is what produces the actionable refusal above. Shrinking the known set would delete the very

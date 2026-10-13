@@ -3,7 +3,9 @@
  *
  * The model writes the body of an async function; inside it, pi's built-in tools are reachable as
  * `tools.<name>(args)` (ADR-0005's set, minus anything the install has not opted in — see
- * ADR-0040; the registered `description` says which), plus
+ * ADR-0040, whose §What this costs names this exact surface; the registered `description` states
+ * that rule and points at the `ptcBindings` global, which is the per-run truth, not the description
+ * itself), plus
  * the parallel binding `pi.dispatch` under its literal dot name (`tools["pi.dispatch"](args)`,
  * ADR-0016 — the shipped surface always binds it), and the program's return value plus
  * `console.log` output are what come back. There are no helpers

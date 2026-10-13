@@ -22,57 +22,126 @@ import {
 } from "../src/tools/common.ts";
 import type { PtcToolDetails } from "../src/tools/common.ts";
 import { createPtcRunCodeTool } from "../src/tools/run-code.ts";
+import { createPtcWorkflowTool } from "../src/tools/workflow.ts";
 import { RUN_TIMEOUT_MS, makeTempDir, removeTempDir, toolContext } from "./helpers/ptc.ts";
 
-test("the registered tool description never OFFERS a binding the default surface withholds", () => {
-  // The registered `description` is what the model actually reads, and it is STATIC — it cannot
-  // know whether this run granted an opt-in. So it may describe only what is bound by default.
-  // Naming an unbound binding as something to CALL is an invitation to a call that fails; the
-  // per-run truth lives on `ptcBindings`, which the description already points at. This is the
-  // same failure `resolveBindingNames`'s own doc names — a surface that drops a binding while the
-  // prose still advertises it — one layer out, where no test looked.
-  const description = createPtcRunCodeTool().description;
-  expect(description).toMatch(/ptcBindings/); // the per-run escape hatch must stay advertised
+/**
+ * Both registered PTC tools, because both carry a `description` the model reads and both describe
+ * `tools.<name>`.
+ *
+ * Round 2 reworded `ptc_workflow`'s description for exactly the reason this file exists, and pinned
+ * only `ptc_run_code`'s. Measured consequence of that half-pin: restoring the round-2 wording —
+ * "mirror the session's enabled tools", the shape ADR-0040 §What this costs calls out as the defect —
+ * left every suite green. A pin that names one of two identical-shaped surfaces is not a pin on the
+ * property; it is a pin on an accident of which one somebody remembered.
+ */
+const PTC_TOOL_DESCRIPTIONS = [
+  { tool: "ptc_run_code", description: createPtcRunCodeTool().description },
+  { tool: "ptc_workflow", description: createPtcWorkflowTool().description },
+] as const;
 
-  for (const name of OPT_IN_BINDING_NAMES) {
-    // (1) never offered in callable form. The contract's shape notes are written as
-    // `` `bash` rejects …`` without the `tools.` prefix and are deliberately NOT caught here:
-    // they describe how a bound binding behaves, and a run that opted in still gets that shape.
-    expect(description, `\`${name}\` must not be offered as a callable example`).not.toMatch(
-      new RegExp(`tools\\.${name}\\b`),
-    );
+test.each(PTC_TOOL_DESCRIPTIONS)(
+  "$tool's description never OFFERS a binding the default surface withholds",
+  ({ tool, description }) => {
+    // The registered `description` is what the model actually reads, and it is STATIC — it cannot
+    // know whether this run granted an opt-in. So it may describe only what is bound by default.
+    // Naming an unbound binding as something to CALL is an invitation to a call that fails; the
+    // per-run truth lives on `ptcBindings`, which the description already points at. This is the
+    // same failure `resolveBindingNames`'s own doc names — a surface that drops a binding while the
+    // prose still advertises it — one layer out, where no test looked.
+    expect(description).toMatch(/ptcBindings/); // the per-run escape hatch must stay advertised
 
-    // (2) never listed as part of what a default session has. The defect was prose, so pinning it
-    // needs a prose-aware rule; scoping to a line that talks about the default session is what
-    // makes it non-degenerate without reaching every mention of the word.
-    const defaultSessionLines = description
-      .split("\n")
-      .filter((line) => /default session/.test(line));
-    for (const line of defaultSessionLines) {
-      expect(line, `\`${name}\` must not be listed as bound in a default session`).not.toContain(
-        name,
+    for (const name of OPT_IN_BINDING_NAMES) {
+      // (1) never offered in callable form. The contract's shape notes are written as
+      // `` `bash` rejects …`` without the `tools.` prefix and are deliberately NOT caught here:
+      // they describe how a bound binding behaves, and a run that opted in still gets that shape.
+      expect(description, `\`${name}\` must not be offered as a callable example`).not.toMatch(
+        new RegExp(`tools\\.${name}\\b`),
       );
-    }
-  }
-});
 
-test("every binding the description shows as callable really is bound by default", () => {
-  // The positive half, so the rule above cannot be satisfied by deleting the prose wholesale.
-  //
-  // Anchored on the opening paren, deliberately. The description contains counter-examples too —
-  // "`tools.pi.dispatch` does not exist" is a dotted path that a bare `tools\.(\w+)` regex reads
-  // as an offer of `pi`. An offer is a CALL, so it is `tools.<name>(`; anything without the paren
-  // is prose about a name, which the negative test above already governs.
-  const description = createPtcRunCodeTool().description;
-  const offered = [...description.matchAll(/tools\.([a-z][a-z0-9_]*)\s*\(/g)].map((m) => m[1]);
-  expect(offered.length, "the description shows at least one callable example").toBeGreaterThan(0);
-  for (const name of offered) {
+      // (2) never listed as part of what a default session has. The defect was prose, so pinning it
+      // needs a prose-aware rule; scoping to a line that talks about the default session is what
+      // makes it non-degenerate without reaching every mention of the word.
+      const defaultSessionLines = description
+        .split("\n")
+        .filter((line) => /default session/.test(line));
+      for (const line of defaultSessionLines) {
+        expect(line, `\`${name}\` must not be listed as bound in a default session`).not.toContain(
+          name,
+        );
+      }
+    }
+
+    // The floor, so deleting a tool from the table above cannot silently un-pin it — the failure
+    // mode this file already lived through once, in the other direction.
+    expect(description.length, `${tool} must have a description to pin`).toBeGreaterThan(0);
+  },
+);
+
+test.each(PTC_TOOL_DESCRIPTIONS)(
+  "$tool's description states that the bound set excludes what the install has not opted in",
+  ({ tool, description }) => {
+    // **The pin for the defect that actually shipped.** Round 2 reworded `ptc_workflow`'s
+    // description from "the bound names mirror the session's enabled tools" to the narrowing
+    // sentence, and the checks above do NOT catch the difference: the old wording neither offers
+    // `tools.bash` nor claims a `default session` list, so it sails through both. Measured before
+    // this line existed — restoring it left every suite green, which is how the hole survived the
+    // round that introduced it.
+    //
+    // So the property is pinned directly, on the sentence that carries it, rather than inferred
+    // from the absence of an offer. A description that stops narrowing now reds here instead of
+    // quietly telling the model its bindings are whatever the session has enabled.
+    const narrowing = description.split("\n").filter((line) => /opted in/.test(line));
     expect(
-      [...DEFAULT_BINDING_NAMES, DISPATCH_BINDING_NAME],
-      `the description offers tools.${name}(…), which is not bound by default`,
-    ).toContain(name);
-  }
-});
+      narrowing.length,
+      `${tool} must say the bound set excludes bindings the install has not opted in (ADR-0040 §What this costs: both model-facing surfaces had to change)`,
+    ).toBeGreaterThan(0);
+  },
+);
+
+test.each(PTC_TOOL_DESCRIPTIONS)(
+  "every binding $tool's description shows as callable really is bound by default",
+  ({ tool, description }) => {
+    // The positive half, so the rule above cannot be satisfied by deleting the prose wholesale.
+    //
+    // Anchored on the opening paren, deliberately. The description contains counter-examples too —
+    // "`tools.pi.dispatch` does not exist" is a dotted path that a bare `tools\.(\w+)` regex reads
+    // as an offer of `pi`. An offer is a CALL, so it is `tools.<name>(`; anything without the paren
+    // is prose about a name, which the negative test above already governs.
+    const offered = [...description.matchAll(/tools\.([a-z][a-z0-9_]*)\s*\(/g)].map((m) => m[1]);
+    for (const name of offered) {
+      expect(
+        [...DEFAULT_BINDING_NAMES, DISPATCH_BINDING_NAME],
+        `${tool} offers tools.${name}(…), which is not bound by default`,
+      ).toContain(name);
+    }
+
+    // **`ptc_workflow` offers nothing concrete, and saying so is the assertion.** Its description
+    // refers the model to `ptc_run_code` for the binding list rather than repeating it, so the
+    // "at least one offer" floor that keeps this test non-vacuous does not hold there — asserted
+    // naively across both tools it turned this red on a fact about the product, and the obvious
+    // "fix" of dropping the floor would have made the whole test an assertion-free body over an
+    // empty set, which is F4 in `test-discipline.md` wearing a green tick.
+    //
+    // So the shape is stated instead of assumed, and both branches assert something: a tool that
+    // defers MUST offer nothing (paste a concrete `tools.bash(` into it and this reds, before the
+    // negative test above gets a chance), and a tool that does not defer MUST offer at least one.
+    // Which branch a tool is in is visible in the failure, so a description that quietly stops
+    // deferring does not silently opt out of the check.
+    const defers = description.includes("exactly as in `ptc_run_code`");
+    if (defers) {
+      expect(
+        offered,
+        `${tool} defers the binding list to ptc_run_code, so it must not offer names of its own`,
+      ).toEqual([]);
+    } else {
+      expect(
+        offered.length,
+        `${tool} does not defer, so it must offer at least one callable example`,
+      ).toBeGreaterThan(0);
+    }
+  },
+);
 
 test("resolveBindingNames intersects the active set with the built-in factories", () => {
   expect([...resolveBindingNames(undefined)]).toEqual([...DEFAULT_BINDING_NAMES]);

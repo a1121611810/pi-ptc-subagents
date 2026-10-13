@@ -20,6 +20,7 @@ import {
   removeTempDir,
   writeAgentSettings,
 } from "./helpers/ptc.ts";
+import { maskSource } from "./helpers/source-mask.ts";
 
 /**
  * The factory's contract with pi is "register the PTC tools and the mode hooks against the
@@ -141,12 +142,16 @@ const SUBAGENTS_AXES_FROM_DISK = {
  * which is a perfectly valid JSON value — so a test asking for an unparseable file silently got a
  * parseable one. Round 2 had three "broken file" bodies collapse into that single non-object path,
  * and the unparseable branch was never reached end to end while the test claimed to cover it.
+ *
+ * Returns the temp dir it used alongside the stub, because `readDefaultModeConfig` names that path
+ * in its error sentence. A caller comparing two of those sentences has to erase the path first, and
+ * it cannot do that without being told which path it was.
  */
 async function emitSessionStartInAgentDir(
   ptc: unknown,
   options: Parameters<typeof makeExtensionStub>[0],
   raw?: string,
-): Promise<ExtensionStub> {
+): Promise<{ stub: ExtensionStub; agentDir: string }> {
   const dir = await makeTempDir();
   const previous = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = dir;
@@ -157,7 +162,7 @@ async function emitSessionStartInAgentDir(
       await writeFile(join(dir, "ptc.json"), JSON.stringify(ptc), "utf8");
     }
     const stub = await makeExtensionStub(options);
-    return stub;
+    return { stub, agentDir: dir };
   } finally {
     if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previous;
@@ -201,7 +206,7 @@ test("a `surfaceMode` key left in ptc.json is reported as ignored, and the surfa
   // this notice has to cover — a table driven off `SURFACE_MODES` would stop at two of the three
   // and silently drop the one a real user most likely wrote.
   for (const value of ["off", "subagents", "full"] as const) {
-    const stub = await emitSessionStartInAgentDir(
+    const { stub } = await emitSessionStartInAgentDir(
       { surfaceMode: value },
       { codemode: NO_CODEMODE },
     );
@@ -248,7 +253,7 @@ const optInNotice = (stub: ExtensionStub) =>
 
 test("a wrong `optInBindings` key is reported once, and grants nothing", async () => {
   for (const bad of [["teleport"], ["read"], ["bash", "nope"], "bash", [7]]) {
-    const stub = await emitSessionStartInAgentDir(
+    const { stub } = await emitSessionStartInAgentDir(
       { optInBindings: bad },
       { codemode: NO_CODEMODE },
     );
@@ -268,28 +273,57 @@ test("a broken ptc.json is reported once, never once per reader", async () => {
   // failures belong to `readDefaultModeConfig`. If either reader starts reporting them again, one
   // broken file prints the same sentence twice and this turns red.
   //
-  // Three bodies that are genuinely THREE reader branches. Round 2 passed all three through
-  // `JSON.stringify`, which turned the unparseable one into a valid JSON string — so every case
-  // took the same non-object branch and the unparseable branch was never reached while the test
-  // claimed to cover it. The distinctness assertion below is what stops that silent collapse from
-  // coming back.
+  // **Four bodies, two failure sentences, and the split is deliberate.** Round 2 passed all its
+  // bodies through `JSON.stringify`, which turned the unparseable one into a valid JSON string, so
+  // every case took the same non-object path while the test claimed to cover the unparseable one.
+  //
+  // Round 3's version of the fix asserted the three sentences were all DIFFERENT. Earning the path
+  // out of the comparison is what showed that claim to be false: with the temp dir erased, the array
+  // and the scalar produce byte-identical sentences, because `readDefaultModeConfig` handles
+  // `null`, a non-object and an array in ONE conditional and one message. That is the right product
+  // behaviour — the user's remedy is identical in all three cases — so the test now asserts the real
+  // shape: exactly two sentences, one of which is the unparseable one, and the array / scalar / null
+  // trio is asserted to SHARE a sentence rather than merely to differ from its neighbours.
+  //
+  // Which matters for the reason the original comment gave, only now it is true: collapse the
+  // unparseable path into the non-object one and the distinct count drops to 1 and this reds.
+  //
+  // `JSON null` is the fourth body and the reason it is here: `JSON.parse("null")` yields `null`,
+  // the first disjunct of `parsed === null || typeof parsed !== "object" || Array.isArray(parsed)`,
+  // and no other body reaches it. `ptc: null` alone would not — in this helper that means "write no
+  // file at all" — hence the `raw`.
   const bodies: ReadonlyArray<{ label: string; ptc: unknown; raw?: string }> = [
     { label: "unparseable", ptc: null, raw: "{ not json" },
     { label: "non-object array", ptc: ["bash"] },
     { label: "JSON scalar", ptc: "nope" },
+    { label: "JSON null", ptc: null, raw: "null" },
   ];
-  const messages: string[] = [];
+  const byLabel = new Map<string, string>();
   for (const body of bodies) {
-    const stub = await emitSessionStartInAgentDir(body.ptc, { codemode: NO_CODEMODE }, body.raw);
+    const { stub, agentDir } = await emitSessionStartInAgentDir(
+      body.ptc,
+      { codemode: NO_CODEMODE },
+      body.raw,
+    );
     expect(optInNotice(stub).length, `no opt-in notice for ${body.label}`).toBe(0);
     const ptcNotices = stub.notifications.filter((n) => /ptc\.json/.test(n.message));
     expect(ptcNotices.length, `exactly one notice for ${body.label}, not one per reader`).toBe(1);
-    messages.push(ptcNotices[0]?.message ?? "");
+    byLabel.set(body.label, (ptcNotices[0]?.message ?? "").replaceAll(agentDir, "<agent-dir>"));
   }
+  const distinct = new Set(byLabel.values());
   expect(
-    new Set(messages).size,
-    `each failure mode reports differently, got: ${JSON.stringify(messages)}`,
-  ).toBe(bodies.length);
+    distinct.size,
+    `two failure modes, once the temp path is erased: ${JSON.stringify([...byLabel])}`,
+  ).toBe(2);
+  const shared = byLabel.get("non-object array");
+  expect(
+    shared === byLabel.get("JSON scalar") && shared === byLabel.get("JSON null"),
+    `array / scalar / null are one message by design, got: ${JSON.stringify([...byLabel])}`,
+  ).toBe(true);
+  expect(
+    distinct.has(byLabel.get("unparseable") ?? ""),
+    "the unparseable branch must keep its own sentence — that is what proves it was reached",
+  ).toBe(true);
 });
 
 test("a working `optInBindings` grant is silent", async () => {
@@ -300,7 +334,7 @@ test("a working `optInBindings` grant is silent", async () => {
     { optInBindings: [] },
     { optInBindings: ["bash"] },
   ]) {
-    const stub = await emitSessionStartInAgentDir(good, { codemode: NO_CODEMODE });
+    const { stub } = await emitSessionStartInAgentDir(good, { codemode: NO_CODEMODE });
     expect(optInNotice(stub).length, `silent for ${JSON.stringify(good)}`).toBe(0);
   }
 });
@@ -308,15 +342,17 @@ test("a working `optInBindings` grant is silent", async () => {
 /**
  * Source-scan helpers, shared by the wiring tests below.
  *
- * Comments are stripped for the reason `tests/config-read-points.test.ts` gives for itself: a name
- * that appears only in a comment is not a read point. Round 2's version of this scan did not strip,
- * and that was measured — a TODO comment inside the options object satisfied a check for an option
- * that was deliberately not passed.
+ * Comments are masked by `maskSource`, not by a regex, and that detail is load-bearing twice over.
+ * Round 2's version of this stripper used `/^[ \t]*\/\/.*$/gm`, which requires `//` to sit at the
+ * start of a line — so a TRAILING `// TODO: getOptInBindings` inside the options object survived
+ * untouched and satisfied a guard whose whole job is to prove the option was passed. Measured, not
+ * assumed: that edit left the suite identical to baseline. `tests/config-read-points.test.ts` already
+ * carried a correct four-state scanner for exactly this; it now lives in
+ * `tests/helpers/source-mask.ts` and both fixtures share the one implementation, because two
+ * hand-rolled strippers drift apart and the weaker one ends up being the one under test.
  */
-function strippedSource(path: string): string {
-  return readFileSync(path, "utf8")
-    .replace(/\/\*[\s\S]*?\*\//g, " ")
-    .replace(/^[ \t]*\/\/.*$/gm, " ");
+function codeOf(path: string): string {
+  return maskSource(readFileSync(path, "utf8")).code;
 }
 
 /**
@@ -328,6 +364,16 @@ function strippedSource(path: string): string {
  * the scan passed for the right reason by luck of the current formatting, and would have read the
  * wrong registration once the formatting changed. A wrong test that passes today is the same defect
  * as one that fails for the wrong reason.
+ *
+ * It runs on the `code` mask, comments blanked but string contents kept, and that is forced by the
+ * data rather than chosen: one of the binding-list call sites lives inside a template interpolation
+ * (`src/index.ts` builds the announcement with `` `${resolveBindingNames(base, optIns)...}` ``), and
+ * the `structural` mask blanks template bodies, so scanning it would have dropped that site without
+ * a word. Known limitation, same family as the one `maskSource` documents: a bracket inside a string
+ * *argument* can still end a slice early. `BINDING_LIST_SITE_FLOOR` below is what catches that —
+ * a truncated scan loses sites, and a floor is the repo's own idiom for exactly this
+ * (`tests/config-read-points.test.ts` uses floors, not exact values, so that the guard does not go
+ * red merely because the promise surface grew).
  *
  * A declaration is skipped — `function describeEntry(` has no arguments to check.
  */
@@ -349,19 +395,47 @@ function callSlices(source: string, name: string): string[] {
   return found;
 }
 
-/** Top-level argument count of a call slice, ignoring commas nested in brackets or strings. */
-function argCount(call: string): number {
-  const inner = call.slice(call.indexOf("(") + 1, call.lastIndexOf(")"));
-  if (inner.trim() === "") return 0;
+/**
+ * Top-level arguments of a call slice, split on commas that are not nested in brackets.
+ *
+ * String-aware, and by construction rather than by a comment claiming so: the slice is re-masked
+ * with `maskSource(...).structural` first, which blanks string contents. Round 2's `argCount` had a
+ * docstring promising it ignored "commas nested in brackets **or strings**" while its loop tracked
+ * brackets only. Measured on that version: `f(a, "x, y")` counted 3 arguments instead of 2, so a
+ * call that passed one real argument and a comma-bearing string satisfied a `> 1` check that exists
+ * to catch a missing argument — the guard passed for the wrong reason, which is the same defect as
+ * failing for the wrong reason.
+ */
+function topLevelArgs(call: string): string[] {
+  const inner = maskSource(call).structural;
+  const body = inner.slice(inner.indexOf("(") + 1, inner.lastIndexOf(")"));
+  if (body.trim() === "") return [];
+  const args: string[] = [];
   let depth = 0;
-  let args = 1;
-  for (const ch of inner) {
-    if ("([{".includes(ch)) depth++;
-    else if (")]}".includes(ch)) depth--;
-    else if (ch === "," && depth === 0) args++;
+  let start = 0;
+  for (let i = 0; i < body.length; i++) {
+    const char = body[i] ?? "";
+    if ("([{".includes(char)) depth++;
+    else if (")]}".includes(char)) depth--;
+    else if (char === "," && depth === 0) {
+      args.push(body.slice(start, i));
+      start = i + 1;
+    }
   }
+  args.push(body.slice(start));
   return args;
 }
+
+/**
+ * Expressions that satisfy "an argument is syntactically present" while granting nothing.
+ *
+ * These are the substitution half of the defect. Round 2's guard caught a DELETED argument and
+ * nothing else: `argCount(site) > 1` was still satisfied by `resolveBindingNames(base, [])`, which
+ * is the same silent no-grant the deleted argument produces. The measured neutralisation for this
+ * feature is exactly this shape — dropping the grant at the extension entry was tried as
+ * `const optInBindings = []` — so a guard that misses it misses the known mutation.
+ */
+const EMPTY_GRANT = /^(?:\[\s*\]|new\s+Set\s*\(\s*\)|undefined|null|\{\s*\}|"")$/;
 
 test("every place src/index.ts builds a binding list passes the grant through", () => {
   // **Self-extending on purpose.** Round 1 fixed "the two registrations"; round 2 measured that the
@@ -380,19 +454,38 @@ test("every place src/index.ts builds a binding list passes the grant through", 
   // the mode-entry announcement`). This scan covers what that cannot reach — the briefing, emitted
   // from `before_agent_start`, which the stub cannot drive — and keeps the property true for call
   // sites that do not exist yet.
-  const source = strippedSource(join(SRC_DIR, "index.ts"));
-  const sites = [
-    ...callSlices(source, "resolveBindingNames("),
-    ...callSlices(source, "describeEntry("),
-  ];
-  expect(sites.length, "there are binding-list call sites to check").toBeGreaterThan(0);
-  for (const site of sites) {
+  const source = codeOf(join(SRC_DIR, "index.ts"));
+  const sites = BINDING_LIST_CALLEES.flatMap((callee) =>
+    callSlices(source, callee.name).map((slice) => ({ callee, slice })),
+  );
+  expect(
+    sites.length,
+    "the scan found every binding-list site; a truncated scan is the failure this floor catches",
+  ).toBeGreaterThanOrEqual(BINDING_LIST_SITE_FLOOR);
+  for (const { callee, slice } of sites) {
+    const args = topLevelArgs(slice);
     expect(
-      argCount(site),
-      `a binding-list call omits the opt-ins argument: ${site}`,
-    ).toBeGreaterThan(1);
+      args.length,
+      `${callee.name} takes its opt-ins at position ${callee.grantAt}: ${slice}`,
+    ).toBeGreaterThanOrEqual(callee.grantAt);
+    expect(
+      args[callee.grantAt - 1]?.trim(),
+      `${callee.name} is handed an empty grant, which is the no-grant defect wearing a disguise`,
+    ).not.toMatch(EMPTY_GRANT);
   }
 });
+
+/** Each binding-list callee and the 1-based argument position its opt-ins parameter occupies. */
+const BINDING_LIST_CALLEES = [
+  { name: "resolveBindingNames(", grantAt: 2 },
+  { name: "describeEntry(", grantAt: 3 },
+] as const;
+
+/**
+ * Floor, not an exact count — same reasoning as `tests/config-read-points.test.ts`: adding a sixth
+ * hop must not redden this guard, but a scan that silently stops finding the five must.
+ */
+const BINDING_LIST_SITE_FLOOR = 5;
 
 test("the grant reaches BOTH registered PTC tools", () => {
   // Behavioural coverage stops at `createPtcRunCodeTool({ getOptInBindings })` /
@@ -400,11 +493,15 @@ test("the grant reaches BOTH registered PTC tools", () => {
   // `ptc_run_code` only. The two tools are the only consumers of the value the extension read.
   //
   // The earlier comment here claimed the removal "left the whole suite green — measured, not
-  // assumed". **It did not, and round 2 caught the over-claim:** deleting both lines turns FOUR
-  // tests red — this one, the announcement test in `tests/ptc-mode.test.ts`, and two line-pinned
-  // gates (`doc-integrity`, `ocr-anchor-coverage`) that move because `src/index.ts` loses two lines.
-  // The guard was always genuine; only the measurement was stated wrong, so the correction stays.
-  const source = strippedSource(join(SRC_DIR, "index.ts"));
+  // assumed". **It did not, and round 2 caught the over-claim.** Round 3 then corrected the
+  // correction: the replacement claimed FOUR tests go red, and measuring the four named files found
+  // TWO — this one and a `doc-integrity` line pin. `tests/ptc-mode.test.ts` stays green because the
+  // announcement reads the `optInBindings` closure, not this `getOptInBindings` option, and
+  // `tests/ocr-anchor-coverage.test.ts` is green on its own. The guard itself was always genuine;
+  // what kept going wrong is the number attached to it, twice, in the same comment — so the count
+  // is now the count this author measured, over the files this author names, with the scope stated
+  // rather than implied. A full-suite count is not claimed and was not measured.
+  const source = codeOf(join(SRC_DIR, "index.ts"));
   for (const factory of ["createPtcRunCodeTool({", "createPtcWorkflowTool({"]) {
     const at = source.indexOf(factory);
     expect(at, `${factory} is still registered in src/index.ts`).toBeGreaterThan(-1);
@@ -427,7 +524,7 @@ test("no legacy notice when ptc.json carries no `surfaceMode` key", async () => 
   // The other half, and the one that would catch a notice on every ordinary session: `defaultMode`
   // still lives in this file, so most sessions have one and most sessions must hear nothing.
   for (const ptc of [null, { defaultMode: false }, { defaultMode: true }]) {
-    const stub = await emitSessionStartInAgentDir(ptc, { codemode: NO_CODEMODE });
+    const { stub } = await emitSessionStartInAgentDir(ptc, { codemode: NO_CODEMODE });
     expect(
       stub.notifications.filter((n) => n.message.includes('"surfaceMode"')),
       `no legacy notice for ${JSON.stringify(ptc)}`,

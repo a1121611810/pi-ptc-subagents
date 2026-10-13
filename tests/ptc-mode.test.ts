@@ -533,7 +533,7 @@ test("a granted opt-in reaches the mode-entry announcement, not just the binding
     await writeFile(join(dir, "ptc.json"), JSON.stringify({ optInBindings: ["bash"] }), "utf8");
     // pi's default session has `bash` ENABLED; the grant is what makes it a BINDING. Stating both
     // halves is the point of the test — "enabled" and "granted" are different questions.
-    expect(DEFAULT_SESSION_TOOLS).toContain("bash" as never);
+    expect(DEFAULT_SESSION_TOOLS).toContain("bash");
     expect(announcementOf(await makeExtensionStub())).toContain("read, bash, edit, write");
   });
 

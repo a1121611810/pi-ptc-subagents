@@ -38,6 +38,7 @@ import { join, relative, sep } from "node:path";
 
 import { BUILTIN_BINDING_NAMES } from "../src/runtime/bindings.ts";
 import { createWorkerEnv, DEFAULT_CONFIG, WORKER_ENV_ALLOW_LIST } from "../src/runtime/limits.ts";
+import { maskSource } from "./helpers/source-mask.ts";
 
 const REPO_ROOT = join(import.meta.dirname, "..");
 const SRC_DIR = join(REPO_ROOT, "src");
@@ -80,97 +81,6 @@ function identifierTarget(label: string): ScanTarget {
 /** 调用形态：`createWorkerEnv(...)`，用来区分「只是 import 了」和「真的调用了」。 */
 function callTarget(label: string): ScanTarget {
   return { label, source: `${label}\\s*\\(` };
-}
-
-type SourceMode = "code" | "line-comment" | "block-comment" | "string";
-
-interface MaskedSource {
-  /** 注释已屏蔽、字符串字面量内容保留 —— 用于匹配标识符。 */
-  readonly code: string;
-  /** 注释与字符串字面量内容都屏蔽 —— 用于括号配平（定位声明区间）。 */
-  readonly structural: string;
-}
-
-/**
- * 单趟扫描同时产出两种掩码，行数与原文件严格一致（命中行号才对得上）。
- *
- * 已知局限：模板字符串里的 `${ ... }` 插值不再做嵌套词法分析，插值内部的引号 / 括号会被当作
- * 字面量内容处理。本 fixture 用到的三个声明体（`DEFAULT_CONFIG` / `WORKER_ENV_ALLOW_LIST` /
- * `BUILTIN_BINDING_NAMES`）都不含带括号的插值，所以不影响声明区间定位。
- */
-function maskSource(source: string): MaskedSource {
-  let code = "";
-  let structural = "";
-  let mode: SourceMode = "code";
-  let closingQuote = "";
-  for (let i = 0; i < source.length; i++) {
-    const char = source[i] ?? "";
-    const next = source[i + 1] ?? "";
-    if (mode === "code") {
-      if (char === "/" && next === "/") {
-        mode = "line-comment";
-        code += "  ";
-        structural += "  ";
-        i++;
-        continue;
-      }
-      if (char === "/" && next === "*") {
-        mode = "block-comment";
-        code += "  ";
-        structural += "  ";
-        i++;
-        continue;
-      }
-      if (char === "'" || char === '"' || char === "`") {
-        mode = "string";
-        closingQuote = char;
-        code += char;
-        structural += char;
-        continue;
-      }
-      code += char;
-      structural += char;
-      continue;
-    }
-    if (mode === "line-comment") {
-      const kept = char === "\n" ? "\n" : " ";
-      code += kept;
-      structural += kept;
-      if (char === "\n") mode = "code";
-      continue;
-    }
-    if (mode === "block-comment") {
-      if (char === "*" && next === "/") {
-        mode = "code";
-        code += "  ";
-        structural += "  ";
-        i++;
-        continue;
-      }
-      const kept = char === "\n" ? "\n" : " ";
-      code += kept;
-      structural += kept;
-      continue;
-    }
-    if (char === "\\") {
-      code += char + next;
-      structural += "  ";
-      i++;
-      continue;
-    }
-    if (char === closingQuote) {
-      mode = "code";
-      code += char;
-      structural += char;
-      continue;
-    }
-    // 字符串字面量内容在 code 变体里保留（config["foo"] 也是一种消费形态），
-    // 在 structural 变体里屏蔽（引号内的括号不该参与声明区间的配平）。
-    // 两个变体都与原文逐字符等长，命中行号才对得上。
-    code += char;
-    structural += char === "\n" ? "\n" : " ";
-  }
-  return { code, structural };
 }
 
 /** 递归列出生产代码文件：`.ts`，排除 `.d.ts` 与构建 / 依赖目录。 */

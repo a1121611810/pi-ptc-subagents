@@ -51,7 +51,7 @@
 | `drainGraceMs`             | 5_000                                   | `turn-pools.ts:50`、`worker-pool.ts:93`                                                                                                                                | 池退役 drain 的上限, 无论如何都 resolve                                                 |
 | `WORKER_ENV_ALLOW_LIST`    | PATH/PATHEXT/SYSTEMROOT/WINDIR/TEMP/TMP | `index.ts:143`(对外导出)、`limits.ts:129`(`createWorkerEnv`)                                                                                                           | worker 唯一可继承的环境变量集合                                                         |
 
-并行旁注:`BUILTIN_BINDING_NAMES`(`bindings.ts:41`,消费点 `ptc-mode.ts:41`、`common.ts:124`、
+并行旁注:`BUILTIN_BINDING_NAMES`(`bindings.ts:41`,消费点 `ptc-mode.ts:1309`、`common.ts:152`、
 `dispatcher.ts:569`)与 `DEFAULT_BINDING_NAMES`(`bindings.ts:106`,消费点 `common.ts:155`、`bindings.ts:341`)
 属于同一承诺面:「暴露哪些 binding」也是配置承诺, 改动必须报读点。
 
