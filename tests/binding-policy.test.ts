@@ -9,7 +9,12 @@ import { expect, test } from "vitest";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AgentToolResult, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { BUILTIN_BINDING_NAMES, DEFAULT_BINDING_NAMES } from "../src/runtime/bindings.ts";
+import {
+  BUILTIN_BINDING_NAMES,
+  DEFAULT_BINDING_NAMES,
+  DISPATCH_BINDING_NAME,
+  OPT_IN_BINDING_NAMES,
+} from "../src/runtime/bindings.ts";
 import {
   resolveBindingNames,
   resolveDepthFromEnv,
@@ -18,6 +23,56 @@ import {
 import type { PtcToolDetails } from "../src/tools/common.ts";
 import { createPtcRunCodeTool } from "../src/tools/run-code.ts";
 import { RUN_TIMEOUT_MS, makeTempDir, removeTempDir, toolContext } from "./helpers/ptc.ts";
+
+test("the registered tool description never OFFERS a binding the default surface withholds", () => {
+  // The registered `description` is what the model actually reads, and it is STATIC — it cannot
+  // know whether this run granted an opt-in. So it may describe only what is bound by default.
+  // Naming an unbound binding as something to CALL is an invitation to a call that fails; the
+  // per-run truth lives on `ptcBindings`, which the description already points at. This is the
+  // same failure `resolveBindingNames`'s own doc names — a surface that drops a binding while the
+  // prose still advertises it — one layer out, where no test looked.
+  const description = createPtcRunCodeTool().description;
+  expect(description).toMatch(/ptcBindings/); // the per-run escape hatch must stay advertised
+
+  for (const name of OPT_IN_BINDING_NAMES) {
+    // (1) never offered in callable form. The contract's shape notes are written as
+    // `` `bash` rejects …`` without the `tools.` prefix and are deliberately NOT caught here:
+    // they describe how a bound binding behaves, and a run that opted in still gets that shape.
+    expect(description, `\`${name}\` must not be offered as a callable example`).not.toMatch(
+      new RegExp(`tools\\.${name}\\b`),
+    );
+
+    // (2) never listed as part of what a default session has. The defect was prose, so pinning it
+    // needs a prose-aware rule; scoping to a line that talks about the default session is what
+    // makes it non-degenerate without reaching every mention of the word.
+    const defaultSessionLines = description
+      .split("\n")
+      .filter((line) => /default session/.test(line));
+    for (const line of defaultSessionLines) {
+      expect(line, `\`${name}\` must not be listed as bound in a default session`).not.toContain(
+        name,
+      );
+    }
+  }
+});
+
+test("every binding the description shows as callable really is bound by default", () => {
+  // The positive half, so the rule above cannot be satisfied by deleting the prose wholesale.
+  //
+  // Anchored on the opening paren, deliberately. The description contains counter-examples too —
+  // "`tools.pi.dispatch` does not exist" is a dotted path that a bare `tools\.(\w+)` regex reads
+  // as an offer of `pi`. An offer is a CALL, so it is `tools.<name>(`; anything without the paren
+  // is prose about a name, which the negative test above already governs.
+  const description = createPtcRunCodeTool().description;
+  const offered = [...description.matchAll(/tools\.([a-z][a-z0-9_]*)\s*\(/g)].map((m) => m[1]);
+  expect(offered.length, "the description shows at least one callable example").toBeGreaterThan(0);
+  for (const name of offered) {
+    expect(
+      [...DEFAULT_BINDING_NAMES, DISPATCH_BINDING_NAME],
+      `the description offers tools.${name}(…), which is not bound by default`,
+    ).toContain(name);
+  }
+});
 
 test("resolveBindingNames intersects the active set with the built-in factories", () => {
   expect([...resolveBindingNames(undefined)]).toEqual([...DEFAULT_BINDING_NAMES]);

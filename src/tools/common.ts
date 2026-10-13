@@ -59,10 +59,14 @@ export interface PtcToolOptions {
    */
   getBindingSourceNames?: () => readonly string[];
   /**
-   * Opt-in bindings granted for this run (#73), read fresh per execute like
-   * {@link PtcToolOptions.getBindingSourceNames} so a session that edits its config between runs
-   * picks the change up. Omitting it grants nothing, which keeps `bash` out of the default
-   * surface — the same direction an unreadable config takes in `readOptInBindingsConfig`.
+   * Opt-in bindings granted for this run (ADR-0040). Omitting it grants nothing, which keeps `bash`
+   * out of the default surface — the same direction an unreadable config takes in
+   * `readOptInBindingsConfig`.
+   *
+   * Called once per run, NOT once per turn: the extension resolves the operator's grant from
+   * `~/.pi/agent/ptc.json` at load time, so a program cannot see a surface different from the one
+   * the prompt describing it was built from. A test or embedder that wants per-run changes supplies
+   * a closure that re-reads whatever it likes.
    */
   getOptInBindings?: () => readonly string[];
   /**
@@ -130,12 +134,14 @@ export function resolveParentTaskIdFromEnv(
  * calls. Names outside the built-in factory set are ignored: only tools this package can
  * build adapters for can be bound.
  *
- * This is the ONE read point that feeds both the binding table and the model-facing binding
- * list, which is why the opt-in gate lives here rather than in `createBuiltinBindings`: a table
- * that dropped `bash` while the prompt still advertised `tools.bash` would hand the model a tool
- * it cannot call and hide the reason. `activeToolNames === undefined` still asserts the full
- * built-in set before the gate, so "no session context" means "every builtin pi has", narrowed by
- * what was opted into — not "nothing".
+ * This is the read point that feeds BOTH the binding table and the model-facing binding list, and
+ * that is why the opt-in gate lives here as well as in `createBuiltinBindings`: a table that
+ * dropped `bash` while the prompt still advertised `tools.bash` would hand the model a tool it
+ * cannot call and hide the reason. The gate is deliberately duplicated rather than centralised —
+ * `createBuiltinBindings` needs its own for callers that never pass through here (ADR-0040,
+ * "the gate has two places and that is fine"). `activeToolNames === undefined` still asserts the
+ * full built-in set before the gate, so "no session context" means "every builtin pi has",
+ * narrowed by what was opted into — not "nothing".
  */
 export function resolveBindingNames(
   activeToolNames: readonly string[] | undefined,

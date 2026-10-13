@@ -86,17 +86,12 @@ describe("readOptInBindingsConfig: the granting path", () => {
     });
   });
 
-  test("a granted list is emitted in BUILTIN order, not in the order it was written", async () => {
-    // With one opt-in name this is order-insensitive by construction, which is exactly why the
-    // assertion is written as "equals the constant" rather than "equals what I passed": the
-    // property being pinned is the normalisation, and it is only observable once there are two.
-    await withPtcJson(
-      JSON.stringify({ optInBindings: [...OPT_IN_BINDING_NAMES].reverse() }),
-      (dir) => {
-        expect([...readOptInBindingsConfig(dir).optInBindings]).toEqual([...OPT_IN_BINDING_NAMES]);
-      },
-    );
-  });
+  // There is deliberately NO "emitted in BUILTIN order" test here. With one opt-in name,
+  // `[...OPT_IN_BINDING_NAMES].reverse()` is the identity, so such a test would pass whether or not
+  // `resolveOptInBindingNames` normalised order — it could not fail, and a test that cannot fail
+  // is worse than no test because it reads as coverage. The property becomes observable the moment
+  // a second opt-in name exists; add it then, and assert against `BUILTIN_BINDING_NAMES` rather
+  // than a hand-written list. Deduplication, which IS observable with one name, is pinned above.
 
   test("a duplicate entry is granted once", async () => {
     await withPtcJson(JSON.stringify({ optInBindings: ["bash", "bash"] }), (dir) => {
@@ -163,7 +158,13 @@ describe("readOptInBindingsConfig: every broken KEY grants nothing AND says why"
  * Asserted as a boundary rather than left implied, because the alternative — reporting it here too
  * — puts the identical sentence on screen once per reader for ONE broken file, which trains the user
  * to ignore the notice that matters. Both still grant nothing; the difference is only which reader
- * says so, and `extension.test.ts` pins the resulting single notice end to end.
+ * says so.
+ *
+ * This file pins the reader's half (it returns `source: "default"` and no `error`); the other half —
+ * that a broken file produces exactly ONE notice on screen — is pinned end to end by
+ * `tests/extension.test.ts > a broken ptc.json is reported once, never once per reader`, which
+ * drives a real `session_start`. The split is deliberate: this file cannot see the notice, and the
+ * extension test cannot see the return value, so neither assertion stands alone.
  */
 describe("readOptInBindingsConfig: a broken FILE is silent here, and still grants nothing", () => {
   test("unparseable JSON", async () => {

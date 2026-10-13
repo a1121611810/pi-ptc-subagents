@@ -10,7 +10,9 @@ import ptcSubagents, {
   WORKER_FRAME_KIND,
 } from "../src/index.ts";
 import { mkdir, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { OPT_IN_BINDING_NAMES } from "../src/runtime/bindings.ts";
 import {
   captureRegisteredTools,
   makeExtensionStub,
@@ -99,6 +101,9 @@ const SUBAGENT_SURFACE_TOOLS = [...PTC_TOOLS, "ptc_subagent", ...TASK_TOOLS, REP
  */
 const NO_CODEMODE = { present: false, how: "not-found" } as const;
 const FOUND_CODEMODE = { present: true, how: "found" } as const;
+
+/** Repo root's `src/`, for the one source scan below. */
+const SRC_DIR = join(import.meta.dirname, "..", "src");
 /**
  * The three axes that resolve `subagents`, for a stub that does NOT redirect the agent dir.
  *
@@ -212,6 +217,89 @@ test("a `surfaceMode` key left in ptc.json is reported as ignored, and the surfa
     expect([...stub.tools.keys()], "an ignored key leaves detection in force").toEqual([
       ...FULL_SURFACE_TOOLS,
     ]);
+  }
+});
+
+/**
+ * ADR-0040: what `session_start` says about the `optInBindings` grant.
+ *
+ * Two failure classes with opposite requirements. A key that is PRESENT AND WRONG must be
+ * reported — the user wrote `"optInBindings": ["bash"]` and silently got no shell, which is a
+ * support question with no other answer. A file that is merely absent, valid, or grantable must
+ * be SILENT — a notice on every ordinary session is how users learn to ignore the notice that
+ * matters.
+ *
+ * The single-notice assertion is the load-bearing one. Two readers parse this file
+ * (`readDefaultModeConfig` for `defaultMode`, `readOptInBindingsConfig` for the grant), and the
+ * boundary that keeps one broken file from producing two identical sentences is a code comment —
+ * so it is pinned here, where a comment cannot be the only evidence.
+ */
+const optInNotice = (stub: ExtensionStub) =>
+  stub.notifications.filter((n) => n.message.includes("opt-in binding"));
+
+test("a wrong `optInBindings` key is reported once, and grants nothing", async () => {
+  for (const bad of [["teleport"], ["read"], ["bash", "nope"], "bash", [7]]) {
+    const stub = await emitSessionStartInAgentDir(
+      { optInBindings: bad },
+      { codemode: NO_CODEMODE },
+    );
+    const notices = optInNotice(stub);
+    expect(notices.length, `one notice for ${JSON.stringify(bad)}, not a stream`).toBe(1);
+    expect(notices[0]?.type, "the grant was refused, so it is a warning").toBe("warning");
+    // It names the valid names, because the notice is the only place the user learns what to type.
+    expect(notices[0]?.message).toContain(OPT_IN_BINDING_NAMES.join(", "));
+    expect(notices[0]?.message).toMatch(/bash` stays out of the PTC surface/);
+  }
+});
+
+test("a broken ptc.json is reported once, never once per reader", async () => {
+  // The shapes `readOptInBindingsConfig` deliberately does NOT report — the file-level parse
+  // failures belong to `readDefaultModeConfig`. If either reader starts reporting them again, one
+  // broken file prints the same sentence twice and this turns red.
+  for (const body of ["{ not json", '["bash"]', '"nope"']) {
+    const stub = await emitSessionStartInAgentDir(body, { codemode: NO_CODEMODE });
+    expect(optInNotice(stub).length, `no opt-in notice for the broken file ${body}`).toBe(0);
+    const ptcNotices = stub.notifications.filter((n) => /ptc\.json/.test(n.message));
+    expect(ptcNotices.length, `exactly one notice for ${body}, not one per reader`).toBe(1);
+  }
+});
+
+test("a working `optInBindings` grant is silent", async () => {
+  // The other half, and the one that would catch a nag on every opted-in session.
+  for (const good of [
+    {},
+    { defaultMode: true },
+    { optInBindings: [] },
+    { optInBindings: ["bash"] },
+  ]) {
+    const stub = await emitSessionStartInAgentDir(good, { codemode: NO_CODEMODE });
+    expect(optInNotice(stub).length, `silent for ${JSON.stringify(good)}`).toBe(0);
+  }
+});
+
+test("the extension threads the grant into BOTH PTC surfaces", () => {
+  // Behavioural coverage of the grant stops at `createPtcRunCodeTool({ getOptInBindings })` /
+  // `createPtcWorkflowTool({ getOptInBindings })`, which `tests/binding-policy.test.ts` drives for
+  // `ptc_run_code` only. Removing the option from BOTH registrations in `src/index.ts` left the
+  // whole suite green — measured, not assumed — because the tools default to "no opt-ins" and the
+  // default session needs none.
+  //
+  // So this is a source scan, and deliberately the repo's own idiom: `ptc-config-wiring.md` treats
+  // "the declaration has no read point" as exactly the class a source-scan fixture exists to catch,
+  // and `tests/config-read-points.test.ts` is the precedent. The scan is narrow — one option name,
+  // two call sites — and it fails with the count, not a bare boolean.
+  const source = readFileSync(join(SRC_DIR, "index.ts"), "utf8");
+  const registrations = ["createPtcRunCodeTool(", "createPtcWorkflowTool("].map((factory) => {
+    const at = source.indexOf(factory);
+    expect(at, `${factory} is still registered in src/index.ts`).toBeGreaterThan(-1);
+    const body = source.slice(at, at + 400);
+    return { factory, wired: /getOptInBindings,/.test(body) };
+  });
+  for (const { factory, wired } of registrations) {
+    expect(
+      wired,
+      `${factory} does not pass getOptInBindings — the grant cannot reach the worker`,
+    ).toBe(true);
   }
 });
 

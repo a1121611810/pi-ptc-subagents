@@ -76,8 +76,11 @@ kinds:
 - _builtin binding_ — a pi built-in tool whose `execute()` is invoked
   directly from the PTC worker (no `pi.on("tool_call")` route; see
   ADR-0005 §2). Currently: `read`, `bash`, `edit`, `write`, `grep`, `find`,
-  `ls`. Listed in `BUILTIN_BINDING_NAMES`; the default table exposes all of
-  them; callers may pass an explicit subset (R3 read-only PTC surface).
+  `ls` — all seven in `BUILTIN_BINDING_NAMES`, which is the set of names that
+  _can_ be bound, not what any one session binds. The default table exposes all
+  but the _opt-in bindings_ (`bash`, ADR-0040); an install grants those with
+  `optInBindings` in `~/.pi/agent/ptc.json`, and a caller may instead pass an
+  explicit subset (R3 read-only PTC surface) or an explicit `optIns` list.
 - _parallel binding_ — a non-builtin binding whose semantics are independent
   of pi's parallel-tool execution and which is explicitly designed for
   fan-out. Currently: `pi.dispatch(...)` (see ADR-0016). It spawns a

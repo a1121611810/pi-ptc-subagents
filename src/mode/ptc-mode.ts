@@ -3,19 +3,23 @@
  *
  * ## What "mode" means here
  *
- * While enabled, the session's visible tool loadout is narrowed so the model reaches
- * `read` / `bash` / `edit` / `write` / `grep` / `find` / `ls` only from *inside* a program
- * (`tools.<name>(args)`). That is DSH's PTC-preset shape, and it is what makes the mode visible
- * in the TUI: the transcript stops showing file-operation rows and shows PTC rows instead.
+ * While enabled, the session's visible tool loadout is narrowed so the model reaches the bound
+ * built-ins only from *inside* a program (`tools.<name>(args)`). Which built-ins are bound is a
+ * separate question this module does not decide: it is `resolveBindingNames()`'s, and as of
+ * ADR-0040 the answer is smaller than the hidden set — `bash` is hidden from the wire *and* held
+ * back from the binding table unless the install opts it in. That is DSH's PTC-preset shape
+ * narrowed further, and it is what makes the mode visible in the TUI: the transcript stops showing
+ * file-operation rows and shows PTC rows instead.
  *
  * The mode is decided per session (`session_start`), announced once, and always reversible.
  *
  * ## Why bindings need a base snapshot (the trap this module exists to avoid)
  *
- * `resolveBindingNames()` computes bindings as `BUILTIN_BINDING_NAMES ∩ pi.getActiveTools()`
- * (T7, ADR-0005 addendum). But `pi.getActiveTools()` reads the *live* loadout — the very set this
- * mode narrows. Hiding the built-ins therefore empties the binding table, and every
- * `tools.read(...)` fails with "not bound": the extension would neuter itself.
+ * `resolveBindingNames()` computes bindings as `pi.getActiveTools() ∩ DEFAULT_BINDING_NAMES`
+ * plus any opted-in binding (T7, ADR-0005 addendum; ADR-0040). But `pi.getActiveTools()` reads the
+ * *live* loadout — the very set this mode narrows. Hiding the built-ins therefore empties the
+ * binding table, and every `tools.read(...)` fails with "not bound": the extension would neuter
+ * itself.
  *
  * The fix is a **base snapshot**. `base` is captured *before* the mode hides anything, and
  * bindings derive from `base` rather than the live loadout while the mode is on. T7's invariant

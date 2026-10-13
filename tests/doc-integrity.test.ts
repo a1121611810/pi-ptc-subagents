@@ -1384,17 +1384,17 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // explain why a generalist still gets the report tool.
     "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:115 -> src/index.ts:533":
       "createChildReportTool(ptcDepth > 0)",
-    "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:1067":
+    "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:1071":
       "export function detectedSurfaceMode(",
     "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:973":
       'getActiveTools().includes("codemode")',
     "docs/adr/0029-surface-follows-codemode-activation.md:120 -> src/index.ts:973":
       'getActiveTools().includes("codemode")',
-    "docs/adr/0029-surface-follows-codemode-activation.md:151 -> ptc-mode.ts:27":
+    "docs/adr/0029-surface-follows-codemode-activation.md:151 -> ptc-mode.ts:31":
       "## Fail-safe on external loadout changes",
     "docs/adr/0029-surface-follows-codemode-activation.md:188 -> src/index.ts:922":
       "if (detected.present && !known) {",
-    "docs/adr/0030-surface-switch-reloads.md:94 -> ptc-mode.ts:27":
+    "docs/adr/0030-surface-switch-reloads.md:94 -> ptc-mode.ts:31":
       "## Fail-safe on external loadout changes",
     "docs/adr/0031-open-source-and-publish-authority.md:129 -> src/runtime/limits.ts:4":
       "The numbers are DSH's",
@@ -1445,17 +1445,17 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     //  32  → 962→856  = decision-4 的 `if (surface.surfaceMode === "subagents" && !pi.getActiveTools()…`
     //  105 → 962→856  = 同一处（ADR-0029 正文第二次引用它）
     //  129 → 27 保持    = ` * ## Fail-safe on external loadout changes`，本轮未移动
-    "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:1067",
+    "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:1071",
     "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:973",
     "docs/adr/0029-surface-follows-codemode-activation.md:120 -> src/index.ts:973",
-    "docs/adr/0029-surface-follows-codemode-activation.md:151 -> ptc-mode.ts:27",
+    "docs/adr/0029-surface-follows-codemode-activation.md:151 -> ptc-mode.ts:31",
     //  166 → 920→807 = `if (detected.present && !known) {`，即交叉核对那一条
     "docs/adr/0029-surface-follows-codemode-activation.md:188 -> src/index.ts:922",
     // 2026-10-03 第四次复核（ADR-0030）：0030 引 ptc-mode.ts:27-31 那段「loadout 被外部改写
     // 时模式如何退让」，27 行是段首。本轮该引用在**文档里**的行号因撤回声明从 68 前移到 83，
     // 引用目标（ptc-mode.ts:27）未动。ADR-0030 另外四处引用写的是 pi 宿主的行号而非本仓文件，
     // 解析器不收，因此不进这份基线——它们由 ADR 正文里的表格自带出处。
-    "docs/adr/0030-surface-switch-reloads.md:94 -> ptc-mode.ts:27",
+    "docs/adr/0030-surface-switch-reloads.md:94 -> ptc-mode.ts:31",
     "docs/adr/0031-open-source-and-publish-authority.md:129 -> src/runtime/limits.ts:4",
     // 2026-10-08 **第六次**复核：ADR-0032 的 7 条全部重新逐行核对，且这次是按**内容**核对的。
     //
@@ -1555,6 +1555,15 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
        *   同一次编辑给 `ptc-mode.ts` 加 `readOptInBindingsConfig`，另有一条 `0029:29 ->
        *   ptc-mode.ts:985`（`detectedSurfaceMode`）从 985 移到 1067，**同一函数同样 10 行**
        *   （985-994 → 1067-1076），所以 ADR 里那条引用连范围一起改，不是只改起点。
+       * 2026-10-13（十次，review round 1 的修复轮）：修 #73 时改了 `ptc-mode.ts` 的模块头两段
+       *   陈旧散文，又顶偏 3 条，**全部 +4**（模块头多了 4 行）：`0029:29` 1067→1071
+       *   （区间 1067-1076→1071-1080，仍是同一函数同样 10 行）、`0029:151` 与 `0030:94`
+       *   27→31（区间 27-31→31-35，同一段同样 5 行）。逐条打开目标行按内容核对，
+       *   **纯位移，没有一条是"换了目标"**。新增 0、删除 0。
+       *
+       * 这一轮值得记下的是**为什么会再顶偏**：修文档漂移的编辑本身改了被引用的文件的头部，
+       * 而这个仓库里「模块头散文」正是最常被改、也最少被当成「会移动被引用行号」的地方。
+       * 连续两轮都是同一个机制，所以它值得写下来而不是当作巧合。
        *
        * 下一次复核者：把上面那句「打开那一行看内容」重做一遍就够，不必往上加新段落。
        */

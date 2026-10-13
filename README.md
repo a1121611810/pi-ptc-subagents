@@ -202,8 +202,9 @@ untrusted projects) live in [docs/usage/surface.md](./docs/usage/surface.md).
   extension: PTC programs run as **you**, with no OS-level sandbox (ADR-0007).
 - Bindings mirror the session's **enabled** built-in tools (`pi.getActiveTools()`):
   a session started with `--tools …` / `--no-builtin-tools` can only reach those
-  tools from inside a PTC program (a default session has `read`, `edit`,
-  `write`, `grep`, `find`, `ls` — enable more to bind more).
+  tools from inside a PTC program. pi's default session has `read`, `bash`,
+  `edit`, `write` — of which the default surface binds `read`, `edit`, `write`
+  (see the next bullet).
 - **`tools.bash(...)` is not in that default.** A PTC program runs as you, so a
   default shell binding hands every model-written program a shell with your own
   identity. It is granted explicitly, per install, in `~/.pi/agent/ptc.json`:
