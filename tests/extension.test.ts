@@ -437,6 +437,29 @@ function topLevelArgs(call: string): string[] {
  */
 const EMPTY_GRANT = /^(?:\[\s*\]|new\s+Set\s*\(\s*\)|undefined|null|\{\s*\}|"")$/;
 
+test("a comma inside a string is not an argument separator", () => {
+  // The sentence the `topLevelArgs` docstring makes is this one, and without a test it is a claim
+  // rather than a property — which is exactly how `argCount`'s identical claim survived a whole
+  // round unverified. Round 4 measured it: changing `maskSource`'s `structural` branch back to
+  // keeping string contents left every suite green, because nothing fed this helper a string.
+  //
+  // So it is fed one, here, and the expected values are literals about comma semantics rather than
+  // anything read back out of `src/` — two arguments because there is one comma, and one argument
+  // because the `(` in the string is not an opening paren.
+  expect(
+    topLevelArgs('resolveBindingNames(base, "read, bash")').length,
+    "one comma, two args",
+  ).toBe(2);
+  expect(
+    topLevelArgs('resolveBindingNames("a(b")').length,
+    "a paren in a string is not a paren",
+  ).toBe(1);
+  // The negative direction, so the two cannot both be satisfied by a splitter that always answers
+  // "one" or "two".
+  expect(topLevelArgs("resolveBindingNames(base, optIns)").length).toBe(2);
+  expect(topLevelArgs("resolveBindingNames(base)").length).toBe(1);
+});
+
 test("every place src/index.ts builds a binding list passes the grant through", () => {
   // **Self-extending on purpose.** Round 1 fixed "the two registrations"; round 2 measured that the
   // grant has six hops in `src/index.ts` and only two were held, leaving the mode-entry

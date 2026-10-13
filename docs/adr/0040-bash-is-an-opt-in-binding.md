@@ -84,12 +84,16 @@ are different questions, and collapsing them is the defect this record removes.
   `Object.keys(tools)` contained `bash` while `ptcBindings` — the frozen per-run manifest, and the
   model-facing truth — did not. Name disclosure, not capability; the error text names the available
   bindings anyway, so nothing is secret. Pre-existing shape, inherited from the stub mechanism.
-- **Two more model-facing surfaces exist, and both had to change with this one.** The PTC mode
-  briefing / entry / status strings, _and_ the registered `description` of `ptc_run_code`. The
-  description is static and cannot know whether a run granted the opt-in, so it may offer only what
-  is bound by default; `tests/binding-policy.test.ts` pins that. A narrowed table with prose that
-  still advertises `tools.bash` is the failure mode ADR-0005 §2 already warns about, one layer out
-  from where anyone was looking.
+- **Three model-facing surfaces exist, and all of them had to change with this one.** The PTC mode
+  briefing / entry / status strings, _and_ the registered `description` of **both** `ptc_run_code`
+  and `ptc_workflow`. (This record first wrote "two", naming only `ptc_run_code`, and stayed wrong
+  through a review round: `ptc_workflow`'s description said the bound names "mirror the session's
+  enabled tools" until the round after, which is this same defect on the sibling surface.)
+  The descriptions are static and cannot know whether a run granted the opt-in, so they may offer
+  only what is bound by default; `tests/binding-policy.test.ts` pins both, including the sentence
+  that states the narrowing — the offer checks alone cannot tell the two wordings apart. A narrowed
+  table with prose that still advertises `tools.bash` is the failure mode ADR-0005 §2 already warns
+  about, one layer out from where anyone was looking.
 
 ## Scope
 
