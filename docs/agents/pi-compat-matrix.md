@@ -87,6 +87,32 @@ and `read` growing an `outputSchema` (our binding projection drops `structuredCo
 program-visible shape is unchanged). The one real behavioural change — print-mode exiting 1 on a
 truncated response — is handled by `truncationFailureMessage` in `src/runtime/dispatch.ts`.
 
+### Feature-level matrix: this package own surface, measured per version (the real answer)
+
+Static capability probes say what pi HAS; they do not say what this package DOES. That needs a
+second probe: drive the real built dist through factory + session_start + /ptc + a real PTC
+program, per version (destination `.scratch/prototype-pi086-runtime/surface-probe.mjs`, driven across all 14
+trees by `run-surface-matrix.mjs`; measured 2026-10-14). Fourteen versions times fifteen features =
+210 checks, all pass - including on the two type-broken 0.86.x/0.87.x versions:
+
+| feature                                                          | 0.86.0-0.87.1        | 0.99.0-1.2.0           |
+| ---------------------------------------------------------------- | -------------------- | ---------------------- |
+| dist loads; factory + session_start register all six tools       | pass x4              | pass x10               |
+| surface=full: programming pair direct (declared to model)        | pass                 | pass                   |
+| /ptc command registered; on narrows read/bash out; off restores  | pass                 | pass                   |
+| ADR-0011 skills section restored while narrowed                  | pass                 | pass                   |
+| PTC program: tools.read / tools.bash / write-read roundtrip      | pass                 | pass                   |
+| failing tools.bash REJECTS, capped at 2000 chars, exit code kept | pass (throw channel) | pass (isError channel) |
+| pi.dispatch refuses unknown agent without spawning               | pass                 | pass                   |
+| ptc_task_list / ptc_child_report / renderers                     | pass                 | pass                   |
+| subagents branch (pair at codemode reach + ptc_subagent)         | n/a (no codemode)    | pass                   |
+
+The two pre-codemode columns are the point, verified: with no codemode the package registers
+its OWN PTC face as direct, /ptc works, programs run, and the only N/A is the subagents branch -
+which cannot exist where there is no codemode to hand off to. The 0.86.x F7 row passes through
+the THROW channel (pi throws; our catch caps it, #190); the 0.99.0+ rows through the isError
+channel: two routes, one cap, one shape.
+
 ### The < 1.0.0 (and 0.99.0) runtime note: two bounded known limitations
 
 An earlier draft recorded the prototype's first cost model - three degradations - and it was
