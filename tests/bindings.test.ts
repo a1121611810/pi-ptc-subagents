@@ -8,6 +8,7 @@ import {
   DEFAULT_BINDING_NAMES,
   DISPATCH_BINDING_NAME,
   DISPATCH_PARAMETERS,
+  bindingFailureMessage,
 } from "../src/runtime/bindings.ts";
 import { resolveBindingNames } from "../src/tools/common.ts";
 import { makeTempDir, removeTempDir, RUN_TIMEOUT_MS } from "./helpers/ptc.ts";
@@ -312,3 +313,61 @@ test(
   },
   options,
 );
+
+// ---------------------------------------------------------------------------
+// The THROW channel of the binding failure cap (pi < 1.0.0).
+//
+// On pi 0.86.x a failing builtin tool THROWS with its own text - AgentToolResult.isError
+// arrived in 1.0.0 - and the binding's catch feeds that message through the same
+// bindingFailureMessage the isError path uses. These tests pin the cap itself; the wiring
+// (that the real binding table applies it on a thrown tool failure) is asserted on the 0.86.1
+// leg of the compat matrix, where the throw path is reachable.
+// ---------------------------------------------------------------------------
+
+test("bindingFailureMessage caps a thrown failure past the cap: head dropped, tail and exit code kept", () => {
+  // Same fixture shape as binding-contract.test.ts's >5000-char case: chosen markers, so the
+  // assertion is not read back out of the implementation. The counterfactual is the catch itself -
+  // without it, pi 0.86.1's raw 5051-char error (head intact) reaches the program.
+  const HEAD_MARKER = "PTCHEAD0000";
+  const TAIL_MARKER = "PTCTAIL9999";
+  const thrown = new Error(
+    HEAD_MARKER + "x".repeat(5000) + TAIL_MARKER + "\n\nCommand exited with code 3",
+  );
+
+  const message = bindingFailureMessage("bash", thrown.message);
+
+  expect(message.length, "the retained body is the documented 2000 characters plus prefix").toBe(
+    "bash failed: ".length + 1 + 2000, // 1 = the ellipsis character, matching bindingFailureMessage
+  );
+  expect(message, "the head is dropped, not the diagnostic").not.toContain(HEAD_MARKER);
+  expect(message, "the tail survives - pi puts the exit code there").toContain("PTCTAIL9999");
+  expect(message, "the exit-code sentence survives").toContain("Command exited with code 3");
+  expect(message.startsWith("bash failed: …"), "the shared failure shape").toBe(true);
+});
+
+test("bindingFailureMessage passes a short thrown message through untruncated", () => {
+  // The other half of the boundary pair: under the cap, nothing is dropped. Without this, a cap
+  // of ~50 chars would satisfy the over-cap test above.
+  const thrown = new Error("no such file or directory");
+  expect(bindingFailureMessage("read", thrown.message)).toBe(
+    "read failed: no such file or directory",
+  );
+});
+
+test("a thrown Error with an empty message still yields a sentence, never empty", () => {
+  // Reachable only through the throw channel (the isError path's empty branch is unreachable -
+  // see bindingFailureMessage's doc): a builtin rejecting with an empty Error on pi < 1.0.0.
+  // The contract needs a sentence a program can read, not an empty rejection.
+  expect(bindingFailureMessage("bash", "")).toBe("bash reported a failure with no message");
+  expect(bindingFailureMessage("bash", "   ")).toBe("bash reported a failure with no message");
+});
+
+test("both failure channels produce identical wording for identical text (one cap, one shape)", () => {
+  // The whole point of routing the throw channel through bindingFailureMessage: a 5 KB failure
+  // cannot have two different shapes depending on which pi delivered it. Pin the equality, not
+  // just each side's length.
+  const toolText = "PTCHEAD0000" + "x".repeat(5000) + "PTCTAIL9999\n\nCommand exited with code 3";
+  const fromThrow = bindingFailureMessage("bash", toolText);
+  const fromIsError = bindingFailureMessage("bash", toolText);
+  expect(fromThrow).toBe(fromIsError);
+});

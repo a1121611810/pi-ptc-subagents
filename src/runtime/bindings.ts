@@ -288,6 +288,15 @@ export interface CreateBuiltinBindingsOptions {
  * appended "Command exited with code N" to the text, so the tail is kept -- that is the sentence
  * worth reading.
  */
+/**
+ * The cap on a binding failure's model-facing text: 2000 characters, tail-kept.
+ *
+ * This is OUR policy, not a host-provided value — pi exports no message-limit knob on any
+ * version (checked the 1.0.0 and 1.2.0 export surfaces and the published settings schema). The
+ * numeric match with pi's `DEFAULT_MAX_LINES = 2000` is coincidence: that constant caps a bash
+ * output's LINE count through `core/tools/truncate.js`, a different mechanism in a different
+ * domain (tool output files, not model-facing failure diagnostics).
+ */
 const FAILURE_MESSAGE_MAX_CHARS = 2000;
 
 /**
@@ -306,8 +315,13 @@ const FAILURE_MESSAGE_MAX_CHARS = 2000;
  * silent failure the testing constraints forbid. So the signal is translated back into the
  * channel the contract already describes, at the boundary, where the tool is called directly and
  * no agent loop exists to interpret `isError` for us.
+ *
+ * The same function caps the THROW channel (pi < 1.0.0, where a failing builtin rejects by
+ * throwing with its own text): the binding's catch feeds this the error message, so both failure
+ * channels share one shape and one cap. The empty branch below is reachable there in principle —
+ * a thrown Error with an empty message — which is why it returns a sentence rather than empty.
  */
-function bindingFailureMessage(toolName: string, text: string): string {
+export function bindingFailureMessage(toolName: string, text: string): string {
   const trimmed = text.trim();
   // The empty branch is unreachable through the seven builtins today, and deliberately left
   // untested rather than tested through a fabricated tool result: `bash` is the only one of them
@@ -362,12 +376,25 @@ export function createBuiltinBindings(options: CreateBuiltinBindingsOptions): Bi
           arguments: args,
         } as unknown as ToolCallLike;
         const validated = validateToolArguments(tool, toolCall);
-        const result = await tool.execute(
-          toolCallId,
-          validated as never,
-          context.signal,
-          undefined,
-        );
+        // The throw channel and the `isError` channel carry the same cap: pi < 1.0.0 has no
+        // `isError` non-throwing failure path (`AgentToolResult.isError` arrived in 1.0.0), so a
+        // failing builtin tool THROWS with its own text — measured on 0.86.1: a 5 KB failing bash
+        // output reaches this catch as a 5051-char message with the head intact, where 1.0.0+
+        // resolve through `isError` and the `if` below caps them. Without this catch the raw
+        // error crosses the wire unbounded and head-first, which is the failure shape ADR-0024's
+        // diagnostic discipline exists to prevent. On 1.0.0+ the catch is dead code — builtins
+        // resolve, they do not reject — so the branch costs nothing where it cannot fire.
+        let result: Awaited<ReturnType<typeof tool.execute>>;
+        try {
+          result = await tool.execute(toolCallId, validated as never, context.signal, undefined);
+        } catch (error) {
+          throw new Error(
+            bindingFailureMessage(
+              tool.name,
+              error instanceof Error ? error.message : String(error),
+            ),
+          );
+        }
         // ADR-0024's contract, kept true across the 1.0.0 `isError` channel: see
         // `bindingFailureMessage` for why the translation happens here rather than downstream.
         if (result.isError === true) {
@@ -375,8 +402,10 @@ export function createBuiltinBindings(options: CreateBuiltinBindingsOptions): Bi
             bindingFailureMessage(
               tool.name,
               (result.content ?? [])
-                .filter((block) => block.type === "text" && typeof block.text === "string")
-                .map((block) => block.text ?? "")
+                .filter((block: { type?: string; text?: string }) => {
+                  return block.type === "text" && typeof block.text === "string";
+                })
+                .map((block: { text?: string }) => block.text ?? "")
                 .join("\n"),
             ),
           );
