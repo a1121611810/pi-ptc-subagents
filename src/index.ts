@@ -80,6 +80,7 @@ export {
   DEFAULT_HIDE_STRATEGY,
   detectExternalLoadoutChange,
   detectSurfaceMode,
+  detectedSurfaceMode,
   initialModeState,
   modeLoadout,
   MODE_REQUIRED_TOOL_NAMES,
