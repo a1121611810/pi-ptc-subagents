@@ -11,12 +11,7 @@ import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, test, vi } from "vitest";
-import type {
-  AgentToolResult,
-  ExtensionToolContext,
-  Theme,
-  ToolDefinition,
-} from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
   createSubCallUpdater,
   SUB_CALL_UPDATE_THROTTLE_MS,
@@ -51,7 +46,7 @@ function call(
   params: { code: string; description?: string; timeoutMs?: number },
   extra: { signal?: AbortSignal; cwd?: string } = {},
 ): Promise<AgentToolResult<PtcToolDetails>> {
-  const ctx: ExtensionToolContext = toolContext(extra.cwd ?? process.cwd());
+  const ctx = toolContext(extra.cwd ?? process.cwd());
   return tool.execute(
     "call-1",
     { description: "integration test program", ...params },

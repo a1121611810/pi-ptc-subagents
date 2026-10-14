@@ -27,6 +27,7 @@ import { createTaskRegistry, type TaskRegistry } from "../../src/runtime/task-re
 import { InMemoryTaskStorage } from "../../src/runtime/task-storage.ts";
 import type { ULID } from "../../src/runtime/task-storage.ts";
 import { installRecordingPi, makeTempDir, removeTempDir, waitFor } from "../helpers/ptc.ts";
+import { readStructuredContent } from "../helpers/pi-compat-probe.ts";
 
 // The agent these tests dispatch, named so nothing here can silently start depending on what a
 // given pi build happens to ship.
@@ -211,13 +212,25 @@ interface ObservedResult {
 
 const observed = (result: unknown): ObservedResult => result as ObservedResult;
 
-/** The projection, or a loud failure -- a missing channel must not read as an empty one. */
+/**
+ * The projection, or a loud failure -- a missing channel must not read as an empty one.
+ *
+ * Read through `readStructuredContent` rather than off `ObservedResult` directly: pi 0.86.0 types
+ * `AgentToolResult` without the field (#192, #195), so this is one of the sites the shared seam
+ * exists for, and the throw below is what stops the widening from turning a missing channel into a
+ * passing `toEqual(undefined)`.
+ */
 function structuredOf(result: ObservedResult): Record<string, unknown> {
-  const structured = result.structuredContent;
+  const structured = readStructuredContent(result);
   if (structured === undefined) {
     throw new Error("ptc_subagent returned no structuredContent");
   }
-  return structured;
+  // The cast is the honest reading of `ObservedResult` above, restated: that interface already
+  // declares this channel as `Record<string, unknown> | undefined`, and it is the shape this file's
+  // assertions are written against. The seam returns `unknown` because on the tool channel pi types
+  // the value as an opaque `JsonValue` — narrowing `unknown` by `!== undefined` alone leaves
+  // `{} | null`, so the declared type has to be reapplied here rather than inferred.
+  return structured as Record<string, unknown>;
 }
 
 /** The assistant text the mock child "produced". `PONG` is the repo's own child-answer literal. */

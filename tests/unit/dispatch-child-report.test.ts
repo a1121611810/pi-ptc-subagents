@@ -19,6 +19,7 @@
  * both use in-memory task storage — no `pi` process, no home directory, no ambient agent.
  */
 import { EventEmitter } from "node:events";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -51,6 +52,13 @@ import {
   createChildReportTool,
 } from "../../src/tools/child-report-tool.ts";
 import { makeExtensionStub } from "../helpers/ptc.ts";
+import {
+  installedPiDir,
+  probePiCapabilities,
+  readDefaultActive,
+  readOutputSchema,
+  readStructuredContent,
+} from "../helpers/pi-compat-probe.ts";
 import {
   MockChildProcessLifecycle,
   parseAgentEvent,
@@ -114,6 +122,95 @@ vi.mock("node:child_process", async (importOriginal) => {
   };
   return { ...actual, spawn: fakeSpawn as unknown as typeof actual.spawn };
 });
+
+// ---------------------------------------------------------------------------
+//  Which channels the INSTALLED pi can carry
+// ---------------------------------------------------------------------------
+
+/**
+ * The installed pi's package root, or `undefined` when none is installed.
+ *
+ * **THE WALK IS NOT THIS FILE'S.** `installedPiDir` and `probePiCapabilities` come from
+ * `tests/helpers/pi-compat-probe.ts`, which every version-sensitive file in this repo imports.
+ * This file used to carry its own copy of both — the walk, the `.structuredContent` substring
+ * test and the `.defaultActive` substring test — and that duplication is the defect the helper
+ * exists to remove: two probes for ONE install, free to disagree with each other and with pi, and
+ * neither falsifiable against the other. Everything asserted below is UNCHANGED by the move; what
+ * changed is that this file can no longer answer "which pi am I on" privately.
+ */
+const PI_DIR = installedPiDir(import.meta.dirname);
+
+/**
+ * One measurement of that install, taken ONCE for all three capabilities.
+ *
+ * `structuredContentOnTheWire` is ADR-0032 channel 1 (the tool channel) and
+ * `defaultActiveRead` is this file's SECOND version-sensitive surface (the per-tool activation
+ * switch). Both are read out of `dist/core/agent-session.js` — the EMITTER, never this repo's own
+ * `src/`, because a probe that scanned our own symbols would answer "yes, we implement it" on
+ * every pi, which is the constant answer rather than a measurement.
+ *
+ * **What is read, and why that file.** The report reaches the host over the child's JSONL:
+ * `buildArgv` launches pi with `--mode json`, and `--mode json`'s `toJsonEvent` passes a
+ * `tool_execution_end` through VERBATIM (`dist/modes/json-event.js`, byte-identical in every
+ * version measured — it only reshapes `message_update`). So the field survives only if the agent
+ * session put it on the event, and that construction lives in `dist/core/agent-session.js`:
+ *
+ *   pi >= 0.99.0  `... (result.structuredContent === undefined ? {} : { structuredContent: result.structuredContent })`
+ *   pi 0.86.0     no `structuredContent` token anywhere in `dist/core` — the event is rebuilt field
+ *                 by field and the field is never named.
+ *
+ * **Why the emitter and not the `.d.ts`.** Grepping the type declaration answers "is it typed", not
+ * "does it arrive", and those come apart on 0.86.0 — which is the whole reason this probe exists.
+ * `defineTool` is the IDENTITY function there (`dist/core/extensions/types.js`,
+ * `function defineTool(tool) { return tool; }`), so a tool that sets `structuredContent` gets it
+ * back untouched and the agent loop keeps it via `...result`: on 0.86.0 the field is PRODUCED and
+ * merely untyped, and DROPPED at the wire. The capability matrix records the same verdict from the
+ * other direction (docs/agents/pi-compat-matrix.md, "The < 1.0.0 (and 0.99.0) runtime note",
+ * limitation 2); the emitter is what is read, so a pi that typed the field without forwarding it
+ * takes the branch its BEHAVIOUR earns rather than the one its declaration promises.
+ *
+ * **The two axes are measured SEPARATELY and stay separate.** They happen to flip on the same
+ * version boundary (0.99.0), so one `if` on each would in fact select consistently; "they have
+ * agreed so far" is not a reason to hardcode that they always will, and a future pi that forwards
+ * `structuredContent` without gaining `defaultActive` has to select the fallback channel WITHOUT
+ * silently passing the activation assertions.
+ *
+ * **Measured, and `defaultActive` is INERT on the floor.** pi 0.86.0's `_refreshToolRegistry` pushes
+ * every newly-registered tool onto the active list with no per-tool check at all, and the count of
+ * `.defaultActive` in `agent-session.js` is 0 there against 1 on both 0.99.0 and 1.0.0 (the three
+ * `defaultActive` tokens 0.86.0 does contain are an unrelated local variable,
+ * `defaultActiveToolNames`). So on the floor this is not a missing type that would still work — the
+ * switch changes nothing, and "registered in the parent but never activated there" is a distinction
+ * pi 0.86.0 cannot express. That is why the activation assertions below state what this package
+ * CONTROLS rather than a pi behaviour the floor does not have.
+ *
+ * `undefined` pi (a copy with no `node_modules`) means nothing to measure, so it takes the CEILING
+ * branch: that is the tool channel the file is written around, and it is the branch whose assertions
+ * are real work rather than a statement about a missing install. The shared helper reports that
+ * install as three `false`s, so the ceiling default has to be applied HERE rather than in the
+ * helper — the helper measures, this file decides what an unmeasurable install is assumed to be.
+ */
+const SHARED = probePiCapabilities(import.meta.dirname);
+
+/** The two axes this file branches on, each read straight off the shared measurement. */
+const TOOL_CHANNEL_AVAILABLE = PI_DIR === undefined || SHARED.structuredContentOnTheWire;
+const DEFAULT_ACTIVE_AVAILABLE = PI_DIR === undefined || SHARED.defaultActiveRead;
+
+/**
+ * The installed pi's agent session, verbatim — the ORACLE the probes above read out of.
+ *
+ * Read at CALL time, never cached in a module constant, because this is the handle the
+ * counterfactual uses: damaging the installed emitter is the only way to prove the branches below
+ * are not tautological (see the channel-1 arm's comment). A cached constant would freeze the
+ * measurement at import time and make the damage invisible to a later read in the same run.
+ *
+ * `""` when pi is not installed, so every assertion that reads it names a missing install rather
+ * than throwing — the ceiling branch above is the one that runs there, and it reads nothing.
+ */
+function installedAgentSession(): string {
+  const file = PI_DIR === undefined ? "" : join(PI_DIR, "dist", "core", "agent-session.js");
+  return file !== "" && existsSync(file) ? readFileSync(file, "utf8") : "";
+}
 
 // ---------------------------------------------------------------------------
 //  Fixtures
@@ -816,17 +913,21 @@ describe("the contract text lives in exactly one place in src/", () => {
       undefined,
       {} as Parameters<typeof tool.execute>[4],
     );
-    // What the host reads off the event: `result.structuredContent`, validated by the ONE
-    // validator both channels share.
+    // The executed result on the installed pi, read through the seam: pi 0.86.0 types
+    // `AgentToolResult` without `structuredContent`, and this is the single place that widening
+    // happens rather than one per site.
+    const structured = readStructuredContent(result);
+    // What the host reads off the event: the executed result's `structuredContent`, validated by
+    // the ONE validator both channels share.
     const validated = extractChildReportFromToolEvent({
       type: "tool_execution_end",
       toolCallId: "call-1",
       toolName: CHILD_REPORT_TOOL_NAME,
       isError: false,
-      result: { structuredContent: result.structuredContent },
+      result: { structuredContent: structured },
     });
     expect(validated).toEqual(VALID_REPORT);
-    expect(validateChildReport(result.structuredContent)).toEqual(VALID_REPORT);
+    expect(validateChildReport(structured)).toEqual(VALID_REPORT);
   });
 
   test("a child-declared usage is dropped by the tool, not carried into the structured channel", () => {
@@ -845,7 +946,8 @@ describe("the contract text lives in exactly one place in src/", () => {
         {} as Parameters<typeof tool.execute>[4],
       )
       .then((result) => {
-        expect(Object.hasOwn(result.structuredContent as object, "usage")).toBe(false);
+        const structured = readStructuredContent(result) as object;
+        expect(Object.hasOwn(structured, "usage")).toBe(false);
       });
   });
 });
@@ -1018,6 +1120,145 @@ describe("the report tool channel", () => {
     });
   });
 
+  // -------------------------------------------------------------------------
+  //  The two version-sensitive surfaces. Both tests are REGISTERED UNCONDITIONALLY —
+  //  no `skipIf`, and no `if (has) { test } else { test }` around the registrations — so
+  //  neither tree reports a skip and neither can silently pass the other's assertion.
+  //
+  //  Each arm RE-DERIVES its probe from the INSTALLED FILE, not from the probe's return value, and
+  //  that distinction is load-bearing — found by RUNNING the counterfactual rather than reasoning
+  //  about it. A guard that re-derives by calling `probePiCapabilities()` a second time is
+  //  SELF-PROVING: a probe whose matcher was mutated returns the mutated answer every time.
+  //  Measured — forcing `structuredContentOnTheWire` and `defaultActiveRead` to `true` on the
+  //  0.86.0 floor left all 59 tests in this file GREEN under exactly that guard. Reading pi's own
+  //  emitter back here closes it: the oracle is a file no edit to the probe can move.
+  // -------------------------------------------------------------------------
+
+  test("CHANNEL 1 — the report arrives on structuredContent wherever the installed pi carries it", async () => {
+    // The tool's own return value, on every measured pi: `defineTool` is the identity function in
+    // 0.86.0 and in 1.0.0 alike, so the payload is produced and handed back untouched. Asserted
+    // OUTSIDE the branch, because it is the part of channel 1 that is NOT version-sensitive, and
+    // separating it is what lets the branch be about the one thing that is: the WIRE.
+    const tool = createChildReportTool(true);
+    const executed = await tool.execute(
+      "call-probe",
+      VALID_REPORT as unknown as Parameters<typeof tool.execute>[1],
+      undefined,
+      undefined,
+      {} as Parameters<typeof tool.execute>[4],
+    );
+    const structured = readStructuredContent(executed);
+    expect(structured, "the tool returns the declared payload verbatim").toEqual(VALID_REPORT);
+
+    if (TOOL_CHANNEL_AVAILABLE) {
+      // Re-derived from the SHARED measurement rather than from this file's old private probe:
+      // asserting `SHARED.structuredContentOnTheWire` can fail on a damaged install, and asserting
+      // `TOOL_CHANNEL_AVAILABLE` could not — that is the constant the `if` itself selects on, so
+      // re-asserting it would be self-proving. The oracle this arm is pinned against is the
+      // INSTALLED emitter, and damaging that is what makes the other arm reachable; see the
+      // counterfactual recorded above the two registration lines.
+      expect(SHARED.structuredContentOnTheWire, "the arm was selected by this measurement").toBe(
+        true,
+      );
+      // pi >= 0.99.0. `buildArgv` launches the child with `--mode json`, the installed agent session
+      // puts `structuredContent` on the `tool_execution_end` that `--mode json` serializes, and
+      // `--mode json` passes the event through verbatim (dist/modes/json-event.js) — so the payload
+      // survives all three hops. Driven end to end through the real extractor from the tool's OWN
+      // output, with NO fenced block anywhere in the transcript: nothing but the tool channel could
+      // produce a report here.
+      const extraction = extractChildReport(
+        parseTranscript([
+          reportToolLine(structured),
+          assistantLine("Reported through the tool; no fenced block here."),
+        ]),
+      );
+
+      expect(extraction.reportChannel, "channel 1 delivers when pi forwards the field").toBe(
+        "tool",
+      );
+      expect(extraction.report).toEqual(VALID_REPORT);
+      // The channel on its own: an extractor that ignored the tool line would return a `none`, and
+      // one that scraped a prompt block would return `prompt-json`.
+      expect(extraction.reportChannel).not.toBe("prompt-json");
+    } else {
+      expect(SHARED.structuredContentOnTheWire, "the arm was selected by this measurement").toBe(
+        false,
+      );
+      // pi 0.86.0 / 0.87.x. The payload is produced above and the host WOULD read it from a line that
+      // carried it — but the installed pi never puts it on the wire, which is what kills channel 1
+      // here. The emitter is quoted so the REASON stays legible and not merely so the branch is
+      // reachable: a reader who wants to know why this pi has no channel 1 greps the one file the
+      // probe reads and finds the absent field.
+      expect(
+        installedAgentSession(),
+        "this pi's tool_execution_end drops structuredContent, so channel 1 cannot deliver",
+      ).not.toContain("structuredContent");
+      // And the consequence at OUR seam: with the field off the wire there is no channel-1 line to
+      // read, so the tool's declaration is worth nothing on its own and the report has to come from
+      // the prompt — which is the next test's claim, not this one's.
+      const withoutWire = extractChildReport(
+        parseTranscript([reportToolLine(undefined), assistantLine("done")]),
+      );
+      expect(withoutWire.reportChannel, "an unwired tool call is no report").toBe("none");
+      expect(withoutWire.report).toBeUndefined();
+    }
+  });
+
+  test("CHANNEL 2 — the prompt-json fallback delivers a report on every pi, not only where channel 1 is dead", async () => {
+    // ADR-0032's fallback, through the real `dispatch()` and a real transcript. The transcript
+    // carries no tool line, which on a pi that CAN carry channel 1 means "the child chose the
+    // prompt", and on a pi that CANNOT means "the tool channel was never available" — so this one
+    // claim is true on both surfaces, and the branch below is only about what the surrounding pi
+    // makes of it.
+    await withAgent(async (dir) => {
+      childTranscript.lines = [...COMPLIANT_TRANSCRIPT];
+
+      const result = asResult(
+        await dispatch(
+          { agent: "reporter", task: "check the gates", agentScope: "project" },
+          { callId: 50, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          { slots: new DispatchSlotCounter(4) },
+        ),
+      );
+
+      expect(result.status).toBe("fulfilled");
+      expect(result.reportChannel, "the prompt channel delivers the report").toBe("prompt-json");
+      // `usage` is the host's own counter over this transcript — the same value the foreground
+      // report carries, so the fallback is not a degraded payload either.
+      expect(result.report).toEqual(REPORT_WITH_HOST_USAGE);
+      // The prose survives alongside the report (ADR-0032), which is why the fallback channel is the
+      // prompt channel and not a second tool.
+      expect(result.text).toBe(COMPLIANT_TEXT);
+      expect(result.text.startsWith(PROSE_HEAD)).toBe(true);
+      expect(result.text.endsWith(PROSE_TAIL)).toBe(true);
+
+      if (TOOL_CHANNEL_AVAILABLE) {
+        // Re-derived from the SHARED measurement, not from this file's old private probe. Asserting
+        // `SHARED.structuredContentOnTheWire` can FAIL on a damaged install; asserting
+        // `TOOL_CHANNEL_AVAILABLE` could not, because that is the very constant the `if` selects
+        // on — so the second is self-proving and the first is not. What makes the OTHER arm
+        // reachable is damaging the ORACLE (the installed emitter), never rewriting a probe.
+        expect(SHARED.structuredContentOnTheWire, "the arm was selected by this measurement").toBe(
+          true,
+        );
+        // Channel 1 is live here and was NOT used, so this report provably did not come from it.
+        expect(result.reportChannel, "channel 1 was available and unused").not.toBe("tool");
+      } else {
+        expect(SHARED.structuredContentOnTheWire, "the arm was selected by this measurement").toBe(
+          false,
+        );
+        // pi 0.86.0 / 0.87.x: this is the ONLY channel, and the distinction that matters is the one
+        // this line draws. `none` is ADR-0032's marker for a child that WAS asked for a report and
+        // did not give one; reporting `none` because the tool channel is unreachable would blame
+        // the child for this pi's missing forward.
+        expect(
+          result.reportChannel,
+          "an unreachable channel 1 must not read as non-compliance",
+        ).not.toBe("none");
+      }
+    });
+  });
+
   test("a transcript where the tool channel never fires still yields a prompt-json report", async () => {
     // ADR-0032's bet, made mechanical: the tool exists in the child only when this package
     // loads there (pi's `-ne` removes extensions entirely, and so does disabling this package
@@ -1133,7 +1374,32 @@ describe("the report tool is activated in the child and not in the parent", () =
       const childStub = await makeExtensionStub(FULL_SURFACE_AXES);
       const childTool = childStub.tools.get(CHILD_REPORT_TOOL_NAME);
       expect(childTool, "the child registers the report tool").toBeDefined();
-      expect(childTool?.defaultActive, "and activates it").toBe(true);
+      // `defaultActive` is pi's activation switch, and this is the half of the claim only a pi WITH
+      // the switch can make. Where pi has it (measured: >= 0.99.0) the declaration IS the activation
+      // and asserting it is the assertion; where it does not, the switch is inert (pi 0.86.0
+      // activates every newly-registered tool unconditionally), so the strongest thing the floor CAN
+      // be asked is that this package's own declaration still says what the contract requires — which
+      // is real work, and hardcoding `false` in the factory still turns it red.
+      const childActivation = readDefaultActive(childTool);
+      if (DEFAULT_ACTIVE_AVAILABLE) {
+        expect(SHARED.defaultActiveRead, "the arm was selected by this measurement").toBe(true);
+        // The real claim where the switch exists: pi activates the tool BY this declaration.
+        expect(childActivation, "pi activates the tool by its declaration").toBe(true);
+      } else {
+        expect(SHARED.defaultActiveRead, "the arm was selected by this measurement").toBe(false);
+        // Asserting the VALUE (not repeating the arm's own predicate) is what keeps this a claim
+        // about our factory: hardcoding `false` in the factory turns it red on the floor exactly as
+        // it does on the ceiling.
+        expect(childActivation, "the declaration still asks pi to activate it").toBe(true);
+        // And the floor's own limit, stated rather than assumed: the switch IS on the object
+        // (defineTool is the identity function) but no per-tool read happens, so this is a
+        // declaration nothing consults. A pi that began consulting it flips this probe and takes the
+        // arm above.
+        expect(
+          installedAgentSession(),
+          "this pi never reads .defaultActive per tool, so the declaration is inert here",
+        ).not.toContain(".defaultActive");
+      }
     });
   });
 
@@ -1189,7 +1455,26 @@ describe("the report tool is activated in the child and not in the parent", () =
 
     // Registered — so a child pi can be told the name and find it — but never activated.
     expect(tool, "registered in the parent").toBeDefined();
-    expect(tool?.defaultActive, "but not activated there").toBe(false);
+    const parentActivation = readDefaultActive(tool);
+    if (DEFAULT_ACTIVE_AVAILABLE) {
+      expect(SHARED.defaultActiveRead, "the arm was selected by this measurement").toBe(true);
+      // Where the switch exists this is the real activation claim, and it is exact: pi honours the
+      // declaration, so `false` here is what keeps the tool out of every parent's model.
+      expect(parentActivation, "but not activated there").toBe(false);
+    } else {
+      expect(SHARED.defaultActiveRead, "the arm was selected by this measurement").toBe(false);
+      // pi < 0.99.0 has no per-tool activation switch at all: `_refreshToolRegistry` activates every
+      // newly-registered tool, so a tool DECLARING `defaultActive: false` is registered-and-active
+      // there whatever this package asks for. Asserting `false` would assert a pi behaviour pi
+      // 0.86.0 does not have; what is assertable — and what the factory still controls — is that a
+      // parent does NOT ask for activation, which is the decision the switch is how this package
+      // makes. Exact rather than `not.toBe(true)`: a factory that dropped the field would leave it
+      // `undefined`, which is the same mistake wearing a different value.
+      expect(parentActivation, "a parent must not ask pi to activate it").toBe(false);
+    }
+    // The loadout half holds on both axes and is asserted on both: the stub reports `getActiveTools()`
+    // from the axes it was driven with, so this is about what this package put in front of the
+    // parent's model, independent of whether pi could have honoured an opt-out.
     expect(parentStub.active, "and absent from the active loadout").not.toContain(
       CHILD_REPORT_TOOL_NAME,
     );
@@ -1209,7 +1494,7 @@ describe("the report tool is activated in the child and not in the parent", () =
       else process.env.PI_PTC_DEPTH = depth;
       const stub = await makeExtensionStub(SUBAGENTS_SURFACE_AXES);
       expect(
-        stub.tools.get(CHILD_REPORT_TOOL_NAME)?.defaultActive,
+        readDefaultActive(stub.tools.get(CHILD_REPORT_TOOL_NAME)),
         "PI_PTC_DEPTH=" + String(depth),
       ).toBe(expected);
     }
@@ -1220,10 +1505,10 @@ describe("the report tool is activated in the child and not in the parent", () =
     // hands a codemode script the `structuredContent` of a tool that DECLARES an output schema,
     // so an undeclared one is a report only this host could ever read.
     const tool = createChildReportTool(true);
-    expect(tool.outputSchema).toBeDefined();
+    expect(readOutputSchema(tool), "the report tool declares an output schema").toBeDefined();
     // One schema, declared twice on purpose: the same value on both ends is what stops the
     // accepted shape and the carried shape from drifting apart.
-    expect(tool.parameters).toBe(tool.outputSchema);
+    expect(tool.parameters).toBe(readOutputSchema(tool));
     expect(tool.description).toBe(CHILD_REPORT_DESCRIPTION);
     expect(tool.promptSnippet, "without a snippet pi omits it from the system prompt").toBeTruthy();
     expect(tool.promptGuidelines?.length ?? 0).toBeGreaterThan(0);

@@ -9,7 +9,6 @@ import { delimiter, join } from "node:path";
 import type {
   ExtensionAPI,
   ExtensionContext,
-  ExtensionToolContext,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import ptcSubagents from "../../src/index.ts";
@@ -446,20 +445,31 @@ export function stubContext(
 }
 
 /**
+ * The exact type of `ToolDefinition.execute()`'s fifth parameter, read off pi rather than
+ * named.
+ *
+ * pi 1.0.0 narrowed that parameter from `ExtensionContext` to `ExtensionToolContext` (`extends
+ * ExtensionContext` with `tools` + `executeTool`), and 0.86.0 — the declared peer floor (#192,
+ * #194) — has no `ExtensionToolContext` export at all, so there is no single name both ends
+ * accept. Deriving the type from the callee is what makes one helper compile against both: it
+ * resolves to `ExtensionContext` on the floor and to `ExtensionToolContext` on the ceiling
+ * without naming either. Verified to compile on both.
+ */
+type ToolExecuteContext = Parameters<ToolDefinition<any, any, any>["execute"]>[4];
+
+/**
  * Minimal execution context for tool tests.
  *
  * The tool layer reads exactly one field — `cwd` (see `src/tools/common.ts`) — but the real
- * parameter type is pi's `ExtensionToolContext`, so tests pass this narrowed object through a
- * cast rather than fabricating a whole session.
+ * parameter type is pi's own `ToolExecuteContext` (above), so tests pass this narrowed object
+ * through a cast rather than fabricating a whole session.
  *
- * pi 1.0.0 narrowed that fifth `execute` parameter from `ExtensionContext` to
- * `ExtensionToolContext`, which `extends ExtensionContext` with `tools` and `executeTool` — the
- * pair codemode scripts use to reach nested tools. The stub answers both honestly rather than
- * leaving them undefined: an empty tool list, and an `executeTool` that refuses loudly. A test
- * that reaches for it is asking for behaviour no unit test wires up, and a thrown Error names
- * that, where a `TypeError: not a function` three frames later would not.
+ * Where pi asks for the extension-tool pair, the stub answers both honestly rather than leaving
+ * them undefined: an empty tool list, and an `executeTool` that refuses loudly. A test that
+ * reaches for it is asking for behaviour no unit test wires up, and a thrown Error names that,
+ * where a `TypeError: not a function` three frames later would not.
  */
-export function toolContext(cwd: string): ExtensionToolContext {
+export function toolContext(cwd: string): ToolExecuteContext {
   return {
     cwd,
     tools: [],
@@ -469,7 +479,7 @@ export function toolContext(cwd: string): ExtensionToolContext {
           "real agent loop, so that path is only covered by the e2e suites",
       );
     },
-  } as unknown as ExtensionToolContext;
+  } as unknown as ToolExecuteContext;
 }
 
 /**

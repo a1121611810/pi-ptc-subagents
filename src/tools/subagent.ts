@@ -30,8 +30,8 @@
  * `ctx.executeTool()`. The rendering below is unchanged and is what the model reads either way.)
  */
 
-import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { defineCompatTool } from "./pi-compat-types.ts";
 import { Type } from "typebox";
 import type { TArray, TNumber, TObject, TOptional, TString } from "typebox";
 import { DISPATCH_PARAMETERS } from "../runtime/bindings.ts";
@@ -257,7 +257,7 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
     agentScope: options.agentRosterScope ?? "both",
     ...(options.homeDir === undefined ? {} : { homeDir: options.homeDir }),
   });
-  return defineTool({
+  return defineCompatTool({
     name: SUBAGENT_TOOL_NAME,
     label: "PTC Subagent",
     description: [
@@ -288,6 +288,19 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
       "Prefer one subagent over many tool calls when the work is a question with an answer rather than a fact you can look up, or when the raw output would be larger than the answer.",
     ],
     parameters: DISPATCH_PARAMETERS,
+    // Inert on the declared floor (#193). `outputSchema` did not exist on pi's
+    // ToolDefinition below 0.99.0 -- measured: 0.86.0's interface runs
+    // `dist/core/extensions/types.d.ts:345`-`:378` and goes from `prepareArguments` straight
+    // to `executionMode`, so a floor pi simply does not read this field.
+    //
+    // It is inert twice over, and the second half is what makes it safe rather than merely
+    // unread. The field only has a reader when a `codemode` script can consume
+    // `structuredContent`, and 0.86.0 ships no `codemode` at all (#197 measured the concept
+    // absent from its `dist/`, zero matches). This tool is also `direct`, not `codemode`-reach,
+    // so nothing on ANY version reads this half for this tool. Declaring it therefore costs a
+    // floor pi nothing and leaves the tool byte-identical across the peer range -- and the
+    // rendered child report above reaches the model either way, which is why the text block
+    // rather than this field is what ADR-0032 leans on. See ./pi-compat-types.ts.
     outputSchema: SUBAGENT_OUTPUT_SCHEMA,
     async execute(_toolCallId, params) {
       const outcome = await dispatch(
@@ -302,8 +315,8 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
         options.getDispatchDeps?.() ?? {},
       );
       // One details shape for both outcomes. Two literals with different keys infer a union,
-      // and `defineTool` then binds to whichever branch it saw first -- so the second return
-      // stops typechecking against the tool's own result type.
+      // and `defineCompatTool` (like the `defineTool` it wraps) then binds to whichever branch it
+      // saw first -- so the second return stops typechecking against the tool's own result type.
       const taskId = handleTaskId(outcome);
       const details: SubagentDetails =
         taskId === undefined

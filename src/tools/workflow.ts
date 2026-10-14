@@ -21,8 +21,8 @@
  *   function/symbol/`undefined`/cycle would otherwise be silently dropped or mangled by the
  *   structured clone on its way to the worker.
  */
-import { defineTool } from "@earendil-works/pi-coding-agent";
-import type { ToolDefinition, ToolExposure } from "@earendil-works/pi-coding-agent";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { defineCompatTool, type ToolExposure } from "./pi-compat-types.ts";
 import { Type } from "typebox";
 import type { Static, TArray, TObject, TOptional, TRecord, TString, TUnknown } from "typebox";
 import { createBuiltinBindings } from "../runtime/bindings.ts";
@@ -234,7 +234,7 @@ export interface PtcWorkflowToolOptions extends PtcToolOptions {
 export function createPtcWorkflowTool(
   options: PtcWorkflowToolOptions = {},
 ): ToolDefinition<WorkflowParameters, PtcToolDetails> {
-  return defineTool({
+  return defineCompatTool({
     name: "ptc_workflow",
     label: "PTC Workflow",
     exposure: options.exposure,

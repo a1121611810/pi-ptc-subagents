@@ -35,8 +35,8 @@
  * `--tools` allowlist would filter the tool straight back out.
  */
 
-import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { defineCompatTool } from "./pi-compat-types.ts";
 import { Type } from "typebox";
 import type { TArray, TObject, TString } from "typebox";
 
@@ -142,7 +142,7 @@ type ChildReportEcho = {
  * mutating the environment.
  */
 export function createChildReportTool(activeByDefault: boolean): AnyTool {
-  return defineTool({
+  return defineCompatTool({
     name: CHILD_REPORT_TOOL_NAME,
     label: "Child Report",
     description: CHILD_REPORT_DESCRIPTION,

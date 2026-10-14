@@ -20,8 +20,8 @@
  * - `timeoutMs: 0` does not disable the deadline; it falls back to `DEFAULT_CONFIG.timeoutMs`,
  *   exactly as DSH's resolver does (R1 §3). The description names the default and the ceiling.
  */
-import { defineTool } from "@earendil-works/pi-coding-agent";
-import type { ToolDefinition, ToolExposure } from "@earendil-works/pi-coding-agent";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { defineCompatTool, type ToolExposure } from "./pi-compat-types.ts";
 import { Type } from "typebox";
 import type { TNumber, TOptional, TObject, TString } from "typebox";
 import { createBuiltinBindings } from "../runtime/bindings.ts";
@@ -157,7 +157,7 @@ export interface PtcRunCodeToolOptions extends PtcToolOptions {
 export function createPtcRunCodeTool(
   options: PtcRunCodeToolOptions = {},
 ): ToolDefinition<RunCodeParameters, PtcToolDetails> {
-  return defineTool({
+  return defineCompatTool({
     name: "ptc_run_code",
     label: "PTC Run Code",
     exposure: options.exposure,

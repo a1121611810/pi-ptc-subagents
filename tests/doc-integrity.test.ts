@@ -1402,9 +1402,9 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:197":
       "export const SUBAGENT_OUTPUT_SCHEMA",
     "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1439": "function accumulateUsage(",
-    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:368":
+    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:381":
       "structuredContent: structured,",
-    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:229":
+    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:230":
       "outputSchema: LIST_OUTPUT_SCHEMA,",
     "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1298":
       "export function childToolList(",
@@ -1471,8 +1471,12 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     //        PI_TRUNCATION_WARNING / truncationFailureMessage，assistantText 及其后整体后移）
     //   20 → subagent.ts:197  = `export const SUBAGENT_OUTPUT_SCHEMA: SubagentOutputSchema`
     //   27 → dispatch.ts:1439 = `function accumulateUsage(`（usage 的累加点，前景后台共用）
-    //   55 → subagent.ts:368 = 把投影写进 `structuredContent:` 的那一行
-    //   49 → ptc-task.ts:229/459/618 = 三处 `outputSchema:` 声明
+    //   55 → subagent.ts:381 = 把投影写进 `structuredContent:` 的那一行
+    //        （2026-10-14 复核：#193 把 subagent.ts 也纳入了 defineCompatTool 写域，
+    //        outputSchema 处新增了一段「floor 上惰性」的说明注释，该行从 368 移到 381）
+    //   55 → ptc-task.ts:230/471/630 = 三处 `outputSchema:` 声明
+    //        （2026-10-14 复核：#193 在 ptc-task.ts 顶部加了一行 pi-compat-types 的 import，
+    //        三处声明整体后移一行）
     //  117 → dispatch.ts:1298 = `export function childToolList(`，即合并进子进程 --tools 的那个函数
     //
     // **这份散文清单是本次复核才补的，而它本身就是个漂移源。** 它抄的是下面数组里的数字，而数组
@@ -1495,8 +1499,8 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1416",
     "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:197",
     "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1439",
-    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:368",
-    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:229",
+    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:381",
+    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:230",
     "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1298",
     // 新增 1 条（2026-10-12，ADR-0039）：目标行已逐条核对。
     "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:115 -> src/index.ts:534",

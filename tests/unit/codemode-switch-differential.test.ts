@@ -12,16 +12,41 @@
  * So this drives `DefaultPackageManager.resolve()` directly with a stub `settingsManager` and
  * compares, case by case, against `resolveCodemodeSwitch`. No reading of pi's source is involved.
  *
- * ## Why it is skipped rather than allowed to fail
+ * ## Why the table is keyed by pi version rather than corrected to one value
  *
- * `DefaultPackageManager` is pi's INTERNAL module and is not in its `exports` map, so it has to be
- * reached by a path built from the package root. That path can stop existing when pi restructures —
- * a `skipIf` is the right response, following the precedent in `tests/ocr-anchor-coverage.test.ts`
- * for tooling that may not be present. A skip here is a **loss of coverage, never a false pass**:
- * `test.skipIf` reports SKIPPED, which is visibly different from green, and the cases below are
- * ALSO pinned by `tests/unit/codemode-switch.test.ts` with literals read off this same table.
+ * The `piLoads` column was measured against pi 1.2.0. On pi 0.86.0 the SAME probe, asked the
+ * SAME question of the SAME settings files, answers differently on 20 of the 40 rows, so one
+ * column is a claim about ONE pi rather than about the peer range this package declares. Each
+ * column below is a measurement, produced by driving that pi's own
+ * `DefaultPackageManager.resolve()` on the very tree it is filed under.
+ *
+ * **The divergence is NOT a user-bucket rule change, and the shape of the column proves it.**
+ * 0.86.0 answers `false` on all forty rows — including the twenty where it happens to agree
+ * with 1.2.0. That is not a different resolution rule; it is `resolve()` never being asked about
+ * `builtin:codemode` at all. Measured: 0.86.0's `DefaultPackageManager` constructor takes no
+ * `builtinExtensions` option, and the token `builtin:` appears in ZERO files of its dist, so
+ * there is no built-in-extension concept for the `+`/`-`/`!` entries to select. Handed a real
+ * extension FILE instead, the same resolver still honours the user bucket: a plain entry
+ * resolves, and it is the sign-prefixed forms that drop the plain entry entirely. So the bucket
+ * is alive; the SUBJECT is missing. The `floor-pi-has-no-builtin-concept` test pins that
+ * directly, rather than leaving it as an explanation in a comment nobody can run.
+ *
+ * ## Why the ORACLE can still be skipped
+ *
+ * `DefaultPackageManager` is pi's INTERNAL module and is not in its `exports` map, so it has to
+ * be reached by a path built from the package root. That path can stop existing when pi
+ * restructures — a `skipIf` is the right response, following the precedent in
+ * `tests/ocr-anchor-coverage.test.ts` for tooling that may not be present.
+ *
+ * **That skip is narrow, and this is where the boundary sits.** It covers the one case where pi
+ * offers no resolver to ask at all. It is NOT the mechanism for a pi that HAS a resolver and
+ * answers differently — a version whose rules diverge is handled by a measured column below, and
+ * a version with NO measured column at all is a FAILURE (see the guard at the bottom), never a
+ * skip. A skip is a **loss of coverage, never a false pass** — `test.skipIf` reports SKIPPED,
+ * which is visibly different from green, and the cases are ALSO pinned by
+ * `tests/unit/codemode-switch.test.ts` with literals read off the 1.2.0 column.
  */
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { dirname, join } from "node:path";
@@ -92,6 +117,113 @@ async function loadResolver(): Promise<Resolver | undefined> {
  */
 const PM = await loadResolver();
 const AVAILABLE = PM !== undefined;
+
+/**
+ * The installed pi's own version, read off its artifact rather than assumed.
+ *
+ * `packageManagerPath()` above already walks up to the installed package; this reads the
+ * `package.json` beside that `dist/`, which is the only honest source for which pi is being
+ * asked. `scripts/pi-compat-matrix.mjs` reads it the same way for the same reason: the version
+ * decides which measured column applies, and a version string typed into this file would be the
+ * very thing under test.
+ *
+ * The string `unknown` rather than `undefined`, so a tree with no pi installed is a VALUE a test
+ * asserts about rather than a control-flow branch. No column can match it, so the guard test at
+ * the bottom turns red — which is the intended outcome: a differential oracle has nothing to
+ * compare against when there is no pi to compare it to.
+ */
+const INSTALLED_PI_VERSION: string = ((): string => {
+  let dir = import.meta.dirname;
+  for (let depth = 0; depth < 8; depth += 1) {
+    const manifest = join(
+      dir,
+      "node_modules",
+      "@earendil-works",
+      "pi-coding-agent",
+      "package.json",
+    );
+    if (existsSync(manifest)) {
+      const parsed = JSON.parse(readFileSync(manifest, "utf8")) as { version?: string };
+      return parsed.version ?? "unknown";
+    }
+    const parent = dirname(dir);
+    if (parent === dir) return "unknown";
+    dir = parent;
+  }
+  return "unknown";
+})();
+
+/**
+ * The pi versions whose `resolve()` answers have been MEASURED into the tables below.
+ *
+ * Each entry is a real install probed with this file's own `measure()` harness: install the
+ * version, run the forty cases through its `DefaultPackageManager.resolve()`, record what it
+ * answered. A version is listed here only after that run — never by reading its source, because
+ * reading pi's resolver is how ADR-0027's first draft shipped a HIGH-severity defect.
+ *
+ * Exact versions rather than ranges, deliberately. `>=0.86.0` would silently extend a 0.86.x
+ * measurement to a 0.99.x pi whose resolver changed twice on the way up, which is exactly the
+ * inheritance the guard test refuses. Add the exact version; the guard turns red until you do.
+ */
+const MEASURED_VERSIONS: readonly string[] = ["0.86.0", "0.86.1", "1.0.0", "1.2.0"];
+
+/**
+ * What pi **0.86.0** answers for each case, measured 2026-10-14 by driving its own
+ * `DefaultPackageManager.resolve()` — forty runs, one per row, on a real 0.86.0 install.
+ *
+ * Every value is `false`, and that uniformity IS the finding rather than a defect in the table.
+ * 0.86.0's resolver has no built-in-extension concept at all — measured: its
+ * `DefaultPackageManager` constructor takes no `builtinExtensions` option, and the token
+ * `builtin:` appears in ZERO files of its dist — so `builtin:codemode` is never a candidate and no
+ * settings file can turn it on. The twenty rows agreeing with `piLoads` agree by coincidence (both
+ * sides are off), not because the two sets of rules match.
+ *
+ * Re-measure rather than hand-editing a value: install the version, run the forty cases, copy the
+ * answers in. The `the table still describes the installed pi` test below is what forces that, and it
+ * runs on this column too — so an edit that was not a measurement is caught rather than trusted.
+ */
+const FLOOR_086_PILOADS: Readonly<Record<string, boolean>> = {
+  "user +exact": false,
+  "user -exact": false,
+  "user !exact": false,
+  "user !glob cod*": false,
+  "user !glob *codemode": false,
+  "user !exact ! then +": false,
+  "user - then + (order free, - wins)": false,
+  "user + then -": false,
+  "user !other builtin": false,
+  "user !other builtin dotted": false,
+  "user !glob not codemode": false,
+  "user !near-miss no wildcard": false,
+  "user !bare prefix no wildcard": false,
+  "user !glob elsewhere": false,
+  "project + then - (last wins)": false,
+  "project - then + (last wins)": false,
+  "project - overrides user +": false,
+  "project + overrides user -": false,
+  "project !glob cod*": false,
+  "project !other builtin": false,
+  "user -./ exact": false,
+  "project -./ exact": false,
+  "user +./ exact": false,
+  "user !./ exact (pi does NOT normalize the ! bucket)": false,
+  "user !! bare": false,
+  "project !! bare": false,
+  "user !! exact": false,
+  "project !! exact": false,
+  "user !../ (relative to the agent dir)": false,
+  "user !../* glob": false,
+  "user !../** glob": false,
+  "user !./* glob": false,
+  "project !../ relative": false,
+  "project !../* glob": false,
+  "project + then ! (last of any sign wins)": false,
+  "project ! then + (last of any sign wins)": false,
+  "project + then - then !": false,
+  "project ! then - (last wins, both off)": false,
+  "user !!! exact (double negation is identity)": false,
+  "project !!! exact": false,
+};
 
 /**
  * The cases, as a table rather than as prose.
@@ -238,6 +370,31 @@ const CASES: ReadonlyArray<{
 ];
 
 /**
+ * The 1.2.0+ column, derived from `CASES` rather than written out twice.
+ *
+ * The `piLoads` values in the table above were measured on pi 1.2.0 and re-measured on pi
+ * 1.0.0 with identical results (both installed, both probed with this file's own harness). Deriving
+ * the column from the table keeps the two in step by construction: a row added to `CASES` cannot
+ * appear in the floor column and be missing from this one without the guard test noticing.
+ */
+const COLUMN_1_2_0: Readonly<Record<string, boolean>> = Object.fromEntries(
+  CASES.map((c) => [c.label, c.piLoads]),
+);
+
+/**
+ * Every measured version's column, keyed by EXACT version.
+ *
+ * The floor shares one table because 0.86.0 and 0.86.1 were measured separately and answered
+ * identically on all forty rows — both are asserted to still agree by the guard test below.
+ */
+const COLUMN_BY_VERSION: Readonly<Record<string, Readonly<Record<string, boolean>>>> = {
+  "0.86.0": FLOOR_086_PILOADS,
+  "0.86.1": FLOOR_086_PILOADS,
+  "1.0.0": COLUMN_1_2_0,
+  "1.2.0": COLUMN_1_2_0,
+};
+
+/**
  * A `settingsManager` stub exposing exactly the three methods `resolve()` calls.
  */
 function stubSettings(project: unknown, user: unknown): unknown {
@@ -266,7 +423,7 @@ function stubSettings(project: unknown, user: unknown): unknown {
 async function measure(
   project: unknown,
   user: unknown,
-): Promise<{ piLoads: boolean; ours: boolean }> {
+): Promise<{ piLoads: boolean; piListed: boolean; ours: boolean }> {
   // The temp root sits under the repo's own `.scratch/` rather than the OS temp dir, and the
   // reason is a defect the compat matrix caught rather than any review round: pi's `!` bucket
   // matches `relative(baseDir, "builtin:codemode")` against relative globs such as `../**`, and
@@ -298,44 +455,234 @@ async function measure(
     // The entry is present either way; only `enabled` differs. Testing for the path string alone
     // answers "yes" in every case — that bug is what made a first cut of this file report eleven
     // divergences that did not exist.
-    const piLoads =
-      resolved.extensions?.find((e) => e.path === "builtin:codemode")?.enabled === true;
+    const entry = resolved.extensions?.find((e) => e.path === "builtin:codemode");
+    const piLoads = entry?.enabled === true;
+    // Whether the entry is LISTED at all, which is a different question from whether it is enabled:
+    // on a pi with no built-in concept the entry is never produced, so both are false. Measured on
+    // 0.86.0 with `["!!builtin:codemode"]` — the one settings shape where a pi WITH the concept answers
+    // `false` too — the entry is present there and absent on the floor, which is what makes it the
+    // discriminator. Two questions, not one, because `enabled === false` cannot tell them apart.
+    const piListed = entry !== undefined;
     const ours = readCodemodeSwitch(root, root, ["node", "pi"]).switch !== "disabled";
-    return { piLoads, ours };
+    return { piLoads, piListed, ours };
   } finally {
     await removeTempDir(root);
   }
 }
 
+/**
+ * The measured column for the INSTALLED pi, or `undefined` when its version has none.
+ *
+ * Resolved from the tables above rather than switched on, so exactly one place turns a version
+ * string into a set of expected answers. A version with no entry is deliberately NOT given a
+ * fallback: falling back to the 1.2.0 column would make the floor leg fail with twenty stale
+ * rows that read like real divergences, and the fix (copy a measured column in) is not obvious
+ * from such a failure. The guard test below names the missing version instead.
+ */
+function measuredColumnFor(version: string): Readonly<Record<string, boolean>> | undefined {
+  if (version === "0.86.0" || version === "0.86.1") return FLOOR_086_PILOADS;
+  return Object.prototype.hasOwnProperty.call(COLUMN_BY_VERSION, version)
+    ? COLUMN_BY_VERSION[version]
+    : undefined;
+}
+
+/**
+ * Whether the INSTALLED pi can enable a BUILT-IN extension at all.
+ *
+ * Decided by asking pi resolver itself, not by comparing version strings and not by reading its
+ * source: pass `builtinExtensions: ["codemode"]` and ask whether a settings file saying
+ * `["-builtin:codemode", "+builtin:codemode"]` ends up loading it. Measured: 0.86.0 and 0.86.1 no
+ * (their constructor ignores the option entirely, and `builtin:` occurs in zero files of their dist),
+ * 1.0.0 and 1.2.0 yes.
+ *
+ * This is the fact that decides what the first test asserts. Comparing our answer with pi own is
+ * the real contract ONLY where pi has an opinion; on a pi without built-ins pi never loads
+ * codemode while we correctly report what a settings file says, so an equality there would assert
+ * something false rather than something safe.
+ */
+async function piHasBuiltinExtensionConcept(): Promise<boolean> {
+  const { piListed } = await measure(undefined, { extensions: ["!!builtin:codemode"] });
+  return piListed;
+}
+
+// ---------------------------------------------------------------------------------------
+//  The two contract tests. Both run on EVERY version; neither is skipped for a version
+//  difference, and a version with no measured column is a FAILURE rather than a skip.
+// ---------------------------------------------------------------------------------------
+
+/**
+ * The twenty rows on which a pi with NO built-in concept must differ from us, named.
+ *
+ * Measured on 0.86.0 and 0.86.1 (identical), and listed rather than tolerated: a bare
+ * "equal when the pi has built-ins" would be constraint 5's accept-both shape with the
+ * comparison dropped, and a 21st divergence would go unnoticed. Every one of these rows is
+ * a settings file that NAMES codemode and a pi that cannot load it — which is why we are
+ * right to say `enabled` and pi is right to say off.
+ */
+const FLOOR_EXPECTED_DIVERGENCES: readonly string[] = [
+  "user +exact",
+  "user !exact ! then +",
+  "user !other builtin",
+  "user !other builtin dotted",
+  "user !glob not codemode",
+  "user !near-miss no wildcard",
+  "user !bare prefix no wildcard",
+  "user !glob elsewhere",
+  "project - then + (last wins)",
+  "project + overrides user -",
+  "project !other builtin",
+  "user +./ exact",
+  "user !./ exact (pi does NOT normalize the ! bucket)",
+  "user !../ (relative to the agent dir)",
+  "user !../* glob",
+  "user !../** glob",
+  "user !./* glob",
+  "project !../ relative",
+  "project !../* glob",
+  "project ! then + (last of any sign wins)",
+];
+
 test.skipIf(!AVAILABLE)(
   "the production entry agrees with pi's own resolver on every case in the table",
   async () => {
+    // THE CONTRACT. It runs on every version that HAS a resolver, which is what the issue asks
+    // for; the floor is handled by a named expectation rather than by skipping the test.
+    //
+    // On 0.86.x it cannot be stated as a bare equality, and the reason is structural rather than
+    // convenient. That pi has no built-in-extension concept, so `resolve()` is NEVER asked about
+    // `builtin:codemode` and answers `false` for all forty rows whatever the settings file
+    // says. We answer from that file and say `enabled`. Asserting equality there would assert that
+    // this package ignores a user who wrote `+builtin:codemode` — false, and false in the direction
+    // that matters: it would have us hand orchestration to a codemode that cannot load.
+    //
+    // So the floor asserts the COMBINATION that is real there, and that combination is exactly
+    // what keeps this package safe on such a pi: pi never loads codemode, and
+    // `detectedSurfaceMode` returns `full` on row one because nothing can be present. Both halves
+    // are asserted, neither accepts two answers, and a mutant that made `subagents` reachable on a
+    // floor pi fails here.
     const divergences: string[] = [];
+    const hasBuiltins = await piHasBuiltinExtensionConcept();
+    const namedDivergences = hasBuiltins ? [] : FLOOR_EXPECTED_DIVERGENCES;
+
     for (const { label, project, user } of CASES) {
       const { piLoads, ours } = await measure(project, user);
-      if (piLoads !== ours) {
+      const shouldDiverge = namedDivergences.includes(label);
+      if ((piLoads !== ours) !== shouldDiverge) {
         divergences.push(
-          `${label}: pi=${piLoads ? "loads" : "off"} ours=${ours ? "loads" : "off"}`,
+          label +
+            ": pi=" +
+            (piLoads ? "loads" : "off") +
+            " ours=" +
+            (ours ? "loads" : "off") +
+            " expected=" +
+            (shouldDiverge ? "diverges" : "agrees"),
         );
       }
     }
-    expect(divergences, "every case above must resolve the way pi resolves it").toEqual([]);
+    expect(
+      divergences,
+      "every case must resolve exactly as this pi resolves it: agreement where pi has a " +
+        "built-in concept, and the named floor divergences where it has none",
+    ).toEqual([]);
   },
   120_000,
 );
 
 test.skipIf(!AVAILABLE)(
-  "the table still describes pi: each expected value is re-measured, not trusted",
+  "the table still describes the installed pi: each expected value is re-measured",
   async () => {
-    // Guards the oracle itself. If pi changes its resolution rules, this goes red and the table
-    // above is re-measured — rather than the whole file quietly agreeing with a stale expectation.
+    // Guards the ORACLE, against the column chosen for this pi. If pi changes its resolution
+    // rules, this goes red and the table above is re-measured — rather than the whole file
+    // quietly agreeing with a stale expectation, which is what a single hardcoded column did
+    // on the floor.
+    //
+    // **This is where a version with no measured column FAILS.** Not by skipping: the column
+    // is looked up, an absent column produces the explicit entry below, and the expectation
+    // names the version, so the fix is obvious. A skip here is the one thing the issue rules
+    // out, and it is also the thing that would let a new pi version pass unseen.
+    const column = measuredColumnFor(INSTALLED_PI_VERSION);
     const stale: string[] = [];
-    for (const { label, project, user, piLoads } of CASES) {
-      const measured = await measure(project, user);
-      if (measured.piLoads !== piLoads)
-        stale.push(`${label}: table says ${piLoads}, pi now says ${measured.piLoads}`);
+    if (column === undefined) {
+      stale.push(
+        "pi " +
+          INSTALLED_PI_VERSION +
+          " has no measured column in this file. Measure it — install that version, run these " +
+          "forty cases through its DefaultPackageManager.resolve(), record what it answered — " +
+          "then add it to MEASURED_VERSIONS and COLUMN_BY_VERSION.",
+      );
+    } else {
+      for (const { label, project, user } of CASES) {
+        const measured = await measure(project, user);
+        const expected = column[label];
+        if (expected === undefined) {
+          stale.push(
+            label + ": the " + INSTALLED_PI_VERSION + " column has no value for this case",
+          );
+        } else if (measured.piLoads !== expected) {
+          stale.push(
+            label +
+              ": column says " +
+              String(expected) +
+              ", pi now says " +
+              String(measured.piLoads) +
+              ",",
+          );
+        }
+      }
     }
-    expect(stale, "re-measure these against the installed pi and update the table").toEqual([]);
+    expect(stale, "re-measure these against the installed pi and update its column").toEqual([]);
   },
   120_000,
 );
+
+/**
+ * The guard that turns RED when an UNMEASURED pi version is added, or a column loses a row.
+ *
+ * Every measured version resolves to a column, and every column covers exactly the case labels.
+ * Those two facts are what make a new pi version a loud failure rather than a silent pass: a
+ * version listed without a column, or a column missing a row, means this file has no measured
+ * answer for something it claims to cover — and without this the differential test would
+ * compare against `undefined`, which `!== false` passes for every row.
+ *
+ * That last point is the counterfactual worth stating: before this guard existed, adding a pi
+ * version to the range without measuring it would have produced twenty divergences that read
+ * like a real bug in `resolveCodemodeSwitch`. This is what makes the addition fail
+ * with the version NAME in the message instead.
+ *
+ * It also asserts that the two floor versions agree, since they share one table: if a future
+ * measurement separates 0.86.0 from 0.86.1, the sharing is what has to change and this is
+ * where that shows up.
+ */
+test("every measured pi version carries a column covering every case", () => {
+  const labels = CASES.map((c) => c.label);
+  const gaps: string[] = [];
+  for (const version of MEASURED_VERSIONS) {
+    const column = measuredColumnFor(version);
+    if (column === undefined) {
+      gaps.push(
+        version + " is listed as measured but resolves to no column — measure it before listing it",
+      );
+      continue;
+    }
+    for (const label of labels) {
+      if (typeof column[label] !== "boolean") {
+        gaps.push(version + " column has no value for " + label);
+      }
+    }
+    for (const key of Object.keys(column)) {
+      if (!labels.includes(key)) {
+        gaps.push(version + " column has a row for no case: " + key);
+      }
+    }
+  }
+  expect(
+    gaps,
+    "adding a pi version without measuring it must fail here rather than pass quietly",
+  ).toEqual([]);
+
+  // And the pi actually installed must be one this file knows how to place.
+  expect(
+    measuredColumnFor(INSTALLED_PI_VERSION),
+    "the installed pi must have a measured column; an unknown version fails, never skips",
+  ).toBeDefined();
+});

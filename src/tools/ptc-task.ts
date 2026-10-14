@@ -29,8 +29,9 @@
  * factory layer only.
  */
 
-import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { defineCompatTool } from "./pi-compat-types.ts";
+
 import { Type } from "typebox";
 import type { Static } from "typebox";
 import type { ChildProcessLifecycle } from "../runtime/child-process-lifecycle.ts";
@@ -214,7 +215,7 @@ function formatTaskLine(record: TaskRecord): string {
  * registry's own error (it throws rather than returning a silent empty list).
  */
 export function createPtcTaskListTool(registry: TaskRegistry): AnyTool {
-  return defineTool({
+  return defineCompatTool({
     name: "ptc_task_list",
     label: "PTC Task List",
     description: [
@@ -454,7 +455,7 @@ const OUTPUT_OUTPUT_SCHEMA = Type.Object({
  * facts. An unknown `taskId` is an explicit error, never a silent empty result.
  */
 export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputStorage): AnyTool {
-  return defineTool({
+  return defineCompatTool({
     name: "ptc_task_output",
     label: "PTC Task Output",
     description: [
@@ -615,7 +616,7 @@ export function createPtcTaskStopTool(
     throw new TypeError("createPtcTaskStopTool: lifecycle is required");
   }
   const clock = options.clock ?? (() => Date.now());
-  return defineTool({
+  return defineCompatTool({
     name: "ptc_task_stop",
     label: "PTC Task Stop",
     description: [

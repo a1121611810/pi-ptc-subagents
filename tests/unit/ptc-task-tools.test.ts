@@ -54,6 +54,7 @@ import {
   type PtcTaskStopDetails,
 } from "../../src/tools/ptc-task.ts";
 import type { ChildReport } from "../../src/runtime/child-report.ts";
+import { readStructuredContent } from "../helpers/pi-compat-probe.ts";
 // Aliased on import: the describe block below is about the RENDERER, and a local alias keeps the
 // assertions reading as renderer assertions rather than reaching through a tool-execution harness.
 import { renderChildReport as renderChildReportForTest } from "../../src/tools/ptc-task.ts";
@@ -206,9 +207,17 @@ async function callTool<TDetails>(
   };
 }
 
-/** The `structuredContent` of one successful call — the value pi hands a codemode script. */
+/**
+ * The `structuredContent` of one successful call — the value pi hands a codemode script.
+ *
+ * Read through `readStructuredContent` rather than off the call's own return type: pi 0.86.0 types
+ * `AgentToolResult` without the field (#192, #195), so this is one of the sites the shared seam
+ * exists for. The widening is invisible here — `callTool` already declares the property
+ * `structuredContent?: unknown` — so this edit is about there being ONE place that widens rather
+ * than than each file re-deriving why it may.
+ */
 async function callStructured<T>(tool: AnyTool, params: unknown): Promise<T> {
-  return (await callTool(tool, params)).structuredContent as T;
+  return readStructuredContent(await callTool(tool, params)) as T;
 }
 
 function textOf(result: { content: Array<{ type: string; text?: string }> }): string {

@@ -5,11 +5,7 @@
  * the real dispatcher and a real worker, exactly as the model's call would.
  */
 import { expect, test } from "vitest";
-import type {
-  AgentToolResult,
-  ExtensionToolContext,
-  ToolDefinition,
-} from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { PtcToolDetails } from "../src/tools/common.ts";
 import { createPtcWorkflowTool } from "../src/tools/workflow.ts";
 import { captureRegisteredTools, RUN_TIMEOUT_MS, toolContext } from "./helpers/ptc.ts";
@@ -28,7 +24,7 @@ function call(
   params: { meta?: unknown; script: string; args?: unknown },
   extra: { signal?: AbortSignal; cwd?: string } = {},
 ): Promise<AgentToolResult<PtcToolDetails>> {
-  const ctx: ExtensionToolContext = toolContext(extra.cwd ?? process.cwd());
+  const ctx = toolContext(extra.cwd ?? process.cwd());
   const meta = params.meta ?? { name: "test workflow", description: "integration test workflow" };
   return tool.execute(
     "call-1",
