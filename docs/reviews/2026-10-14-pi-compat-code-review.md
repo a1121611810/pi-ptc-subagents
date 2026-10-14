@@ -49,6 +49,25 @@ Four of those five are the same defect: **tests that pass whether the feature wo
 3. **The comment asserting an invariant is a claim, not decoration.** Three of them were wrong,
    and the only reason is that measurement contradicted them.
 
+## Round 2 — the five blocking items, verified closed
+
+Every item below was re-checked by mutating the code the fix guards and watching a NAMED test turn
+red. A fix without that evidence is not a closure (see `AGENTS.md`, review discipline), so the
+counterfactual is the record:
+
+| item              | mutation                           | result                                                                           |
+| ----------------- | ---------------------------------- | -------------------------------------------------------------------------------- |
+| X1 pump guard     | drop `exitCode === 0 ? …`          | RED — `an exit-0 close with a truncation warning … is NOT labelled a truncation` |
+| X1 registry order | move the `stderrDiagnostic` branch | RED (already pinned)                                                             |
+| X2 forwarding     | `stderr: stderrText` → `undefined` | RED — `exit 1 + pi's truncation line …`                                          |
+| X3 tilde rewrite  | delete the `~` branch              | RED — `a bare ~ becomes the home directory` + 2 differential tests               |
+| B1 allowlist      | delete the entry                   | the matrix refuses to run and names the file (`exit 2`)                          |
+| B2 catch          | delete the whole catch             | RED — `the real binding table caps a builtin that REJECTS`                       |
+
+A second pass over X1 found one more gap of the same kind: the pump's new guard existed but no
+test failed without it. It does now (row 1), which is why the row is in this table rather than
+assumed.
+
 ## Open, deliberately
 
 - **`peerDependencies` still declares `>=0.86.0` while the measured capability floor is 0.99.0.**
