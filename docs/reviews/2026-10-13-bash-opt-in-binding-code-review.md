@@ -94,10 +94,15 @@ tell a comment from a fact.
 
 ## Anchors
 
-- **Round 2** — `scripts/PROTOTYPE-optin-e2e.sh`, two arms against a real `pi` 1.1.0 subprocess with
-  a real model, differing only in `~/.pi/agent/ptc.json`. 2/2: `tools.bash` refused without the
-  opt-in, actually executed with it. The suite drives the binding table directly; this asked a model
-  to call the binding.
+- **Round 2** — a throwaway harness, two arms against a real `pi` 1.1.0 subprocess with a real
+  model, differing only in `~/.pi/agent/ptc.json`. 2/2: `tools.bash` refused without the opt-in,
+  actually executed with it. The suite drives the binding table directly; this asked a model to
+  call the binding.
+
+  It is at `scripts/PROTOTYPE-optin-e2e.sh` on `prototype/bash-opt-in-e2e`, not on `main`: a real
+  model call, a local `pi`, a built `dist/` and a local `auth.json` — none of which CI has, so it
+  is an anchor and not a gate.
+
 - **Round 4** — the same prototype re-run against the rebuilt `dist/`: **2/2 arms matched**. Without
   `ptc.json` the model was refused `bash` and told what _was_ bound (`read`, `edit`, `write`,
   `pi.dispatch`); with `{ "optInBindings": ["bash"] }` the same program executed and returned the
