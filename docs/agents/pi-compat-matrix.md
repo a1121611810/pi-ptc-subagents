@@ -105,7 +105,37 @@ trees by `run-surface-matrix.mjs`; measured 2026-10-14). Fourteen versions times
 | failing tools.bash REJECTS, capped at 2000 chars, exit code kept | pass (throw channel) | pass (isError channel) |
 | pi.dispatch refuses unknown agent without spawning               | pass                 | pass                   |
 | ptc_task_list / ptc_child_report / renderers                     | pass                 | pass                   |
-| subagents branch (pair at codemode reach + ptc_subagent)         | n/a (no codemode)    | pass                   |
+| subagents branch (independent; driven with subagents inputs)     | pass x4              | pass x10               |
+
+### The subagents branch is INDEPENDENT - it exists on every version
+
+An earlier draft of this section recorded the subagents branch as "n/a - no codemode" on the
+pre-codemode versions. That was a PROBE error, not a fact: it conflated two independent things.
+The branch is selected by `detectedSurfaceMode` (ptc-mode.ts:1127), a pure function of three
+probe answers - presence, switch, activation - and none of those is "which pi is running".
+What varies per version is one INPUT: presence, read off the real pi entry by
+`probeCodemodePresence`. The decision (and the registration it produces) is this package own code
+and must be exercised on every version by feeding it the inputs that select it.
+
+Measured with `surface-decision-probe.mjs` across all 14 trees: driving the decision with
+subagents-selecting inputs yields "subagents" on EVERY version, and on every version that
+resolves to registering `ptc_subagent` with `ptc_run_code` at `codemode` reach:
+
+| version                           | presence (read from real pi) | decision with subagents inputs | driven by the real pi | ptc_subagent registered |
+| --------------------------------- | ---------------------------- | ------------------------------ | --------------------- | ----------------------- |
+| 0.86.0 / 0.86.1 / 0.87.0 / 0.87.1 | not-found (no codemode dir)  | subagents x4                   | full x4               | true x4                 |
+| 0.99.0 - 1.2.0                    | found                        | subagents x10                  | subagents x10         | true x10                |
+
+The last two columns are the honest split. The decision resolves "subagents" on all 14 because
+the decision is ours; it only resolves "subagents" WHEN DRIVEN BY THE REAL PI on 0.99.0+, because
+only those pis have a codemode directory for the presence input to find. On 0.86.x/0.87.x the
+real-pi inputs correctly land on "full" - the package own PTC face - which is the surface
+convention working, not a missing branch.
+
+Probe finding recorded: `detectedSurfaceMode` is not re-exported from the built dist (only the
+factory-level `detectSurfaceMode` is), so a probe must drive it through that seam - which is what
+this measurement does, and is the reason an earlier probe substituted the presence check for the
+decision check.
 
 The two pre-codemode columns are the point, verified: with no codemode the package registers
 its OWN PTC face as direct, /ptc works, programs run, and the only N/A is the subagents branch -
