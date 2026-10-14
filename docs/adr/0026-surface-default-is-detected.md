@@ -255,7 +255,7 @@ accept this for now", which is a decision and should not live only in a review l
      ("retry idempotence") is accurate, and it is now measured rather than asserted.
    - **No collision.** Two children with different task ids in one directory get two distinctly named
      files. Same id is the idempotence case above, and is unreachable from the normal path:
-     `sessionId` is the freshly minted `taskId` (`dispatch.ts:1725`) and one task id is one TaskRecord.
+     `sessionId` is the freshly minted `taskId` (`dispatch.ts:1775`) and one task id is one TaskRecord.
    - **Not established by that measurement, and closed by a different argument:** where the child's
      output is _routed_ on our side. That is a different sink — `OutputStorage` and the subscription
      pipeline, ours — from the child's session file. The two do not interact, and the round-8

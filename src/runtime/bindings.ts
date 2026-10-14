@@ -316,20 +316,21 @@ const FAILURE_MESSAGE_MAX_CHARS = 2000;
  * channel the contract already describes, at the boundary, where the tool is called directly and
  * no agent loop exists to interpret `isError` for us.
  *
- * The same function caps the THROW channel (pi < 1.0.0, where a failing builtin rejects by
- * throwing with its own text): the binding's catch feeds this the error message, so both failure
+ * The same function caps the REJECT channel, which is NOT the pre-1.0.0-only path it looks like:
+ * `isError` arrived in 0.99.0 but only `bash` moved onto it, and every other builtin still rejects
+ * on every supported version. The binding catch feeds this the error message, so both failure
  * channels share one shape and one cap. The empty branch below is reachable there in principle —
- * a thrown Error with an empty message — which is why it returns a sentence rather than empty.
+ * an Error with an empty message — which is why it returns a sentence rather than empty.
  */
 export function bindingFailureMessage(toolName: string, text: string): string {
   const trimmed = text.trim();
-  // The empty branch is unreachable through the seven builtins today, and deliberately left
-  // untested rather than tested through a fabricated tool result: `bash` is the only one of them
-  // that sets `isError` (core/tools/bash.js:300) and it appends its status sentence
-  // unconditionally, so an `isError` result always carries text. A test for this branch would
-  // have to mock the thing it exists to constrain. The tail slice IS pinned —
-  // `binding-contract.test.ts` drives a >5000-char non-zero exit and asserts the leading marker is
-  // gone and the trailing one survives.
+  // Through the `isError` channel the empty branch is unreachable today: `bash` is the only
+  // builtin that sets it (core/tools/bash.js:300) and it appends its status sentence
+  // unconditionally, so an `isError` result always carries text. It is pinned through the THROW
+  // channel instead — a builtin rejecting with an empty Error, whose catch feeds this the
+  // message. The tail slice is pinned on both channels: `binding-contract.test.ts` drives a
+  // >5000-char non-zero exit and asserts the leading marker is gone and the trailing one
+  // survives, and `bindings.test.ts` drives a rejecting `ls` through the real table.
   if (trimmed.length === 0) return `${toolName} reported a failure with no message`;
   const body =
     trimmed.length <= FAILURE_MESSAGE_MAX_CHARS
@@ -376,14 +377,14 @@ export function createBuiltinBindings(options: CreateBuiltinBindingsOptions): Bi
           arguments: args,
         } as unknown as ToolCallLike;
         const validated = validateToolArguments(tool, toolCall);
-        // The throw channel and the `isError` channel carry the same cap: pi < 1.0.0 has no
-        // `isError` non-throwing failure path (`AgentToolResult.isError` arrived in 1.0.0), so a
-        // failing builtin tool THROWS with its own text — measured on 0.86.1: a 5 KB failing bash
-        // output reaches this catch as a 5051-char message with the head intact, where 1.0.0+
-        // resolve through `isError` and the `if` below caps them. Without this catch the raw
-        // error crosses the wire unbounded and head-first, which is the failure shape ADR-0024's
-        // diagnostic discipline exists to prevent. On 1.0.0+ the catch is dead code — builtins
-        // resolve, they do not reject — so the branch costs nothing where it cannot fire.
+        // The reject channel and the `isError` channel carry the same cap. `AgentToolResult.isError`
+        // arrived in 0.99.0 and `bash` is the ONE builtin that moved onto it; the rest still
+        // REJECT, so this catch is not the pre-1.0.0-only path it was documented as. Measured on
+        // 0.86.1, 1.0.0 and 1.2.0: `ls`/`read`/`grep`/`find` reject for a bad path (ls.js:44
+        // `Path not found: …`), and a non-zero bash exit rejects with its full output on 0.86.1
+        // but resolves through `isError` on 1.0.0+. Without this catch that raw error crosses the
+        // wire unbounded and head-first — the failure shape ADR-0024's diagnostic discipline
+        // exists to prevent — on EVERY supported version, not only the old ones.
         let result: Awaited<ReturnType<typeof tool.execute>>;
         try {
           result = await tool.execute(toolCallId, validated as never, context.signal, undefined);

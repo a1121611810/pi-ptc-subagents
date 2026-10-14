@@ -514,15 +514,17 @@ describe("the contract is true of the runtime it describes", () => {
       "bash failed: ".length + "…".length + 2000,
     );
 
-    // The empty-text branch of `bindingFailureMessage` is deliberately NOT covered
-    // here, and the reason is measured rather than assumed: of the seven builtins on
-    // pi 1.0.0 only `bash` ever sets `isError` (`core/tools/bash.js`, the non-zero
-    // exit), and its text is `appendStatus(output, "Command exited with code N")`,
-    // which appends the sentence unconditionally -- the neighbouring test shows it
-    // arriving even from a command that prints nothing. The other six throw or
-    // resolve, never reaching the helper. So the branch is unreachable through the
-    // public seam, and a test for it would have to stand in a fake tool result, i.e.
-    // assert the helper against itself. Left unpinned on purpose.
+    // The empty-text branch of `bindingFailureMessage` is not reachable from HERE, and the
+    // reason is measured rather than assumed: of the seven builtins on pi 1.0.0 only `bash` ever
+    // sets `isError` (`core/tools/bash.js`, the non-zero exit), and its text is
+    // `appendStatus(output, "Command exited with code N")`, which appends the sentence
+    // unconditionally -- the neighbouring test shows it arriving even from a command that
+    // prints nothing. The other six resolve on this pi version, never reaching the helper.
+    //
+    // It IS pinned elsewhere, on the channel that reaches it: `tests/bindings.test.ts` drives the
+    // empty branch through the throw channel (a builtin rejecting with an empty Error on
+    // pi < 1.0.0, which the binding's catch feeds here). This file stays about the isError channel
+    // because that is the one it drives -- the two are the same branch reached two ways.
   });
 
   test("a failure message under the cap is not truncated at all", async () => {

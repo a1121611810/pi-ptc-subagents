@@ -55,12 +55,19 @@ test.skipIf(!distAvailable)(
       expect(decide(presence, sw, act), label).toBe(expected);
     }
 
-    // And it is total: no combination yields undefined or a third value.
+    // And it is total: every input combination yields one of the two named surfaces, never
+    // undefined and never a third value. Asserting that means excluding the alternatives one at
+    // a time: an accept-both membership test would also be true for a function that always
+    // answered "full", which is exactly what the four cases above already reject.
     for (const presence of [PRESENT, ABSENT]) {
       for (const sw of ["absent", "enabled", "disabled"]) {
         for (const act of ["active", "inactive"]) {
+          const label = `${presence.present}/${sw}/${act}`;
           const got = decide(presence, sw, act);
-          expect(["full", "subagents"], `${presence.present}/${sw}/${act}`).toContain(got);
+          // Two assertions rather than one membership test: the first rejects undefined, the
+          // second rejects every value that is neither surface, so a new one cannot slip in.
+          expect(got, label).not.toBeUndefined();
+          expect(got === "full" || got === "subagents", label + " => " + got).toBe(true);
         }
       }
     }

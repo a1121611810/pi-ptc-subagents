@@ -21,9 +21,12 @@ the binding contract, tool visibility).
    transitive `@earendil-works/*` family to the same version through `pnpm-workspace.yaml`.
 3. Installs with `--no-frozen-lockfile` (the repo's own lockfile is NOT copied — see below).
 4. Runs, in order: `tsc --noEmit` → `oxlint` → `oxfmt --check` → **build** → a
-   version-sensitive test subset → `verify-dist-render`.
+   version-sensitive test subset → **the throw-path leg** → `verify-dist-render`.
 5. Prints one row per step and exits non-zero if any step failed. Rows are per step, not a
-   single pass/fail, because a floor failure reads very differently from a regression.
+   single pass/fail, because a floor failure reads very differently from a regression. Rows come
+   in three states — `pass` / `skip` / `FAIL` — because one of them (`skip`, the throw-path leg
+   on any pi >= 0.99.0) is neither a pass nor a failure, and collapsing it into `pass` is the
+   defect this row exists to prevent (see [below](#the-last-two-rows-of-that-table-are-different-claims-and-only-one-of-them-runs)).
 
 ## Capability matrix — every published version from 0.86.0 to latest
 
@@ -103,9 +106,59 @@ trees by `run-surface-matrix.mjs`; measured 2026-10-14). Fourteen versions times
 | ADR-0011 skills section restored while narrowed                  | pass                 | pass                   |
 | PTC program: tools.read / tools.bash / write-read roundtrip      | pass                 | pass                   |
 | failing tools.bash REJECTS, capped at 2000 chars, exit code kept | pass (throw channel) | pass (isError channel) |
+| **that row's guard, as `compat:pi` runs it**                     | **pass**             | **skipped**            |
 | pi.dispatch refuses unknown agent without spawning               | pass                 | pass                   |
 | ptc_task_list / ptc_child_report / renderers                     | pass                 | pass                   |
 | subagents branch (independent; driven with subagents inputs)     | pass x4              | pass x10               |
+
+#### The last two rows of that table are different claims, and only one of them runs
+
+`pass (throw channel)` and `pass (isError channel)` are RESULTS of the prototype probe
+(`surface-probe.mjs`), which drives the real built dist per version. The row beneath them is
+what `pnpm run compat:pi` does with `tests/unit/bash-throw-cap-0861.test.ts`, and the two must
+not be read as the same measurement:
+
+- **On the 0.86.x leg: pass.** pi 0.86.x has no `isError` channel, so a failing builtin THROWS,
+  the guard's `skipIf` does not engage, and `bash-throw-cap-0861.test.ts` really executes the cap
+  assertion against the installed tree.
+- **On every leg >= 0.99.0: skipped, NOT a pass.** The installed pi resolves bash failures
+  through `isError`, so the throw path does not exist there; the file's first test skipIf's
+  itself out and reports 1 passed + 1 skipped. The cap is still covered on those versions - but
+  through the isError channel, by the probe row above, not by this guard.
+
+So the guard measures exactly one channel on exactly the versions that have it. A `skip` here
+is not a defect and does not turn the matrix red; a `skip` presented as a `pass` would be.
+
+This distinction is mechanical now, not a reading convention. `scripts/pi-compat-matrix.mjs`
+reports the leg as its own row with its own marker - `pass` / `skip` / `FAIL` - decided by
+re-running that one file with `--reporter=json` and reading the assertion's real status out of
+the machine report. The reason is printed on every run, and the summary line counts skipped
+legs explicitly:
+
+```
+  pass  1.2.0 tests
+  skip  1.2.0 throw-path leg (capped bash rejection)
+        SKIPPED - NOT A PASS: pi 1.2.0 resolves BASH failures through the isError channel, so the
+        bash throw path is unreachable there (the other builtins still reject on every version, and
+        the cap covering them is pinned by tests/bindings.test.ts in the default gate).
+        tests/unit/bash-throw-cap-0861.test.ts reports 1 passed + 1 skipped here; the bash-specific
+        leg is measured on the 0.86.x floor instead
+```
+
+and on the floor:
+
+```
+  pass  0.86.1 throw-path leg (capped bash rejection)
+```
+
+**Why this needed a mechanism rather than a doc note.** `bash-throw-cap-0861.test.ts` was NOT
+in the script's `VERSION_SENSITIVE_TESTS` list, so `compat:pi` had never run it at all while
+this table recorded a passing throw-channel row - a documented leg with zero executions behind
+it. List membership alone does not fix that, because on every version the matrix also measures
+(`1.0.0`, `1.2.0`) the guard skipIf's itself: a green `tests` row cannot distinguish "the cap
+held" from "the cap never ran". Hence both halves: the entry in the list, and a reported
+verdict. The script now also refuses to start if the entry is ever removed again (exit code 2,
+naming the file), because that is the exact failure mode that produced the wrong row.
 
 ### The subagents branch is INDEPENDENT - it exists on every version
 

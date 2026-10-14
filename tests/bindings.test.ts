@@ -315,13 +315,13 @@ test(
 );
 
 // ---------------------------------------------------------------------------
-// The THROW channel of the binding failure cap (pi < 1.0.0).
+// The THROW channel of the binding failure cap.
 //
-// On pi 0.86.x a failing builtin tool THROWS with its own text - AgentToolResult.isError
-// arrived in 1.0.0 - and the binding's catch feeds that message through the same
-// bindingFailureMessage the isError path uses. These tests pin the cap itself; the wiring
-// (that the real binding table applies it on a thrown tool failure) is asserted on the 0.86.1
-// leg of the compat matrix, where the throw path is reachable.
+// A builtin can fail by REJECTING or by RESOLVING with isError, and both must reach the program
+// as the same shape. The rejection path is reachable on EVERY supported pi, not only the pre-1.0.0
+// ones: measured on 0.86.1, 1.0.0 and 1.2.0, `ls`/`read`/`grep`/`find` reject for a bad path while
+// only `bash` moved its non-zero exit onto `isError` (0.99.0). The first test below drives a REAL
+// builtin through the REAL table, which is the only one of these that can see the catch.
 // ---------------------------------------------------------------------------
 
 test("bindingFailureMessage caps a thrown failure past the cap: head dropped, tail and exit code kept", () => {
@@ -362,12 +362,138 @@ test("a thrown Error with an empty message still yields a sentence, never empty"
   expect(bindingFailureMessage("bash", "   ")).toBe("bash reported a failure with no message");
 });
 
-test("both failure channels produce identical wording for identical text (one cap, one shape)", () => {
-  // The whole point of routing the throw channel through bindingFailureMessage: a 5 KB failure
-  // cannot have two different shapes depending on which pi delivered it. Pin the equality, not
-  // just each side's length.
-  const toolText = "PTCHEAD0000" + "x".repeat(5000) + "PTCTAIL9999\n\nCommand exited with code 3";
-  const fromThrow = bindingFailureMessage("bash", toolText);
-  const fromIsError = bindingFailureMessage("bash", toolText);
-  expect(fromThrow).toBe(fromIsError);
-});
+test(
+  "the real binding table caps a builtin that REJECTS: the catch feeds bindingFailureMessage",
+  async () => {
+    /*
+     * The one test in this block that can see the catch, and the reason it is not just another
+     * bindingFailureMessage unit test.
+     *
+     * Every other test here calls the pure function, so they pass whether or not the wrapper
+     * has a catch at all: replacing the catch with a bare `await tool.execute(...)` leaves them
+     * all green. This one drives a REAL pi builtin through the REAL table, so it is red under
+     * exactly that edit.
+     *
+     * The path is `ls` on a name that does not exist, which rejects with "Path not found:
+     * <resolved>" (core/tools/ls.js:44) - an fs.exists check with no `rg`/`fd` binary in the
+     * path, so it does not depend on what happens to be installed on the machine. Measured on
+     * 0.86.1, 1.0.0 and 1.2.0: ls, read, grep and find all REJECT for a bad path, and only bash
+     * moved its non-zero exit onto isError (which arrived in 0.99.0). The old header here
+     * claimed the catch was only "reachable on the 0.86.1 leg" - that was wrong, and the compat
+     * matrix could not have caught it, because the matrix runs this same file on every version
+     * and this same path fires on all of them.
+     *
+     * Markers sit at both ends of the NAME so the assertion reads the cap shape (head dropped,
+     * tail kept) rather than a number read back out of the implementation. The length assertion
+     * is `<=` on purpose: the resolved absolute path contains the run temp dir, so the exact
+     * total is a property of the fixture rather than a constant to freeze here.
+     */
+    const HEAD_MARKER = "PTCHEAD0000";
+    const TAIL_MARKER = "PTCTAIL9999";
+    // Over the 2000-char cap once resolved against the temp cwd, so this is the over-cap leg.
+    const missingName = HEAD_MARKER + "-" + "-".repeat(2100) + "-" + TAIL_MARKER;
+
+    const dir = await makeTempDir();
+    try {
+      const bindings = createBuiltinBindings({ cwd: dir, names: ["ls"] });
+      const binding = bindings.get("ls");
+      if (binding === undefined) throw new Error("ls binding is missing");
+
+      let caught: unknown;
+      try {
+        await binding.execute({ path: missingName }, call);
+      } catch (error) {
+        caught = error;
+      }
+
+      expect(
+        caught,
+        "a rejecting builtin surfaces as a rejection, not a silent resolve",
+      ).toBeInstanceOf(Error);
+      const message = (caught as Error).message;
+      // The leading ellipsis IS the cap announcing itself: a message without it was never
+      // truncated, and a message keeping the head marker was not capped either.
+      expect(
+        message.startsWith("ls failed: \u2026"),
+        "the retained body is announced as truncated",
+      ).toBe(true);
+      expect(message, "the head is dropped, not the diagnostic").not.toContain(HEAD_MARKER);
+      expect(message, "the tail survives").toContain(TAIL_MARKER);
+      expect(
+        message.length,
+        "capped at the documented 2000 characters plus prefix",
+      ).toBeLessThanOrEqual("ls failed: ".length + 1 + 2000);
+
+      // The same channel under the cap: nothing is dropped. Without this, a cap of ~50 chars,
+      // which would satisfy every assertion above, would pass.
+      let shortCaught: unknown;
+      try {
+        await binding.execute({ path: "does-not-exist.txt" }, call);
+      } catch (error) {
+        shortCaught = error;
+      }
+      expect(shortCaught).toBeInstanceOf(Error);
+      expect((shortCaught as Error).message).toMatch(/^ls failed: Path not found: /);
+      expect((shortCaught as Error).message).toContain("does-not-exist.txt");
+      expect((shortCaught as Error).message, "under the cap nothing is dropped").not.toContain(
+        "\u2026",
+      );
+    } finally {
+      await removeTempDir(dir);
+    }
+  },
+  options,
+);
+
+test(
+  "a REJECTING builtin and an isError builtin produce one shape through the real table",
+  async () => {
+    /*
+     * The replacement for the tautology this file used to assert: it called
+     * bindingFailureMessage twice with the same two arguments and checked that the answers
+     * matched, which is true of every function and so pinned nothing. These are two SEPARATE
+     * real calls - one builtin that REJECTS (ls, the catch channel) and one that resolves with
+     * isError (bash non-zero exit, the only builtin on pi >= 0.99.0 to use it). If either
+     * channel stopped routing through bindingFailureMessage, or grew a prefix or cap of its own,
+     * the two messages would diverge here.
+     */
+    const dir = await makeTempDir();
+    try {
+      // `bash` is opt-in, so the surface is curated to name both: a curated list is honoured
+      // verbatim and takes the opt-in name at face value (the escape hatch #73 documents).
+      const bindings = createBuiltinBindings({ cwd: dir, names: ["ls", "bash"] });
+      const messageFor = async (name: string, args: Record<string, unknown>): Promise<string> => {
+        const binding = bindings.get(name);
+        if (binding === undefined) throw new Error(name + " binding is missing");
+        try {
+          await binding.execute(args, call);
+        } catch (error) {
+          return error instanceof Error ? error.message : String(error);
+        }
+        throw new Error(name + " resolved, but this test asked for a failure");
+      };
+
+      const fromReject = await messageFor("ls", { path: "does-not-exist.txt" });
+      const fromIsError = await messageFor("bash", { command: "echo out; exit 3" });
+
+      // One wrapper, one wording, one cap - measured on the two real channels rather than by
+      // calling one function twice with one input.
+      expect(fromReject).toMatch(/^ls failed: Path not found: /);
+      expect(fromIsError).toMatch(/^bash failed: out/);
+      for (const message of [fromReject, fromIsError]) {
+        expect(message.length, "one cap applies to both channels").toBeLessThanOrEqual(
+          "failed: ".length + 1 + 2000,
+        );
+        expect(message, "these fixtures are short, so neither is truncated").not.toContain(
+          "\u2026",
+        );
+      }
+      // Each channel reports the text of its own tool, so the sentences genuinely differ. The
+      // old test asserted the opposite by construction; this is the thing it never checked.
+      expect(fromReject).not.toBe(fromIsError);
+    } finally {
+      await removeTempDir(dir);
+    }
+  },
+  options,
+);

@@ -1384,7 +1384,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // explain why a generalist still gets the report tool.
     "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:115 -> src/index.ts:534":
       "createChildReportTool(ptcDepth > 0)",
-    "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:1127":
+    "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:1134":
       "export function detectedSurfaceMode(",
     "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:974":
       'getActiveTools().includes("codemode")',
@@ -1445,7 +1445,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     //  32  → 962→856  = decision-4 的 `if (surface.surfaceMode === "subagents" && !pi.getActiveTools()…`
     //  105 → 962→856  = 同一处（ADR-0029 正文第二次引用它）
     //  129 → 27 保持    = ` * ## Fail-safe on external loadout changes`，本轮未移动
-    "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:1127",
+    "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:1134",
     "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:974",
     "docs/adr/0029-surface-follows-codemode-activation.md:120 -> src/index.ts:974",
     "docs/adr/0029-surface-follows-codemode-activation.md:151 -> ptc-mode.ts:32",

@@ -518,6 +518,43 @@ export function backgroundDispatchConcurrencyLimitReached(): DispatchResult {
 }
 
 /**
+ * The stderr line pi's own print mode writes when the final response was cut off
+ * at the model's output token limit, captured verbatim from
+ * `@earendil-works/pi-coding-agent@1.2.0`'s `dist/modes/print-mode.js:126`:
+ *
+ * ```
+ * console.error("Response was truncated: the model reached its output token limit.");
+ * ```
+ *
+ * That release is also where the exit code changed: a truncated `-p` run used to
+ * exit 0 with its partial text, and 1.2.0 prints the partial text, writes this
+ * line to stderr, and exits 1. On pi <= 1.1.x the line never appears, so every
+ * reader of this constant is dead code there — the predicate below simply never
+ * fires, which is why no version gate is needed.
+ *
+ * Matched as a SUBSTRING, not a whole-line equality: pi may prefix or suffix it
+ * (a retry banner, a newline), and the diagnostic value is in the sentence, not
+ * in the surrounding bytes.
+ */
+export const PI_TRUNCATION_WARNING =
+  "Response was truncated: the model reached its output token limit.";
+
+/**
+ * The errorMessage a truncated child carries, or `undefined` when its stderr does
+ * not name truncation. Shared by the foreground `decideCloseOutcome` and the
+ * background `resolve-exit` path so the two fronts cannot disagree about wording.
+ *
+ * `stderr` may be empty on old pi, on a spawn failure, or from a lifecycle adapter
+ * that does not capture it; all three are the same `undefined`.
+ */
+export function truncationFailureMessage(stderr: string | undefined): string | undefined {
+  if (stderr === undefined || stderr.length === 0) return undefined;
+  return stderr.includes(PI_TRUNCATION_WARNING)
+    ? "child response was truncated at the model's output token limit (pi exited non-zero)"
+    : undefined;
+}
+
+/**
  * Inputs to {@link decideCloseOutcome}: the shape the child's `close` event
  * hands the host, distilled to the fields that drive the resolve decision.
  */
@@ -528,6 +565,16 @@ export interface CloseOutcomeInput {
   finalText: string;
   /** `true` when `ctx.signal` aborted before this close fired. */
   aborted: boolean;
+  /**
+   * The child's accumulated stderr, or `undefined` when the caller did not capture it.
+   *
+   * pi 1.2.0 labels a truncated print-mode run with a stderr warning AND exit 1;
+   * without this field such a close lands in the anonymous `rejected` branch and
+   * the model is told only that the dispatch failed. The information is not lost —
+   * the foreground `DispatchResult.stderr` carries the same bytes — but an
+   * errorMessage that names the cause is what a caller reads first.
+   */
+  stderr?: string;
 }
 
 /** Result of {@link decideCloseOutcome} — what the dispatcher commits to. */
@@ -547,8 +594,10 @@ export interface CloseOutcome {
  * Non-cancellation cases follow the original close-handler ladder:
  *   - exit 0 with final text → fulfilled
  *   - exit 0 without final text → rejected (the model never answered)
- *   - any other exit code → rejected, no errorMessage (spawn-error path labels
- *     its own failures with `failed to spawn pi: ...`)
+ *   - any other exit code → rejected; the errorMessage names a truncation when
+ *     the child's stderr does (pi 1.2.0's print mode), and is absent otherwise.
+ *     The spawn-error path labels its own failures with `failed to spawn pi: ...`
+ *     before this function runs, so it never reaches the catch-all.
  */
 export function decideCloseOutcome(input: CloseOutcomeInput): CloseOutcome {
   if (input.aborted) {
@@ -560,7 +609,8 @@ export function decideCloseOutcome(input: CloseOutcomeInput): CloseOutcome {
   if (input.exitCode === 0) {
     return { status: "rejected", errorMessage: "dispatch produced no final text" };
   }
-  return { status: "rejected" };
+  const truncated = truncationFailureMessage(input.stderr);
+  return { status: "rejected", ...(truncated === undefined ? {} : { errorMessage: truncated }) };
 }
 
 /**
@@ -1809,6 +1859,22 @@ async function dispatchBackground(
 
         const exitValue: ChildExitValue = await lifecycle.exit(handle);
         const exitCode = exitValue.code ?? -1;
+        // Captured here, not drained from events(): pi's JSONL carries assistant turns on
+        // stdout, and the one diagnostic that reaches a model-facing errorMessage from
+        // stderr is pi 1.2.0's print-mode truncation warning (see PI_TRUNCATION_WARNING).
+        // The foreground close handler reads the same buffer via the same method, so the
+        // two fronts cannot disagree about whether a close was a truncation.
+        const childStderr = await lifecycle.stderr(handle);
+        // The child's own stopReason: "error" still outranks it in the registry — a
+        // self-reported model failure is a better diagnosis than our stderr inference.
+        //
+        // Guarded on a NON-ZERO exit so the two fronts cannot disagree, which is what
+        // decideCloseOutcome already encodes: it returns "dispatch produced no final text"
+        // for an exit-0 close regardless of stderr, so computing the diagnostic here for
+        // an exit-0 close would hand the registry a reason the foreground refused to give.
+        // A truncated child on pi <= 1.1.x exits 0 with partial text and is NOT diagnosed
+        // as a truncation on either front — that is the shared rule, not a gap in one of them.
+        const stderrDiagnostic = exitCode === 0 ? undefined : truncationFailureMessage(childStderr);
 
         // ADR-0022 §3/§7: project the drained bytes onto the record and persist the raw text
         // so ptc_task_output can dereference outputRef. The preview is inlined only at or
@@ -1874,6 +1940,7 @@ async function dispatchBackground(
             outputBytes,
             outputPreview,
             childError,
+            ...(stderrDiagnostic === undefined ? {} : { stderrDiagnostic }),
           },
           { clock, callerId, logger },
         );
@@ -2216,7 +2283,15 @@ export async function dispatch(
           return;
         }
 
-        const { status, errorMessage } = decideCloseOutcome({ exitCode, finalText, aborted });
+        const { status, errorMessage } = decideCloseOutcome({
+          exitCode,
+          finalText,
+          aborted,
+          // Reuses the same capture the spawn-error check above read, so the adapter's
+          // stderr() is called exactly once per close. On pi 1.2.0 a truncated print-mode
+          // run lands here with a labelled errorMessage instead of the anonymous reject.
+          stderr: stderrText,
+        });
         finalize(status, errorMessage);
       } catch (err) {
         // The lifecycle adapter's events() / exit() / stderr() do not throw under

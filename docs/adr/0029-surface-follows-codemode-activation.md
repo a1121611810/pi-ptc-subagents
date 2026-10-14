@@ -26,7 +26,7 @@ chain runs:
 | ---------- | -------------------------------------------------------------- | ----------------------------------------------- |
 | presence   | `dist/extensions/codemode` exists                              | `probeCodemodePresence`                         |
 | switch     | no entry anywhere ⇒ `"absent"` ⇒ pi loads built-ins by default | `resolveCodemodeSwitch`                         |
-| ⇒ surface  | `subagents`                                                    | `detectedSurfaceMode` (`ptc-mode.ts:1127-1136`) |
+| ⇒ surface  | `subagents`                                                    | `detectedSurfaceMode` (`ptc-mode.ts:1134-1136`) |
 | activation | `codemode` registers with **`defaultActive: false`**           | `dist/extensions/codemode/index.js:26`          |
 | ⇒ loadout  | pi's default active names are `["read","bash","edit","write"]` | `settings-manager.js:35`                        |
 | ⇒ warning  | `getActiveTools()` has no `codemode`                           | `src/index.ts:974`                              |

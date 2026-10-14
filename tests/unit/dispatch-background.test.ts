@@ -804,6 +804,117 @@ describe("dispatch background pump", () => {
   });
 
   /**
+   * pi 1.2.0's print-mode truncation close, end to end through the real pump: the child exits 1
+   * with partial text and pi's stderr warning (`dist/modes/print-mode.js:126`), and the record
+   * names the cause in the foreground's own words. The stderr is planted through the mock
+   * adapter's `setStderr` seam — the same buffer the foreground close handler reads — so this
+   * drives the pump's ACTUAL capture, not the registry's handling of a hand-built command (that
+   * half lives in `task-registry.test.ts`).
+   *
+   * Counterfactual: deleting the `lifecycle.stderr(handle)` call in the background pump turns
+   * this red — the record reverts to an unlabelled `failed`, which is exactly the pi 1.2.0
+   * regression this exists to prevent.
+   */
+  test("a truncated child's stderr warning reaches the record through the real pump", async () => {
+    await withAgent(async (dir) => {
+      const h = createHarness({ start: 1000 });
+      const handle = asHandle(
+        await dispatch(
+          { agent: AGENT, task: "truncated", background: true, agentScope: "project" },
+          { callId: 23, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          h.deps,
+        ),
+      );
+
+      // pi 1.2.0 prints the partial text to stdout AND the warning to stderr, then exits 1.
+      h.lifecycle.pushEvent(h.lifecycle.handleAt(0), {
+        type: "message_end",
+        message: { role: "assistant", content: [{ type: "text", text: "partial answer" }] },
+      });
+      h.lifecycle.setStderr(
+        h.lifecycle.handleAt(0),
+        "Response was truncated: the model reached its output token limit.\n",
+      );
+      h.clock.set(1500);
+      h.lifecycle.resolveExit(h.lifecycle.handleAt(0), 1, null);
+
+      const record = await waitForTerminal(h.storage, handle.taskId);
+      expect(record.status).toBe("failed");
+      expect(record.exitCode).toBe(1);
+      expect(record.errorMessage).toBe(
+        "child response was truncated at the model's output token limit (pi exited non-zero)",
+      );
+      expect(h.slots.active).toBe(0);
+    });
+  });
+
+  /**
+   * The exit-0 half of the invariant, and the reason the pump computes its diagnostic behind an
+   * `exitCode !== 0` guard. The foreground's `decideCloseOutcome` answers an exit-0 close with
+   * "dispatch produced no final text" whatever the stderr says, so if the pump computed the
+   * diagnostic for an exit-0 close the two fronts would hand the model two different
+   * explanations of the same child.
+   *
+   * Counterfactual: dropping the guard in the pump turns this red.
+   */
+  test("an exit-0 close with a truncation warning in stderr is NOT labelled a truncation", async () => {
+    await withAgent(async (dir) => {
+      const h = createHarness({ start: 1000 });
+      const handle = asHandle(
+        await dispatch(
+          {
+            agent: AGENT,
+            task: "truncated but exited clean",
+            background: true,
+            agentScope: "project",
+          },
+          { callId: 40, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          h.deps,
+        ),
+      );
+
+      h.lifecycle.setStderr(
+        h.lifecycle.handleAt(0),
+        "Response was truncated: the model reached its output token limit.",
+      );
+      h.clock.set(1500);
+      // exit 0 with no assistant text: the foreground calls this "no final text".
+      h.lifecycle.resolveExit(h.lifecycle.handleAt(0), 0, null);
+
+      const record = await waitForTerminal(h.storage, handle.taskId);
+      expect(record.status).toBe("failed");
+      expect(record.errorMessage).toBe("dispatch produced no final text");
+    });
+  });
+  /**
+   * The counterfactual pair: the same close with stderr that does NOT name truncation stays
+   * unlabelled. A predicate that reported truncation for any non-zero close would pass the
+   * test above while lying about every other failure mode.
+   */
+  test("an unrelated non-zero close with stderr stays unlabelled through the real pump", async () => {
+    await withAgent(async (dir) => {
+      const h = createHarness({ start: 1000 });
+      const handle = asHandle(
+        await dispatch(
+          { agent: AGENT, task: "auth-failure", background: true, agentScope: "project" },
+          { callId: 24, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          h.deps,
+        ),
+      );
+      h.lifecycle.setStderr(
+        h.lifecycle.handleAt(0),
+        "Authentication failed for \"deepseek\". Run '/login deepseek' to re-authenticate.",
+      );
+      h.clock.set(1500);
+      h.lifecycle.resolveExit(h.lifecycle.handleAt(0), 1, null);
+
+      const record = await waitForTerminal(h.storage, handle.taskId);
+      expect(record.status).toBe("failed");
+      expect(record.errorMessage).toBeUndefined();
+    });
+  });
+
+  /**
    * A healthy child ends its turn with `stopReason: "stop"`, not `"error"`. Reading the
    * stopReason loosely would flip every successful child to `failed`; this guards against that
    * over-correction, and fails if `childAssistantError` stops checking the value.

@@ -12,6 +12,13 @@ The five canonical triage roles, used as label strings directly. See `docs/agent
 
 Single-context: one `CONTEXT.md` at the repo root and `docs/adr/` for ADRs. See `docs/agents/domain.md`.
 
+### pi compatibility matrix
+
+The package tracks pi releases and declares a peer range the default gate only measures one point
+of. `pnpm run compat:pi` runs the gate against the floor and the ceiling. See
+`docs/agents/pi-compat-matrix.md` — read it before touching the codemode probes, the binding
+contract, or the declared peer range.
+
 ## The website
 
 `packages/website/` is a second workspace member with **its own five checks and its own deployment**,

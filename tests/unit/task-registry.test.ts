@@ -828,6 +828,70 @@ describe("TaskRegistry.resolve-exit", () => {
   });
 
   /**
+   * pi 1.2.0's print-mode truncation close: exit 1, partial text, and the stderr line
+   * (`dist/modes/print-mode.js:126`) the pump now reads. The background record has to say WHY
+   * the child failed, in the same words the foreground `decideCloseOutcome` uses — a task and a
+   * dispatch that ended the same way must not carry two different sentences.
+   *
+   * Counterfactual: dropping `stderrDiagnostic` from the transition (or from
+   * `resolveExitErrorMessage`) turns this red, and the record goes back to an unlabelled
+   * `failed`.
+   */
+  test("a stderr truncation diagnostic reaches a failed record with the foreground's wording", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+
+    const resolved = await h.registry.transition(
+      {
+        kind: "resolve-exit",
+        taskId: TASK_1,
+        exitCode: 1,
+        outputBytes: 15,
+        outputPreview: "partial answer",
+        stderrDiagnostic:
+          "child response was truncated at the model's output token limit (pi exited non-zero)",
+        reportChannel: "none",
+      },
+      callContext(h, CALLER),
+    );
+
+    expect(resolved.record.status).toBe("failed");
+    expect(resolved.record.errorMessage).toBe(
+      "child response was truncated at the model's output token limit (pi exited non-zero)",
+    );
+  });
+
+  /**
+   * The precedence the pump relies on: the child's own stopReason error outranks the host's
+   * stderr inference. A child that said "429 rate limit" and then exited 1 must not be
+   * relabelled by a stderr heuristic — the child's diagnosis is the better one, and two
+   * competing errorMessage sources on one record would make the audit trail unreadable.
+   *
+   * Counterfactual: swapping the two checks in `resolveExitErrorMessage` turns this red.
+   */
+  test("childError outranks the stderr diagnostic when both arrive", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+
+    const resolved = await h.registry.transition(
+      {
+        kind: "resolve-exit",
+        taskId: TASK_1,
+        exitCode: 1,
+        outputBytes: 0,
+        childError: "child reported stopReason: error",
+        stderrDiagnostic:
+          "child response was truncated at the model's output token limit (pi exited non-zero)",
+        reportChannel: "none",
+      },
+      callContext(h, CALLER),
+    );
+
+    expect(resolved.record.status).toBe("failed");
+    expect(resolved.record.errorMessage).toBe("child reported stopReason: error");
+  });
+
+  /**
    * A model stop must not be relabelled by the new failure rule: the record's own reason lives
    * in `stopReason`, and writing `errorMessage` on a `canceled` task would replace an audit
    * trail nobody asked to have replaced.

@@ -1,11 +1,19 @@
 /**
  * The compat matrix's 0.86.1 leg: the bash binding's THROW path honors the failure-message cap.
  *
- * pi 0.86.x has no `AgentToolResult.isError` channel — a failing builtin THROWS — so the binding
- * wrapper's catch is the only thing standing between pi's raw failure text and the program. On
- * pi 1.0.0+ builtins resolve through `isError`, the catch is dead code, and this file has
- * nothing to measure: `test.skipIf` reports SKIPPED rather than passing silently (same
- * convention as `codemode-switch-differential.test.ts` for an absent oracle).
+ * pi 0.86.x has no `AgentToolResult.isError` channel (it arrived in 0.99.0), so a non-zero bash
+ * exit THROWS with its full output — the binding wrapper's catch is the only thing between pi's
+ * raw failure text and the program, and this file measures that it applies.
+ *
+ * On pi 1.0.0+ bash itself resolves through `isError`, so THIS file has nothing to measure there:
+ * `test.skipIf` reports SKIPPED rather than passing silently (same convention as
+ * `codemode-switch-differential.test.ts` for an absent oracle).
+ *
+ * Scope note, because it reads narrower than the truth: on pi 1.0.0+ the catch is NOT dead code.
+ * `bash` is the only builtin that moved onto `isError` — `ls`/`read`/`grep`/`find` still reject
+ * there, and the cap covers them on every supported version. That is pinned in
+ * `tests/bindings.test.ts` ("the real binding table caps a builtin that REJECTS"), which runs in
+ * the DEFAULT gate on every version; this file is the pi-version-specific leg for bash alone.
  *
  * Run as part of the compat matrix's version-sensitive subset (`pnpm run compat:pi`), where the
  * installed pi IS the version under test.

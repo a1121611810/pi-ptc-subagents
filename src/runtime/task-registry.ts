@@ -162,6 +162,12 @@ export type TaskCommand =
    * `DispatchResult` too, so making it optional at the persistence boundary would be the one
    * place a degradation could go unstated) but the pair is applied ONLY when this close resolves
    * `succeeded` — see {@link DefaultTaskRegistry}.
+   *
+   * `stderrDiagnostic` is the host's own stderr inference ({@link PI_TRUNCATION_WARNING},
+   * pi 1.2.0's print-mode truncation warning), carried separately from `childError` so the two
+   * sources keep their precedence: a child that reported its own failure wins, and the stderr
+   * inference is what a silent non-zero exit falls back to. The registry reads it only on the
+   * `failed` branch, exactly like `childError`.
    */
   | {
       kind: "resolve-exit";
@@ -171,6 +177,7 @@ export type TaskCommand =
       outputBytes?: number;
       outputPreview?: string;
       childError?: string;
+      stderrDiagnostic?: string;
       report?: ChildReport;
       reportChannel: ChildReportChannel;
     };
@@ -296,6 +303,11 @@ function resolveExitErrorMessage(
   // task as a failure would overwrite the audit trail with a diagnosis nobody asked for.
   if (to === "canceled" || to === "succeeded") return undefined;
   if (command.childError !== undefined) return command.childError;
+  // The host's own stderr inference (pi 1.2.0's truncation warning) outranks the bare
+  // "no final text" wording: it answers WHY the child went silent, which the generic
+  // sentence does not. Only reachable on a non-zero close, because the exit-0 branch
+  // above returns first — a truncated child on pi <= 1.1.x exits 0 and stays unlabelled.
+  if (command.stderrDiagnostic !== undefined) return command.stderrDiagnostic;
   if (command.exitCode === 0 && !producedText) return "dispatch produced no final text";
   return undefined;
 }

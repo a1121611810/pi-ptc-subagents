@@ -23,10 +23,19 @@
  */
 import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, test } from "vitest";
 import { readCodemodeSwitch } from "../../src/mode/ptc-mode.ts";
-import { makeTempDir, removeTempDir } from "../helpers/ptc.ts";
+import { removeTempDir } from "../helpers/ptc.ts";
+
+/**
+ * This repo's root, resolved once: the `measure()` harness plants its temp roots under
+ * `.scratch/` inside it so the `!` bucket's relative globs resolve against a FIXED depth.
+ * `import.meta.dirname` is the tests/unit directory, so the root is two levels up.
+ */
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 /**
  * `dist/core/package-manager.js` inside the installed pi, or `undefined` when it is not there.
@@ -258,7 +267,19 @@ async function measure(
   project: unknown,
   user: unknown,
 ): Promise<{ piLoads: boolean; ours: boolean }> {
-  const root = await makeTempDir("pi-ptc-diff-");
+  // The temp root sits under the repo's own `.scratch/` rather than the OS temp dir, and the
+  // reason is a defect the compat matrix caught rather than any review round: pi's `!` bucket
+  // matches `relative(baseDir, "builtin:codemode")` against relative globs such as `../**`, and
+  // HOW MANY `../` segments that produces depends on the DEPTH DIFFERENCE between the temp root
+  // and this file. Under `os.tmpdir()` the depth difference varies with where the checkout is
+  // cloned (measured: `../builtin:codemode` from a repo-local root, six `../` from a macOS temp
+  // dir), so the table's `!../**` expectation silently depended on the checkout's location — the
+  // same class as the field report whose verdict was decided by the developer's home directory.
+  // Under `.scratch/pi-ptc-diff-*/` the depth is one segment below this repo's root, always, on
+  // every machine and in the compat matrix's scratch copy. `.scratch/` is gitignored, and the
+  // directory is removed in the `finally` below like any other temp root.
+  const root = join(REPO_ROOT, ".scratch", "pi-ptc-diff-" + randomBytes(6).toString("hex"));
+  await mkdir(root, { recursive: true });
   try {
     await mkdir(join(root, ".pi"), { recursive: true });
     if (project !== undefined) {

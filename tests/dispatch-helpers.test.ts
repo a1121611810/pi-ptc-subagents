@@ -14,6 +14,8 @@ import {
   parseAgentEvent,
   parseAgentMarkdown,
   safeKill,
+  PI_TRUNCATION_WARNING,
+  truncationFailureMessage,
   type AgentConfigLike,
   type DispatchInput,
 } from "../src/runtime/dispatch.ts";
@@ -33,6 +35,23 @@ const spawnRecorder = vi.hoisted(() => ({
   }>,
   /** Set before a call to make the fake child fail to spawn instead of closing cleanly. */
   spawnError: undefined as Error | undefined,
+  /**
+   * How the NEXT fake child behaves: the bytes it writes to each pipe and the code it closes
+   * with. Consumed (and cleared) by the next `spawn`, so a test sets it, dispatches once, and
+   * every later test is back on the default close-0-no-output child.
+   */
+  nextChild: undefined as
+    | {
+        /** Written to `proc.stdout` as one chunk; parsed by the REAL adapter as JSONL. */
+        stdout?: string;
+        /** Written to `proc.stderr` as one chunk; accumulated by the REAL adapter. */
+        stderr?: string;
+        /** The `close` event's code. Defaults to 0. */
+        exitCode?: number;
+        /** The `close` event's signal. Omitted by default, matching the original mock. */
+        exitSignal?: NodeJS.Signals;
+      }
+    | undefined,
 }));
 
 vi.mock("node:child_process", async (importOriginal) => {
@@ -57,13 +76,22 @@ vi.mock("node:child_process", async (importOriginal) => {
     proc.kill = () => true;
     // Node reports an async spawn failure (ENOENT and friends) as `error` *before* `close`.
     const failure = spawnRecorder.spawnError;
+    // Consumed here so the next spawn starts from the default child, not this one's script.
+    const script = spawnRecorder.nextChild;
+    spawnRecorder.nextChild = undefined;
     queueMicrotask(() => {
       if (failure !== undefined) {
         proc.emit("error", failure);
         proc.emit("close", -2);
         return;
       }
-      proc.emit("close", 0);
+      // The order a real child produces: stdout data, then stderr data, then `close`. The REAL
+      // `RealChildProcessLifecycle` listens on exactly these three, so a dispatch driven through
+      // this seam exercises the production adapter and the production close handler rather than
+      // a mock standing in for them.
+      if (script?.stdout !== undefined) proc.stdout.emit("data", Buffer.from(script.stdout));
+      if (script?.stderr !== undefined) proc.stderr.emit("data", Buffer.from(script.stderr));
+      proc.emit("close", script?.exitCode ?? 0, script?.exitSignal ?? null);
     });
     return proc;
   };
@@ -686,6 +714,240 @@ describe("decideCloseOutcome", () => {
     const out = decideCloseOutcome({ exitCode: -1, finalText: "", aborted: false });
     expect(out.status).toBe("rejected");
     expect(out.errorMessage).toBeUndefined();
+  });
+
+  // --- pi 1.2.0's print-mode truncation close --------------------------------------
+  //
+  // pi 1.2.0 changed a truncated `-p` run from "exit 0 with partial text" to
+  // "exit 1 + a stderr warning + the partial text". The literal below is copied
+  // verbatim from `@earendil-works/pi-coding-agent@1.2.0`'s
+  // `dist/modes/print-mode.js:126` — the independent source the expectation rests
+  // on (testing-constraint #4), not a string this module invented.
+
+  test("exit 1 + pi's truncation stderr line → rejected with the cause named", () => {
+    const out = decideCloseOutcome({
+      exitCode: 1,
+      finalText: "partial answer",
+      aborted: false,
+      stderr: "Response was truncated: the model reached its output token limit.\n",
+    });
+    expect(out.status).toBe("rejected");
+    expect(out.errorMessage).toBe(
+      "child response was truncated at the model's output token limit (pi exited non-zero)",
+    );
+  });
+
+  test("the truncation line is matched as a substring, not a whole-line equality", () => {
+    // pi may prefix or suffix the sentence; the diagnostic value is the sentence itself.
+    const out = decideCloseOutcome({
+      exitCode: 1,
+      finalText: "",
+      aborted: false,
+      stderr:
+        "some banner\nResponse was truncated: the model reached its output token limit.\nmore",
+    });
+    expect(out.errorMessage).toBe(
+      "child response was truncated at the model's output token limit (pi exited non-zero)",
+    );
+  });
+
+  test("non-zero exit with OTHER stderr stays unlabelled (the counterfactual)", () => {
+    // The counterfactual for the branch above: a predicate that reported truncation for
+    // ANY non-zero close (or matched a looser word like "truncated" alone) would make
+    // this pass a lie. A provider error, an auth failure, a rate limit — none of them
+    // say this sentence, and none of them may be relabelled as one.
+    const out = decideCloseOutcome({
+      exitCode: 1,
+      finalText: "",
+      aborted: false,
+      stderr: "Authentication failed for \"deepseek\". Run '/login deepseek' to re-authenticate.",
+    });
+    expect(out.status).toBe("rejected");
+    expect(out.errorMessage).toBeUndefined();
+  });
+
+  test("undefined and empty stderr behave identically to the pre-1.2.0 shape", () => {
+    // pi <= 1.1.x never writes the line, and a lifecycle adapter may not capture
+    // stderr at all. Both must resolve exactly as before the field existed.
+    for (const stderr of [undefined, ""] as const) {
+      const out = decideCloseOutcome({ exitCode: 1, finalText: "", aborted: false, stderr });
+      expect(out.errorMessage, "stderr: " + JSON.stringify(stderr)).toBeUndefined();
+    }
+  });
+
+  test("the truncation branch cannot upgrade a rejected close to fulfilled", () => {
+    // A truncated child still failed: pi exited 1. The branch only names the cause,
+    // it never changes the status — that is what makes it safe to ignore for callers
+    // that only branch on status.
+    const out = decideCloseOutcome({
+      exitCode: 1,
+      finalText: "partial answer",
+      aborted: false,
+      stderr: "Response was truncated: the model reached its output token limit.",
+    });
+    expect(out.status).toBe("rejected");
+  });
+
+  test("the truncation line is inert on a fulfilled close (exit 0 wins)", () => {
+    // On pi <= 1.1.x a truncated run exits 0 with partial text. If the stderr line ever
+    // appeared there (it does not today), the exit-0 branch must still win: a close that
+    // produced text is a fulfilment, not a failure to diagnose.
+    const out = decideCloseOutcome({
+      exitCode: 0,
+      finalText: "partial answer",
+      aborted: false,
+      stderr: "Response was truncated: the model reached its output token limit.",
+    });
+    expect(out.status).toBe("fulfilled");
+    expect(out.errorMessage).toBeUndefined();
+  });
+});
+
+describe("truncationFailureMessage", () => {
+  // The shared predicate both fronts read, tested on its own so the wording contract
+  // is pinned where it lives rather than through decideCloseOutcome's copy of it.
+  test("the exported constant IS pi's own line, byte for byte", () => {
+    // The one assertion that keeps this from drifting into a paraphrase: if pi ever
+    // rewords the sentence, this literal must be re-measured, and this test is where
+    // that shows up (testing-constraint #4 — the expectation names its source).
+    expect(PI_TRUNCATION_WARNING).toBe(
+      "Response was truncated: the model reached its output token limit.",
+    );
+  });
+
+  test("recognises the sentence anywhere in the buffer, returns the shared wording", () => {
+    expect(truncationFailureMessage("noise\n" + PI_TRUNCATION_WARNING + "\n")).toBe(
+      "child response was truncated at the model's output token limit (pi exited non-zero)",
+    );
+  });
+
+  test("returns undefined for absent, empty, and unrelated stderr", () => {
+    expect(truncationFailureMessage(undefined)).toBeUndefined();
+    expect(truncationFailureMessage("")).toBeUndefined();
+    // A near-miss that a word-level match would take: the full sentence is the claim.
+    expect(truncationFailureMessage("Response was truncated.")).toBeUndefined();
+    expect(truncationFailureMessage("the model reached its output token limit.")).toBeUndefined();
+  });
+});
+
+/**
+ * The FOREGROUND close handler's wiring, driven through the production adapter.
+ *
+ * `decideCloseOutcome` is heavily unit-tested above, and every one of those tests calls it
+ * DIRECTLY. That left the seam between the real close handler and the function untested: deleting
+ * `stderr: stderrText` from the `decideCloseOutcome({...})` call at dispatch.ts:2287 left all 52
+ * tests in this file green, because the truncation sentence stops being forwarded only on the path
+ * that reads a child's actual stderr.
+ *
+ * So these tests drive `dispatch()` itself. The fake child is spawned through the
+ * `node:child_process` mock above, which means the REAL `RealChildProcessLifecycle` adapts it
+ * (stdout -> JSONL events, stderr -> the buffer, close -> exit value) and the REAL close handler
+ * decides the outcome. The truncation sentence asserted here is pi's own line, copied verbatim
+ * from `@earendil-works/pi-coding-agent@1.2.0` `dist/modes/print-mode.js:126` — the independent
+ * source (constraint #4).
+ *
+ * Counterfactual: replace `stderr: stderrText` with `stderr: undefined` in the close handler and
+ * the first test goes red (`errorMessage` becomes `undefined`); nothing else here changes.
+ */
+describe("foreground close: the child's stderr reaches the outcome (production wiring)", () => {
+  /** pi 1.2.0's print-mode truncation warning, byte for byte (print-mode.js:126). */
+  const TRUNCATION_STDERR = "Response was truncated: the model reached its output token limit.\n";
+  /** The wording `truncationFailureMessage` produces, written out so this file is not reading the
+   * sentence back out of the function it is testing. */
+  const TRUNCATED_ERROR =
+    "child response was truncated at the model's output token limit (pi exited non-zero)";
+
+  /** An agent whose markdown parses, so `dispatch()` reaches the spawn. */
+  async function makeProject(dir: string, name: string): Promise<void> {
+    await mkdir(join(dir, ".pi", "agents"), { recursive: true });
+    await writeFile(
+      join(dir, ".pi", "agents", name + ".md"),
+      `---\nname: ${name}\n---\nYou probe.\n`,
+    );
+  }
+
+  test("exit 1 + pi's truncation line -> rejected with the cause named on the DispatchResult", async () => {
+    const dir = await makeTempDir();
+    try {
+      await makeProject(dir, "stderr-probe");
+      spawnRecorder.calls.length = 0;
+      // A partial answer, then the truncation warning on stderr, then exit 1 — pi 1.2.0's shape.
+      spawnRecorder.nextChild = {
+        stdout:
+          JSON.stringify({
+            type: "message_end",
+            message: { role: "assistant", content: [{ type: "text", text: "partial answer" }] },
+          }) + "\n",
+        stderr: TRUNCATION_STDERR,
+        exitCode: 1,
+      };
+
+      const result = await dispatch(
+        { agent: "stderr-probe", task: "ping", agentScope: "project" },
+        { callId: 31, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+      );
+
+      // The whole point: this errorMessage exists ONLY because the close handler forwarded the
+      // captured stderr into decideCloseOutcome. Cut that forwarding and it is undefined.
+      expect(result.status).toBe("rejected");
+      expect(result.errorMessage, "the truncation cause reaches the caller").toBe(TRUNCATED_ERROR);
+      // The child's stderr is ALSO on the result, so the bytes themselves are not in doubt — the
+      // claim under test is that they reached the DECISION.
+      expect(result.stderr).toBe(TRUNCATION_STDERR);
+      // pi exited 1, so the child ran and failed (not a refusal): `started` stays true.
+      expect(result.started).toBe(true);
+      expect(result.exitCode).toBe(1);
+    } finally {
+      await removeTempDir(dir);
+    }
+  });
+
+  test("the same close WITHOUT the truncation line stays unlabelled (the counterfactual)", async () => {
+    const dir = await makeTempDir();
+    try {
+      await makeProject(dir, "stderr-probe");
+      spawnRecorder.calls.length = 0;
+      // A provider error on stderr instead: non-zero exit, real bytes, but a sentence that does
+      // not name truncation. A predicate wired to ANY stderr would pass the test above as a lie.
+      const authStderr =
+        "Authentication failed for \"deepseek\". Run '/login deepseek' to re-authenticate.\n";
+      spawnRecorder.nextChild = { stderr: authStderr, exitCode: 1 };
+
+      const result = await dispatch(
+        { agent: "stderr-probe", task: "ping", agentScope: "project" },
+        { callId: 32, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+      );
+
+      expect(result.status).toBe("rejected");
+      // Unlabelled: the run failed, but nothing in the bytes says why, so the honest answer is no
+      // errorMessage rather than a guess. This is the assertion that keeps the first test honest.
+      expect(result.errorMessage).toBeUndefined();
+      expect(result.stderr).toBe(authStderr);
+    } finally {
+      await removeTempDir(dir);
+    }
+  });
+
+  test("the truncation line cannot upgrade the close to fulfilled, or the status at all", async () => {
+    const dir = await makeTempDir();
+    try {
+      await makeProject(dir, "stderr-probe");
+      spawnRecorder.calls.length = 0;
+      // exit 0 wins over the warning, and the child produced no text: the answer is the
+      // "produced no final text" rejection, NOT the truncation sentence. Guards a reordering of
+      // the close handler's ladder, which the direct unit tests above cannot see.
+      spawnRecorder.nextChild = { stderr: TRUNCATION_STDERR, exitCode: 0 };
+
+      const result = await dispatch(
+        { agent: "stderr-probe", task: "ping", agentScope: "project" },
+        { callId: 33, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+      );
+
+      expect(result.status).toBe("rejected");
+      expect(result.errorMessage).toBe("dispatch produced no final text");
+    } finally {
+      await removeTempDir(dir);
+    }
   });
 });
 

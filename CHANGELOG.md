@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **A failing PTC binding now reports a bounded diagnostic on every supported pi version.** The
+  binding wrapper catches a builtin tool that REJECTS and routes the failure text through
+  `bindingFailureMessage`, the same 2000-character tail-kept cap the `isError` channel already
+  used. Measured per pi version: `ls` / `read` / `grep` / `find` reject for a bad path on
+  0.86.1 through 1.2.0 — only `bash` moved onto `AgentToolResult.isError` (which arrived in
+  0.99.0). Before this, a rejected builtin crossed the boundary with pi's raw, head-first error
+  text, unbounded. The per-binding contract text is unchanged: a failing call still REJECTS.
+- **A truncated child response is now named instead of silently rejected.** pi 1.2.0 changed print
+  mode so a response cut off at the model's output token limit exits 1 rather than 0. The
+  foreground `DispatchResult` and the background `TaskRecord` now both carry an explicit message for
+  that close, and neither front labels an exit-0 close as a truncation — so the two cannot
+  disagree about the same child.
+
+### Added
+
+- **`detectedSurfaceMode` is re-exported from the built package.** The surface decision (the pure
+  function behind which orchestration face this package registers) was reachable only from the
+  source module, so no artifact-level test or probe could drive it directly. Its four input
+  combinations are now pinned against `dist`.
+- **`pnpm run compat:pi`** measures this package's gate against more than one pi version (floor,
+  pinned, ceiling), reports each step separately, and prints the version-specific legs as a
+  third state so a skipped leg is never mistaken for a passing one. See
+  [docs/agents/pi-compat-matrix.md](docs/agents/pi-compat-matrix.md).
+
+### Documentation
+
+- Measured capability and feature-surface matrices across all 14 published pi versions from
+  0.86.0 to 1.2.0, with the corrected finding that the capability floor is **0.99.0**, not 1.0.0.
+
 ## [3.0.0] - 2026-10-14
 
 ### Changed
@@ -131,6 +164,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   binding list itself is unchanged, and `powershell` is currently not reachable from PTC
   programs even when enabled (tracked separately).
 
+[3.0.0]: https://github.com/a1121611810/pi-ptc-subagents/compare/v2.1.0...v3.0.0
+[Unreleased]: https://github.com/a1121611810/pi-ptc-subagents/compare/v3.0.0...HEAD
 [2.1.0]: https://github.com/a1121611810/pi-ptc-subagents/compare/v2.0.3...v2.1.0
 [2.0.3]: https://github.com/a1121611810/pi-ptc-subagents/compare/v2.0.2...v2.0.3
 [2.0.2]: https://github.com/a1121611810/pi-ptc-subagents/compare/v2.0.1...v2.0.2
@@ -259,6 +294,7 @@ exposure` over `pi-coding-agent@0.86.1`'s `dist/` returns nothing, and so does
   cannot move it.
 
 [2.0.0]: https://github.com/a1121611810/pi-ptc-subagents/compare/v1.6.0...v2.0.0
+[Unreleased]: https://github.com/a1121611810/pi-ptc-subagents/compare/v3.0.0...HEAD
 
 ## [1.6.0] - 2026-10-08
 

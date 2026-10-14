@@ -42,7 +42,9 @@
  * restriction is left alone too — see `decideModeEntry`.
  */
 import { readFileSync, realpathSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, dirname, join, relative, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { minimatch } from "minimatch";
 import {
   BUILTIN_BINDING_NAMES,
@@ -331,6 +333,52 @@ const CODEMODE_BUILTIN_ENTRY = "builtin:codemode";
  * Sources, pi 1.0.0: `matchesAnyPattern` at `dist/core/package-manager.js:473-493`,
  * `normalizeExactPattern` / `matchesAnyExactPattern` at `:496-517`. The `SKILL.md` branch of both is
  * omitted because a built-in path never has that basename.
+ *
+ * pi **1.2.0** wraps the pattern in `normalizePath` before it is posixised — measured at
+ * `dist/core/package-manager.js:483` (`matchesAnyPattern`) and `:498`
+ * (`matchesAnyExactPattern`), with the helper at `dist/utils/paths.js:59-83`. 1.0.0 posixises the
+ * pattern directly. `normalizePath` rewrites three things this copy has to answer for: a bare
+ * `~` becomes the home directory, a leading `~/` becomes a path under it, and a `file://` URL
+ * becomes its path. Everything else (trailing slashes, `.` segments, the other tilde forms such
+ * as `~user` or `~*`) passes through untouched.
+ *
+ * The rewrite IS inert for the answer this copy produces — measured, not assumed, and the
+ * measurement had to use pi's own axes to see it. pi matches a built-in extension on the
+ * LITERAL string `builtin:codemode` (`BUILTIN_PATH_PREFIX + name`, `source-info.js:2`, applied
+ * at `package-manager.js:741-742`), with `baseDir` = `this.agentDir` for the USER array and
+ * `join(this.cwd, CONFIG_DIR_NAME)` for the PROJECT one (`:719-720`). So the three minimatch
+ * axes are `relative(baseDir, "builtin:codemode")` (a `..`-prefixed relative path),
+ * `"builtin:codemode"`, and `"builtin:codemode"` — none of which a rewritten pattern can name,
+ * because every tilde or `file://` rewrite produces an ABSOLUTE path and an absolute pattern
+ * matches neither a relative path nor the literal `builtin:codemode`. An earlier probe modelled
+ * the entry as `extensions/codemode/index.js` under `agentDir` and found two flipping shapes
+ * (`!~/.pi/**`, the fully-spelled extension path); that model was wrong about pi, and the 20
+ * tilde shapes re-probed against the real axes on both the USER and PROJECT buckets drift in
+ * zero of them.
+ *
+ * One observable difference the rewrite DOES introduce, and the mirror inherits deliberately: a
+ * malformed `file://` pattern now THROWS. Measured against pi 1.2.0's real resolver
+ * (`DefaultPackageManager.resolve` with a settings stub): `extensions: ["!file://~/x"]` dies with
+ * `TypeError: File URL host must be "localhost" or empty on darwin`, because `fileURLToPath`
+ * refuses a host it does not recognise and `~` is not one. 1.0.0 posixised the literal and matched
+ * nothing. The mirror throws through the same helper, which is the faithful answer — a settings
+ * file that malformed breaks pi itself, and this package must not answer a question pi never got
+ * to ask. That is the opposite direction from the `extensions: [42]` divergence recorded on
+ * `signedTargets` below: there pi never starts, so a softer answer costs nothing; here there is
+ * no session for one to matter to.
+ *
+ * Adopted unconditionally rather than gated on pi's `VERSION`: the copy exists to track the host
+ * this package runs under, and a copy that silently keeps 1.0.0's shape is the drift the
+ * differential test exists to catch. Inertness is a property of pi's current call site, not of
+ * this code — if pi ever matches a built-in on a path under `agentDir`, the rewrite starts to
+ * matter and `tests/unit/codemode-switch-differential.test.ts` is where that shows up.
+ *
+ * Exported so the rewrite is pinned where it is WRITTEN, not only through the answer it happens
+ * not to change: every test that reached this function went through `resolveCodemodeSwitch` and
+ * asserted `switch === "absent"` — correct whether the rewrite ran or not, so deleting BOTH tilde
+ * branches left them all green (review round 1, finding X3). It is therefore tested against pi's
+ * own `normalizePath` in `tests/unit/codemode-switch.test.ts`, and the resolver-level tests above
+ * are labelled as invariance for the reason given here.
  */
 
 /** pi's `toPosixPath` (`package-manager.js:79-81`). */
@@ -338,11 +386,25 @@ function toPosixPath(p: string): string {
   return p.split(sep).join("/");
 }
 
-/** pi's `normalizeExactPattern` (`:496-499`) — strips a leading `./` or `.\`, then posixises. */
+/**
+ * pi's `normalizePath` (`dist/utils/paths.js:59-83`), narrowed to the rewrite the matchers see:
+ * a bare `~`, a leading `~/`, and a `file://` URL. The options pi does not pass here (trim,
+ * unicode-space folding, `@`-prefix stripping, the win32 shell rewrite) are omitted because the
+ * call site leaves them unset — carrying them would be a second copy of behaviour nothing
+ * exercises. `homedir()` is read once per call, like pi's own default.
+ */
+export function normalizePatternPath(pattern: string): string {
+  if (pattern === "~") return homedir();
+  if (pattern.startsWith("~/")) return join(homedir(), pattern.slice(2));
+  if (pattern.startsWith("file://")) return fileURLToPath(pattern);
+  return pattern;
+}
+
+/** pi's `normalizeExactPattern` (`:496-499`, 1.2.0: with `normalizePath`) — strips a leading `./` or `.\`, then posixises. */
 function normalizeExactPattern(pattern: string): string {
   const stripped =
     pattern.startsWith("./") || pattern.startsWith(".\\") ? pattern.slice(2) : pattern;
-  return toPosixPath(stripped);
+  return toPosixPath(normalizePatternPath(stripped));
 }
 
 /** pi's `matchesAnyPattern` (`:473-493`), minus the `SKILL.md` branch. */
@@ -355,7 +417,7 @@ function matchesAnyPattern(
   const name = basename(filePath);
   const filePathPosix = toPosixPath(filePath);
   return patterns.some((pattern) => {
-    const normalized = toPosixPath(pattern);
+    const normalized = toPosixPath(normalizePatternPath(pattern));
     return (
       minimatch(rel, normalized) ||
       minimatch(name, normalized) ||
