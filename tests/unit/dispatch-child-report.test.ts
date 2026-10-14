@@ -212,6 +212,62 @@ function installedAgentSession(): string {
   return file !== "" && existsSync(file) ? readFileSync(file, "utf8") : "";
 }
 
+/**
+ * The measured shape, pinned against a source that is NOT a measurement of pi's source.
+ *
+ * **Why this exists, in the measured detail.** Every other assertion in this file relates one
+ * measurement to another, and measurements that all lie in the same direction satisfy every
+ * relationship between them. The channel-1 and activation arms each re-derive their own
+ * measurement, which catches a mutant that moves one axis — and no more than that.
+ *
+ * The counterfactual that measures the limit: DAMAGE THE ORACLE. Delete every
+ * `structuredContent` token from the installed `dist/core/agent-session.js` and re-run. Both arms
+ * of channel 1 stay GREEN, because the damage simply moves the test onto the other arm, whose
+ * assertions are about a pi that lacks the field — which is what the damaged pi now is. Measured on
+ * pi 1.0.0: 59 passed with the token deleted. The same edit DOES turn
+ * `tests/unit/surface-subagents-execution-layer.test.ts` red, at its "the three fields arrived in
+ * pi 0.99.0 together" record, because that file pairs the shape against pi's OWN version string.
+ *
+ * **So the same oracle damage is caught in this repo, and not in this file — until this test.**
+ * The version string is the independent source (constraint 4) that the probes cannot move: it is
+ * pi's own `package.json`, not a reading of pi's behaviour. Both fields arrived together in 0.99.0,
+ * so a pi claiming `>= 0.99.0` and reporting a field absent is a shape no measured version has.
+ *
+ * **The gap this closes is specific.** A regression in pi's emitter would be caught by that other
+ * file, but a regression in THIS package's probe — a matcher widened into a constant, or a walk that
+ * resolves the wrong tree — is invisible to it, because the other file calls the same helper. Here
+ * the comparison is against a source the helper never reads, which is the only kind that survives a
+ * helper that lies consistently.
+ *
+ * Nothing is conditionally asserted: `>= 0.99.0` and `< 0.99.0` are both outright claims, and an
+ * unmeasurable install reports `"unknown"`, which satisfies neither and so goes red rather than
+ * passing on an absent measurement.
+ */
+const INSTALLED_PI_VERSION = ((): string => {
+  if (PI_DIR === undefined) return "unknown";
+  try {
+    const manifest = JSON.parse(readFileSync(join(PI_DIR, "package.json"), "utf8")) as {
+      version?: string;
+    };
+    return manifest.version ?? "unknown";
+  } catch {
+    // An unparseable manifest is an absent measurement, and an absent measurement must not be
+    // laundered into a pass by defaulting to a version that would satisfy these assertions.
+    return "unknown";
+  }
+})();
+
+/** Whether pi's OWN version claims the 0.99.0 gate — numeric, so a 1.10.0 is not read as older. */
+const VERSION_IS_AT_LEAST_0_99_0 = ((): boolean => {
+  const match = /^(\d+)\.(\d+)\.(\d+)/.exec(INSTALLED_PI_VERSION);
+  if (match === null) return false;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  const patch = Number(match[3]);
+  if (major !== 0) return major > 0;
+  return minor > 99 || (minor === 99 && patch >= 0);
+})();
+
 // ---------------------------------------------------------------------------
 //  Fixtures
 // ---------------------------------------------------------------------------
@@ -1121,18 +1177,75 @@ describe("the report tool channel", () => {
   });
 
   // -------------------------------------------------------------------------
-  //  The two version-sensitive surfaces. Both tests are REGISTERED UNCONDITIONALLY —
+  //  The three version-sensitive surfaces. All tests are REGISTERED UNCONDITIONALLY —
   //  no `skipIf`, and no `if (has) { test } else { test }` around the registrations — so
   //  neither tree reports a skip and neither can silently pass the other's assertion.
   //
-  //  Each arm RE-DERIVES its probe from the INSTALLED FILE, not from the probe's return value, and
-  //  that distinction is load-bearing — found by RUNNING the counterfactual rather than reasoning
-  //  about it. A guard that re-derives by calling `probePiCapabilities()` a second time is
-  //  SELF-PROVING: a probe whose matcher was mutated returns the mutated answer every time.
-  //  Measured — forcing `structuredContentOnTheWire` and `defaultActiveRead` to `true` on the
-  //  0.86.0 floor left all 59 tests in this file GREEN under exactly that guard. Reading pi's own
-  //  emitter back here closes it: the oracle is a file no edit to the probe can move.
+  //  Each arm RE-DERIVES its measurement from the INSTALLED FILE, not from the probe's return
+  //  value, and that distinction is load-bearing — found by RUNNING the counterfactual rather
+  //  than reasoning about it. A guard that re-derives by calling `probePiCapabilities()` a
+  //  second time is SELF-PROVING: a probe whose matcher was mutated returns the mutated answer
+  //  every time. Measured — forcing `structuredContentOnTheWire` and `defaultActiveRead` to
+  //  `true` on the 0.86.0 floor left all 59 tests in this file GREEN under exactly that guard.
+  //  Reading pi's own emitter back here closes that half: the oracle is a file no edit to the
+  //  probe can move.
+  //
+  //  **The limit of re-derivation, also measured rather than asserted.** Rewriting a probe's
+  //  BODY to `return true` is self-proving, and so is re-asserting the constant the `if` selects
+  //  on. The counterfactual that counts is damaging the ORACLE itself — and doing so to THIS
+  //  file, by deleting every `structuredContent` token from the installed
+  //  `dist/core/agent-session.js`, left all 59 tests GREEN on pi 1.0.0. The damage does not break
+  //  a test here; it MOVES this file onto the other arm, whose assertions are about a pi that
+  //  lacks the field — which is exactly what the damaged pi now is. Re-derivation catches a mutant
+  //  that moves ONE axis; it cannot catch one that moves the whole install consistently.
+  //
+  //  The test that DOES catch it is the third surface below, and its mechanism is named in its
+  //  own comment: pi's OWN version string, which no probe reads and no single edit moves along
+  //  with them. That same oracle edit does turn
+  //  `tests/unit/surface-subagents-execution-layer.test.ts` red at its "the three fields arrived
+  //  in pi 0.99.0 together" record — this file simply did not hold the independent source, so
+  //  nothing in it was falsifiable from outside. That gap is what the third surface closes.
   // -------------------------------------------------------------------------
+
+  test("the measured channel shape matches the version pi itself declares", () => {
+    // COUNTERFACTUAL (constraint 5), and the one assertion in this file that is not a
+    // measurement-against-a-measurement. Both fields arrived together in pi 0.99.0 and are absent
+    // below it, so pi's own `package.json` says which shape is correct — and unlike every other
+    // input this file reads, it is not something the shared helper can be wrong about.
+    //
+    // **What it catches, concretely.** A widened matcher in the helper (bare-substring instead of
+    // the emitter's construction, which reads TRUE on the floor), a walk resolving the wrong tree,
+    // or an emitter that stops forwarding while its version string still claims 1.x. Any of those
+    // breaks the pairing below; none of them is caught by either arm's re-derivation, because each
+    // arm reads the same damaged tree.
+    //
+    // Asserted on BOTH ends of the declared range and unconditionally: `unknown` satisfies neither
+    // side, so an unmeasurable install goes RED here rather than passing on an absent
+    // measurement. Nothing below is wrapped in a branch, which is what keeps it F2-clean.
+    expect(
+      {
+        version: INSTALLED_PI_VERSION,
+        atLeast099: VERSION_IS_AT_LEAST_0_99_0,
+        structuredContentOnTheWire: SHARED.structuredContentOnTheWire,
+        defaultActiveRead: SHARED.defaultActiveRead,
+      },
+      "the 0.99.0 fields arrived together, so a pi claiming >= 0.99.0 must report BOTH and one claiming < 0.99.0 must report NEITHER - and a version string cannot be moved by the same edit that moves a probe, which is what makes this the only falsifier from outside the helper",
+    ).toEqual({
+      version: INSTALLED_PI_VERSION,
+      atLeast099: VERSION_IS_AT_LEAST_0_99_0,
+      structuredContentOnTheWire: VERSION_IS_AT_LEAST_0_99_0,
+      defaultActiveRead: VERSION_IS_AT_LEAST_0_99_0,
+    });
+    // The version string comes from the SAME install the probes measured, or the pairing above
+    // would compare one tree's behaviour against another's version. `PI_DIR` is exactly what
+    // `probePiCapabilities` walked from this file's own directory, so this is the assertion that
+    // the walk and the read resolved one package root — the one failure that would make the
+    // pairing above vacuously TRUE rather than merely wrong.
+    expect(
+      INSTALLED_PI_VERSION,
+      "the probes and this version string must describe ONE install, not two",
+    ).not.toBe("unknown");
+  });
 
   test("CHANNEL 1 — the report arrives on structuredContent wherever the installed pi carries it", async () => {
     // The tool's own return value, on every measured pi: `defineTool` is the identity function in

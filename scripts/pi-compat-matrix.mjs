@@ -26,17 +26,20 @@
  *    `--no-frozen-lockfile` (the point is a different resolution than the pin).
  * 3. Runs, in order: `tsc --noEmit`, `oxlint`, `oxfmt --check`, a version-sensitive test subset
  *    (or the whole suite with `--full`), `vp pack`, and `verify-dist-render`.
- * 4. Reports PER STEP, not as one pass/fail. The floor can fail typecheck without it being a
- *    regression: pi 0.86.x has no `ToolDefinition.outputSchema` and no `ToolExposure` (both
- *    arrived in 1.0.0, see ADR-0028 and ADR-0025), so 9 type errors on 0.86.1 are the declared
- *    range being wider than the real floor, not code that used to work breaking. A version row
- *    that cannot even install is still reported, never silently skipped.
+ * 4. Reports PER STEP, not as one pass/fail, so a failure on one version is legible as
+ *    "this pi does not support it" instead of "we regressed". As of 2026-10-14 the floor itself
+ *    is green: this package typechecks on 0.86.0 (0 errors), on 0.86.1 (0) and on 0.99.0 (0), so
+ *    no step is expected to fail. The capability gap is real but lives BELOW typecheck — pi 0.86.x
+ *    has no `ToolDefinition.outputSchema`, no `ToolExposure` and no `isError` channel (all
+ *    arrived in 0.99.0; see ADR-0028 and ADR-0025), which is why the throw-path leg below is the
+ *    one row that reads `skip` rather than `pass` on the upper versions. A version row that
+ *    cannot even install is still reported, never silently skipped.
  *
  * ## Usage
  *
  *   node scripts/pi-compat-matrix.mjs                 # the default list below
  *   node scripts/pi-compat-matrix.mjs 1.2.0           # one version
- *   node scripts/pi-compat-matrix.mjs 0.86.1 1.2.0 --full
+ *   node scripts/pi-compat-matrix.mjs 0.86.0 1.2.0 --full
  *
  * Adding a version when pi ships one: add it to PI_COMPAT_VERSIONS. The floor stays — it is the
  * claim `peerDependencies` makes, and the one this script exists to test.
@@ -50,13 +53,20 @@ import { join } from "node:path";
 /**
  * The matrix. Order matters for the report only; every entry is measured independently.
  *
- * - 0.86.1 — the oldest release the package's own docs describe as supported; the closest
- *   reachable point to the `>=0.86.0` floor (0.86.0 itself is not on npm).
+ * - 0.86.0 — the LITERAL lower bound of `peerDependencies` (`">=0.86.0"`), so the matrix
+ *   measures the claim the package makes rather than a stand-in for it. 0.86.0 is published on
+ *   npm (checked 2026-10-14: the 0.8x/0.9x series is 0.80.1 … 0.86.0, 0.86.1, 0.87.0, 0.87.1,
+ *   0.99.0 …), which is why the list can name it directly.
  * - 1.0.0 — the `devDependencies` pin, i.e. what the default gate already measures.
  * - 1.2.0 — the newest release at the time this script was written; move this forward (and add
  *   intermediates when a bisect would help) as pi ships.
+ *
+ * The oldest entry is tied to the peer range's lower bound by
+ * `tests/unit/pi-compat-matrix.test.ts`, which PARSES that bound out of package.json and
+ * requires equality — so bumping `peerDependencies` without adding the matching leg here turns
+ * that test red rather than silently widening what the matrix claims to cover.
  */
-const PI_COMPAT_VERSIONS = ["0.86.1", "1.0.0", "1.2.0"];
+const PI_COMPAT_VERSIONS = ["0.86.0", "1.0.0", "1.2.0"];
 
 /** The three packages whose devDependency is rewritten per version. */
 const PI_PACKAGES = [

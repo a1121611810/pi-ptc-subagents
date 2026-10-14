@@ -31,9 +31,11 @@ the binding contract, tool visibility).
 ## Capability matrix — every published version from 0.86.0 to latest
 
 Probed 2026-10-14 across **all 14 published versions** (each installed into its own tree, then
-statically probed over the installed artifacts by
-`.scratch/prototype-pi086-runtime/capability-probe.mjs`; the 0.86.1 / 0.99.0 / 1.0.0 / 1.2.0
-columns additionally runtime-verified by `probe-runtime.mjs` loading the real built dist).
+statically probed over the installed artifacts by the throwaway probe
+`.scratch/prototype-pi086-runtime/capability-probe.mjs`; the 0.86.0 / 0.86.1 / 0.99.0 / 1.0.0 /
+1.2.0 columns additionally runtime-verified by `probe-runtime.mjs` loading the real built dist).
+Those probes are **one-off prototypes under `.scratch/`**, not tracked tooling — they are the
+evidence behind this table, and nothing in the gate depends on them still being there.
 
 | capability point                                           | 0.86.0 | 0.86.1 | 0.87.0 | 0.87.1 | 0.99.0 | 0.99.1 | 0.99.2 | 1.0.0 | 1.0.1 | 1.0.2 | 1.0.3 | 1.0.4 | 1.1.0 | 1.2.0 |
 | ---------------------------------------------------------- | ------ | ------ | ------ | ------ | ------ | ------ | ------ | ----- | ----- | ----- | ----- | ----- | ----- | ----- |
@@ -53,33 +55,44 @@ columns additionally runtime-verified by `probe-runtime.mjs` loading the real bu
 | `formatSkillsForPrompt` supports `"indirect"`              | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗     | ✗     | ✗     | ✗     | ✓     | ✓     | ✓     |
 | published settings schema (`schemas/`)                     | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗     | ✗     | ✗     | ✗     | ✗     | ✗     | ✓     |
 | `--tools` keeps MCP tools unless `mcp__` entry             | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗     | ✗     | ✗     | ✗     | ✓     | ✓     | ✓     |
-| **this package typechecks**                                | ✗      | ✗      | ✗      | ✗      | **✓**  | ✓      | ✓      | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     |
+| **this package typechecks**                                | **✓**  | **✓**  | **✓**  | **✓**  | ✓      | ✓      | ✓      | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     |
 
 Three corrections this table forced, all caught by measuring instead of citing:
 
-1. **The capability floor is 0.99.0, not 1.0.0.** Every API this package's ADRs attribute to
-   "pi 1.0.0" (`isError`, `outputSchema`, `exposure`, the `structuredContent` forward,
-   codemode itself, MCP auto-enable) is already present in 0.99.0 — and our source typechecks
-   with ZERO errors against 0.99.0 (bisected: 0.87.1 = 9 errors, 0.99.0 = 0), and the runtime
-   probe passes on it. The ADRs' "1.0.0" citations name where the MEASUREMENTS were taken, not
-   where the API appeared.
-2. **0.86.x/0.87.x fail the gate but not the runtime.** Their gap is type-level only; the
-   built dist loads and the full surface registers on 0.86.1 (probed).
+1. **0.99.0 is where the capabilities APPEAR, not where this package starts working.** Every API
+   our ADRs attribute to "pi 1.0.0" (`isError`, `outputSchema`, `exposure`, the
+   `structuredContent` forward, codemode itself, MCP auto-enable) is already present in 0.99.0 and
+   absent below it. The ADRs' "1.0.0" citations name where the MEASUREMENTS were taken, not where
+   the API appeared. What those missing APIs cost us below 0.99.0 is recorded under "The < 1.0.0
+   (and 0.99.0) runtime note" below — a different thing from failing to compile.
+2. **0.86.0 is the declared floor and this package compiles and runs on it.** Measured 2026-10-14:
+   `tsc --noEmit` reports **0 errors** on 0.86.0, 0.86.1 and 0.87.1 (the three versions the peer
+   range and this matrix actually exercise), and `pnpm run compat:pi 0.86.0` passes every step —
+   install, resolved-version, typecheck, lint, fmt:check, build, tests, throw-path leg,
+   verify:dist. An earlier revision of this document recorded these versions as type-broken (9
+   errors on 0.86.1/0.87.1). That measurement was taken before #192 landed and no longer holds.
 3. **The 1.2.0-only features are smaller than the changelog suggests**: `normalizePath` on
    patterns, `reachesTools`, the `messageType` union, exit-1 truncation, and the published
    schemas — each inert or handled for this package (see the 1.2.0 section below).
 
 ### The gate and the declared floor
 
-pi 0.86.x/0.87.x fail typecheck with **9 errors in two classes** — `ToolExposure` not exported,
-`outputSchema`/`exposure`/`defaultActive` not on `ToolDefinition`, plus the same names reaching
-the tests (`ExtensionToolContext`, `AgentToolResult.structuredContent`). These are compile-time
-gaps; the runtime rows above pass there.
+`peerDependencies` declares `>=0.86.0`, and `compat:pi` measures that literal number — the
+matrix's oldest entry IS the parsed lower bound of the peer range, tied by an equality check in
+`tests/unit/pi-compat-matrix.test.ts` (it parses the range out of `package.json`; moving either
+side turns the test red). Measured 2026-10-14 on the 0.86.0 tree: **0 type errors**, every gate step
+passing, runtime surface registered and the built dist loading.
 
-**Conclusion: the real floor is 0.99.0, for the gate and for runtime alike.** The matrix reports
-the floor failure as a failing `typecheck` row instead of hiding it. Whether to narrow
-`peerDependencies` to `>=0.99.0` (matching reality) or keep `>=0.86.0` and document 0.86.x/0.87.x
-as installable-but-type-broken is a product decision this script deliberately does not make.
+So there is no gap between the declared floor and the measured floor. The `✗` cells in the 0.86.x
+/ 0.87.x columns of the table above are **capability absences, not defects**: pi below 0.99.0 has no
+`isError` channel, no `outputSchema`, no `ToolExposure`, no codemode and no
+`structuredContent` forward. This package compiles without them and its runtime behaviour on
+those versions is recorded in the two tables below. Read those cells as "pi does not offer this
+API", never as "we do not work here".
+
+Note that an earlier revision of this document concluded "the real floor is 0.99.0" and left
+open whether to narrow `peerDependencies` to match. That question is settled: `>=0.86.0` is both
+the claim and the measured truth, so the range stays.
 
 ### The 1.0.x → 1.2.0 finding: green, with upstream behaviours worth knowing
 
@@ -94,9 +107,11 @@ truncated response — is handled by `truncationFailureMessage` in `src/runtime/
 
 Static capability probes say what pi HAS; they do not say what this package DOES. That needs a
 second probe: drive the real built dist through factory + session_start + /ptc + a real PTC
-program, per version (destination `.scratch/prototype-pi086-runtime/surface-probe.mjs`, driven across all 14
-trees by `run-surface-matrix.mjs`; measured 2026-10-14). Fourteen versions times fifteen features =
-210 checks, all pass - including on the two type-broken 0.86.x/0.87.x versions:
+program, per version. That probe (`.scratch/prototype-pi086-runtime/surface-probe.mjs`, driven
+across all 14 trees by `run-surface-matrix.mjs`, measured 2026-10-14) is a throwaway `.scratch/`
+prototype, not tracked tooling - it is the evidence behind this table and nothing in the gate runs
+it. Fourteen versions times fifteen features = 210 checks, all pass - including on the four
+pre-0.99.0 versions, which are not type-broken:
 
 | feature                                                          | 0.86.0-0.87.1        | 0.99.0-1.2.0           |
 | ---------------------------------------------------------------- | -------------------- | ---------------------- |
@@ -120,7 +135,8 @@ not be read as the same measurement:
 
 - **On the 0.86.x leg: pass.** pi 0.86.x has no `isError` channel, so a failing builtin THROWS,
   the guard's `skipIf` does not engage, and `bash-throw-cap-0861.test.ts` really executes the cap
-  assertion against the installed tree.
+  assertion against the installed tree. Measured on the 0.86.0 leg of `compat:pi 0.86.0`:
+  `pass 0.86.0 throw-path leg (capped bash rejection)`.
 - **On every leg >= 0.99.0: skipped, NOT a pass.** The installed pi resolves bash failures
   through `isError`, so the throw path does not exist there; the file's first test skipIf's
   itself out and reports 1 passed + 1 skipped. The cap is still covered on those versions - but
@@ -145,10 +161,10 @@ legs explicitly:
         leg is measured on the 0.86.x floor instead
 ```
 
-and on the floor:
+and on the floor (`pnpm run compat:pi 0.86.0`, verbatim):
 
 ```
-  pass  0.86.1 throw-path leg (capped bash rejection)
+  pass  0.86.0 throw-path leg (capped bash rejection)
 ```
 
 **Why this needed a mechanism rather than a doc note.** `bash-throw-cap-0861.test.ts` was NOT
@@ -220,9 +236,11 @@ differs on a pre-codemode pi:
 
 Not a cost, worth stating so it is never re-classified as one: `structuredContent` is documented
 as not-sent-to-the-model, and on a pre-codemode pi the only programmatic caller (codemode) does
-not exist - so its absence is invisible to the model. Evidence: the prototype probe and its
-verdict (`.scratch/prototype-pi086-runtime/`, `VERDICT.md` v2; `probe-runtime.mjs` loads the
-real built dist against a real installed tree through a realpath-resolving module loader).
+not exist - so its absence is invisible to the model. Evidence: the throwaway prototype probe and
+its verdict (`.scratch/prototype-pi086-runtime/`, `VERDICT.md` v2; `probe-runtime.mjs` loads the
+real built dist against a real installed tree through a realpath-resolving module loader). That
+directory is a disposable prototype area, not tracked tooling - the lasting record is the two
+tables above.
 
 ## What the copy must include (each item is a measured failure)
 
@@ -264,9 +282,15 @@ first.
 ## Adding a version
 
 Add it to `PI_COMPAT_VERSIONS` in `scripts/pi-compat-matrix.mjs` **and add a column to the
-capability table above** (probe the installed tree with
-`.scratch/prototype-pi086-runtime/capability-probe.mjs` — one install, sixteen one-line answers).
-Keep the list ascending — a guard test (`tests/unit/pi-compat-matrix.test.ts`) pins the floor,
-uniqueness, and ordering. The floor stays: it is the claim `peerDependencies` makes. The
-capability table is the exhaustive version-by-version record; the script's list is the curated
-set the gate re-measures on demand.
+capability table above**. Probing the installed tree for that column means writing a probe of the
+kind left behind under `.scratch/prototype-pi086-runtime/` — one install, one line of answers per
+capability. Those prototypes are not tracked tooling and are expected to be disposable; the
+tracked artifact is the table row and the matrix entry.
+
+Keep the list ascending. `tests/unit/pi-compat-matrix.test.ts` pins ordering and uniqueness, and
+pins the drift invariant: the list's oldest entry must **equal** the lower bound parsed out of
+`package.json`'s `peerDependencies`. That is a deliberate asymmetry with the rest of the file —
+it PARSES the range (`>=0.86.0` -> `0.86.0`) and compares for equality, so raising the peer floor
+to `>=0.99.0` without adding the matching leg turns it red. The floor stays: it is the claim
+`peerDependencies` makes. The capability table is the exhaustive version-by-version record; the
+script's list is the curated set the gate re-measures on demand.

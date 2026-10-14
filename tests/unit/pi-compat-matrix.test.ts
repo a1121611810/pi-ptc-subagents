@@ -19,12 +19,43 @@ const rootPackage = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "ut
   scripts?: Record<string, string>;
 };
 
+/**
+ * The LOWER BOUND of the declared peer range, extracted by PARSING the range string.
+ *
+ * The drift guard below is only meaningful if it parses the range rather than looking for a
+ * substring of it: a containment check would keep passing after `peerDependencies` moved to a
+ * different floor, which is precisely the drift being guarded against. So this reads the operator
+ * off the front of each branch and returns the version that follows it — which is the lower bound
+ * for every operator this package has ever declared (`>=X`, `^X`, `~X` and a bare `X` all
+ * have X as their smallest satisfying version).
+ *
+ * OR-ed ranges (`>=0.86.0 || ^1.0.0`) take the SMALLEST satisfying branch, so widening the range
+ * in either direction cannot silently move the floor the guard compares against.
+ *
+ * Returns `null` for anything not modelled here (`>`, `<`, `|`, spaces, `x` wildcards, hyphen
+ * ranges). That is deliberate: the caller then FAILS LOUDLY rather than comparing against a
+ * guessed floor. A silently mis-parsed range is the exact failure this test exists to catch, so
+ * forcing a human decision beats guessing.
+ */
+function peerRangeFloor(range: string): string | null {
+  const branches = range.split("||").map((branch) => branch.trim());
+  const parsed = branches.map((branch) => {
+    const m = /^(>=|\^|~)?v?(\d+)\.(\d+)\.(\d+)$/.exec(branch);
+    return m ? `${m[2]}.${m[3]}.${m[4]}` : null;
+  });
+  if (parsed.some((version) => version === null)) return null;
+  return (
+    parsed
+      .filter((version): version is string => version !== null)
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))[0] ?? null
+  );
+}
+
 test("the default version list covers the declared peer range and is well-formed", () => {
-  // The floor is the claim peerDependencies makes; if the list stops containing it, the matrix
-  // no longer tests the range's lower end. Parsed out of the script source rather than imported,
-  // because the script is a .mjs entry point with no exports.
-  const floor = rootPackage.peerDependencies?.["@earendil-works/pi-coding-agent"];
-  expect(floor, "the package declares a pi peer range").toBeDefined();
+  // Ordering, non-emptiness and uniqueness only. Whether the list reaches the floor is the drift
+  // guard's job below, which is an EQUALITY check — see there for why that one is separate.
+  const range = rootPackage.peerDependencies?.["@earendil-works/pi-coding-agent"];
+  expect(range, "the package declares a pi peer range").toBeDefined();
   const match = /PI_COMPAT_VERSIONS = \[([^\]]*)\]/.exec(script);
   expect(match, "PI_COMPAT_VERSIONS is defined as an array literal").not.toBeNull();
   const versions = (match![1] ?? "")
@@ -35,12 +66,55 @@ test("the default version list covers the declared peer range and is well-formed
   expect(new Set(versions).size, "the list has no duplicate version").toBe(versions.length);
   const sorted = [...versions].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   expect(versions, "the list is ascending, so the report reads oldest to newest").toEqual(sorted);
-  const floorNum = floor!.replace(/[^0-9.]/g, "");
-  const oldest = sorted[0] ?? "";
+});
+
+test("DRIFT GUARD: the matrix's oldest version IS the peer range's lower bound", () => {
+  // The anti-drift claim of #196. It deliberately does NOT accept `oldest >= floor` and does NOT
+  // match the floor as a substring of the range: either would still be green after
+  // `peerDependencies` moved to `>=0.99.0`, which is exactly the drift. The floor is PARSED out
+  // of package.json and required to EQUAL the matrix's oldest entry, so moving EITHER side — the
+  // peer floor, or the list — turns this red.
+  //
+  // Counterfactual (measured, reported on #196): editing `peerDependencies` to ">=0.99.0" and
+  // leaving PI_COMPAT_VERSIONS alone fails here with oldest="0.86.0" vs floor="0.99.0".
+  const range = rootPackage.peerDependencies?.["@earendil-works/pi-coding-agent"];
+  expect(range, "the package declares a pi peer range").toBeDefined();
+  const floor = peerRangeFloor(range!);
+  expect(floor, 'the peer range ("' + range + '") parses to a lower bound').not.toBeNull();
+
+  const match = /PI_COMPAT_VERSIONS = \[([^\]]*)\]/.exec(script);
+  expect(match, "PI_COMPAT_VERSIONS is defined as an array literal").not.toBeNull();
+  const versions = (match![1] ?? "")
+    .split(",")
+    .map((s) => s.trim().replace(/^"|"$/g, ""))
+    .filter((s) => s.length > 0);
+
   expect(
-    oldest >= floorNum,
-    "the oldest measured version (" + oldest + ") honours the declared floor (" + floorNum + ")",
-  ).toBe(true);
+    versions[0] ?? "",
+    "the oldest measured version must equal the parsed peer floor (" + floor + ")",
+  ).toBe(floor);
+  expect(versions, "the peer floor is actually in the measured list").toContain(floor);
+});
+
+test("the floor parser is pinned, so the drift guard cannot pass on a mis-parse", () => {
+  // The guard above trusts `peerRangeFloor`, so the parser is pinned against literal range
+  // strings — the semver operators themselves are the source of truth, not a round trip through
+  // the parser. Changing the regex (e.g. dropping the `^` anchor, or letting a stray space pass)
+  // fails one of these.
+  expect(peerRangeFloor(">=0.86.0")).toBe("0.86.0");
+  expect(peerRangeFloor("^0.86.0")).toBe("0.86.0");
+  expect(peerRangeFloor("~1.0.0")).toBe("1.0.0");
+  expect(peerRangeFloor("1.0.0")).toBe("1.0.0");
+  expect(peerRangeFloor(">=1.2.3")).toBe("1.2.3");
+  // OR-ed ranges resolve to the SMALLEST satisfying branch, so widening cannot move the floor up.
+  expect(peerRangeFloor(">=0.86.0 || ^1.0.0")).toBe("0.86.0");
+  expect(peerRangeFloor("^1.0.0 || >=0.86.0")).toBe("0.86.0");
+  // Forms this parser does not model must be REJECTED (null), never approximated: comparing the
+  // guard against a guessed floor is the drift it exists to catch.
+  expect(peerRangeFloor(">0.86.0")).toBeNull();
+  expect(peerRangeFloor(">=0.86.0 <2.0.0")).toBeNull();
+  expect(peerRangeFloor("0.86.x")).toBeNull();
+  expect(peerRangeFloor("")).toBeNull();
 });
 
 test("the copy list carries every path the suite reads outside src and tests", () => {
