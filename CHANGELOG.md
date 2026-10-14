@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [3.0.0] - 2026-10-14
 
 ### Changed
 
@@ -21,10 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ```
 
   **Migration:** a program that calls `tools.bash(...)` and was relying on the default now fails with
-  `no binding named "bash"`. Either add the key above (restart pi to pick it up), or, for a
-  narrower change, pass an explicit `names` list to `createBuiltinBindings` — a caller-curated list
-  is honoured verbatim and needs no second key. The error names the bindings that _are_ available,
-  so the fix is readable from the refusal.
+  `no binding named "bash" in this run; available bindings: …`. Either add the key above (restart
+  pi to pick it up), or, for a narrower change, pass an explicit `names` list to
+  `createBuiltinBindings` — a caller-curated list is honoured verbatim and needs no second key. The
+  error names the bindings that _are_ available, so the fix is readable from the refusal.
 
   Two properties worth knowing: the opt-in is **separate from the session's tool set** — pi having
   `bash` enabled does not grant it, because "enabled" and "you agreed to give a model-written program
