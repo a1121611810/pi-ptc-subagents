@@ -10,6 +10,7 @@ import {
   DISPATCH_PARAMETERS,
   bindingFailureMessage,
 } from "../src/runtime/bindings.ts";
+import { DispatchSlotCounter, dispatch, type DispatchInput } from "../src/runtime/dispatch.ts";
 import { resolveBindingNames } from "../src/tools/common.ts";
 import { makeTempDir, removeTempDir, RUN_TIMEOUT_MS } from "./helpers/ptc.ts";
 
@@ -283,7 +284,97 @@ test("the read-only schema takes the two tiers and the short spelling, and refus
   expect(accepts({ mode: "strict" }), "an object spelling was considered and not shipped").toBe(
     false,
   );
+
+  /*
+   * The four rows that make the read-point guard in `dispatch()` necessary, asserted HERE rather
+   * than left as folklore. Each one is a value no tier implements, and each one is ACCEPTED.
+   *
+   * The `Type.Boolean()` branch is what accepts them: measured on this schema, `Type.Literal(true)`
+   * accepts the same four, so swapping the literal for a union of the two does not close it,
+   * while `Type.Literal("strict")` on its own rejects all four correctly. There is no declaration
+   * of this union that refuses them, which is why `isUsableReadOnlyRequest` exists at the read
+   * point instead — see the guard's doc comment for the measured coercion that follows.
+   *
+   * Expectations are pinned to the schema's own contract ("a boolean or one of the two tier
+   * literals"), so this row is falsified by tightening the schema too — which would be the fix
+   * nobody could find, stated here so the next reader looks.
+   */
+  expect(accepts(1), "the schema cannot tell 1 from true").toBe(true);
+  expect(accepts(0), "nor 0 from false").toBe(true);
+  expect(accepts("true"), 'nor "true" from true').toBe(true);
+  expect(accepts("1"), 'nor "1" from true').toBe(true);
 });
+
+test(
+  "dispatch() refuses a readOnly value that is not a tier instead of coercing it",
+  async () => {
+    /*
+     * The half the schema above cannot reach (ADR-0041 §Constraint compliance: "an invalid value is
+     * refused at the boundary rather than coerced").
+     *
+     * It is a `dispatch()` test and not a binding test on purpose. Through the binding, pi's
+     * validator COERCES these four values — measured, `readOnly: 1` arrives at `dispatch()` as
+     * `true` — so the binding seam cannot see this guard fire at all. `dispatch()` is exported and
+     * is what `createPtcSubagentTool` calls directly with its params cast to `DispatchInput`, and
+     * there nothing coerces: `1` is not a tier, `resolveReadOnlyTier` answers `undefined`, and the
+     * caller gets a full-capability child while having asked for read-only.
+     *
+     * COUNTERFACTUAL — the exact edit: delete the `isUsableReadOnlyRequest` guard at the top of
+     * `dispatch()`. Then `agent: "ghost"` is resolved instead of refused and the message below
+     * names the AGENT rather than the parameter. `ghost` is deliberate: it never resolves, so a
+     * build without the guard fails this row instead of launching a real `pi`, and the row stays a
+     * unit test on a file that stubs no process.
+     */
+    const dir = await makeTempDir();
+    try {
+      await mkdir(join(dir, ".pi", "agents"), { recursive: true });
+      await writeFile(
+        join(dir, ".pi", "agents", "probe.md"),
+        "---\nname: probe\n---\nYou probe.\n",
+      );
+      for (const bad of [1, 0, "true", "1", { mode: "strict" }, ["strict"]] as unknown[]) {
+        // Typed `as never` because the point of the test is a value the declared type forbids.
+        // Cast to `DispatchInput` rather than to `never`: the point of the row is a VALUE the
+        // declared type forbids, not a call the overload set cannot resolve. Casting the argument
+        // to `never` would also hide the return type, and `started` / `errorMessage` are the whole
+        // claim here.
+        const result = await dispatch(
+          {
+            agent: "ghost",
+            task: "t",
+            agentScope: "project",
+            readOnly: bad,
+          } as unknown as DispatchInput,
+          { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          { slots: new DispatchSlotCounter(8) },
+        );
+        // `JSON.stringify` for the object row and `String` for the primitives: the label has to
+        // be the value the caller sent, and Object's default stringification would print
+        // "[object Object]" for both object rows -- the same string twice, so the second row
+        // could pass on the first row's failure.
+        const label = typeof bad === "object" && bad !== null ? JSON.stringify(bad) : String(bad);
+
+        expect(result.status, `${label} is refused, not coerced`).toBe("rejected");
+        // ADR-0016 §3: the binding never throws, and this is the same seam.
+        expect(result.started, `${label} never launched a child`).toBe(false);
+        expect(result.errorMessage ?? "", "the refusal names the parameter").toContain("readOnly");
+        expect(result.errorMessage ?? "", "and the value the caller sent").toContain(label);
+        // The ordering claim, and the reason this assertion is here: the guard runs ABOVE agent
+        // resolution, so a caller fixing `readOnly` is told about `readOnly`.
+        expect(
+          result.errorMessage ?? "",
+          "and not about the agent, which was never looked up",
+        ).not.toContain("unknown agent");
+        // And the accepted values are named, so the refusal is actionable without reading our source.
+        expect(result.errorMessage ?? "").toContain("strict");
+        expect(result.errorMessage ?? "").toContain("lenient");
+      }
+    } finally {
+      await removeTempDir(dir);
+    }
+  },
+  options,
+);
 
 test(
   "the pi.dispatch binding validates arguments and refuses bad calls without throwing",

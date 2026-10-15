@@ -20,9 +20,10 @@ pi rather than inferred:
   gate that `setActiveTools` cannot widen past. A name that is not on the list is not declared to
   the model. So a narrowed child is reachable with one flag and no guard process.
 - pi has **no** permission mode, no read-only mode, no approval gate and no sandbox. Its own
-  security documentation records that it runs with the permissions of the account that started it,
-  that it does not ask for approval before each tool call, and that the absence of a built-in
-  sandbox is outside its security boundary.
+  security documentation — `docs/security.md` (pi upstream, `packages/coding-agent/docs/`) —
+  records that it runs with the permissions of the account that started it, that it does not ask
+  for approval before each tool call, and that the absence of a built-in sandbox is outside its
+  security boundary.
 
 Put together: a strict child is genuinely unable to write, and calling that a security boundary
 would be false.
@@ -44,16 +45,46 @@ Absent, `false` and any value outside the union behave as no tier. `true` is fol
 or compared. An unrecognised value is refused at the argument boundary rather than reaching the
 child as a tier nobody implements.
 
-**Call-site precedence is total.** A tier set on the call decides the tool list outright, and an
-agent definition's declared `tools:` is not consulted. The direction is the point: the caller asked
-for a mode, and a role that quietly reinstates a tool they removed would make the parameter a
-suggestion.
+**Call-site precedence is total for `strict`.** A strict tier set on the call decides the tool list
+outright, and an agent definition's declared `tools:` is not consulted. The direction is the point:
+the caller asked for a mode, and a role that quietly reinstates a tool they removed would make the
+parameter a suggestion. `lenient` raises no precedence question, because it never reaches the tool
+list: the definition still decides it, exactly as for a dispatch with no tier, which is what
+byte-identical means.
 
-**No field reports which tier took effect.** Precedence being total, the requested tier and the
-applied tier are the same value in every reachable case — a valid tier is applied, an invalid one
-is refused at the boundary, and the report-contract interaction is visible in the definition the
-caller named. A result field could therefore only echo the caller's own input, and the background
-front would have had to carry that echo through the task record and the output tool to deliver it.
+**The tier that took effect is reported.** `DispatchResult` and `TaskRecord` both carry
+`readOnlyTier`, and the background front projects it to the caller as `read_only_tier`. It is
+present whenever a tier was requested and absent when none was, so an override is never silent.
+
+The value cannot differ from the request — a valid tier is applied, an invalid one is refused at
+the read point, and the report-contract interaction is visible in the definition the caller named
+— so **the field is an echo, and it is recorded as one rather than dressed up as a negotiation.**
+It earns its place on visibility, not on information: a caller who named a definition that
+declares `tools:` and also asked for strict has to be able to say which of the two decided the
+child's tools without re-deriving it from the agent roster. The cost is real — the field rides
+the task record and the output projection so the background front is not the one front that stays
+silent — and it was paid knowingly, after first deciding not to.
+
+### An invalid value is refused at the read point, not at the schema
+
+There is no schema this can be closed with, and the reason is worth recording because it is not
+what the schema suggests. pi's `validateToolArguments` does not refuse `1`, `0`, `"true"` or
+`"1"` against a union of `Type.Boolean()` with two string literals — and `Type.Literal(true)`
+accepts the same four, while `Type.Literal("strict")` rejects them. It **coerces** instead:
+`readOnly: 1` is handed onward as `true`, and `readOnly: 0` as `false`. So the schema cannot
+close the hole, and closing it in the schema would have looked like the fix while changing
+nothing.
+
+That makes the coercion's direction the actual hazard, and it cuts the way the caller least
+expects: `1` and `"true"` land on `strict`, which over-narrows but keeps the promise, while **`0`
+lands on no tier at all** — a full-capability child for a caller who asked to be read-only. The
+guard therefore lives in `dispatch()`, ahead of the background split so both fronts get it, and it
+refuses with the rejected `DispatchResult` the repo already uses rather than throwing, because
+ADR-0016 §3 requires the binding never throws.
+
+`undefined`, `null` and `false` stay usable. They are the three spellings of "I asked for
+nothing" and the spec keeps all of them; refusing them would refuse a valid request to be left
+alone.
 
 ### The strict set is derived, not a constant
 
@@ -73,9 +104,10 @@ strict _because_ it also takes away running things.
 ### Not a security boundary, in those words
 
 Nothing here contains a hostile child. A child is a model that may be wrong, not an attacker, and
-the tier reduces what a wrong child can do rather than what an adversary can. `docs/security.md`
-places the absence of a sandbox outside pi's boundary; this record extends the same statement to
-the narrowing, and any future change that needs a real boundary has to bring one rather than
+the tier reduces what a wrong child can do rather than what an adversary can. Pi's security
+documentation — `docs/security.md` (pi upstream, `packages/coding-agent/docs/`) — places the
+absence of a sandbox outside pi's boundary; this record extends the same statement to the
+narrowing, and any future change that needs a real boundary has to bring one rather than
 re-describe this.
 
 ### No guard extension, and no `--no-extensions`
@@ -95,6 +127,13 @@ enumerated anywhere in the model's prompt today, and this change does not make t
 binding contract states binding _result_ shapes and its second rule deliberately excludes
 arguments, so advertising a parameter list there means overturning a rule that is not about this
 parameter. Filed as follow-up work rather than smuggled in here.
+
+### The refusal row is tested below the e2e seam
+
+The e2e smoke harness calls `dispatch()` directly and so never reaches argument validation, which
+leaves one row of the behaviour matrix invisible from it: an unrecognised tier refused at the
+boundary. That row therefore lives in the boundary test (`tests/bindings.test.ts`) while every
+other behaviour stays in the e2e file — a fact about the seam, not a gap in the coverage.
 
 ## Consequences
 
@@ -118,5 +157,7 @@ parameter. Filed as follow-up work rather than smuggled in here.
   and a writing fix in one turn should not need two sessions. Rejected.
 - **The tier in agent-definition frontmatter.** Reinstates the wrong home this decision removes,
   and the parser's exact key set is pinned by an existing test. Rejected.
-- **Reporting the applied tier in the result.** An echo of the caller's own input, at the cost of
-  carrying it through the task record for the background front. Rejected.
+- **Reporting the applied tier in the result.** Decided against at first, on the grounds that the
+  value can only echo the caller's own input. Reversed: the field carries no information the
+  caller lacks, but it carries the one thing they would otherwise have to re-derive — that their
+  tier, not the definition, decided the child's tools.

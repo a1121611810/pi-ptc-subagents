@@ -249,8 +249,10 @@ export interface DispatchInput {
    *
    * Call-site precedence is TOTAL: a tier set here decides the child's tool list outright
    * and an agent definition's declared `tools:` is not consulted. Nothing can therefore
-   * arrive as a different tier than the one asked for, which is why there is no field
-   * reporting what took effect — such a field could only echo the caller's own input.
+   * arrive as a different tier than the one asked for. The result still reports what took
+   * effect ({@link DispatchResult.readOnlyTier}) — not because it could differ from this,
+   * but because an override nobody can read is an override that reads as "this agent
+   * declares tools: read, bash" when it did not.
    */
   readOnly?: boolean | ReadOnlyTier;
 }
@@ -277,6 +279,105 @@ export const READ_ONLY_TOOL_NAMES: readonly string[] = ["read", "grep", "find", 
 export function resolveReadOnlyTier(readOnly: DispatchInput["readOnly"]): ReadOnlyTier | undefined {
   if (readOnly === true) return "strict";
   return readOnly === "strict" || readOnly === "lenient" ? readOnly : undefined;
+}
+
+/**
+ * ADR-0041 §Constraint compliance: "an invalid value is refused at the boundary rather than
+ * coerced." The boundary check that cannot live in the schema.
+ *
+ * `unknown`, deliberately, and that is the whole reason this function exists. `readOnly` is
+ * declared `boolean | ReadOnlyTier`, but that is a compile-time claim about a value that reaches
+ * `dispatch()` over a seam the type does not govern. Measured against the schema this module
+ * declares (`Type.Optional(Type.Union([Type.Boolean(), Type.Literal("strict"),
+ * Type.Literal("lenient")]))`):
+ *
+ * - The union ACCEPTS `1`, `0`, `"true"` and `"1"`, and `Type.Literal(true)` accepts the same
+ *   four, so tightening the literal does not close it — only `Type.Literal("strict")` rejects
+ *   them, and a union of that with `Type.Boolean()` still takes the Boolean branch. There is no
+ *   schema this can be closed with.
+ * - `validateToolArguments` then COERCES rather than refuses: on the binding front `readOnly: 1`
+ *   is handed onward as `true`. That is the coercion the spec forbids, and it is the milder of
+ *   the two failures because it happens to land on a tier.
+ * - A caller that reaches `dispatch()` over the exported API is under no such coercion —
+ *   `createPtcSubagentTool` casts its params to `DispatchInput` and calls `dispatch()` directly
+ *   — and there `1` is not a tier at all. `resolveReadOnlyTier` returns `undefined`, no `--tools`
+ *   flag is emitted, and the caller gets a FULL-CAPABILITY child while having asked for
+ *   read-only: the silent failure `docs/testing-constraints.md` #3 exists to forbid, and the most
+ *   expensive kind, because the request was honoured by nobody and reported by nobody.
+ *
+ * `undefined`, `null` and `false` are USABLE, not invalid: they are the three spellings of "I
+ * asked for nothing" and the spec keeps all of them. Tightening them would refuse a request the
+ * spec calls valid.
+ */
+export function isUsableReadOnlyRequest(readOnly: unknown): boolean {
+  return (
+    readOnly === undefined ||
+    readOnly === null ||
+    typeof readOnly === "boolean" ||
+    readOnly === "strict" ||
+    readOnly === "lenient"
+  );
+}
+
+/**
+ * The refusal for a `readOnly` value no tier implements (ADR-0041 §Constraint compliance).
+ *
+ * A `DispatchResult`, never a throw: ADR-0016 §3 requires the binding never throws, and
+ * `dispatch()` is the binding's implementation. `started: false` puts it in the sub-call tree's
+ * `rejected` bucket (the harness said no), beside the depth and concurrency gates rather than
+ * beside a child that ran and failed.
+ *
+ * The message names the parameter, the value it received and the values it accepts, because the
+ * value the caller sent is the one thing it cannot see from the message otherwise — the same
+ * tone as {@link missingAgentResult}, which lists what IS registered for the same reason.
+ *
+ * `agentName: "unknown"`, matching the other pre-spawn gates: nothing was resolved, because
+ * nothing was looked up.
+ */
+export function invalidReadOnlyRequestResult(readOnly: unknown): DispatchResult {
+  // JSON for the containers and `String` for everything else, which is also what makes the value
+  // in the message the SAME string the caller's own input renders as -- `String(["strict"])` is
+  // "strict" while `JSON.stringify(["strict"])` is `["strict"]`, and only one of those two tells
+  // the caller which value was refused.
+  const rendered =
+    typeof readOnly === "object" && readOnly !== null ? JSON.stringify(readOnly) : String(readOnly);
+  return {
+    text: "",
+    status: "rejected",
+    started: false,
+    agentName: "unknown",
+    durationMs: 0,
+    exitCode: -1,
+    reportChannel: "none",
+    errorMessage:
+      "invalid readOnly value: " +
+      rendered +
+      ' (readOnly accepts true, false, "strict" or "lenient"; null and undefined ask for no tier)',
+  };
+}
+
+/**
+ * Stamp the tier that took effect onto a result the path produced (ADR-0041 §"The tier that
+ * took effect is reported").
+ *
+ * One helper rather than a field on each of the five refusal factories, for two reasons. The
+ * factories are shared with the background front and with `bindings.ts`, and threading a tier
+ * argument through every one of them would make "does a refusal state the tier" a per-call-site
+ * question. Here it is one call, and a refusal that forgets to call it is visible as a missing
+ * field rather than as a fourth spelling of the answer.
+ *
+ * Applied to refusals as well as outcomes on purpose: the value states the tier the CALL resolved
+ * to, and a refusal means no child was launched with it — not that a different tier was applied.
+ *
+ * A spread, never an assigned `undefined`: an explicitly-`undefined` key and an absent key are
+ * different things on this surface, and only the absent one keeps `readOnlyTier === undefined`
+ * from reading as "asked for nothing, tier unknown" — a claim nobody can act on.
+ */
+export function withReadOnlyTier(
+  result: DispatchResult,
+  tier: ReadOnlyTier | undefined,
+): DispatchResult {
+  return tier === undefined ? result : { ...result, readOnlyTier: tier };
 }
 
 /** Token usage accumulated from the child's message_end events. Optional. */
@@ -319,6 +420,25 @@ export interface DispatchResult {
    * type so the report tool (#101) does not have to change it.
    */
   reportChannel: ChildReportChannel;
+  /**
+   * ADR-0041 §"The tier that took effect is reported": the tier actually applied to this
+   * dispatch. PRESENT whenever a tier was requested, ABSENT when none was — so `undefined` is a
+   * claim ("no tier was asked for"), not a gap.
+   *
+   * It is not negotiated, and the value never differs from what was asked for: call-site
+   * precedence is total, so `resolveReadOnlyTier` has no second opinion to disagree with. The
+   * field exists anyway because that is not the property a caller needs. What a caller needs is
+   * to see that a definition's declared `tools:` was OVERRIDDEN — a `readOnlyTier` beside a
+   * child whose agent file says `tools: read, bash` is the difference between "the tier narrowed
+   * this child" and a tool list nobody can account for.
+   *
+   * Stamped on refusals too ({@link withReadOnlyTier}): it states the tier the call resolved to,
+   * and a refusal means no child was launched with it, not that another tier was applied.
+   *
+   * The background front carries the same fact as {@link TaskRecord.readOnlyTier}, because a
+   * background dispatch returns a `DispatchHandle` and has no result to put this on.
+   */
+  readOnlyTier?: ReadOnlyTier;
 }
 
 /** Discovery of an agent by name; mirrors pi's subagent extension AgentConfig shape. */
@@ -1354,10 +1474,19 @@ export function unknownAgentResult(
  * every dispatched child. Neither half covers the other's case, which is why both exist — see
  * `src/tools/child-report-tool.ts`.
  *
- * ADR-0041 §Precedence is total: a read-only tier set at the call site decides the list outright
- * and the agent's declared `tools:` is never consulted. That direction is the whole point of the
- * parameter — the caller asked for a mode, not for a role — and it is why there is no merge to
- * reconcile here and no field reporting an outcome that could differ from the request.
+ * ADR-0041 §Call-site precedence is total: a **strict** tier set at the call site decides the list
+ * outright and the agent's declared `tools:` is never consulted. That direction is the whole point
+ * of the parameter — the caller asked for a mode, not for a role — and it is why there is no merge
+ * to reconcile here. The outcome is stated on the result (`readOnlyTier`), so the override is
+ * visible rather than silent; it cannot differ from the request, which is the point of it being
+ * reported and not of it being negotiable.
+ *
+ * The claim is about STRICT alone, and the distinction is not pedantic. A `lenient` tier reaches
+ * the branch below and is handled exactly as "no tier" was — definition's `tools:` and all — because
+ * lenient's promise is that the tool list is byte-identical to an untiered dispatch, and honouring
+ * the definition is part of what untiered means. So there is no precedence question to settle for
+ * lenient: the tier does not touch the list, and reading it as "wins over the definition" would
+ * predict a narrowing that does not happen.
  */
 export function childToolList(
   agent: Pick<AgentConfigLike, "tools" | "childReport">,
@@ -1776,20 +1905,24 @@ async function dispatchBackground(
   input: DispatchInput,
   ctx: DispatchContext,
   deps: DispatchDeps,
+  readOnlyTier: ReadOnlyTier | undefined,
 ): Promise<DispatchHandle | DispatchResult> {
   const childDepth = ctx.depth + 1;
   if (childDepth > ctx.maxDispatchDepth) {
     // Background refusal (issue #68 part 4): teach the model to inspect in-flight tasks.
-    return backgroundDispatchDepthLimitReached();
+    return withReadOnlyTier(backgroundDispatchDepthLimitReached(), readOnlyTier);
   }
   // Pitfall #2, split by issue #185: a name that was GIVEN and is unusable is a caller bug and
   // is reported before any slot is minted or held. A name that was NOT given is not a bug at
   // all — it selects the generalist child, resolved below like any other agent.
   if (isMalformedAgentName(input.agent)) {
-    return missingAgentResult({
-      cwd: input.cwd ?? ctx.cwd,
-      agentScope: input.agentScope ?? "user",
-    });
+    return withReadOnlyTier(
+      missingAgentResult({
+        cwd: input.cwd ?? ctx.cwd,
+        agentScope: input.agentScope ?? "user",
+      }),
+      readOnlyTier,
+    );
   }
   // ADR-0022 §4/§9: mint the task id BEFORE acquiring its slot so the reservation is keyed by
   // the task that owns it. The pump and `shutdown` both release by this id; the release is
@@ -1797,7 +1930,7 @@ async function dispatchBackground(
   const taskId = createULID();
   const slots = deps.slots ?? FALLBACK_DISPATCH_SLOTS;
   if (!slots.tryAcquire(taskId)) {
-    return backgroundDispatchConcurrencyLimitReached();
+    return withReadOnlyTier(backgroundDispatchConcurrencyLimitReached(), readOnlyTier);
   }
 
   const clock = deps.clock ?? ((): number => Date.now());
@@ -1816,7 +1949,7 @@ async function dispatchBackground(
   const resolution = resolveDispatchAgent(input, cwd, agentScope);
   if (resolution.kind === "unknown") {
     slots.release(taskId);
-    return unknownAgentResult(resolution.name, agentScope, cwd);
+    return withReadOnlyTier(unknownAgentResult(resolution.name, agentScope, cwd), readOnlyTier);
   }
   const agent = resolution.agent;
 
@@ -1876,6 +2009,14 @@ async function dispatchBackground(
           exitCode: undefined,
           spawnSource,
           parentTaskId: ctx.parentTaskId,
+          // ADR-0041 §"The tier that took effect is reported" on the background front. The
+          // background dispatch returns a DispatchHandle and has no DispatchResult to carry it,
+          // so the record is where the tier has to live; `ptc_task_output` projects it back out
+          // exactly as it projects `reportChannel`. Written AT SPAWN rather than at the terminal
+          // transition, because the tier is a fact about the request, not about how it ended —
+          // a failed or canceled read-only child was still dispatched read-only. Spread so an
+          // untiered dispatch persists no key at all.
+          ...(readOnlyTier === undefined ? {} : { readOnlyTier }),
           // ADR-0022 §3 (v1, R-m12): `sessionFile` is left UNSET. The extension cannot know
           // pi's session-file path, and a fabricated value would be worse than an absent one;
           // a future reader that can learn it may fill the field in.
@@ -2056,19 +2197,22 @@ async function dispatchBackground(
     if (tmp !== undefined) cleanupTmp(tmp);
     slots.release(taskId);
     logger.warn("background dispatch failed for agent " + agent.name + ": " + message);
-    return {
-      text: "",
-      status: "rejected",
-      started: childHandle !== undefined,
-      // The RESOLVED name, not `input.agent`: for a generalist there is no input name to report,
-      // and reporting the raw argument would print `undefined` into a field the schema types as a
-      // string.
-      agentName: agent.name,
-      durationMs: 0,
-      exitCode: -1,
-      reportChannel: "none",
-      errorMessage: "background dispatch failed: " + message,
-    };
+    return withReadOnlyTier(
+      {
+        text: "",
+        status: "rejected",
+        started: childHandle !== undefined,
+        // The RESOLVED name, not `input.agent`: for a generalist there is no input name to report,
+        // and reporting the raw argument would print `undefined` into a field the schema types as a
+        // string.
+        agentName: agent.name,
+        durationMs: 0,
+        exitCode: -1,
+        reportChannel: "none",
+        errorMessage: "background dispatch failed: " + message,
+      },
+      readOnlyTier,
+    );
   }
 }
 
@@ -2107,16 +2251,29 @@ export async function dispatch(
   ctx: DispatchContext,
   deps: DispatchDeps = {},
 ): Promise<DispatchResult | DispatchHandle> {
+  // ADR-0041 §Constraint compliance, FIRST — above the background branch so both fronts get it,
+  // and above every gate so nothing is minted, spawned or reserved for a request that is not
+  // one. pi's validator cannot close this (see {@link isUsableReadOnlyRequest}): `readOnly: 1`
+  // passes the schema, and depending on which seam it arrives over it is either silently coerced
+  // into a strict tier or read as no tier at all -- a full-capability child for a caller who
+  // asked for a read-only one. Refused, never coerced.
+  if (!isUsableReadOnlyRequest(input.readOnly)) {
+    return invalidReadOnlyRequestResult(input.readOnly);
+  }
+  // The one resolution of the request in this function, so the value reported on every result
+  // below cannot disagree with the value the argv and the prompt were built from.
+  const readOnlyTier = resolveReadOnlyTier(input.readOnly);
+
   // ADR-0022 §1: the background opt switches the binding's tail. Pre-spawn refusals reuse
   // the foreground shapes, so the union stays even for a statically-background call.
   if (input.background === true) {
-    return await dispatchBackground(input, ctx, deps);
+    return await dispatchBackground(input, ctx, deps, readOnlyTier);
   }
 
   // ADR-0016 Recursive dispatch: bound recursion explicitly.
   const childDepth = ctx.depth + 1;
   if (childDepth > ctx.maxDispatchDepth) {
-    return dispatchDepthLimitReached();
+    return withReadOnlyTier(dispatchDepthLimitReached(), readOnlyTier);
   }
 
   const cwd = input.cwd ?? ctx.cwd;
@@ -2128,7 +2285,7 @@ export async function dispatch(
   // A name that was not given is no longer an error at all -- it resolves to the generalist
   // child, which is the default this front shares with the background path.
   if (isMalformedAgentName(input.agent)) {
-    return missingAgentResult({ cwd, agentScope });
+    return withReadOnlyTier(missingAgentResult({ cwd, agentScope }), readOnlyTier);
   }
 
   // One owner gates the rule for both fronts (ADR-0025 decision 7, issue #88 decision 9).
@@ -2142,13 +2299,16 @@ export async function dispatch(
   // concurrent ptc_subagent calls would share a token and the second would refuse spuriously.
   const slots = deps.slots ?? FALLBACK_DISPATCH_SLOTS;
   if (!slots.tryAcquire()) {
-    return dispatchConcurrencyLimitReached();
+    return withReadOnlyTier(dispatchConcurrencyLimitReached(), readOnlyTier);
   }
 
   const resolution = resolveDispatchAgent(input, cwd, agentScope);
   if (resolution.kind === "unknown") {
     slots.release();
-    return unknownAgentResult(resolution.name, agentScope, cwd, Date.now() - start);
+    return withReadOnlyTier(
+      unknownAgentResult(resolution.name, agentScope, cwd, Date.now() - start),
+      readOnlyTier,
+    );
   }
   const agent = resolution.agent;
 
@@ -2248,16 +2408,22 @@ export async function dispatch(
       const extraction: ChildReportExtraction = reportContract
         ? finishChildReportScan(scan)
         : { reportChannel: "opted-out" };
-      const out: DispatchResult = {
-        text: finalText,
-        status,
-        started,
-        agentName: agent.name,
-        durationMs: Date.now() - start,
-        exitCode,
-        // Total field (ADR-0032): stated on every outcome, including a rejected one.
-        reportChannel: extraction.reportChannel,
-      };
+      // ADR-0041 §"The tier that took effect is reported", through the same helper every
+      // refusal below uses — one helper, so "does a result state the tier" is a single question
+      // with a single answer rather than two spellings that can drift apart.
+      const out: DispatchResult = withReadOnlyTier(
+        {
+          text: finalText,
+          status,
+          started,
+          agentName: agent.name,
+          durationMs: Date.now() - start,
+          exitCode,
+          // Total field (ADR-0032): stated on every outcome, including a rejected one.
+          reportChannel: extraction.reportChannel,
+        },
+        readOnlyTier,
+      );
       // `usage` is stamped HERE, from the host's own counter, rather than taken from the child's
       // JSON — see ChildReportPayload. A child that reported no usage block yields zeros rather
       // than a missing field: the report's shape is total, and "this child cost nothing" and

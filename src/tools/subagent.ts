@@ -36,7 +36,11 @@ import { Type } from "typebox";
 import type { TArray, TNumber, TObject, TOptional, TString } from "typebox";
 import { DISPATCH_PARAMETERS } from "../runtime/bindings.ts";
 import type { DispatchDeps, DispatchInput, DispatchResult } from "../runtime/dispatch.ts";
-import { dispatch, describeRegisteredAgentRoster } from "../runtime/dispatch.ts";
+import {
+  dispatch,
+  describeRegisteredAgentRoster,
+  resolveReadOnlyTier,
+} from "../runtime/dispatch.ts";
 import type { DispatchHandle } from "../runtime/task-registry.ts";
 import type { ULID } from "../runtime/task-storage.ts";
 import { renderChildReportText } from "./render.ts";
@@ -193,6 +197,13 @@ type SubagentStructuredContent =
  * invisible degradation ADR-0032 forbids. The channel is the total field; `report` is the optional
  * one, and the pair is what makes the pair readable. ("A second spelling of `reportChannel`" is not
  * an objection: `exit_code` and `task_id` are already snake_case projections, per ADR-0028.)
+ *
+ * `read_only_tier` is ADR-0041's "the tier that took effect is reported", projected for the same
+ * reason `report_channel` is: call-site precedence is total, so the value cannot differ from the
+ * request, and that is precisely why stating it is worth a key -- it is what makes an override of
+ * a definition's declared `tools:` visible to a script instead of something the script has to
+ * infer from an agent file it may never have read. ABSENT when no tier was asked for, on every
+ * branch, including the background handle's.
  */
 export const SUBAGENT_OUTPUT_SCHEMA: SubagentOutputSchema = Type.Object({
   task_id: Type.Optional(
@@ -212,6 +223,12 @@ export const SUBAGENT_OUTPUT_SCHEMA: SubagentOutputSchema = Type.Object({
   exit_code: Type.Optional(
     Type.Number({
       description: "The child's exit code. Present ONLY for a call that already finished.",
+    }),
+  ),
+  read_only_tier: Type.Optional(
+    Type.String({
+      description:
+        'The read-only tier the dispatch resolved to: "strict" or "lenient" (ADR-0041). Absent when no tier was asked for, so an absent key means "no tier" rather than "tier unknown".',
     }),
   ),
   report: Type.Optional(
@@ -326,6 +343,14 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
       // re-derived from `outcome`: one outcome, one reading. Each literal carries only the keys
       // that apply to it, because JsonValue has no `undefined` -- see SUBAGENT_OUTPUT_SCHEMA.
       if (taskId !== undefined) {
+        // ADR-0041: a background dispatch returns a DispatchHandle, which carries no
+        // `readOnlyTier` to read -- the field this front states is on the DispatchResult and on
+        // the TaskRecord (`ptc_task_output`). The tier that took effect is nevertheless known
+        // here and IS known for this call: reaching this branch means `dispatch()` returned a
+        // handle, and `dispatch()` returns a handle only after its read-point guard passed, so
+        // this is the tier the child was actually spawned with. Stated rather than omitted, for
+        // the same reason `report_channel: "none"` is stated on this branch below.
+        const handleTier = resolveReadOnlyTier((params as DispatchInput).readOnly);
         const structured: SubagentStructuredContent = {
           task_id: taskId,
           status: details.status,
@@ -336,6 +361,7 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
           // and an undefined-valued key vanishes there, leaving a script a projection its own
           // schema does not describe.
           report_channel: "none",
+          ...(handleTier === undefined ? {} : { read_only_tier: handleTier }),
         };
         return {
           content: [{ type: "text" as const, text: HANDLE_TEXT + taskId }],
@@ -350,20 +376,26 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
       // at settle, and a value this tool could recompute would be a second, unauthoritative
       // reading of the same number.
       const report: SubagentReportProjection | undefined = outcome.report;
+      // ADR-0041: spread rather than a plain property, so an untiered dispatch emits NO key --
+      // the same value-level absence every other optional key on this surface uses.
+      const tierField =
+        outcome.readOnlyTier === undefined ? {} : { read_only_tier: outcome.readOnlyTier };
       const structured: SubagentStructuredContent =
         details.exitCode === undefined
-          ? { status: details.status, report_channel: outcome.reportChannel }
+          ? { status: details.status, report_channel: outcome.reportChannel, ...tierField }
           : report === undefined
             ? {
                 status: details.status,
                 exit_code: details.exitCode,
                 report_channel: outcome.reportChannel,
+                ...tierField,
               }
             : {
                 status: details.status,
                 exit_code: details.exitCode,
                 report_channel: outcome.reportChannel,
                 report,
+                ...tierField,
               };
       // ADR-0032 §Rendering: the report has to be IN the text, not only in `structuredContent`. That
       // reason was once stated as "on this surface there is no `codemode`", which stopped being true

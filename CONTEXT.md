@@ -95,8 +95,8 @@ dispatch prompt is APPENDED to pi's own system prompt, and no `--tools` flag is 
 definition declares `tools:`. A definition can therefore only take capability away; there is none it
 can add. A dispatch that names none gets the **generalist child** — pi's own system prompt, pi's full
 toolset, no model pin, reported as an empty `agentName`. A definition is not the only narrowing
-axis: ADR-0041 puts a **read-only tier** on the call site, and where the two meet the call site wins
-outright, so a definition's declared `tools:` is not consulted when a tier was asked for.
+axis: _read-only tier_ is the other one, and where the two meet a strict tier at the call site
+decides the tool list outright.
 
 _Avoid_: "preset agent" / "default agent" for the generalist. Nothing ships in the package, and the
 generalist is the child pi already is, not a definition this project wrote and installs. Also avoid
@@ -444,6 +444,16 @@ own system prompt rather than substituted for it: for a child with no agent defi
 the whole of what the prompt file adds, with pi's own prompt still underneath. Shape mirrors
 DSH's `subagent-context` injection; the only difference is the depth /
 max-depth attributes, which are pi-ptc-specific. ADR-0016 Recursive section, ADR-0039.
+
+**read-only tier** — the optional `readOnly` argument on a `pi.dispatch` call, in two tiers:
+`"strict"` (and `true`, its short spelling) narrows the dispatched **child pi process's** tool
+list to the read set; `"lenient"` narrows nothing and only adds one clause to the
+_`pi-ptc-context` hint_. Which side it narrows is load-bearing: the child's own tools, decided at
+the call site — **not** the PTC worker's binding surface, which is what the R3 read-only PTC
+surface (an explicit `optInBindings` subset in `~/.pi/agent/ptc.json`) narrows. ADR-0041.
+_Avoid_: "read-only mode" without a tier named, "read-only dispatch" (that names the argument's two
+tiers, not a kind of dispatch), and reading the strict tier as a boundary — it is a narrowing, not
+a sandbox.
 
 **run_code** — the model-facing tool name DSH exposes in PTC mode. The pi
 version exposes `ptc_run_code` to avoid collision with pi's hypothetical

@@ -239,7 +239,10 @@ const FOREGROUND_ANSWER = "PONG";
 const FOREGROUND_EXIT_CODE = 0;
 
 /** One background call through the real front, with its harness so a test can reach the registry. */
-async function dispatchBackground(dir: string): Promise<{ result: ObservedResult; h: Harness }> {
+async function dispatchBackground(
+  dir: string,
+  extra?: Record<string, unknown>,
+): Promise<{ result: ObservedResult; h: Harness }> {
   const h = createHarness();
   const tool = createPtcSubagentTool(baseOptions(dir, h.deps));
   const result = await run(tool, {
@@ -247,6 +250,7 @@ async function dispatchBackground(dir: string): Promise<{ result: ObservedResult
     agentScope: "project",
     task: "look at the tests",
     background: true,
+    ...extra,
   });
   // Asserted here rather than in each test: without a child there is no background outcome at all,
   // and "structuredContent is absent because nothing was dispatched" is a false pass.
@@ -259,8 +263,11 @@ async function dispatchBackground(dir: string): Promise<{ result: ObservedResult
  * `FOREGROUND_EXIT_CODE`. Both halves are required -- `decideCloseOutcome` only returns `fulfilled`
  * for exit 0 WITH final text, and a `rejected` outcome never reaches either success return.
  */
-async function dispatchForeground(dir: string): Promise<ObservedResult> {
-  return dispatchForegroundSaying(dir, FOREGROUND_ANSWER);
+async function dispatchForeground(
+  dir: string,
+  extra?: Record<string, unknown>,
+): Promise<ObservedResult> {
+  return dispatchForegroundSaying(dir, FOREGROUND_ANSWER, undefined, extra);
 }
 
 /**
@@ -276,10 +283,16 @@ async function dispatchForegroundSaying(
   dir: string,
   text: string,
   usage?: { input: number; output: number; cost: number },
+  extra?: Record<string, unknown>,
 ): Promise<ObservedResult> {
   const h = createHarness();
   const tool = createPtcSubagentTool(baseOptions(dir, h.deps));
-  const settled = run(tool, { agent: AGENT, agentScope: "project", task: "answer, then stop" });
+  const settled = run(tool, {
+    agent: AGENT,
+    agentScope: "project",
+    task: "answer, then stop",
+    ...extra,
+  });
   await waitFor(() => h.lifecycle.spawnCount > 0);
   const child = h.lifecycle.handleAt(0);
   h.lifecycle.pushEvent(child, {
@@ -758,7 +771,15 @@ describe("ptc_subagent structuredContent", () => {
       //
       // The third outcome is a child that COMPLIED: only its projection carries `report`, so a
       // sweep over the other two would never see that key emitted and could not catch it going
-      // undeclared.
+      // undeclared. The fourth is a TIERED dispatch, because `read_only_tier` is ADR-0041's "the
+      // tier that took effect is reported" and a key emitted only on a path this sweep does not
+      // walk is a key the sweep cannot vouch for.
+      //
+      // What this sweep CANNOT do, and why the two rows below it exist: it unions every outcome
+      // into one Set, so a key supplied by any single row satisfies it for all of them. Adding a
+      // second tiered row here to cover the other projection writer made that worse — measured, the
+      // background row kept supplying `read_only_tier` for the settled path after the settled
+      // path stopped emitting it, and the sweep stayed green. Per-writer assertions, per writer.
       const emitted = [
         ...new Set([
           ...Object.keys(structuredOf((await dispatchBackground(dir)).result)),
@@ -768,17 +789,71 @@ describe("ptc_subagent structuredContent", () => {
               await dispatchForegroundSaying(dir, childSaying("done", CHILD_REPORT_LITERAL)),
             ),
           ),
+          ...Object.keys(structuredOf(await dispatchForeground(dir, { readOnly: "strict" }))),
         ]),
       ].sort();
       const declared = Object.keys(SUBAGENT_OUTPUT_SCHEMA.properties ?? {}).sort();
       expect(emitted, "every emitted key is a declared one").toEqual(declared);
-      // And the projection stays LEAN -- five keys, none of them the `details` spelling, and no
+      // And the projection stays LEAN -- six keys, none of them the `details` spelling, and no
       // field that exists only to say "this does not apply". `report_channel` is the exception
       // that proves the rule: it exists ONLY to say that `report` does not apply, and it is here
       // because ADR-0032 makes an unstated degradation a defect.
-      expect(declared).toEqual(["exit_code", "report", "report_channel", "status", "task_id"]);
+      expect(declared).toEqual([
+        "exit_code",
+        "read_only_tier",
+        "report",
+        "report_channel",
+        "status",
+        "task_id",
+      ]);
       expect(declared, "snake_case, like pi's own builtins").not.toContain("taskId");
       expect(declared).not.toContain("exitCode");
+    });
+  });
+
+  test("the handle projection carries the tier on its OWN, which the sweep above cannot see", async () => {
+    /*
+     * The sweep above unions every outcome into one Set, so a key emitted by ANY row satisfies it
+     * for all of them. That is the right question for `emitted ⊆ declared`, and it is structurally
+     * blind to the question this row asks: does the HANDLE branch project the tier at all?
+     *
+     * Measured, and the reason this row exists: deleting `read_only_tier: handleTier` from
+     * `src/tools/subagent.ts` turned doc-integrity red (the pins moved) and left every behavioural
+     * assertion green — the foreground row was still supplying the key to the union.
+     *
+     * The two projections are separately written, so they fail separately: one reads the settled
+     * `DispatchResult`, the other re-derives the tier off the params because a `DispatchHandle` has
+     * nowhere to carry it. One assertion per writer.
+     */
+    await withAgent(async (dir) => {
+      const tiered = structuredOf((await dispatchBackground(dir, { readOnly: "strict" })).result);
+      expect(tiered.read_only_tier, "the handle states the tier it was asked for").toBe("strict");
+
+      const untiered = structuredOf((await dispatchBackground(dir)).result);
+      expect(
+        "read_only_tier" in untiered,
+        "and says nothing when no tier was asked for — absent is the claim, not an empty string",
+      ).toBe(false);
+    });
+  });
+
+  test("the settled projection carries the tier too, which the sweep cannot see either", async () => {
+    // The other of the two writers, with the same reason and the same measurement: neutering
+    // `tierField` on the settled path (`outcome.readOnlyTier === undefined ? {} : {}`) left the
+    // whole repository green while the sweep above was still collecting the key from the handle
+    // row. The settled path is the one that reads the authoritative `DispatchResult`, so it is the
+    // one where a wrong value would be a wrong CLAIM rather than a derived duplicate.
+    await withAgent(async (dir) => {
+      const strict = structuredOf(await dispatchForeground(dir, { readOnly: "strict" }));
+      expect(strict.read_only_tier).toBe("strict");
+
+      const lenient = structuredOf(await dispatchForeground(dir, { readOnly: "lenient" }));
+      expect(lenient.read_only_tier, "lenient is its own tier, not a flavour of strict").toBe(
+        "lenient",
+      );
+
+      const untiered = structuredOf(await dispatchForeground(dir));
+      expect("read_only_tier" in untiered, "no tier asked for, so nothing claimed").toBe(false);
     });
   });
 

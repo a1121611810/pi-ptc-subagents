@@ -40,6 +40,7 @@ import {
   type ChildReport,
   type ChildReportChannel,
 } from "../runtime/child-report.ts";
+import type { ReadOnlyTier } from "../runtime/dispatch.ts";
 import { applyAdr0015Truncation, type OutputStorage } from "../runtime/output-storage.ts";
 import { OUTPUT_PREVIEW_MAX_BYTES, type TaskRegistry } from "../runtime/task-registry.ts";
 import type { TaskRecord, TaskStatus, ULID } from "../runtime/task-storage.ts";
@@ -304,6 +305,12 @@ export interface PtcTaskOutputDetails {
    * `none` marker for a child that ignored the contract. Absent exactly when `report` is absent.
    */
   reportChannel?: ChildReportChannel;
+  /**
+   * ADR-0041: the read-only tier this task was dispatched with, read off the record the spawn
+   * wrote it on. Absent for every task dispatched without a tier — which is the same claim the
+   * foreground `DispatchResult` makes when it carries no `readOnlyTier`.
+   */
+  readOnlyTier?: ReadOnlyTier;
 }
 
 // ---------------------------------------------------------------------------
@@ -424,6 +431,12 @@ const OUTPUT_OUTPUT_SCHEMA = Type.Object({
         "Which channel delivered the child's report: `tool`, `prompt-json`, or `none` when the child ignored the contract (ADR-0032). Absent until the task succeeds — a running or failed task carries no report claim at all.",
     }),
   ),
+  read_only_tier: Type.Optional(
+    Type.String({
+      description:
+        "The read-only tier the dispatch resolved to: `strict` or `lenient` (ADR-0041). Absent when the dispatch asked for no tier. Present from spawn onwards, including for a task that later failed — a failed read-only child was still dispatched read-only.",
+    }),
+  ),
   report: Type.Optional(
     Type.Object({
       summary: Type.String({ description: "The child's own one-line summary." }),
@@ -515,6 +528,7 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
         ...(truncation.fullPath === undefined ? {} : { outputFullPath: truncation.fullPath }),
         ...(record.report === undefined ? {} : { report: record.report }),
         ...(record.reportChannel === undefined ? {} : { reportChannel: record.reportChannel }),
+        ...(record.readOnlyTier === undefined ? {} : { readOnlyTier: record.readOnlyTier }),
       };
       // ADR-0032 rendering: the report reads first, the child's prose after — conclusion first,
       // reasoning second. A task with a report always has output too (a `succeeded` child produced
@@ -535,6 +549,7 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
         output_truncated: truncation.truncated,
         ...(truncation.fullPath === undefined ? {} : { output_full_path: truncation.fullPath }),
         ...(record.reportChannel === undefined ? {} : { report_channel: record.reportChannel }),
+        ...(record.readOnlyTier === undefined ? {} : { read_only_tier: record.readOnlyTier }),
         ...(record.report === undefined ? {} : { report: record.report }),
       };
       return { content: [{ type: "text", text }], details, structuredContent };

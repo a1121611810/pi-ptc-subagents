@@ -96,12 +96,13 @@ Input fields are the foreground binding's fields plus two:
 | `label`         | `string`                           | `task.slice(0, 64)`      | human label on the handle and the record |
 | `readOnly`      | `boolean \| "strict" \| "lenient"` | omitted = no tier        | ask for a read-only child (ADR-0041)     |
 
-`readOnly` is a mode, not a role, so it beats the agent's declared `tools:` outright rather than
-merging with it. `"strict"` (and `true`, its short spelling) narrows the child's tools to the read
-set — no `bash`, no `edit`, no `write` — so it cannot modify anything; `"lenient"` leaves the tool
-list exactly as it would have been and only tells the child to work read-only. Strict is a
-capability narrowing, **not** a sandbox: nothing here contains a hostile child, and a strict child
-cannot run tests or call `git`.
+`readOnly` is a mode, not a role. `"strict"` (and `true`, its short spelling) beats the agent's
+declared `tools:` outright rather than merging with it, narrowing the child's tools to the read set
+— no `bash`, no `edit`, no `write` — so it cannot modify anything. `"lenient"` never reaches the
+tool list at all, so the declared tools (or the child's full toolset) still decide it: the child is
+handed byte-for-byte the list an untiered dispatch would have handed it, and is only told to work
+read-only. Strict is a capability narrowing, **not** a sandbox: nothing here contains a hostile
+child, and a strict child cannot run tests or call `git`.
 
 On a refusal — depth cap, concurrency cap, unknown agent, or a spawn that never came up — the call
 resolves with a `DispatchResult` instead: `{ status: "rejected", started: false, errorMessage: … }`.
@@ -490,5 +491,6 @@ Deferred deliberately; the map items and reasons are in ADR-0022 §8/§10.
 - [ADR-0023 — background task ownership](../adr/0023-background-task-ownership.md) — owner-tagged
   records and owner-scoped reaping (why sibling processes no longer reap your tasks).
 - [ADR-0016 — the `pi.dispatch` binding](../adr/0016-ptc-dispatch-binding.md) — the foreground binding this extends.
+- [ADR-0041 — the read-only dispatch tier](../adr/0041-read-only-is-a-call-site-tier.md) — why `readOnly` is a narrowing and not a boundary.
 - [ADR-0015 — the pi truncation contract](../adr/0015-pi-truncation-contract.md) — the 50 KB / 2000-line rule.
 - [`CONTEXT.md`](../../CONTEXT.md) — canonical terms (background dispatch, TaskRecord, TaskStatus, TaskRegistry, Subscription, DispatchHandle, `ptc_task_*`, `<bg-task-notification>`).

@@ -27,7 +27,7 @@ import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DISPATCH_CONTEXT } from "../helpers/ptc.ts";
 import { dispatch } from "../../src/runtime/dispatch.ts";
-import { DispatchSlotCounter } from "../../src/runtime/dispatch.ts";
+import { DispatchSlotCounter, type DispatchInput } from "../../src/runtime/dispatch.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FAKE_PI = join(HERE, "fixtures", "fake-pi.mjs");
@@ -334,6 +334,160 @@ describe("a read-only tier is decided at the call site (ADR-0041)", () => {
       const result = await dispatchReadOnly(cwd, "strict", "restricted");
       expect(result.status).toBe("fulfilled");
       expect(toolsTheChildWasHanded(result.text)).toBe("read,grep,find,ls");
+    });
+  });
+
+  test("the tier that took effect is reported, and it is the tier asked for", async () => {
+    /*
+     * ADR-0041 §"The tier that took effect is reported". The override is the reason this field
+     * exists: a `restricted` definition declares `tools: read, bash`, the call site says strict,
+     * and a caller reading only the agent file has no way to account for the child it got. The
+     * field does not negotiate -- precedence is total -- it makes the override visible.
+     *
+     * Expectations are the two tier literals from the ADR's own decision, plus the one fold
+     * (`true` -> `strict`) the type comment states, not a copy of `resolveReadOnlyTier`.
+     */
+    await withFakePi(async (cwd) => {
+      await writeRestrictedAgent(cwd, ["tools: read, bash"]);
+
+      const strict = await dispatchReadOnly(cwd, "strict", "restricted");
+      expect(strict.status).toBe("fulfilled");
+      expect(strict.readOnlyTier, "strict is reported as itself").toBe("strict");
+
+      const short = await dispatchReadOnly(cwd, true, "restricted");
+      expect(short.status).toBe("fulfilled");
+      // `true` is the SAME request as "strict", so it reports the tier it was folded into and
+      // never survives as a second state.
+      expect(short.readOnlyTier, "true folds into strict rather than becoming its own state").toBe(
+        "strict",
+      );
+
+      const lenient = await dispatchReadOnly(cwd, "lenient", "restricted");
+      expect(lenient.status).toBe("fulfilled");
+      expect(lenient.readOnlyTier, "lenient is reported as itself").toBe("lenient");
+    });
+  });
+
+  test("no tier asked for means no tier reported, on either spelling of asking for nothing", async () => {
+    /*
+     * The absence half, and the row that makes the field's PRESENCE mean something: a field that
+     * is always `"strict"` satisfies the row above.
+     *
+     * `Object.hasOwn` rather than `toBeUndefined`, for the same reason `ptc-subagent.test.ts`
+     * uses it: an explicitly-`undefined` key and an absent key are different things on this
+     * surface, and only the absent one keeps `readOnlyTier === undefined` from reading as
+     * "asked for nothing, outcome unknown".
+     */
+    await withFakePi(async (cwd) => {
+      const none = await dispatch(
+        { task: "say PONG", cwd },
+        { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
+        { slots: new DispatchSlotCounter(2) },
+      );
+      expect(none.status).toBe("fulfilled");
+      expect(Object.hasOwn(none, "readOnlyTier"), "no tier asked for, none reported").toBe(false);
+
+      const explicitlyNo = await dispatchReadOnly(cwd, false);
+      expect(explicitlyNo.status).toBe("fulfilled");
+      expect(
+        Object.hasOwn(explicitlyNo, "readOnlyTier"),
+        "and false asks for nothing, so it is reported the same way",
+      ).toBe(false);
+
+      const explicitlyNull = await dispatch(
+        { task: "say PONG", cwd, readOnly: null } as unknown as DispatchInput,
+        { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
+        { slots: new DispatchSlotCounter(2) },
+      );
+      expect(explicitlyNull.status).toBe("fulfilled");
+      expect(
+        Object.hasOwn(explicitlyNull, "readOnlyTier"),
+        "and so does null, the third spelling of asking for nothing",
+      ).toBe(false);
+    });
+  });
+
+  test("readOnly: false is byte-identical to asking for no tier at all", async () => {
+    /*
+     * THE UNPINNED BEHAVIOUR. Measured before this row existed: deleting the whole body of
+     * `resolveReadOnlyTier` left the repository fully green, because every other row in this file
+     * asserts what a tier DOES and nothing observed what asking for nothing does. `false` and
+     * `null` are the spec's own no-tier spellings, so they are the ones whose behaviour the spec
+     * pins and the suite did not.
+     *
+     * The comparison is the child's OWN stdout, byte for byte, and it covers both halves of the
+     * no-op in one assertion: `tools=` is the `--tools` flag that decides how much child the
+     * parent gets, and `prompt=` is the file the dispatcher wrote and passed. What it does NOT
+     * cover is argv the fixture does not echo (`--model`, `--thinking`); those are unaffected by
+     * the parameter by construction — `buildArgv` branches on it in exactly one place, the
+     * `--tools` flag — and this file does not gain an echo to prove it.
+     *
+     * COUNTERFACTUAL, measured: make `resolveReadOnlyTier` answer "strict" for `false` or for
+     * `null` and this is the row that turns red — the second dispatch would come back
+     * `tools=read,grep,find,ls,...` where the first says `none`. The other direction is pinned
+     * here too: drop the `readOnly === null` clause from `isUsableReadOnlyRequest` (measured, 2
+     * rows red — this one and the reported-absence row) and both dispatches are refused instead
+     * of run, which the `fulfilled` assertion catches.
+     */
+    await withFakePi(async (cwd) => {
+      const none = await dispatch(
+        { task: "say PONG", cwd },
+        { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
+        { slots: new DispatchSlotCounter(2) },
+      );
+      expect(none.status).toBe("fulfilled");
+
+      for (const askedForNothing of [false, null]) {
+        const explicitlyNo = await dispatch(
+          // Cast: `null` is not in `DispatchInput["readOnly"]`, and the fact that the wire can
+          // carry it anyway is why the read-point guard has an `unknown` parameter at all.
+          { task: "say PONG", cwd, readOnly: askedForNothing } as unknown as DispatchInput,
+          { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
+          { slots: new DispatchSlotCounter(2) },
+        );
+
+        expect(
+          explicitlyNo.status,
+          `readOnly: ${String(askedForNothing)} asks for no tier, which is a valid request`,
+        ).toBe("fulfilled");
+        expect(
+          explicitlyNo.text,
+          `same tools flag, same prompt, same everything the child saw (readOnly: ${String(askedForNothing)})`,
+        ).toBe(none.text);
+        expect(
+          toolsTheChildWasHanded(explicitlyNo.text),
+          "spelled out as well, so the failure names which half diverged",
+        ).toBe(toolsTheChildWasHanded(none.text));
+      }
+    });
+  });
+
+  test("an invalid readOnly value is refused before anything is launched", async () => {
+    /*
+     * The loud half of ADR-0041 §Constraint compliance, at the seam where the consequence is
+     * observable. `readOnly: 1` passes the declared schema (measured, and pinned in
+     * `tests/bindings.test.ts`), so without the guard this dispatch would reach the fake pi and
+     * come back `tools=none` — a full-capability child for a caller who asked for read-only.
+     *
+     * COUNTERFACTUAL: delete the `isUsableReadOnlyRequest` guard at the top of `dispatch()`.
+     * Then this row sees `fulfilled` with `tools=none` instead of a rejection naming the
+     * parameter, and it red without spawning anything real — the fake pi is the child.
+     */
+    await withFakePi(async (cwd) => {
+      const result = await dispatch(
+        // `as unknown as DispatchInput`: the point of the row is a VALUE the declared type
+        // forbids. Casting to `never` would also erase the return type, and `started` /
+        // `errorMessage` are the whole claim.
+        { task: "say PONG", cwd, readOnly: 1 } as unknown as DispatchInput,
+        { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
+        { slots: new DispatchSlotCounter(2) },
+      );
+
+      expect(result.status, "refused, not coerced into a tier or into nothing").toBe("rejected");
+      expect(result.started, "and nothing was launched").toBe(false);
+      expect(result.text, "no child means no child text").toBe("");
+      expect(result.errorMessage ?? "", "the refusal names the parameter").toContain("readOnly");
+      expect(result.errorMessage ?? "", "and the value that was refused").toContain("1");
     });
   });
 });
