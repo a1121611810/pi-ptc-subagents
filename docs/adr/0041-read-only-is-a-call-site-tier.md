@@ -40,10 +40,17 @@ would be false.
   effect is one line in the `<pi-ptc-context>` block the child is already given, saying to work
   without modifying anything. The child can write; it has been told not to.
 
-Absent, `false` and any value outside the union behave as no tier. `true` is folded into
-`"strict"` by one resolver before anything downstream sees it, so no second state is ever stored
-or compared. An unrecognised value is refused at the argument boundary rather than reaching the
-child as a tier nobody implements.
+`false` and an absent or `null` `readOnly` all mean "no tier"; the flag distinguishes "asked
+for" from "not asked for", and `false` asks for nothing. `true` is folded into `"strict"` by one
+resolver before anything downstream sees it, so no second state is ever stored or compared.
+
+What happens to a value outside that set is **not** decided here, and the reason is worth stating
+precisely because it is not what the schema suggests. pi validates a tool call and hands
+`execute` the VALIDATED value, so by the time any code in this repository sees `readOnly`, pi has
+already coerced it: `1`, `"true"` and `"1"` have become `true`, and **`0` has become `false`**.
+The refusal in `dispatch()` therefore cannot see them — not on the binding front, and not on the
+top-level tool's, because pi builds the arguments object before both. See
+`isUsableReadOnlyRequest` for what the guard does and does not defend.
 
 **Call-site precedence is total for `strict`.** A strict tier set on the call decides the tool list
 outright, and an agent definition's declared `tools:` is not consulted. The direction is the point:
@@ -65,22 +72,36 @@ child's tools without re-deriving it from the agent roster. The cost is real —
 the task record and the output projection so the background front is not the one front that stays
 silent — and it was paid knowingly, after first deciding not to.
 
-### An invalid value is refused at the read point, not at the schema
+### The invalid-value guard is real, and it is not on the path the hole is on
 
 There is no schema this can be closed with, and the reason is worth recording because it is not
 what the schema suggests. pi's `validateToolArguments` does not refuse `1`, `0`, `"true"` or
 `"1"` against a union of `Type.Boolean()` with two string literals — and `Type.Literal(true)`
 accepts the same four, while `Type.Literal("strict")` rejects them. It **coerces** instead:
-`readOnly: 1` is handed onward as `true`, and `readOnly: 0` as `false`. So the schema cannot
-close the hole, and closing it in the schema would have looked like the fix while changing
-nothing.
+`readOnly: 1` becomes `true`, and `readOnly: 0` becomes `false`.
 
-That makes the coercion's direction the actual hazard, and it cuts the way the caller least
-expects: `1` and `"true"` land on `strict`, which over-narrows but keeps the promise, while **`0`
-lands on no tier at all** — a full-capability child for a caller who asked to be read-only. The
-guard therefore lives in `dispatch()`, ahead of the background split so both fronts get it, and it
+That makes the coercion's direction the hazard, and it cuts the way the caller least expects:
+`1`, `"true"` and `"1"` land on `strict`, which over-narrows but keeps the promise, while **`0`
+lands on no tier at all** — a full-capability child for a caller who asked to be read-only.
+
+**The coercion happens upstream of every guard this repository can write.** pi's tool-call path is
+`prepareToolCallArguments` → `validateToolArguments` → `execute(id, validatedArgs)`: `execute` is
+handed the validated value, so by the time any code here sees `readOnly`, `0` is already `false`.
+Both production fronts go through it. The guard in `dispatch()` therefore sits _behind_ the
+coercion and cannot see the four values it exists to refuse.
+
+It is written anyway, and the honest account of why is that it was written before that was known.
+It is not decorative: `dispatch()` is a module-level function with callers that build their own
+arguments, and for them a value that is neither a tier nor a no-tier spelling is a real input. It
 refuses with the rejected `DispatchResult` the repo already uses rather than throwing, because
-ADR-0016 §3 requires the binding never throws.
+ADR-0016 §3 requires the binding never throws. But it defends a seam production does not use, and
+**this record does not claim the hole is closed.**
+
+Closing it means refusing upstream of the coercion, and there are two places to do it: pi's
+`prepareArguments` hook, which runs on the raw arguments before validation, or the binding's
+pre-validation `raw` read, which already exists for the malformed-agent check. Neither is decided
+here — both change what the tool contract owes pi, and the peer range has to be measured for both
+before either ships.
 
 `undefined`, `null` and `false` stay usable. They are the three spellings of "I asked for
 nothing" and the spec keeps all of them; refusing them would refuse a valid request to be left

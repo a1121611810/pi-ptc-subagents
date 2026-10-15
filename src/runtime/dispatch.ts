@@ -247,12 +247,19 @@ export interface DispatchInput {
    * work without modifying anything. `bash` is deliberately absent from the strict set —
    * a child holding `bash` could write through it, which would make the guarantee fictional.
    *
-   * Call-site precedence is TOTAL: a tier set here decides the child's tool list outright
-   * and an agent definition's declared `tools:` is not consulted. Nothing can therefore
-   * arrive as a different tier than the one asked for. The result still reports what took
-   * effect ({@link DispatchResult.readOnlyTier}) — not because it could differ from this,
-   * but because an override nobody can read is an override that reads as "this agent
+   * Call-site precedence is TOTAL for `strict`: a strict tier set here decides the child's
+   * tool list outright and an agent definition's declared `tools:` is not consulted. Nothing
+   * can therefore arrive as a different tier than the one asked for. The result still reports
+   * what took effect ({@link DispatchResult.readOnlyTier}) — not because it could differ from
+   * this, but because an override nobody can read is an override that reads as "this agent
    * declares tools: read, bash" when it did not.
+   *
+   * The claim is scoped to `strict` because it is the only tier that touches the list. A
+   * `lenient` tier is routed by {@link childToolList} down the same branch an untiered dispatch
+   * takes — the definition's declared `tools:` included — because lenient's promise is that the
+   * list is byte-identical to an untiered dispatch, and honouring the definition is part of what
+   * untiered means. Read lenient as "wins over the definition" and you would predict a narrowing
+   * that does not happen.
    */
   readOnly?: boolean | ReadOnlyTier;
 }
@@ -295,15 +302,23 @@ export function resolveReadOnlyTier(readOnly: DispatchInput["readOnly"]): ReadOn
  *   four, so tightening the literal does not close it — only `Type.Literal("strict")` rejects
  *   them, and a union of that with `Type.Boolean()` still takes the Boolean branch. There is no
  *   schema this can be closed with.
- * - `validateToolArguments` then COERCES rather than refuses: on the binding front `readOnly: 1`
- *   is handed onward as `true`. That is the coercion the spec forbids, and it is the milder of
- *   the two failures because it happens to land on a tier.
- * - A caller that reaches `dispatch()` over the exported API is under no such coercion —
- *   `createPtcSubagentTool` casts its params to `DispatchInput` and calls `dispatch()` directly
- *   — and there `1` is not a tier at all. `resolveReadOnlyTier` returns `undefined`, no `--tools`
- *   flag is emitted, and the caller gets a FULL-CAPABILITY child while having asked for
- *   read-only: the silent failure `docs/testing-constraints.md` #3 exists to forbid, and the most
- *   expensive kind, because the request was honoured by nobody and reported by nobody.
+ * - `validateToolArguments` then COERCES rather than refuses. **And that happens before this
+ *   guard can run.** pi's tool-call path is `prepareToolCallArguments` → `validateToolArguments`
+ *   → `execute(id, validatedArgs)`, so `execute` is handed the validated value, not the caller's.
+ *   Both production fronts go through it: `createPtcSubagentTool.execute` receives `0` already
+ *   rewritten to `false`, and so does the binding's validated arguments.
+ *
+ * **So this guard does not close the coercion on either reachable front, and nothing here
+ * claims that it does.** `readOnly: 0` arrives as `false`, which is a USABLE no-tier request, and
+ * the caller gets a FULL-CAPABILITY child while having asked to be read-only. That is the silent
+ * failure `docs/testing-constraints.md` #3 exists to forbid, and it is still open.
+ *
+ * What this guard does defend, and it is not nothing: `dispatch()` is a module-level function
+ * with callers that build their own arguments — the test suite among them — and for those a value
+ * that is neither a tier nor a no-tier spelling is a real input rather than a hypothetical.
+ * Closing the remaining gap means refusing UPSTREAM of the coercion, at `prepareArguments` or in
+ * the binding's pre-validation `raw` read; both are recorded as open work in ADR-0041 rather than
+ * settled here, because either changes what the tool contract owes pi.
  *
  * `undefined`, `null` and `false` are USABLE, not invalid: they are the three spellings of "I
  * asked for nothing" and the spec keeps all of them. Tightening them would refuse a request the
