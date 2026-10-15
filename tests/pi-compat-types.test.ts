@@ -295,3 +295,44 @@ test("every tool declaration site routes through defineCompatTool, not pi's own 
   }, 0);
   expect(wrapperUses, "the compat wrapper has to have call sites").toBeGreaterThan(0);
 });
+
+test("every exported probe helper is consumed somewhere (no dead exports)", () => {
+  // The helper was built so the version-sensitive files could not disagree about which pi they
+  // are measuring, and S-05's counterfactual showed what bypassing it costs: with
+  // `installedPiDir` forced to `undefined`, the migrated files go red and the pre-migration ones
+  // stay green -- the suite cannot detect that duplication itself. An export nobody calls is the
+  // same failure one step earlier: it reads like infrastructure and is maintained by nobody.
+  //
+  // `installedPiSource` and `defaultActiveIsHonoured` were both deleted for exactly this reason
+  // (S-06). The repo already guards orphan rule files in ocr-anchor-coverage.test.ts; helper
+  // exports had no equivalent, so the next one would have landed the same way.
+  //
+  // The source of expected values is the same walk the review used: name every consumer file,
+  // and require each exported function to appear in at least one.
+  const HELPER = join(SRC_TOOLS, "..", "..", "tests", "helpers", "pi-compat-probe.ts");
+  const source = readFileSync(HELPER, "utf8");
+  // Functions only. A type that is an exported function's return or parameter type is not dead:
+  // `PiCompatCapabilities` names nothing today because callers take the return value by
+  // inference, and deleting the export would shrink the module's type surface without removing
+  // anything a caller relied on. Both exports S-06 removed were functions.
+  const exported = [...source.matchAll(/^export function (\w+)/gm)].map((m) => m[1]);
+  expect(exported.length, "the helper exports functions").toBeGreaterThan(3);
+
+  const consumers = readdirSync(TESTS_DIR, { recursive: true })
+    .filter((f): f is string => typeof f === "string" && f.endsWith(".ts"))
+    .filter((f) => f !== join("helpers", "pi-compat-probe.ts"))
+    .map((f) => ({
+      file: f,
+      text: readFileSync(join(TESTS_DIR, f), "utf8"),
+    }));
+  expect(consumers.length, "the walk has to find the test tree").toBeGreaterThan(10);
+
+  const dead = exported.filter(
+    (name) => !consumers.some((c) => new RegExp(`\\b${name}\\b`).test(c.text)),
+  );
+  expect(
+    dead,
+    "an export with no caller reads like infrastructure and is maintained by nobody; delete it " +
+      "or use it (see docs/reviews/2026-10-14-pi-compat-floor-compile-review.md S-06)",
+  ).toEqual([]);
+});

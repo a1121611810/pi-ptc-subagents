@@ -1116,7 +1116,7 @@ export function applyMcpAutoEnableEvidence(
  * handing our orchestration surface away is the whole point of `subagents` mode (ADR-0026) —
  * but only while that `codemode` is actually going to run (ADR-0027).
  *
- * The five cases, as a table (ADR-0029 adds the last row):
+ * The four cases, as a table (ADR-0029 adds the last row):
  *
  * | codemode on disk | switch         | activation | surface     | why                                        |
  * | ---------------- | -------------- | ---------- | ----------- | ------------------------------------------ |

@@ -70,9 +70,21 @@ assumed.
 
 ## Open, deliberately
 
+Both rows below were open when this round was written. Both have since been decided; the original
+finding text is kept so the record shows what was true then.
+
 - **`peerDependencies` still declares `>=0.86.0` while the measured capability floor is 0.99.0.**
   `docs/agents/pi-compat-matrix.md` records the measurement and names narrowing a product decision
   the script deliberately does not make. It stays open until a human decides.
+  **Closed 2026-10-15 by the human: keep `>=0.86.0`, and make the code compile there** rather than
+  narrow the range. #192/#193 did that (`tsc --noEmit` over a 0.86.0 tree: 20 errors -> 0), and a
+  lint rule now refuses a direct `defineTool` import in `src/`, so the migration cannot rot back
+  into a state that compiles here and breaks there. The 0.99.0 line stays meaningful: it is where
+  the APIs **appear**, not where this package starts working, and the matrix document says so.
 - **The matrix probe scripts live under `.scratch/`** (gitignored), so a clone cannot re-run the
   210 measurements the document cites. Tracked rather than moved, because the scripts are
   throwaway by construction.
+  **Closed 2026-10-15 by moving them** to `docs/research/pi-compat-probes-20261014/`, with a
+  README that states what they measured, what a re-run needs (measurement trees built outside this
+  repository), and that they are not gate tooling. They remain throwaway by construction; what
+  changed is that a `git clean` can no longer delete the evidence.
