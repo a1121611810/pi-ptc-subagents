@@ -69,7 +69,8 @@ and registers the extension in `~/.pi/agent/settings.json` automatically.
 `tools["<name>"](args)`. Every binding lives in the one `tools` table —
 there is no `pi` global in the worker — so the parallel binding named
 `pi.dispatch` is reached as `tools["pi.dispatch"](args)` and takes a single
-object (`{ task, agent?, cwd?, agentScope?, model?, thinkingLevel?, background?, label? }`),
+object (`{ task, agent?, cwd?, agentScope?, model?, thinkingLevel?, background?, label?,
+readOnly? }`),
 not a positional argument list. Two
 kinds:
 
@@ -93,7 +94,9 @@ by `agentScope`. Naming one is optional — ADR-0039 — because the child is a 
 dispatch prompt is APPENDED to pi's own system prompt, and no `--tools` flag is passed unless the
 definition declares `tools:`. A definition can therefore only take capability away; there is none it
 can add. A dispatch that names none gets the **generalist child** — pi's own system prompt, pi's full
-toolset, no model pin, reported as an empty `agentName`.
+toolset, no model pin, reported as an empty `agentName`. A definition is not the only narrowing
+axis: _read-only tier_ is the other one, and where the two meet a strict tier at the call site
+decides the tool list outright.
 
 _Avoid_: "preset agent" / "default agent" for the generalist. Nothing ships in the package, and the
 generalist is the child pi already is, not a definition this project wrote and installs. Also avoid
@@ -441,6 +444,19 @@ own system prompt rather than substituted for it: for a child with no agent defi
 the whole of what the prompt file adds, with pi's own prompt still underneath. Shape mirrors
 DSH's `subagent-context` injection; the only difference is the depth /
 max-depth attributes, which are pi-ptc-specific. ADR-0016 Recursive section, ADR-0039.
+
+**read-only tier** — the optional `readOnly` argument on a `pi.dispatch` call, in two tiers:
+`"strict"` narrows the dispatched **child pi process's** tool list to the read set; `"lenient"`
+narrows nothing and only adds one clause to the _`pi-ptc-context` hint_. Strings only — a boolean
+was tried first, and pi's validator coerced `readOnly: 0` into "no tier", a silent
+full-capability child for a caller who asked to be read-only; the string enum refuses every
+wrong-typed value at the schema (ADR-0041 §Decision). Which side it narrows is load-bearing: the
+child's own tools, decided at the call site — **not** the PTC worker's binding surface, which is
+what the R3 read-only PTC surface (an explicit `optInBindings` subset in `~/.pi/agent/ptc.json`)
+narrows. ADR-0041.
+_Avoid_: "read-only mode" without a tier named, "read-only dispatch" (that names the argument's two
+tiers, not a kind of dispatch), and reading the strict tier as a boundary — it is a narrowing, not
+a sandbox.
 
 **run_code** — the model-facing tool name DSH exposes in PTC mode. The pi
 version exposes `ptc_run_code` to avoid collision with pi's hypothetical

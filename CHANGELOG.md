@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **A dispatched child can be asked to be read-only, per call.** A new optional `readOnly`
+  argument on the dispatch call takes `"strict"` or `"lenient"` — strings only. Strict replaces
+  the child's tool list with the read set — `read`, `grep`, `find`,
+  `ls`, plus the child report tool when the report contract is on — so the write tools are never
+  declared to the child and it cannot call them. Lenient leaves the tool list exactly as it would
+  have been and adds one line to the `<pi-ptc-context>` block the child already receives.
+  The design first carried a boolean short spelling, and it was reversed before release rather
+  than after: measured, pi's validator coerces booleans — `readOnly: 0` would have silently
+  become "no tier", a full-capability child for a caller who asked to be read-only — and a string
+  enum refuses every wrong-typed value at the schema instead. No released version ever shipped
+  the boolean form.
+  A tier set on the call beats an agent definition's declared `tools:` for strict; for lenient
+  there is no precedence question, because the tier does not touch the tool list at all.
+  Nothing breaks for anyone who does not pass it: an ordinary dispatch's argv and prompt are
+  unchanged. **This is a capability narrowing, not a security boundary** — `bash` is deliberately
+  absent from the strict set, so a strict child cannot run tests or call `git`, and no hostile
+  child is contained by any of it. ADR-0041 records the reasoning and the alternatives.
+
 ## [3.1.0] - 2026-10-15
 
 ### Changed

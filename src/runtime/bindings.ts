@@ -33,6 +33,8 @@ import {
   dispatch as dispatchBinding,
   isMalformedAgentName,
   missingAgentResult,
+  resolveReadOnlyTier,
+  withReadOnlyTier,
   type DispatchDeps,
   type DispatchInput,
 } from "./dispatch.ts";
@@ -204,6 +206,7 @@ type DispatchParameters = TObject<{
   thinkingLevel: TOptional<TString>;
   background: TOptional<TBoolean>;
   label: TOptional<TString>;
+  readOnly: TOptional<TUnion<[TLiteral<"strict">, TLiteral<"lenient">]>>;
 }>;
 
 /**
@@ -241,6 +244,20 @@ export const DISPATCH_PARAMETERS: DispatchParameters = Type.Object({
   thinkingLevel: Type.Optional(Type.String()),
   background: Type.Optional(Type.Boolean()),
   label: Type.Optional(Type.String()),
+  // ADR-0041. A union of STRING LITERALS, and that is the whole reason this closes. Measured
+  // against pi's `validateToolArguments`: including `Type.Boolean()` makes pi COERCE — `1` and
+  // `"true"` are handed onward as `true`, `0` and `"false"` as `false` — so a boolean short
+  // spelling silently turned a wrong-typed value into a tier, on the one parameter whose entire
+  // job is to be unambiguous. A string-only union refuses all of them, and it is also the shape
+  // tool schemas carry most widely. `true` as a short spelling for "strict" was dropped for this.
+  readOnly: Type.Optional(
+    Type.Union([Type.Literal("strict"), Type.Literal("lenient")], {
+      description:
+        'Ask for a read-only child. "strict": its tools are narrowed to the read set, so it ' +
+        'cannot write anything. "lenient": its tools are left exactly as they would have been ' +
+        "and it is only told to work without modifying anything. Omit for today\u2019s behaviour.",
+    }),
+  ),
 });
 
 /** Minimal `Tool` shape for pi's validator. */
@@ -250,6 +267,24 @@ const DISPATCH_TOOL_LIKE = {
     "Dispatch a task to a registered pi agent as a child subprocess (foreground await or background task).",
   parameters: DISPATCH_PARAMETERS,
 };
+
+/**
+ * The read-only tier the caller asked for, read off the RAW (pre-validation) arguments.
+ *
+ * Raw rather than `validated`, and that is the whole point: these two refusals live INSIDE the
+ * validation `catch`, where the arguments have failed `validateToolArguments` and the validated
+ * value is not in hand. It also means a `readOnly` that failed validation contributes nothing —
+ * which is correct, because it is not a tier anyone applied.
+ *
+ * ADR-0041 §Reporting: the field is present whenever a tier was requested. Without this, these
+ * were the only `DispatchResult`s in the package that dropped it, because they never pass
+ * through `dispatch()`'s refusal factories where `withReadOnlyTier` lives.
+ */
+function readOnlyTierOf(
+  raw: Record<string, unknown> | undefined,
+): ReturnType<typeof resolveReadOnlyTier> {
+  return resolveReadOnlyTier(raw?.readOnly as Parameters<typeof resolveReadOnlyTier>[0]);
+}
 
 export interface CreateBuiltinBindingsOptions {
   /** Per-run working directory: the F4 `RunConfig.cwd`, used to build every tool. */
@@ -454,31 +489,37 @@ export function createBuiltinBindings(options: CreateBuiltinBindingsOptions): Bi
           // adding a "no agent given" branch here would be a second, divergent answer to a
           // question the dispatcher already owns.
           if (isMalformedAgentName(rawAgent)) {
-            return missingAgentResult({
-              cwd: options.cwd,
-              agentScope:
-                rawScope === "user" || rawScope === "project" || rawScope === "both"
-                  ? rawScope
-                  : "user",
-            });
+            return withReadOnlyTier(
+              missingAgentResult({
+                cwd: options.cwd,
+                agentScope:
+                  rawScope === "user" || rawScope === "project" || rawScope === "both"
+                    ? rawScope
+                    : "user",
+              }),
+              readOnlyTierOf(raw),
+            );
           }
-          return {
-            text: "",
-            status: "rejected",
-            started: false,
-            // The name the caller gave, or `""` when this refusal is about some OTHER field.
-            // `rawAgent` is `unknown` here and `agentName` is typed `string`: returning the raw
-            // value put `undefined` into a string field on the now-reachable path where a
-            // different field fails validation and no agent was named (issue #185 made that path
-            // reachable by removing the early missing-agent guard).
-            agentName: typeof rawAgent === "string" ? rawAgent : "",
-            durationMs: 0,
-            exitCode: 1,
-            // ADR-0032: the total channel field, for the same reason every other refusal has
-            // it — this shape never carries a report, and a program must not have to infer that.
-            reportChannel: "none",
-            errorMessage: error instanceof Error ? error.message : String(error),
-          };
+          return withReadOnlyTier(
+            {
+              text: "",
+              status: "rejected",
+              started: false,
+              // The name the caller gave, or `""` when this refusal is about some OTHER field.
+              // `rawAgent` is `unknown` here and `agentName` is typed `string`: returning the raw
+              // value put `undefined` into a string field on the now-reachable path where a
+              // different field fails validation and no agent was named (issue #185 made that path
+              // reachable by removing the early missing-agent guard).
+              agentName: typeof rawAgent === "string" ? rawAgent : "",
+              durationMs: 0,
+              exitCode: 1,
+              // ADR-0032: the total channel field, for the same reason every other refusal has
+              // it — this shape never carries a report, and a program must not have to infer that.
+              reportChannel: "none",
+              errorMessage: error instanceof Error ? error.message : String(error),
+            },
+            readOnlyTierOf(raw),
+          );
         }
         return dispatchBinding(
           validated as DispatchInput,

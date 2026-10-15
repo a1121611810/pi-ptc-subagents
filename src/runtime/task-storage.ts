@@ -49,6 +49,7 @@
 import { ok as assertPresent } from "node:assert/strict";
 
 import type { ChildReport, ChildReportChannel } from "./child-report.ts";
+import type { ReadOnlyTier } from "./dispatch.ts";
 import type { ULID } from "./ulid.ts";
 
 /**
@@ -136,6 +137,17 @@ export interface TaskRecord {
    * read as "none".
    */
   reportChannel?: ChildReportChannel;
+  /**
+   * ADR-0041 §"The tier that took effect is reported", on the background front. The tier the
+   * call resolved to, persisted at SPAWN so `ptc_task_output` can hand it back beside the child's
+   * prose — a background dispatch returns a `DispatchHandle`, so this is the whole of the
+   * foreground `DispatchResult.readOnlyTier` for a task that is still running.
+   *
+   * Unlike the two report fields above it is NOT conditional on `succeeded`: a tier is a fact
+   * about the request, so a failed or canceled read-only child still states it. Absent means no
+   * tier was asked for, which is the same claim the foreground result's absent field makes.
+   */
+  readOnlyTier?: ReadOnlyTier;
 }
 
 /**

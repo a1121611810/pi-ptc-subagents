@@ -10,6 +10,14 @@ import {
   DISPATCH_PARAMETERS,
   bindingFailureMessage,
 } from "../src/runtime/bindings.ts";
+import {
+  DispatchSlotCounter,
+  dispatch,
+  isUsableReadOnlyRequest,
+  resolveReadOnlyTier,
+  type DispatchInput,
+  type ReadOnlyTier,
+} from "../src/runtime/dispatch.ts";
 import { resolveBindingNames } from "../src/tools/common.ts";
 import { makeTempDir, removeTempDir, RUN_TIMEOUT_MS } from "./helpers/ptc.ts";
 
@@ -240,6 +248,144 @@ test("the schema itself accepts an omitted agent, and refuses an unusable one", 
   expect(accepts({ task: "t", agent: "x" }), "a name is").toBe(true);
 });
 
+test("the read-only schema is a string enum and refuses everything else, including booleans", () => {
+  /*
+   * ADR-0041's boundary row, and the row the whole string-enum decision exists for. It lives
+   * here rather than in the e2e smoke file because that file calls `dispatch()` directly and
+   * therefore never reaches argument validation at all — the rejection is invisible from that
+   * seam, which is a fact about the seam rather than a gap in the coverage.
+   *
+   * The refusal is the point, and it is strictly harder than the earlier boolean-inclusive
+   * union: pi's `validateToolArguments` COERCES a `Type.Boolean()` member, so under that union
+   * an invalid value silently became a tier, or became no tier at all. Measured against a union
+   * of string literals every one of them is REFUSED. Counterfactual: put `Type.Boolean()` back
+   * into the union in `src/runtime/bindings.ts` and the boolean rows below flip from `false`
+   * to `true`.
+   */
+  const tool = {
+    name: DISPATCH_BINDING_NAME,
+    description: "probe",
+    parameters: DISPATCH_PARAMETERS,
+  };
+  const accepts = (readOnly: unknown): boolean => {
+    try {
+      validateToolArguments(
+        tool as never,
+        {
+          type: "toolCall",
+          id: "probe",
+          name: DISPATCH_BINDING_NAME,
+          arguments: { task: "t", readOnly },
+        } as never,
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  expect(accepts("strict")).toBe(true);
+  expect(accepts("lenient")).toBe(true);
+  expect(accepts(null), "the schema maps null to absent, which means no tier").toBe(true);
+  expect(accepts(undefined), "and so does an omitted key").toBe(true);
+  expect(accepts("STRICT"), "the tiers are case-sensitive on purpose").toBe(false);
+  expect(accepts("readonly"), "the parameter name is not a tier value").toBe(false);
+  expect(accepts({ mode: "strict" }), "an object spelling was considered and not shipped").toBe(
+    false,
+  );
+
+  /*
+   * The rows the boolean-inclusive union could never have written, and the reason the schema
+   * is a string enum. Under `Type.Optional(Type.Union([Type.Boolean(), ...]))` pi's validator
+   * COERCED every one of these — measured: `1` and `"true"` arrived as `true`, `0` and
+   * `"false"` arrived as `false` — so an invalid value silently became a tier, or became no
+   * tier at all. Under a union of string literals, `Type.Literal("strict")` refuses them, and
+   * so the schema refuses them.
+   *
+   * Counterfactual: restore `Type.Boolean()` to the union in `src/runtime/bindings.ts` and
+   * these four flip to `true`. The schema's own contract is the oracle — not a copy of
+   * `resolveReadOnlyTier` — so a schema regression turns this row red.
+   */
+  expect(accepts(true), "a boolean is not a tier spelling").toBe(false);
+  expect(accepts(1), "the number pi coerced to `true` under the old union").toBe(false);
+  expect(
+    accepts(0),
+    "and `0`, which coerced to `false` — silently no tier, the dangerous one",
+  ).toBe(false);
+  expect(accepts("true"), "the string pi coerced to `true`").toBe(false);
+  expect(accepts("1")).toBe(false);
+});
+
+test(
+  "dispatch() refuses a readOnly value that is not a tier instead of coercing it",
+  async () => {
+    /*
+     * Defence in depth for the seam the schema does not govern (ADR-0041: `dispatch()` is a
+     * module-level function, and direct callers build their own arguments).
+     *
+     * It is a `dispatch()` test and not a binding test on purpose. Through the binding or the
+     * top-level tool, pi's validator already refused every value in this loop before `dispatch()`
+     * runs — the schema is a string enum now — so the guard never fires there. What remains is
+     * a caller that imports `dispatch()` and passes a wrong-typed `readOnly` directly, and for
+     * that caller the guard is the only boundary.
+     *
+     * COUNTERFACTUAL — the exact edit: delete the `isUsableReadOnlyRequest` guard at the top of
+     * `dispatch()`. Then `agent: "ghost"` is resolved instead of refused and the message below
+     * names the AGENT rather than the parameter. `ghost` is deliberate: it never resolves, so a
+     * build without the guard fails this row instead of launching a real `pi`, and the row stays a
+     * unit test on a file that stubs no process.
+     */
+    const dir = await makeTempDir();
+    try {
+      await mkdir(join(dir, ".pi", "agents"), { recursive: true });
+      await writeFile(
+        join(dir, ".pi", "agents", "probe.md"),
+        "---\nname: probe\n---\nYou probe.\n",
+      );
+      for (const bad of [1, 0, "true", "1", { mode: "strict" }, ["strict"]] as unknown[]) {
+        // Typed `as never` because the point of the test is a value the declared type forbids.
+        // Cast to `DispatchInput` rather than to `never`: the point of the row is a VALUE the
+        // declared type forbids, not a call the overload set cannot resolve. Casting the argument
+        // to `never` would also hide the return type, and `started` / `errorMessage` are the whole
+        // claim here.
+        const result = await dispatch(
+          {
+            agent: "ghost",
+            task: "t",
+            agentScope: "project",
+            readOnly: bad,
+          } as unknown as DispatchInput,
+          { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          { slots: new DispatchSlotCounter(8) },
+        );
+        // `JSON.stringify` for the object row and `String` for the primitives: the label has to
+        // be the value the caller sent, and Object's default stringification would print
+        // "[object Object]" for both object rows -- the same string twice, so the second row
+        // could pass on the first row's failure.
+        const label = typeof bad === "object" && bad !== null ? JSON.stringify(bad) : String(bad);
+
+        expect(result.status, `${label} is refused, not coerced`).toBe("rejected");
+        // ADR-0016 §3: the binding never throws, and this is the same seam.
+        expect(result.started, `${label} never launched a child`).toBe(false);
+        expect(result.errorMessage ?? "", "the refusal names the parameter").toContain("readOnly");
+        expect(result.errorMessage ?? "", "and the value the caller sent").toContain(label);
+        // The ordering claim, and the reason this assertion is here: the guard runs ABOVE agent
+        // resolution, so a caller fixing `readOnly` is told about `readOnly`.
+        expect(
+          result.errorMessage ?? "",
+          "and not about the agent, which was never looked up",
+        ).not.toContain("unknown agent");
+        // And the accepted values are named, so the refusal is actionable without reading our source.
+        expect(result.errorMessage ?? "").toContain("strict");
+        expect(result.errorMessage ?? "").toContain("lenient");
+      }
+    } finally {
+      await removeTempDir(dir);
+    }
+  },
+  options,
+);
+
 test(
   "the pi.dispatch binding validates arguments and refuses bad calls without throwing",
   async () => {
@@ -307,6 +453,78 @@ test(
       )) as { status: string; errorMessage?: string };
       expect(unknown.status).toBe("rejected");
       expect(unknown.errorMessage ?? "").toContain("unknown agent: ghost");
+    } finally {
+      await removeTempDir(dir);
+    }
+  },
+  options,
+);
+
+test(
+  "a refusal on the binding front states the tier the caller asked for",
+  async () => {
+    /*
+     * The two refusals this binding produces BEFORE `dispatch()` runs — a malformed agent name and
+     * a raw schema failure — are the only `DispatchResult`s in the package that never pass through
+     * `dispatch()`'s refusal factories, and `withReadOnlyTier` lives on those factories. So they
+     * were the two places where a requested tier was dropped from the result: measured on the same
+     * input, `dispatch({agent:"", readOnly:"strict"})` returned `readOnlyTier: "strict"` while
+     * `binding.execute({agent:"", task:"t", readOnly:"strict"})` returned no such key at all.
+     *
+     * ADR-0041 §Reporting says the field "is present whenever a tier was requested". This row is
+     * the production path for that claim on this front — a PTC programme dispatching through the
+     * parallel binding, which is not the same as the `dispatch()` seam.
+     *
+     * COUNTERFACTUAL, measured: delete `withReadOnlyTier` from the two refusal literals in
+     * `src/runtime/bindings.ts` and this row goes red twice over — the binding returns no tier,
+     * and the `dispatch()` comparison beside it still does, which is the divergence itself.
+     */
+    const dir = await makeTempDir();
+    try {
+      await mkdir(join(dir, ".pi", "agents"), { recursive: true });
+      await writeFile(
+        join(dir, ".pi", "agents", "probe.md"),
+        "---\nname: probe\n---\nYou probe.\n",
+      );
+      const bindings = createBuiltinBindings({
+        cwd: dir,
+        names: ["read"],
+        includeDispatch: true,
+      });
+      const binding = bindings.get(DISPATCH_BINDING_NAME);
+      if (binding === undefined) throw new Error("pi.dispatch binding is missing");
+      const call = { callId: 0 } as never;
+
+      for (const [label, args] of [
+        ["a malformed agent name", { agent: "  ", task: "t", agentScope: "project" }],
+        ["a raw schema failure", { agent: "probe", task: "t", agentScope: "everywhere" }],
+      ] as const) {
+        const viaBinding = (await binding.execute({ ...args, readOnly: "strict" }, call)) as {
+          status: string;
+          readOnlyTier?: string;
+        };
+        expect(viaBinding.status, `${label} is refused`).toBe("rejected");
+        expect(
+          viaBinding.readOnlyTier,
+          `${label}: the binding front must state the tier the caller asked for, exactly as ` +
+            `dispatch() does for the same input`,
+        ).toBe("strict");
+
+        const viaDispatch = (await dispatch(
+          { agent: args.agent as string, task: "t", readOnly: "strict" } as never,
+          { callId: 0, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          { slots: new DispatchSlotCounter(8) },
+        )) as { status: string; readOnlyTier?: string };
+        expect(viaDispatch.readOnlyTier, `${label}: and the two fronts must agree`).toBe(
+          viaBinding.readOnlyTier,
+        );
+      }
+
+      // And the absence half, so the field cannot simply be stamped on everything.
+      const untiered = (await binding.execute({ agent: "  ", task: "t" }, call)) as {
+        readOnlyTier?: string;
+      };
+      expect("readOnlyTier" in untiered, "no tier asked for, so no tier is claimed").toBe(false);
     } finally {
       await removeTempDir(dir);
     }
@@ -497,3 +715,56 @@ test(
   },
   options,
 );
+
+test("the schema and the resolver name the SAME two tiers", () => {
+  /*
+   * The tier vocabulary is spelled out in five places: the `ReadOnlyTier` type, the resolver, the
+   * guard, the hand-written schema type and the runtime schema object. Nothing NAMES the
+   * invariant that they agree — which is different from nothing catching a violation of it.
+   *
+   * **`tsc` does catch both directions, and this record says so because the first draft of this
+   * comment claimed it did not.** A mutation audit reported that adding a literal to the runtime
+   * union leaves `tsc` green; measured, it does not: `DISPATCH_PARAMETERS: DispatchParameters`
+   * makes the object literal non-assignable and TS2322 fires at the annotation (verified). The
+   * other direction is covered because the resolver compares against `ReadOnlyTier` and stops
+   * covering when the union grows.
+   *
+   * So the net is real but IMPLICIT — it exists only because somebody wrote the annotation and
+   * the exhaustive comparison, and neither line says "this is where the tiers are decided". This
+   * row makes the invariant explicit, names both sides, and fails with the schema's literal list
+   * in the diff, which is a better error message than a 400-character TS2322.
+   *
+   * COUNTERFACTUAL: add `Type.Literal("advisory")` to the runtime union in
+   * `src/runtime/bindings.ts` and this is the row that reds.
+   */
+  const schemaLiterals = (
+    DISPATCH_PARAMETERS.properties as {
+      readOnly?: { anyOf?: { const?: unknown }[] };
+    }
+  ).readOnly?.anyOf?.map((entry) => entry.const);
+  expect(
+    schemaLiterals,
+    "the runtime schema's readOnly union is readable as a list of literals",
+  ).toEqual(["strict", "lenient"]);
+
+  // And the other direction: every literal the schema names, the resolver actually resolves —
+  // and to itself, not to something wider or narrower.
+  for (const literal of schemaLiterals ?? []) {
+    expect(
+      resolveReadOnlyTier(literal as ReadOnlyTier),
+      `"${String(literal)}" is advertised by the schema, so the resolver must implement it`,
+    ).toBe(literal);
+    expect(
+      isUsableReadOnlyRequest(literal),
+      `"${String(literal)}" is a tier, so the guard must accept it`,
+    ).toBe(true);
+  }
+
+  // The no-tier spellings, stated here rather than left to the rows above: exactly two, and
+  // nothing else. A third ("no" / "off" / "none") would be a value the code silently treats as
+  // no-tier without the schema saying so.
+  expect(isUsableReadOnlyRequest(undefined)).toBe(true);
+  expect(isUsableReadOnlyRequest(null)).toBe(true);
+  expect(isUsableReadOnlyRequest("")).toBe(false);
+  expect(isUsableReadOnlyRequest("off")).toBe(false);
+});

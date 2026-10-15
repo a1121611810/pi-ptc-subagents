@@ -15,7 +15,7 @@
  */
 import { describe, expect, test, vi } from "vitest";
 import { EventEmitter } from "node:events";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   DISPATCH_KILL_GRACE_MS,
@@ -23,6 +23,7 @@ import {
   dispatch,
   dispatchDepthLimitReached,
   type DispatchDeps,
+  type DispatchInput,
   type DispatchResult,
 } from "../../src/runtime/dispatch.ts";
 import {
@@ -43,6 +44,7 @@ import {
   type ULID,
 } from "../../src/runtime/task-storage.ts";
 import { InMemoryOutputStorage, type OutputStorage } from "../../src/runtime/output-storage.ts";
+import { createPtcTaskOutputTool } from "../../src/tools/ptc-task.ts";
 import { makeTempDir, removeTempDir, waitFor } from "../helpers/ptc.ts";
 
 // ---------------------------------------------------------------------------
@@ -311,6 +313,194 @@ describe("dispatch background spawn", () => {
       expect(translated).not.toContain("--no-session");
       expect(translated).toContain("--session-dir");
       expect(argv[argv.length - 1]).toBe("Task: ping");
+    });
+  });
+
+  test("a strict tier narrows the background child's tool list too (ADR-0041)", async () => {
+    // The silent half-feature, asserted where the background path is already owned. Both spawn
+    // paths call the same argv builder with the same input, so this passes for free today --
+    // which is precisely why it needs saying out loud: "passes for free" is what a future edit
+    // to one path stops being. The e2e smoke file cannot reach this row, because a background
+    // dispatch needs a task registry and this file deliberately runs with none.
+    await withAgent(async (dir) => {
+      const h = createHarness();
+      const result = await dispatch(
+        {
+          agent: AGENT,
+          task: "investigate",
+          background: true,
+          agentScope: "project",
+          readOnly: "strict",
+        },
+        { callId: 9, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+        h.deps,
+      );
+      expect(asHandle(result).status).toBe("running");
+      const argv = h.lifecycle.getRecordedArgv(h.lifecycle.handleAt(0));
+      expect(argv[argv.indexOf("--tools") + 1]).toBe("read,grep,find,ls,ptc_child_report");
+    });
+  });
+
+  test("the background path appends the lenient clause, not just the foreground one (ADR-0041)", async () => {
+    /*
+     * Written because a mutation found the gap, not because the suite went red: stubbing the
+     * background path's `readOnly` passthrough left every other test in the repository green.
+     * The argv assertion in the test above cannot see it either -- argv comes from a builder both
+     * paths share, while the PROMPT is materialised separately on each, and only this file has a
+     * background harness.
+     *
+     * Counterfactual: pass `readOnly: undefined` at the background `appendDepthHint` call site
+     * and this is the single test that turns red.
+     */
+    await withAgent(async (dir) => {
+      const h = createHarness();
+      const result = await dispatch(
+        {
+          agent: AGENT,
+          task: "investigate",
+          background: true,
+          agentScope: "project",
+          readOnly: "lenient",
+        },
+        { callId: 10, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+        h.deps,
+      );
+      expect(asHandle(result).status).toBe("running");
+      const opts = h.lifecycle.getRecordedOpts(h.lifecycle.handleAt(0));
+      const prompt = await readFile(opts.promptFile!, "utf8");
+      expect(prompt).toContain("You were dispatched read-only");
+
+      // **The clause's CONTENT, not its greeting.** Four assertions in this repository used to
+      // check only `You were dispatched read-only` — the first four words — and a mutation audit
+      // measured that the clause could then be weakened to "do not create or delete files" (drop
+      // `modify` — the write most likely to happen) or replaced wholesale by "do not write
+      // files", with the WHOLE suite green and `tsc` clean. ADR-0041 §Decision makes this clause
+      // the entire effect of the lenient tier, so an unpinned clause is an unpinned tier.
+      //
+      // Each of the three claims below is a separate promise the clause makes, so each is asserted
+      // separately: a failure names which promise went missing.
+      expect(prompt, "it names all three writes it forbids, not just the greeting").toContain(
+        "create, modify or delete files",
+      );
+      expect(prompt, "and that running commands counts as writing").toContain("run commands");
+      expect(
+        prompt,
+        "and it says the tools are still there — without that the child would read the clause " +
+          "as a narrowing that silently failed",
+      ).toContain("all still available");
+
+      // And the tier it did NOT apply: a lenient child keeps the full toolset.
+      const argv = h.lifecycle.getRecordedArgv(h.lifecycle.handleAt(0));
+      expect(argv, "lenient must not narrow the background child either").not.toContain("--tools");
+    });
+  });
+
+  test("the record carries the tier that took effect, for a background child too (ADR-0041)", async () => {
+    /*
+     * The background half of "The tier that took effect is reported" (user story 17: background
+     * honours the tier exactly as foreground does, and this field must not be a foreground-only
+     * promise). It cannot live in `tests/e2e/subagent-smoke.test.ts`: a background dispatch
+     * needs a task registry and that file deliberately runs with none.
+     *
+     * The record is the ONLY place it can go, because a background dispatch returns a
+     * `DispatchHandle` and there is no `DispatchResult` to carry it — so this row also pins the
+     * decision, not just the value.
+     *
+     * Expectations are the two ADR-0041 tier literals, read off the record the spawn wrote —
+     * there is no third, because the boolean short spelling was removed when the schema became a
+     * string enum. COUNTERFACTUAL: write the tier only at the terminal
+     * transition instead of at spawn, and this row is red on the `running` read below — which is
+     * also the failure it is for, since a task polled while it is still running is exactly when
+     * a caller has no other place to look.
+     */
+    await withAgent(async (dir) => {
+      for (const [request, expected] of [
+        ["strict", "strict"],
+        ["lenient", "lenient"],
+      ] as const) {
+        const h = createHarness();
+        const handle = asHandle(
+          await dispatch(
+            {
+              agent: AGENT,
+              task: "investigate",
+              background: true,
+              agentScope: "project",
+              readOnly: request,
+            },
+            { callId: 40, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+            h.deps,
+          ),
+        );
+        // Read while the child is STILL RUNNING: the tier is a fact about the request, not about
+        // how it ended, so it is already there.
+        const running = await h.storage.loadTask(handle.taskId);
+        expect(running?.status).toBe("running");
+        expect(running?.readOnlyTier, `${JSON.stringify(request)} on a running task`).toBe(
+          expected,
+        );
+
+        // And it survives the terminal transition, because a failed read-only child was still
+        // dispatched read-only.
+        h.lifecycle.pushEvent(h.lifecycle.handleAt(0), {
+          type: "message_end",
+          message: {
+            role: "assistant",
+            stopReason: "stop",
+            content: [{ type: "text", text: "answer" }],
+          },
+        });
+        h.clock.set(1500);
+        h.lifecycle.resolveExit(h.lifecycle.handleAt(0), 1, null);
+        const failed = await waitForTerminal(h.storage, handle.taskId);
+        expect(failed.status).toBe("failed");
+        expect(failed.readOnlyTier, "the tier is not a succeeded-only field").toBe(expected);
+      }
+    });
+  });
+
+  test("a background dispatch asked for no tier records no tier, on either spelling", async () => {
+    /*
+     * The absence half, and the row that makes the field's PRESENCE mean something on this front:
+     * a record that always carried `"strict"` would satisfy the row above.
+     *
+     * `Object.hasOwn`, matching the report rows in this file: an explicitly-`undefined` key and an
+     * absent key are different things, and only the absent one keeps `undefined` from reading as
+     * "no tier was asked for, outcome unknown".
+     *
+     * The two spellings left are an omitted key and an explicit `null`, which pi's validator
+     * maps to an absent value. `false` is NOT one of them any more: under a string enum it is a
+     * wrong-typed value, so it is refused rather than quietly honoured — the boundary table in
+     * `tests/bindings.test.ts` is where that is pinned.
+     *
+     * COUNTERFACTUAL: stamp the tier unconditionally at spawn (`readOnlyTier: readOnlyTier ?? undefined`
+     * written as a plain property) and this turns red on the hasOwn assertion.
+     */
+    await withAgent(async (dir) => {
+      for (const request of [undefined, null] as const) {
+        const h = createHarness();
+        const handle = asHandle(
+          await dispatch(
+            {
+              agent: AGENT,
+              task: "investigate",
+              background: true,
+              agentScope: "project",
+              // Cast: `null` is not in `DispatchInput["readOnly"]`, and the fact that the wire can
+              // carry it anyway is why the read-point guard has an `unknown` parameter at all.
+              ...(request === undefined ? {} : { readOnly: request as unknown }),
+            } as DispatchInput,
+            { callId: 41, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+            h.deps,
+          ),
+        );
+        const record = await h.storage.loadTask(handle.taskId);
+        expect(record).not.toBeNull();
+        expect(
+          Object.hasOwn(record as object, "readOnlyTier"),
+          `${String(request)} asks for no tier, so no tier is recorded`,
+        ).toBe(false);
+      }
     });
   });
 
@@ -1235,6 +1425,118 @@ describe("background output persistence", () => {
       expect(record.outputPreview).toBe("PONG");
       expect(record.outputRef).toBe(outputStorage.outputRef(handle.taskId));
       expect(await outputStorage.readOutput(handle.taskId)).toBe("PONG");
+    });
+  });
+
+  test("ptc_task_output projects the tier back off the record (ADR-0041)", async () => {
+    /*
+     * The last leg of the chain, and the only one this file can own: the record field is written
+     * in `dispatch.ts`, and `ptc_task_output` is what hands it back to a model or a script. The
+     * test for that projection lives in `tests/unit/ptc-task-tools.test.ts`, which this change
+     * does not own, so it is pinned HERE instead — with the same registry, the same output
+     * storage and a REAL background dispatch in front of it, rather than a hand-built record.
+     *
+     * Both spellings, because they are different surfaces: `details` is camelCase like the
+     * record it reads, `structuredContent` is snake_case like every other key on it (ADR-0028).
+     * Getting that second one wrong is invisible to a script that only reads the first.
+     *
+     * COUNTERFACTUAL: drop the `read_only_tier` spread in `createPtcTaskOutputTool`'s
+     * structuredContent literal and only the snake_case assertion turns red; drop the `details`
+     * spread and only the camelCase one does. Two edits, two independent pins.
+     */
+    await withAgent(async (dir) => {
+      const h = createHarness({ start: 1000 });
+      const outputStorage = new InMemoryOutputStorage();
+      const deps: DispatchDeps = { ...h.deps, outputStorage };
+      const handle = asHandle(
+        await dispatch(
+          {
+            agent: AGENT,
+            task: "survey",
+            background: true,
+            agentScope: "project",
+            readOnly: "strict",
+          },
+          { callId: 2, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          deps,
+        ),
+      );
+      h.lifecycle.pushEvent(h.lifecycle.handleAt(0), {
+        type: "message_end",
+        message: { role: "assistant", content: [{ type: "text", text: "PONG" }] },
+      });
+      h.clock.set(1500);
+      h.lifecycle.resolveExit(h.lifecycle.handleAt(0), 0, null);
+      const record = await waitForTerminal(h.storage, handle.taskId);
+      expect(record.status).toBe("succeeded");
+
+      const tool = createPtcTaskOutputTool(h.registry, outputStorage);
+      const result = (await tool.execute(
+        "call-1",
+        { taskId: record.id },
+        undefined,
+        undefined,
+        undefined as never,
+        // `as unknown as`, not `as`: pi 0.86.0's `AgentToolResult` has no `structuredContent`
+        // at all, so a direct cast to a type that REQUIRES one is TS2352 on the declared floor.
+        // Measured by `pnpm run compat:pi 0.86.0` — this file was the only failure in the whole
+        // floor leg, and `as` was the whole of it.
+      )) as unknown as
+        | {
+            details: { readOnlyTier?: string; output: string };
+            structuredContent: { read_only_tier?: string };
+          }
+        | undefined;
+      expect(result, "the tool returned a result").toBeDefined();
+      expect(result?.details.readOnlyTier, "details keeps the record's camelCase spelling").toBe(
+        "strict",
+      );
+      expect(
+        result?.structuredContent.read_only_tier,
+        "the codemode projection is snake_case, like every other key on it",
+      ).toBe("strict");
+      // And the child's prose is still there: the tier is a sibling of the output, never a
+      // replacement for it.
+      expect(result?.details.output).toContain("PONG");
+    });
+  });
+
+  test("ptc_task_output carries no tier key for a task dispatched without one", async () => {
+    // The absence half, and the row that makes the presence one mean something: a projection that
+    // always emitted `read_only_tier` would satisfy the test above. `Object.hasOwn`, because an
+    // explicitly-undefined key vanishes at the JSON boundary anyway and a script would then be
+    // holding a projection its own schema does not describe.
+    await withAgent(async (dir) => {
+      const h = createHarness({ start: 1000 });
+      const outputStorage = new InMemoryOutputStorage();
+      const deps: DispatchDeps = { ...h.deps, outputStorage };
+      const handle = asHandle(
+        await dispatch(
+          { agent: AGENT, task: "survey", background: true, agentScope: "project" },
+          { callId: 3, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          deps,
+        ),
+      );
+      h.lifecycle.pushEvent(h.lifecycle.handleAt(0), {
+        type: "message_end",
+        message: { role: "assistant", content: [{ type: "text", text: "PONG" }] },
+      });
+      h.clock.set(1500);
+      h.lifecycle.resolveExit(h.lifecycle.handleAt(0), 0, null);
+      const record = await waitForTerminal(h.storage, handle.taskId);
+
+      const tool = createPtcTaskOutputTool(h.registry, outputStorage);
+      const result = (await tool.execute(
+        "call-2",
+        { taskId: record.id },
+        undefined,
+        undefined,
+        undefined as never,
+        // Same floor reason as the cast above: `structuredContent` does not exist on
+        // pi 0.86.0's `AgentToolResult`.
+      )) as unknown as { details: object; structuredContent: object } | undefined;
+      expect(Object.hasOwn(result?.structuredContent ?? {}, "read_only_tier")).toBe(false);
+      expect(Object.hasOwn(result?.details ?? {}, "readOnlyTier")).toBe(false);
     });
   });
 

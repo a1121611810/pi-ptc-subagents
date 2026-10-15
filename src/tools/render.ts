@@ -42,6 +42,7 @@ import type {
 // `ChildReportChannel` are read off a `DispatchResult` by the tool, never constructed here.
 import type { ChildReport, ChildReportChannel, ChildReportFinding } from "../runtime/dispatch.ts";
 import { CHILD_REPORT_MAX_FINDINGS } from "../runtime/child-report.ts";
+import { TREE_LAST } from "./read-only-tier-text.ts";
 import { MAX_LINE_CHARS, renderModelValue, sanitizeText } from "./text.ts";
 import { DEFAULT_SHIMMER_INTERVAL_MS, type ShimmerState, withShimmer } from "./shimmer.ts";
 
@@ -70,7 +71,6 @@ const TREE_ROOT = "└─ "; // call-row prefix
 const TREE_ROOT_CONT = "   "; // continuation under the root (summary line + error text)
 const TREE_INDENT = "   "; // column children start at
 const TREE_FIRST = "├─ "; // connector of first / middle child
-const TREE_LAST = "└─ "; // connector of last child
 const TREE_CONT_FIRST = "│  "; // continuation of first / middle child
 const TREE_CONT_LAST = "   "; // continuation of last child (just spaces — no connector)
 
