@@ -261,13 +261,20 @@ export interface DispatchInput {
    * untiered means. Read lenient as "wins over the definition" and you would predict a narrowing
    * that does not happen.
    */
-  readOnly?: boolean | ReadOnlyTier;
+  readOnly?: ReadOnlyTier;
 }
 
 /**
  * ADR-0041: the two read-only tiers. `strict` narrows what the child can be handed;
- * `lenient` narrows nothing and only states the posture. `boolean` is accepted at the call
- * site as a short spelling of `"strict"` and is folded by {@link resolveReadOnlyTier}.
+ * `lenient` narrows nothing and only states the posture.
+ *
+ * **Strings only, and that is load-bearing rather than a style choice.** Measured against pi's
+ * `validateToolArguments`: a union that includes `Type.Boolean()` COERCES — `1` and `"true"`
+ * arrive as `true`, `0` and `"false"` arrive as `false` — while a union of string literals
+ * refuses every one of them. The boolean short spelling therefore bought a silent type coercion
+ * on the parameter whose entire job is to be unambiguous, and it cost more than the token it
+ * saved. A pure string enum is also the shape tool schemas support most widely, which a mixed
+ * `boolean | enum` union is not.
  */
 export type ReadOnlyTier = "strict" | "lenient";
 
@@ -279,58 +286,44 @@ export type ReadOnlyTier = "strict" | "lenient";
 export const READ_ONLY_TOOL_NAMES: readonly string[] = ["read", "grep", "find", "ls"];
 
 /**
- * ADR-0041: the one place the two spellings of a tier are unified. `true` folds into
- * `"strict"` here and nowhere else, so downstream code has a single `ReadOnlyTier | undefined`
- * to reason about and no second state can be stored, compared or forgotten.
+ * ADR-0041: the one place a tier is recognised. One spelling means there is nothing to fold and
+ * no second state to store, compare or forget — the reason this function exists at all is that
+ * `undefined` ("no tier") must be decided in exactly one place.
+ *
+ * It is not the boundary check. That lives in the schema, and the schema is strict because the
+ * union is string-only; see {@link isUsableReadOnlyRequest} for what is left for the seam the
+ * schema does not govern.
  */
 export function resolveReadOnlyTier(readOnly: DispatchInput["readOnly"]): ReadOnlyTier | undefined {
-  if (readOnly === true) return "strict";
   return readOnly === "strict" || readOnly === "lenient" ? readOnly : undefined;
 }
 
 /**
- * ADR-0041 §Constraint compliance: "an invalid value is refused at the boundary rather than
- * coerced." The boundary check that cannot live in the schema.
+ * ADR-0041: the boundary check, for the seam the schema does not govern.
  *
- * `unknown`, deliberately, and that is the whole reason this function exists. `readOnly` is
- * declared `boolean | ReadOnlyTier`, but that is a compile-time claim about a value that reaches
- * `dispatch()` over a seam the type does not govern. Measured against the schema this module
- * declares (`Type.Optional(Type.Union([Type.Boolean(), Type.Literal("strict"),
- * Type.Literal("lenient")]))`):
+ * `unknown`, deliberately. `readOnly` is declared `ReadOnlyTier`, but that is a compile-time
+ * claim about a value that reaches `dispatch()` from callers which build their own arguments
+ * rather than going through a schema — the test suite among them.
  *
- * - The union ACCEPTS `1`, `0`, `"true"` and `"1"`, and `Type.Literal(true)` accepts the same
- *   four, so tightening the literal does not close it — only `Type.Literal("strict")` rejects
- *   them, and a union of that with `Type.Boolean()` still takes the Boolean branch. There is no
- *   schema this can be closed with.
- * - `validateToolArguments` then COERCES rather than refuses. **And that happens before this
- *   guard can run.** pi's tool-call path is `prepareToolCallArguments` → `validateToolArguments`
- *   → `execute(id, validatedArgs)`, so `execute` is handed the validated value, not the caller's.
- *   Both production fronts go through it: `createPtcSubagentTool.execute` receives `0` already
- *   rewritten to `false`, and so does the binding's validated arguments.
+ * **On both production fronts this is no longer load-bearing, and the reason is a schema
+ * decision rather than a guard.** pi COERCES a `Type.Boolean()` union: `1`, `"true"` and `"1"`
+ * arrive as `true`, `0` and `"false"` as `false`, and by the time any code here sees them the
+ * caller's own spelling is gone. That is why the union is string-only — a union of string
+ * literals refuses all four, measured — and why the boolean short spelling was dropped: it bought
+ * a silent coercion on the one parameter whose entire job is to be unambiguous.
  *
- * **So this guard does not close the coercion on either reachable front, and nothing here
- * claims that it does.** `readOnly: 0` arrives as `false`, which is a USABLE no-tier request, and
- * the caller gets a FULL-CAPABILITY child while having asked to be read-only. That is the silent
- * failure `docs/testing-constraints.md` #3 exists to forbid, and it is still open.
+ * So what is left is defence in depth, and it is worth keeping for one reason: `dispatch()` is a
+ * module-level function, and "the only callers happen to validate first" is a property of today's
+ * callers rather than of the function's contract.
  *
- * What this guard does defend, and it is not nothing: `dispatch()` is a module-level function
- * with callers that build their own arguments — the test suite among them — and for those a value
- * that is neither a tier nor a no-tier spelling is a real input rather than a hypothetical.
- * Closing the remaining gap means refusing UPSTREAM of the coercion, at `prepareArguments` or in
- * the binding's pre-validation `raw` read; both are recorded as open work in ADR-0041 rather than
- * settled here, because either changes what the tool contract owes pi.
- *
- * `undefined`, `null` and `false` are USABLE, not invalid: they are the three spellings of "I
- * asked for nothing" and the spec keeps all of them. Tightening them would refuse a request the
- * spec calls valid.
+ * `undefined` and `null` are USABLE: they are the two spellings of "I asked for nothing", and
+ * the schema maps both to an absent value. `false` is NOT usable any more — it used to mean "no
+ * tier", and under a string enum it is simply a wrong-typed value, so it is refused rather than
+ * quietly honoured.
  */
 export function isUsableReadOnlyRequest(readOnly: unknown): boolean {
   return (
-    readOnly === undefined ||
-    readOnly === null ||
-    typeof readOnly === "boolean" ||
-    readOnly === "strict" ||
-    readOnly === "lenient"
+    readOnly === undefined || readOnly === null || readOnly === "strict" || readOnly === "lenient"
   );
 }
 
@@ -367,7 +360,7 @@ export function invalidReadOnlyRequestResult(readOnly: unknown): DispatchResult 
     errorMessage:
       "invalid readOnly value: " +
       rendered +
-      ' (readOnly accepts true, false, "strict" or "lenient"; null and undefined ask for no tier)',
+      ' (readOnly accepts "strict" or "lenient"; null and undefined ask for no tier)',
   };
 }
 

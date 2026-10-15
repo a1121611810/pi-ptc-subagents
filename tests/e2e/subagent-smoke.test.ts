@@ -214,11 +214,7 @@ describe("a read-only tier is decided at the call site (ADR-0041)", () => {
     return tools ?? "";
   }
 
-  async function dispatchReadOnly(
-    cwd: string,
-    readOnly: boolean | "strict" | "lenient",
-    agent?: string,
-  ) {
+  async function dispatchReadOnly(cwd: string, readOnly: "strict" | "lenient", agent?: string) {
     return await dispatch(
       { task: "say PONG", agentScope: "both", cwd, readOnly, ...(agent ? { agent } : {}) },
       { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
@@ -258,13 +254,40 @@ describe("a read-only tier is decided at the call site (ADR-0041)", () => {
     });
   });
 
-  test('true is the same request as "strict", not a second state', async () => {
-    // Counterfactual: a build that stored `true` as its own tier, or that resolved it to
-    // something narrower, fails HERE and nowhere else -- every other row passes either way.
+  test("an invalid value is refused instead of reaching the child as a tier nobody implements", async () => {
+    /*
+     * The row the boolean union made impossible to write, and the whole reason the parameter
+     * became a string enum. With `Type.Boolean()` in the schema, pi's validator COERCED rather
+     * than refused: `1` arrived as `true` and `0` as `false`, so `readOnly: 0` silently became
+     * no tier at all — a full-capability child for a caller who asked for read-only. Under a
+     * string-only union the schema refuses every one of them before any of this matters.
+     *
+     * The dispatch-level guard stays as defence in depth (direct `dispatch()` callers build
+     * their own arguments), so the counterfactual holds: without it, `readOnly: "readonly"`
+     * would still come back `rejected` today — but that is a property of today's schema, not of
+     * the function's contract, which is why the guard is not deleted.
+     */
     await withFakePi(async (cwd) => {
-      const result = await dispatchReadOnly(cwd, true);
-      expect(result.status).toBe("fulfilled");
-      expect(toolsTheChildWasHanded(result.text)).toBe("read,grep,find,ls,ptc_child_report");
+      for (const notATier of [1, 0, true, "true", "readonly", "Strict"] as const) {
+        // `as unknown as DispatchInput`: the point of the row is a VALUE the declared type
+        // forbids. Casting to `never` would also erase the return type, and `started` /
+        // `errorMessage` are the whole claim.
+        const result = await dispatch(
+          { task: "say PONG", cwd, readOnly: notATier } as unknown as DispatchInput,
+          { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
+          { slots: new DispatchSlotCounter(2) },
+        );
+
+        expect(result.status, `readOnly: ${String(notATier)} refused, not coerced`).toBe(
+          "rejected",
+        );
+        expect(result.started, "and nothing was launched").toBe(false);
+        expect(result.text, "no child means no child text").toBe("");
+        expect(result.errorMessage ?? "", "the refusal names the parameter").toContain("readOnly");
+        expect(result.errorMessage ?? "", "and the value that was refused").toContain(
+          String(notATier),
+        );
+      }
     });
   });
 
@@ -344,8 +367,10 @@ describe("a read-only tier is decided at the call site (ADR-0041)", () => {
      * and a caller reading only the agent file has no way to account for the child it got. The
      * field does not negotiate -- precedence is total -- it makes the override visible.
      *
-     * Expectations are the two tier literals from the ADR's own decision, plus the one fold
-     * (`true` -> `strict`) the type comment states, not a copy of `resolveReadOnlyTier`.
+     * Expectations are the two tier literals from the ADR's own decision, not a copy of
+     * `resolveReadOnlyTier`. There is no third: the boolean short spelling was removed because a
+     * `Type.Boolean()` in this union made pi COERCE, so `readOnly: 1` silently became `strict`
+     * and `readOnly: 0` silently became no tier at all.
      */
     await withFakePi(async (cwd) => {
       await writeRestrictedAgent(cwd, ["tools: read, bash"]);
@@ -353,14 +378,6 @@ describe("a read-only tier is decided at the call site (ADR-0041)", () => {
       const strict = await dispatchReadOnly(cwd, "strict", "restricted");
       expect(strict.status).toBe("fulfilled");
       expect(strict.readOnlyTier, "strict is reported as itself").toBe("strict");
-
-      const short = await dispatchReadOnly(cwd, true, "restricted");
-      expect(short.status).toBe("fulfilled");
-      // `true` is the SAME request as "strict", so it reports the tier it was folded into and
-      // never survives as a second state.
-      expect(short.readOnlyTier, "true folds into strict rather than becoming its own state").toBe(
-        "strict",
-      );
 
       const lenient = await dispatchReadOnly(cwd, "lenient", "restricted");
       expect(lenient.status).toBe("fulfilled");
@@ -372,6 +389,12 @@ describe("a read-only tier is decided at the call site (ADR-0041)", () => {
     /*
      * The absence half, and the row that makes the field's PRESENCE mean something: a field that
      * is always `"strict"` satisfies the row above.
+     *
+     * The two spellings are an omitted key and an explicit `null`. `false` is not among them any
+     * more — it used to mean "no tier", and under a string enum it is a wrong-typed value, so it
+     * is REFUSED rather than quietly honoured. That is the improvement this change bought: the
+     * value a caller is most likely to reach for by mistake now gets an answer instead of a
+     * full-capability child.
      *
      * `Object.hasOwn` rather than `toBeUndefined`, for the same reason `ptc-subagent.test.ts`
      * uses it: an explicitly-`undefined` key and an absent key are different things on this
@@ -387,13 +410,6 @@ describe("a read-only tier is decided at the call site (ADR-0041)", () => {
       expect(none.status).toBe("fulfilled");
       expect(Object.hasOwn(none, "readOnlyTier"), "no tier asked for, none reported").toBe(false);
 
-      const explicitlyNo = await dispatchReadOnly(cwd, false);
-      expect(explicitlyNo.status).toBe("fulfilled");
-      expect(
-        Object.hasOwn(explicitlyNo, "readOnlyTier"),
-        "and false asks for nothing, so it is reported the same way",
-      ).toBe(false);
-
       const explicitlyNull = await dispatch(
         { task: "say PONG", cwd, readOnly: null } as unknown as DispatchInput,
         { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
@@ -402,18 +418,18 @@ describe("a read-only tier is decided at the call site (ADR-0041)", () => {
       expect(explicitlyNull.status).toBe("fulfilled");
       expect(
         Object.hasOwn(explicitlyNull, "readOnlyTier"),
-        "and so does null, the third spelling of asking for nothing",
+        "and so does null, the other spelling of asking for nothing",
       ).toBe(false);
     });
   });
 
-  test("readOnly: false is byte-identical to asking for no tier at all", async () => {
+  test("an omitted readOnly and null are byte-identical to asking for no tier at all", async () => {
     /*
      * THE UNPINNED BEHAVIOUR. Measured before this row existed: deleting the whole body of
      * `resolveReadOnlyTier` left the repository fully green, because every other row in this file
-     * asserts what a tier DOES and nothing observed what asking for nothing does. `false` and
-     * `null` are the spec's own no-tier spellings, so they are the ones whose behaviour the spec
-     * pins and the suite did not.
+     * asserts what a tier DOES and nothing observed what asking for nothing does. The two
+     * no-tier spellings are an omitted key and `null` (the schema maps `null` to absent), and
+     * they are the ones whose behaviour the spec pins and the suite did not.
      *
      * The comparison is the child's OWN stdout, byte for byte, and it covers both halves of the
      * no-op in one assertion: `tools=` is the `--tools` flag that decides how much child the
@@ -422,8 +438,8 @@ describe("a read-only tier is decided at the call site (ADR-0041)", () => {
      * the parameter by construction — `buildArgv` branches on it in exactly one place, the
      * `--tools` flag — and this file does not gain an echo to prove it.
      *
-     * COUNTERFACTUAL, measured: make `resolveReadOnlyTier` answer "strict" for `false` or for
-     * `null` and this is the row that turns red — the second dispatch would come back
+     * COUNTERFACTUAL, measured: make `resolveReadOnlyTier` answer "strict" for `null` and this
+     * is the row that turns red — the second dispatch would come back
      * `tools=read,grep,find,ls,...` where the first says `none`. The other direction is pinned
      * here too: drop the `readOnly === null` clause from `isUsableReadOnlyRequest` (measured, 2
      * rows red — this one and the reported-absence row) and both dispatches are refused instead
@@ -437,7 +453,7 @@ describe("a read-only tier is decided at the call site (ADR-0041)", () => {
       );
       expect(none.status).toBe("fulfilled");
 
-      for (const askedForNothing of [false, null]) {
+      for (const askedForNothing of [null] as const) {
         const explicitlyNo = await dispatch(
           // Cast: `null` is not in `DispatchInput["readOnly"]`, and the fact that the wire can
           // carry it anyway is why the read-point guard has an `unknown` parameter at all.
@@ -459,35 +475,6 @@ describe("a read-only tier is decided at the call site (ADR-0041)", () => {
           "spelled out as well, so the failure names which half diverged",
         ).toBe(toolsTheChildWasHanded(none.text));
       }
-    });
-  });
-
-  test("an invalid readOnly value is refused before anything is launched", async () => {
-    /*
-     * The loud half of ADR-0041 §Constraint compliance, at the seam where the consequence is
-     * observable. `readOnly: 1` passes the declared schema (measured, and pinned in
-     * `tests/bindings.test.ts`), so without the guard this dispatch would reach the fake pi and
-     * come back `tools=none` — a full-capability child for a caller who asked for read-only.
-     *
-     * COUNTERFACTUAL: delete the `isUsableReadOnlyRequest` guard at the top of `dispatch()`.
-     * Then this row sees `fulfilled` with `tools=none` instead of a rejection naming the
-     * parameter, and it red without spawning anything real — the fake pi is the child.
-     */
-    await withFakePi(async (cwd) => {
-      const result = await dispatch(
-        // `as unknown as DispatchInput`: the point of the row is a VALUE the declared type
-        // forbids. Casting to `never` would also erase the return type, and `started` /
-        // `errorMessage` are the whole claim.
-        { task: "say PONG", cwd, readOnly: 1 } as unknown as DispatchInput,
-        { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
-        { slots: new DispatchSlotCounter(2) },
-      );
-
-      expect(result.status, "refused, not coerced into a tier or into nothing").toBe("rejected");
-      expect(result.started, "and nothing was launched").toBe(false);
-      expect(result.text, "no child means no child text").toBe("");
-      expect(result.errorMessage ?? "", "the refusal names the parameter").toContain("readOnly");
-      expect(result.errorMessage ?? "", "and the value that was refused").toContain("1");
     });
   });
 });

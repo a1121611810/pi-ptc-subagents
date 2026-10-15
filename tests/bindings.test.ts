@@ -241,17 +241,19 @@ test("the schema itself accepts an omitted agent, and refuses an unusable one", 
   expect(accepts({ task: "t", agent: "x" }), "a name is").toBe(true);
 });
 
-test("the read-only schema takes the two tiers and the short spelling, and refuses the rest", () => {
+test("the read-only schema is a string enum and refuses everything else, including booleans", () => {
   /*
-   * ADR-0041's boundary row. It lives here rather than in the e2e smoke file because that file
-   * calls `dispatch()` directly and therefore never reaches argument validation at all — the
-   * rejection is invisible from that seam, which is a fact about the seam rather than a gap in
-   * the coverage.
+   * ADR-0041's boundary row, and the row the whole string-enum decision exists for. It lives
+   * here rather than in the e2e smoke file because that file calls `dispatch()` directly and
+   * therefore never reaches argument validation at all — the rejection is invisible from that
+   * seam, which is a fact about the seam rather than a gap in the coverage.
    *
-   * The refusal is the point: an unrecognised tier typed as `Type.Optional(Type.String())` would
-   * pass validation here, reach the child as "some tier nobody implements", and silently behave
-   * like no tier at all. Counterfactual: widen the schema to a plain string and every `false`
-   * below inverts.
+   * The refusal is the point, and it is strictly harder than the earlier boolean-inclusive
+   * union: pi's `validateToolArguments` COERCES a `Type.Boolean()` member, so under that union
+   * an invalid value silently became a tier, or became no tier at all. Measured against a union
+   * of string literals every one of them is REFUSED. Counterfactual: put `Type.Boolean()` back
+   * into the union in `src/runtime/bindings.ts` and the boolean rows below flip from `false`
+   * to `true`.
    */
   const tool = {
     name: DISPATCH_BINDING_NAME,
@@ -275,10 +277,10 @@ test("the read-only schema takes the two tiers and the short spelling, and refus
     }
   };
 
-  expect(accepts(true), "the short spelling of strict").toBe(true);
   expect(accepts("strict")).toBe(true);
   expect(accepts("lenient")).toBe(true);
-  expect(accepts(false), "false asks for nothing, which is a valid thing to ask for").toBe(true);
+  expect(accepts(null), "the schema maps null to absent, which means no tier").toBe(true);
+  expect(accepts(undefined), "and so does an omitted key").toBe(true);
   expect(accepts("STRICT"), "the tiers are case-sensitive on purpose").toBe(false);
   expect(accepts("readonly"), "the parameter name is not a tier value").toBe(false);
   expect(accepts({ mode: "strict" }), "an object spelling was considered and not shipped").toBe(
@@ -286,38 +288,39 @@ test("the read-only schema takes the two tiers and the short spelling, and refus
   );
 
   /*
-   * The four rows that make the read-point guard in `dispatch()` necessary, asserted HERE rather
-   * than left as folklore. Each one is a value no tier implements, and each one is ACCEPTED.
+   * The rows the boolean-inclusive union could never have written, and the reason the schema
+   * is a string enum. Under `Type.Optional(Type.Union([Type.Boolean(), ...]))` pi's validator
+   * COERCED every one of these — measured: `1` and `"true"` arrived as `true`, `0` and
+   * `"false"` arrived as `false` — so an invalid value silently became a tier, or became no
+   * tier at all. Under a union of string literals, `Type.Literal("strict")` refuses them, and
+   * so the schema refuses them.
    *
-   * The `Type.Boolean()` branch is what accepts them: measured on this schema, `Type.Literal(true)`
-   * accepts the same four, so swapping the literal for a union of the two does not close it,
-   * while `Type.Literal("strict")` on its own rejects all four correctly. There is no declaration
-   * of this union that refuses them, which is why `isUsableReadOnlyRequest` exists at the read
-   * point instead — see the guard's doc comment for the measured coercion that follows.
-   *
-   * Expectations are pinned to the schema's own contract ("a boolean or one of the two tier
-   * literals"), so this row is falsified by tightening the schema too — which would be the fix
-   * nobody could find, stated here so the next reader looks.
+   * Counterfactual: restore `Type.Boolean()` to the union in `src/runtime/bindings.ts` and
+   * these four flip to `true`. The schema's own contract is the oracle — not a copy of
+   * `resolveReadOnlyTier` — so a schema regression turns this row red.
    */
-  expect(accepts(1), "the schema cannot tell 1 from true").toBe(true);
-  expect(accepts(0), "nor 0 from false").toBe(true);
-  expect(accepts("true"), 'nor "true" from true').toBe(true);
-  expect(accepts("1"), 'nor "1" from true').toBe(true);
+  expect(accepts(true), "a boolean is not a tier spelling").toBe(false);
+  expect(accepts(1), "the number pi coerced to `true` under the old union").toBe(false);
+  expect(
+    accepts(0),
+    "and `0`, which coerced to `false` — silently no tier, the dangerous one",
+  ).toBe(false);
+  expect(accepts("true"), "the string pi coerced to `true`").toBe(false);
+  expect(accepts("1")).toBe(false);
 });
 
 test(
   "dispatch() refuses a readOnly value that is not a tier instead of coercing it",
   async () => {
     /*
-     * The half the schema above cannot reach (ADR-0041 §Constraint compliance: "an invalid value is
-     * refused at the boundary rather than coerced").
+     * Defence in depth for the seam the schema does not govern (ADR-0041: `dispatch()` is a
+     * module-level function, and direct callers build their own arguments).
      *
-     * It is a `dispatch()` test and not a binding test on purpose. Through the binding, pi's
-     * validator COERCES these four values — measured, `readOnly: 1` arrives at `dispatch()` as
-     * `true` — so the binding seam cannot see this guard fire at all. `dispatch()` is exported and
-     * is what `createPtcSubagentTool` calls directly with its params cast to `DispatchInput`, and
-     * there nothing coerces: `1` is not a tier, `resolveReadOnlyTier` answers `undefined`, and the
-     * caller gets a full-capability child while having asked for read-only.
+     * It is a `dispatch()` test and not a binding test on purpose. Through the binding or the
+     * top-level tool, pi's validator already refused every value in this loop before `dispatch()`
+     * runs — the schema is a string enum now — so the guard never fires there. What remains is
+     * a caller that imports `dispatch()` and passes a wrong-typed `readOnly` directly, and for
+     * that caller the guard is the only boundary.
      *
      * COUNTERFACTUAL — the exact edit: delete the `isUsableReadOnlyRequest` guard at the top of
      * `dispatch()`. Then `agent: "ghost"` is resolved instead of refused and the message below

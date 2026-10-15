@@ -204,7 +204,7 @@ type DispatchParameters = TObject<{
   thinkingLevel: TOptional<TString>;
   background: TOptional<TBoolean>;
   label: TOptional<TString>;
-  readOnly: TOptional<TUnion<[TBoolean, TLiteral<"strict">, TLiteral<"lenient">]>>;
+  readOnly: TOptional<TUnion<[TLiteral<"strict">, TLiteral<"lenient">]>>;
 }>;
 
 /**
@@ -242,15 +242,18 @@ export const DISPATCH_PARAMETERS: DispatchParameters = Type.Object({
   thinkingLevel: Type.Optional(Type.String()),
   background: Type.Optional(Type.Boolean()),
   label: Type.Optional(Type.String()),
-  // ADR-0041. The union rather than a plain string: an unknown tier has to be refused at
-  // this boundary, where the caller can see the refusal, rather than reaching the child as
-  // "some tier nobody implements". `true` is the short spelling of "strict" and folds there.
+  // ADR-0041. A union of STRING LITERALS, and that is the whole reason this closes. Measured
+  // against pi's `validateToolArguments`: including `Type.Boolean()` makes pi COERCE — `1` and
+  // `"true"` are handed onward as `true`, `0` and `"false"` as `false` — so a boolean short
+  // spelling silently turned a wrong-typed value into a tier, on the one parameter whose entire
+  // job is to be unambiguous. A string-only union refuses all of them, and it is also the shape
+  // tool schemas carry most widely. `true` as a short spelling for "strict" was dropped for this.
   readOnly: Type.Optional(
-    Type.Union([Type.Boolean(), Type.Literal("strict"), Type.Literal("lenient")], {
+    Type.Union([Type.Literal("strict"), Type.Literal("lenient")], {
       description:
-        'Ask for a read-only child. true or "strict": the child is narrowed to the read set, so ' +
-        'it cannot write. "lenient": its tools are left exactly as they would have been and it is ' +
-        "only told to work without modifying anything. Omit for today's behaviour.",
+        'Ask for a read-only child. "strict": its tools are narrowed to the read set, so it ' +
+        'cannot write anything. "lenient": its tools are left exactly as they would have been ' +
+        "and it is only told to work without modifying anything. Omit for today\u2019s behaviour.",
     }),
   ),
 });

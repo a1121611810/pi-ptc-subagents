@@ -446,11 +446,14 @@ DSH's `subagent-context` injection; the only difference is the depth /
 max-depth attributes, which are pi-ptc-specific. ADR-0016 Recursive section, ADR-0039.
 
 **read-only tier** — the optional `readOnly` argument on a `pi.dispatch` call, in two tiers:
-`"strict"` (and `true`, its short spelling) narrows the dispatched **child pi process's** tool
-list to the read set; `"lenient"` narrows nothing and only adds one clause to the
-_`pi-ptc-context` hint_. Which side it narrows is load-bearing: the child's own tools, decided at
-the call site — **not** the PTC worker's binding surface, which is what the R3 read-only PTC
-surface (an explicit `optInBindings` subset in `~/.pi/agent/ptc.json`) narrows. ADR-0041.
+`"strict"` narrows the dispatched **child pi process's** tool list to the read set; `"lenient"`
+narrows nothing and only adds one clause to the _`pi-ptc-context` hint_. Strings only — a boolean
+was tried first, and pi's validator coerced `readOnly: 0` into "no tier", a silent
+full-capability child for a caller who asked to be read-only; the string enum refuses every
+wrong-typed value at the schema (ADR-0041 §Decision). Which side it narrows is load-bearing: the
+child's own tools, decided at the call site — **not** the PTC worker's binding surface, which is
+what the R3 read-only PTC surface (an explicit `optInBindings` subset in `~/.pi/agent/ptc.json`)
+narrows. ADR-0041.
 _Avoid_: "read-only mode" without a tier named, "read-only dispatch" (that names the argument's two
 tiers, not a kind of dispatch), and reading the strict tier as a boundary — it is a narrowing, not
 a sandbox.

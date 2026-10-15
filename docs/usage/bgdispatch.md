@@ -84,19 +84,21 @@ return handle;
 
 Input fields are the foreground binding's fields plus two:
 
-| field           | type                               | default                  | meaning                                  |
-| --------------- | ---------------------------------- | ------------------------ | ---------------------------------------- |
-| `agent`         | `string`                           | omitted = generalist     | optional: narrow the child               |
-| `task`          | `string`                           | — (required)             | task text handed to the child            |
-| `cwd`           | `string`                           | the run's cwd            | child working directory                  |
-| `agentScope`    | `"user" \| "project" \| "both"`    | `"user"`                 | which agent directories are searched     |
-| `model`         | `string`                           | agent markdown's `model` | model override                           |
-| `thinkingLevel` | `string`                           | `"off"`                  | thinking-level override                  |
-| `background`    | `boolean`                          | `false`                  | long-lived dispatch                      |
-| `label`         | `string`                           | `task.slice(0, 64)`      | human label on the handle and the record |
-| `readOnly`      | `boolean \| "strict" \| "lenient"` | omitted = no tier        | ask for a read-only child (ADR-0041)     |
+| field           | type                            | default                  | meaning                                  |
+| --------------- | ------------------------------- | ------------------------ | ---------------------------------------- |
+| `agent`         | `string`                        | omitted = generalist     | optional: narrow the child               |
+| `task`          | `string`                        | — (required)             | task text handed to the child            |
+| `cwd`           | `string`                        | the run's cwd            | child working directory                  |
+| `agentScope`    | `"user" \| "project" \| "both"` | `"user"`                 | which agent directories are searched     |
+| `model`         | `string`                        | agent markdown's `model` | model override                           |
+| `thinkingLevel` | `string`                        | `"off"`                  | thinking-level override                  |
+| `background`    | `boolean`                       | `false`                  | long-lived dispatch                      |
+| `label`         | `string`                        | `task.slice(0, 64)`      | human label on the handle and the record |
+| `readOnly`      | `"strict" \| "lenient"`         | omitted = no tier        | ask for a read-only child (ADR-0041)     |
 
-`readOnly` is a mode, not a role. `"strict"` (and `true`, its short spelling) beats the agent's
+`readOnly` is a mode, not a role, and a **string, not a boolean** — strings only, because pi's
+validator coerces booleans and that coercion could silently turn `readOnly: 0` into "no tier".
+`"strict"` beats the agent's
 declared `tools:` outright rather than merging with it, narrowing the child's tools to the read set
 — no `bash`, no `edit`, no `write` — so it cannot modify anything. `"lenient"` never reaches the
 tool list at all, so the declared tools (or the child's full toolset) still decide it: the child is

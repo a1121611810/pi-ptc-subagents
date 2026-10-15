@@ -31,26 +31,43 @@ would be false.
 ## Decision
 
 **One optional parameter on the dispatch call, in two tiers, decided by the caller.**
-`readOnly?: boolean | "strict" | "lenient"`.
+`readOnly?: "strict" | "lenient"` — strings only.
 
-- **`"strict"`, and `true` as its short spelling** — the child's tool list becomes the read set
+- **`"strict"`** — the child's tool list becomes the read set
   (`read`, `grep`, `find`, `ls`) plus the child report tool when the report contract is on for
   that agent. The write tools are not declared to the child at all, so it cannot call them.
 - **`"lenient"`** — the tool list is left **byte-identical** to a dispatch with no tier. The only
   effect is one line in the `<pi-ptc-context>` block the child is already given, saying to work
   without modifying anything. The child can write; it has been told not to.
 
-`false` and an absent or `null` `readOnly` all mean "no tier"; the flag distinguishes "asked
-for" from "not asked for", and `false` asks for nothing. `true` is folded into `"strict"` by one
-resolver before anything downstream sees it, so no second state is ever stored or compared.
+Absent and `null` both mean "no tier". There is no boolean short spelling, and that is the
+single most consequential decision in this record: see the section below for the measured reason.
 
-What happens to a value outside that set is **not** decided here, and the reason is worth stating
-precisely because it is not what the schema suggests. pi validates a tool call and hands
-`execute` the VALIDATED value, so by the time any code in this repository sees `readOnly`, pi has
-already coerced it: `1`, `"true"` and `"1"` have become `true`, and **`0` has become `false`**.
-The refusal in `dispatch()` therefore cannot see them — not on the binding front, and not on the
-top-level tool's, because pi builds the arguments object before both. See
-`isUsableReadOnlyRequest` for what the guard does and does not defend.
+**Strings only, because pi coerces booleans and that coercion was not benign.** The parameter
+started as `readOnly?: boolean | "strict" | "lenient"`, with `true` as the short spelling of
+"strict". Measured against pi's `validateToolArguments`, that union was the exception to a rule
+every mainstream validator follows:
+
+| You write             | pi hands your code | Effect                      |
+| --------------------- | ------------------ | --------------------------- |
+| `1`, `"1"`, `"true"`  | `true`             | silently `strict`           |
+| `0`, `"0"`, `"false"` | `false`            | silently **no tier at all** |
+
+That last row is the failure `docs/testing-constraints.md` #3 exists to forbid: a caller who asked
+to be read-only got a full-capability child, and nobody reported it. The coercion also defeated
+every guard this repository can write, because pi hands `execute` the validated value — the
+caller's own spelling is gone by then.
+
+The schema's answer was a string enum. `Type.Literal("strict")` compares strictly and refuses
+`1`, `0`, `true`, `"true"`, `[]` and `{}`, where `Type.Literal(true)` accepts the same four
+boolean-ish forms. Under a union of string literals the hole closes at the schema — before the
+coercion, not behind it — with no `prepareArguments` hook, no new pi contract, and no `compat:pi`
+measurement. That a pure string enum is also the shape tool schemas carry most widely is a
+benefit, not the reason.
+
+The cost is one token: the model writes `"strict"` where it once wrote `true`. The spec's
+original user story asked for the shortest _flat_ spelling rather than a nested object, and
+`"strict"` is still flat; the boolean was an alias the story did not require.
 
 **Call-site precedence is total for `strict`.** A strict tier set on the call decides the tool list
 outright, and an agent definition's declared `tools:` is not consulted. The direction is the point:
@@ -93,40 +110,27 @@ The lenient line says its tools are **UNCHANGED**. That clause is not filler: a 
 guarantee it does not have. Both halves of the tier are stated, including the half that is a
 promise rather than a narrowing.
 
-### The invalid-value guard is real, and it is not on the path the hole is on
+### The invalid-value guard is defence in depth, and the schema is the boundary
 
-There is no schema this can be closed with, and the reason is worth recording because it is not
-what the schema suggests. pi's `validateToolArguments` does not refuse `1`, `0`, `"true"` or
-`"1"` against a union of `Type.Boolean()` with two string literals — and `Type.Literal(true)`
-accepts the same four, while `Type.Literal("strict")` rejects them. It **coerces** instead:
-`readOnly: 1` becomes `true`, and `readOnly: 0` becomes `false`.
+The guard in `dispatch()` exists because `dispatch()` is a module-level function, and callers
+that build their own arguments — the test suite among them — reach it without going through any
+schema. For them, a value that is neither a tier nor a no-tier spelling is a real input, and the
+guard refuses it with the rejected `DispatchResult` the repo already uses rather than throwing,
+because ADR-0016 §3 requires the binding never throws.
 
-That makes the coercion's direction the hazard, and it cuts the way the caller least expects:
-`1`, `"true"` and `"1"` land on `strict`, which over-narrows but keeps the promise, while **`0`
-lands on no tier at all** — a full-capability child for a caller who asked to be read-only.
+It is **not** the boundary on the production fronts, and this record does not claim it is. Both
+production paths reach `dispatch()` only after pi's `validateToolArguments` has run, and the
+schema is a string enum now, so `1`, `0`, `"true"`, `[]` and the rest are refused before any code
+here sees them. The earlier iteration of this design had the guard defending a hole the guard
+could not see — pi coerced the boolean union upstream — and that history is why the schema is the
+way it is; the guard survived because it guards a seam the schema does not, not because it guards
+the one it does.
 
-**The coercion happens upstream of every guard this repository can write.** pi's tool-call path is
-`prepareToolCallArguments` → `validateToolArguments` → `execute(id, validatedArgs)`: `execute` is
-handed the validated value, so by the time any code here sees `readOnly`, `0` is already `false`.
-Both production fronts go through it. The guard in `dispatch()` therefore sits _behind_ the
-coercion and cannot see the four values it exists to refuse.
-
-It is written anyway, and the honest account of why is that it was written before that was known.
-It is not decorative: `dispatch()` is a module-level function with callers that build their own
-arguments, and for them a value that is neither a tier nor a no-tier spelling is a real input. It
-refuses with the rejected `DispatchResult` the repo already uses rather than throwing, because
-ADR-0016 §3 requires the binding never throws. But it defends a seam production does not use, and
-**this record does not claim the hole is closed.**
-
-Closing it means refusing upstream of the coercion, and there are two places to do it: pi's
-`prepareArguments` hook, which runs on the raw arguments before validation, or the binding's
-pre-validation `raw` read, which already exists for the malformed-agent check. Neither is decided
-here — both change what the tool contract owes pi, and the peer range has to be measured for both
-before either ships.
-
-`undefined`, `null` and `false` stay usable. They are the three spellings of "I asked for
-nothing" and the spec keeps all of them; refusing them would refuse a valid request to be left
-alone.
+`undefined` and `null` stay usable: they are the two spellings of "I asked for nothing", and the
+schema maps `null` to an absent value. `false` does **not** stay usable — it used to mean "no
+tier", and under a string enum it is a wrong-typed value, so it is refused rather than quietly
+honoured. That is the improvement this decision bought: the value a caller is most likely to
+reach for by mistake now gets an answer instead of a full-capability child.
 
 ### The strict set is derived, not a constant
 
@@ -199,6 +203,13 @@ other behaviour stays in the e2e file — a fact about the seam, not a gap in th
   and a writing fix in one turn should not need two sessions. Rejected.
 - **The tier in agent-definition frontmatter.** Reinstates the wrong home this decision removes,
   and the parser's exact key set is pinned by an existing test. Rejected.
+- **A boolean short spelling (`readOnly: true`).** Shipped, then reversed when measured: pi
+  coerces the boolean union, so `readOnly: 0` silently became no tier — a full-capability child
+  for a caller who asked to be read-only. Reversed on the measurement, not on taste.
+- **Refusing upstream of the coercion** (`prepareArguments`, or the binding's pre-validation
+  `raw` read). Recorded while the boolean union was the design and the schema could not close
+  the hole. Moot once the union went string-only: the schema closes it before the coercion
+  happens, so nothing upstream needs refusing.
 - **Reporting the applied tier in the result.** Decided against at first, on the grounds that the
   value can only echo the caller's own input. Reversed: the field carries no information the
   caller lacks, but it carries the one thing they would otherwise have to re-derive — that their

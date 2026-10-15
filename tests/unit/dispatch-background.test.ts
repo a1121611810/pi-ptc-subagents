@@ -23,6 +23,7 @@ import {
   dispatch,
   dispatchDepthLimitReached,
   type DispatchDeps,
+  type DispatchInput,
   type DispatchResult,
 } from "../../src/runtime/dispatch.ts";
 import {
@@ -329,7 +330,7 @@ describe("dispatch background spawn", () => {
           task: "investigate",
           background: true,
           agentScope: "project",
-          readOnly: true,
+          readOnly: "strict",
         },
         { callId: 9, cwd: dir, depth: 0, maxDispatchDepth: 3 },
         h.deps,
@@ -393,7 +394,6 @@ describe("dispatch background spawn", () => {
      */
     await withAgent(async (dir) => {
       for (const [request, expected] of [
-        [true, "strict"],
         ["strict", "strict"],
         ["lenient", "lenient"],
       ] as const) {
@@ -447,11 +447,16 @@ describe("dispatch background spawn", () => {
      * absent key are different things, and only the absent one keeps `undefined` from reading as
      * "no tier was asked for, outcome unknown".
      *
+     * The two spellings left are an omitted key and an explicit `null`, which pi's validator
+     * maps to an absent value. `false` is NOT one of them any more: under a string enum it is a
+     * wrong-typed value, so it is refused rather than quietly honoured — the boundary table in
+     * `tests/bindings.test.ts` is where that is pinned.
+     *
      * COUNTERFACTUAL: stamp the tier unconditionally at spawn (`readOnlyTier: readOnlyTier ?? undefined`
      * written as a plain property) and this turns red on the hasOwn assertion.
      */
     await withAgent(async (dir) => {
-      for (const request of [undefined, false] as const) {
+      for (const request of [undefined, null] as const) {
         const h = createHarness();
         const handle = asHandle(
           await dispatch(
@@ -460,8 +465,10 @@ describe("dispatch background spawn", () => {
               task: "investigate",
               background: true,
               agentScope: "project",
-              ...(request === undefined ? {} : { readOnly: request }),
-            },
+              // Cast: `null` is not in `DispatchInput["readOnly"]`, and the fact that the wire can
+              // carry it anyway is why the read-point guard has an `unknown` parameter at all.
+              ...(request === undefined ? {} : { readOnly: request as unknown }),
+            } as DispatchInput,
             { callId: 41, cwd: dir, depth: 0, maxDispatchDepth: 3 },
             h.deps,
           ),
