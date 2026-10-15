@@ -236,6 +236,47 @@ export interface DispatchInput {
    * task text truncated to 64 characters.
    */
   label?: string;
+  /**
+   * ADR-0041: ask for a read-only child. `true` and `"strict"` are the SAME request, not
+   * two tiers — `resolveReadOnlyTier` folds one into the other, so `true` never survives as
+   * a state of its own. `false` asks for nothing and is indistinguishable from omitting it.
+   *
+   * The two tiers are a capability narrowing and a posture, and the difference is meant to
+   * be visible at a glance: `strict` replaces the child's tool list (so it cannot write),
+   * `lenient` leaves that list exactly as it would have been and only tells the child to
+   * work without modifying anything. `bash` is deliberately absent from the strict set —
+   * a child holding `bash` could write through it, which would make the guarantee fictional.
+   *
+   * Call-site precedence is TOTAL: a tier set here decides the child's tool list outright
+   * and an agent definition's declared `tools:` is not consulted. Nothing can therefore
+   * arrive as a different tier than the one asked for, which is why there is no field
+   * reporting what took effect — such a field could only echo the caller's own input.
+   */
+  readOnly?: boolean | ReadOnlyTier;
+}
+
+/**
+ * ADR-0041: the two read-only tiers. `strict` narrows what the child can be handed;
+ * `lenient` narrows nothing and only states the posture. `boolean` is accepted at the call
+ * site as a short spelling of `"strict"` and is folded by {@link resolveReadOnlyTier}.
+ */
+export type ReadOnlyTier = "strict" | "lenient";
+
+/**
+ * ADR-0041: what a strict child is narrowed to. The four read tools pi ships, and nothing
+ * that can write — no `bash`, no `edit`, no `write`. Declared as a value rather than inlined
+ * at the use site so the ADR, the glossary entry and the implementation name one list.
+ */
+export const READ_ONLY_TOOL_NAMES: readonly string[] = ["read", "grep", "find", "ls"];
+
+/**
+ * ADR-0041: the one place the two spellings of a tier are unified. `true` folds into
+ * `"strict"` here and nowhere else, so downstream code has a single `ReadOnlyTier | undefined`
+ * to reason about and no second state can be stored, compared or forgotten.
+ */
+export function resolveReadOnlyTier(readOnly: DispatchInput["readOnly"]): ReadOnlyTier | undefined {
+  if (readOnly === true) return "strict";
+  return readOnly === "strict" || readOnly === "lenient" ? readOnly : undefined;
 }
 
 /** Token usage accumulated from the child's message_end events. Optional. */
@@ -376,6 +417,22 @@ const CHILD_REPORT_PROMPT_CLAUSE =
   "you must not report usage or token counts — those are measured by the host.";
 
 /**
+ * ADR-0041: what the `lenient` tier actually says. It lives in the child's prompt because the
+ * child is the party that has to act on it — the caller's `readOnly: "lenient"` reaches this
+ * text and nothing else.
+ *
+ * The clause names what it does NOT do. A child told only "work read-only" would reasonably
+ * wonder whether `edit` was removed and misread the absence as a failure; stating that the tools
+ * are all still there is what makes the tier's honesty checkable from the prompt rather than
+ * taken on trust.
+ */
+const READ_ONLY_PROMPT_CLAUSE =
+  "You were dispatched read-only: do not create, modify or delete files, and do not run commands " +
+  "that would. Your tools are otherwise all still available to you — this is an instruction, not " +
+  "a restriction, so a task that genuinely needs to write is worth saying so rather than failing " +
+  "quietly.";
+
+/**
  * Build the context block appended to every dispatched child's system prompt, after whatever the
  * definition contributed.
  *
@@ -402,9 +459,10 @@ export function appendDepthHint(
   systemPrompt: string,
   depth: number,
   maxDepth: number,
-  options: { reportContract?: boolean } = {},
+  options: { reportContract?: boolean; readOnly?: DispatchInput["readOnly"] } = {},
 ): string {
   const reportContract = options.reportContract !== false;
+  const readOnly = resolveReadOnlyTier(options.readOnly);
   const hint = [
     '<pi-ptc-context depth="' + depth + '" max-depth="' + maxDepth + '">',
     "You are a PTC run at depth " +
@@ -423,6 +481,7 @@ export function appendDepthHint(
     "context. Your final message is the deliverable: it is what the caller receives, so put the",
     "answer there rather than narrating how you found it.",
     ...(reportContract ? [CHILD_REPORT_PROMPT_CLAUSE] : []),
+    ...(readOnly === "lenient" ? [READ_ONLY_PROMPT_CLAUSE] : []),
     "</pi-ptc-context>",
   ].join("\n");
   return systemPrompt.length === 0 ? hint : systemPrompt + "\n\n" + hint;
@@ -1294,10 +1353,27 @@ export function unknownAgentResult(
  * pair: the report tool registers with `defaultActive` set from `PI_PTC_DEPTH`, so it is live in
  * every dispatched child. Neither half covers the other's case, which is why both exist — see
  * `src/tools/child-report-tool.ts`.
+ *
+ * ADR-0041 §Precedence is total: a read-only tier set at the call site decides the list outright
+ * and the agent's declared `tools:` is never consulted. That direction is the whole point of the
+ * parameter — the caller asked for a mode, not for a role — and it is why there is no merge to
+ * reconcile here and no field reporting an outcome that could differ from the request.
  */
 export function childToolList(
   agent: Pick<AgentConfigLike, "tools" | "childReport">,
+  readOnly?: DispatchInput["readOnly"],
 ): readonly string[] | undefined {
+  const tier = resolveReadOnlyTier(readOnly);
+  if (tier === "strict") {
+    // Derived rather than a constant, for the same reason the merge below is derived: an
+    // agent that opted out of the report contract must not be handed the report tool, or it
+    // ends up with a tool the flag activated and nothing ever asked it to call.
+    return isReportContractOn(agent)
+      ? [...READ_ONLY_TOOL_NAMES, CHILD_REPORT_TOOL_NAME]
+      : READ_ONLY_TOOL_NAMES;
+  }
+  // `lenient` falls through untouched. It narrows nothing, and a tier that quietly removed a
+  // tool would be a half-strict wearing the name of a promise it cannot keep.
   const declared = agent.tools ?? [];
   if (!isReportContractOn(agent)) return declared.length > 0 ? declared : undefined;
   if (declared.length === 0) return undefined;
@@ -1333,7 +1409,7 @@ export function buildArgv(
   // accept an --agent-scope flag (the subagent extension does not pass one either), and
   // in --no-session mode pi loads user-scope agents from ~/.pi/agent/agents by default.
   // Project agents would need a different mechanism (e.g. PI_CODING_AGENT_DIR override).
-  const tools = childToolList(agent);
+  const tools = childToolList(agent, input.readOnly);
   if (tools !== undefined) {
     args.push("--tools", tools.join(","));
   }
@@ -1753,6 +1829,7 @@ async function dispatchBackground(
     const reportContract = isReportContractOn(agent);
     const fullPrompt = appendDepthHint(agent.systemPrompt, childDepth, ctx.maxDispatchDepth, {
       reportContract,
+      readOnly: input.readOnly,
     });
     const written = await promptFileWriter(agent.name, fullPrompt);
     tmp = written;
@@ -2081,6 +2158,7 @@ export async function dispatch(
   const reportContract = isReportContractOn(agent);
   const fullPrompt = appendDepthHint(agent.systemPrompt, childDepth, ctx.maxDispatchDepth, {
     reportContract,
+    readOnly: input.readOnly,
   });
 
   // Between the acquire above and the Promise whose `finalize` is the one release, there is an

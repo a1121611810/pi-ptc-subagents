@@ -204,6 +204,7 @@ type DispatchParameters = TObject<{
   thinkingLevel: TOptional<TString>;
   background: TOptional<TBoolean>;
   label: TOptional<TString>;
+  readOnly: TOptional<TUnion<[TBoolean, TLiteral<"strict">, TLiteral<"lenient">]>>;
 }>;
 
 /**
@@ -241,6 +242,17 @@ export const DISPATCH_PARAMETERS: DispatchParameters = Type.Object({
   thinkingLevel: Type.Optional(Type.String()),
   background: Type.Optional(Type.Boolean()),
   label: Type.Optional(Type.String()),
+  // ADR-0041. The union rather than a plain string: an unknown tier has to be refused at
+  // this boundary, where the caller can see the refusal, rather than reaching the child as
+  // "some tier nobody implements". `true` is the short spelling of "strict" and folds there.
+  readOnly: Type.Optional(
+    Type.Union([Type.Boolean(), Type.Literal("strict"), Type.Literal("lenient")], {
+      description:
+        'Ask for a read-only child. true or "strict": the child is narrowed to the read set, so ' +
+        'it cannot write. "lenient": its tools are left exactly as they would have been and it is ' +
+        "only told to work without modifying anything. Omit for today's behaviour.",
+    }),
+  ),
 });
 
 /** Minimal `Tool` shape for pi's validator. */

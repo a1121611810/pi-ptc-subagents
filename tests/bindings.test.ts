@@ -240,6 +240,51 @@ test("the schema itself accepts an omitted agent, and refuses an unusable one", 
   expect(accepts({ task: "t", agent: "x" }), "a name is").toBe(true);
 });
 
+test("the read-only schema takes the two tiers and the short spelling, and refuses the rest", () => {
+  /*
+   * ADR-0041's boundary row. It lives here rather than in the e2e smoke file because that file
+   * calls `dispatch()` directly and therefore never reaches argument validation at all — the
+   * rejection is invisible from that seam, which is a fact about the seam rather than a gap in
+   * the coverage.
+   *
+   * The refusal is the point: an unrecognised tier typed as `Type.Optional(Type.String())` would
+   * pass validation here, reach the child as "some tier nobody implements", and silently behave
+   * like no tier at all. Counterfactual: widen the schema to a plain string and every `false`
+   * below inverts.
+   */
+  const tool = {
+    name: DISPATCH_BINDING_NAME,
+    description: "probe",
+    parameters: DISPATCH_PARAMETERS,
+  };
+  const accepts = (readOnly: unknown): boolean => {
+    try {
+      validateToolArguments(
+        tool as never,
+        {
+          type: "toolCall",
+          id: "probe",
+          name: DISPATCH_BINDING_NAME,
+          arguments: { task: "t", readOnly },
+        } as never,
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  expect(accepts(true), "the short spelling of strict").toBe(true);
+  expect(accepts("strict")).toBe(true);
+  expect(accepts("lenient")).toBe(true);
+  expect(accepts(false), "false asks for nothing, which is a valid thing to ask for").toBe(true);
+  expect(accepts("STRICT"), "the tiers are case-sensitive on purpose").toBe(false);
+  expect(accepts("readonly"), "the parameter name is not a tier value").toBe(false);
+  expect(accepts({ mode: "strict" }), "an object spelling was considered and not shipped").toBe(
+    false,
+  );
+});
+
 test(
   "the pi.dispatch binding validates arguments and refuses bad calls without throwing",
   async () => {

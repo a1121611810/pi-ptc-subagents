@@ -198,6 +198,146 @@ describe("an omitted agent dispatches a generalist child", () => {
   });
 });
 
+describe("a read-only tier is decided at the call site (ADR-0041)", () => {
+  /**
+   * The value the child was actually handed, read out of what the fake pi echoes back.
+   *
+   * It is parsed out of the child's own stdout rather than rebuilt from the dispatcher, because
+   * the whole claim is about a real process receiving a real flag. A test that built the expected
+   * string next to the implementation would be asserting the implementation twice.
+   */
+  function toolsTheChildWasHanded(text: string): string {
+    const match = /\stools=(\S*)/.exec(text);
+    expect(match, "the child echoed a tools value: " + text.slice(0, 200)).not.toBeNull();
+    const tools = match?.[1];
+    expect(tools, "the echo carried no value").toBeDefined();
+    return tools ?? "";
+  }
+
+  async function dispatchReadOnly(
+    cwd: string,
+    readOnly: boolean | "strict" | "lenient",
+    agent?: string,
+  ) {
+    return await dispatch(
+      { task: "say PONG", agentScope: "both", cwd, readOnly, ...(agent ? { agent } : {}) },
+      { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
+      { slots: new DispatchSlotCounter(2), taskRegistry: undefined },
+    );
+  }
+
+  /** A definition that declares its own tool list, so precedence has something to beat. */
+  async function writeRestrictedAgent(cwd: string, frontmatter: string[]) {
+    await mkdir(join(cwd, ".pi", "agents"), { recursive: true });
+    await writeFile(
+      join(cwd, ".pi", "agents", "restricted.md"),
+      ["---", "name: restricted", ...frontmatter, "---", "Reply PONG."].join("\n"),
+      "utf8",
+    );
+  }
+
+  test("no tier leaves the child's tool list exactly as it was", async () => {
+    await withFakePi(async (cwd) => {
+      const result = await dispatch(
+        { task: "say PONG", cwd },
+        { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
+        { slots: new DispatchSlotCounter(2) },
+      );
+      expect(result.status).toBe("fulfilled");
+      // "none" is the fake pi's word for "no --tools flag reached me", which is the whole
+      // non-regression claim: a tier that was never asked for must not narrow anything.
+      expect(toolsTheChildWasHanded(result.text)).toBe("none");
+    });
+  });
+
+  test("strict narrows the child to the read set plus the report tool", async () => {
+    await withFakePi(async (cwd) => {
+      const result = await dispatchReadOnly(cwd, "strict");
+      expect(result.status).toBe("fulfilled");
+      expect(toolsTheChildWasHanded(result.text)).toBe("read,grep,find,ls,ptc_child_report");
+    });
+  });
+
+  test('true is the same request as "strict", not a second state', async () => {
+    // Counterfactual: a build that stored `true` as its own tier, or that resolved it to
+    // something narrower, fails HERE and nowhere else -- every other row passes either way.
+    await withFakePi(async (cwd) => {
+      const result = await dispatchReadOnly(cwd, true);
+      expect(result.status).toBe("fulfilled");
+      expect(toolsTheChildWasHanded(result.text)).toBe("read,grep,find,ls,ptc_child_report");
+    });
+  });
+
+  test("strict beats the tool list a definition declared", async () => {
+    // The precedence row, and the reason the parameter exists: the caller asked for a MODE,
+    // not for a role. An implementation that merged the definition's `bash` in "so the child
+    // keeps what it needs" reads as reasonable and is exactly what this row refuses.
+    await withFakePi(async (cwd) => {
+      await writeRestrictedAgent(cwd, ["tools: read, bash"]);
+      const result = await dispatchReadOnly(cwd, "strict", "restricted");
+      expect(result.status).toBe("fulfilled");
+      const tools = toolsTheChildWasHanded(result.text);
+      expect(tools).toBe("read,grep,find,ls,ptc_child_report");
+      expect(tools, "the definition's bash did not survive the call site").not.toContain("bash");
+    });
+  });
+
+  test("lenient leaves the tool list alone and says so in the child's prompt", async () => {
+    /*
+     * Two claims in one row because they are one claim: the tiers must differ in a way a reader
+     * can SEE, rather than lenient being strict with an extra sentence bolted on.
+     *
+     * Counterfactual, and the mutation this exists to refuse: make `lenient` narrow the tool list
+     * "a bit less strictly" and everything else in this file still passes. Asserting the tool
+     * list is unchanged is the half that catches it.
+     */
+    await withFakePi(async (cwd) => {
+      const untiered = await dispatch(
+        { task: "say PONG", cwd },
+        { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
+        { slots: new DispatchSlotCounter(2) },
+      );
+      const lenient = await dispatchReadOnly(cwd, "lenient");
+
+      expect(untiered.status).toBe("fulfilled");
+      expect(lenient.status).toBe("fulfilled");
+      expect(
+        toolsTheChildWasHanded(lenient.text),
+        "lenient must not narrow anything — that is the strict tier's job",
+      ).toBe(toolsTheChildWasHanded(untiered.text));
+      expect(lenient.text, "the clause reaches the child verbatim").toContain(
+        "You were dispatched read-only",
+      );
+      expect(untiered.text, "and it is absent when no tier was asked for").not.toContain(
+        "You were dispatched read-only",
+      );
+    });
+  });
+
+  test("strict says nothing in the prompt, because the tool list already said it", async () => {
+    // The other half of the same claim. A strict child that was ALSO told "do not write" is
+    // being told to obey a rule it has no tool to break, which reads as a weaker guarantee than
+    // the one it has.
+    await withFakePi(async (cwd) => {
+      const strict = await dispatchReadOnly(cwd, "strict");
+      expect(strict.status).toBe("fulfilled");
+      expect(strict.text).not.toContain("You were dispatched read-only");
+      expect(strict.text).toContain("pi-ptc-context");
+    });
+  });
+
+  test("a definition that opted out of the report contract is not handed the report tool", async () => {
+    // Otherwise the flag activates a tool the child's prompt never asked it to call: registered,
+    // documented, never called -- the state ADR-0032's merge exists to avoid.
+    await withFakePi(async (cwd) => {
+      await writeRestrictedAgent(cwd, ["childReport: false"]);
+      const result = await dispatchReadOnly(cwd, "strict", "restricted");
+      expect(result.status).toBe("fulfilled");
+      expect(toolsTheChildWasHanded(result.text)).toBe("read,grep,find,ls");
+    });
+  });
+});
+
 describe("an unusable install says so instead of pretending", () => {
   test("no agent at all is refused with a refusal that names where to put one", async () => {
     await withFakePi(async (cwd) => {

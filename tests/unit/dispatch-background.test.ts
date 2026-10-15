@@ -15,7 +15,7 @@
  */
 import { describe, expect, test, vi } from "vitest";
 import { EventEmitter } from "node:events";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   DISPATCH_KILL_GRACE_MS,
@@ -311,6 +311,65 @@ describe("dispatch background spawn", () => {
       expect(translated).not.toContain("--no-session");
       expect(translated).toContain("--session-dir");
       expect(argv[argv.length - 1]).toBe("Task: ping");
+    });
+  });
+
+  test("a strict tier narrows the background child's tool list too (ADR-0041)", async () => {
+    // The silent half-feature, asserted where the background path is already owned. Both spawn
+    // paths call the same argv builder with the same input, so this passes for free today --
+    // which is precisely why it needs saying out loud: "passes for free" is what a future edit
+    // to one path stops being. The e2e smoke file cannot reach this row, because a background
+    // dispatch needs a task registry and this file deliberately runs with none.
+    await withAgent(async (dir) => {
+      const h = createHarness();
+      const result = await dispatch(
+        {
+          agent: AGENT,
+          task: "investigate",
+          background: true,
+          agentScope: "project",
+          readOnly: true,
+        },
+        { callId: 9, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+        h.deps,
+      );
+      expect(asHandle(result).status).toBe("running");
+      const argv = h.lifecycle.getRecordedArgv(h.lifecycle.handleAt(0));
+      expect(argv[argv.indexOf("--tools") + 1]).toBe("read,grep,find,ls,ptc_child_report");
+    });
+  });
+
+  test("the background path appends the lenient clause, not just the foreground one (ADR-0041)", async () => {
+    /*
+     * Written because a mutation found the gap, not because the suite went red: stubbing the
+     * background path's `readOnly` passthrough left every other test in the repository green.
+     * The argv assertion in the test above cannot see it either -- argv comes from a builder both
+     * paths share, while the PROMPT is materialised separately on each, and only this file has a
+     * background harness.
+     *
+     * Counterfactual: pass `readOnly: undefined` at the background `appendDepthHint` call site
+     * and this is the single test that turns red.
+     */
+    await withAgent(async (dir) => {
+      const h = createHarness();
+      const result = await dispatch(
+        {
+          agent: AGENT,
+          task: "investigate",
+          background: true,
+          agentScope: "project",
+          readOnly: "lenient",
+        },
+        { callId: 10, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+        h.deps,
+      );
+      expect(asHandle(result).status).toBe("running");
+      const opts = h.lifecycle.getRecordedOpts(h.lifecycle.handleAt(0));
+      const prompt = await readFile(opts.promptFile!, "utf8");
+      expect(prompt).toContain("You were dispatched read-only");
+      // And the tier it did NOT apply: a lenient child keeps the full toolset.
+      const argv = h.lifecycle.getRecordedArgv(h.lifecycle.handleAt(0));
+      expect(argv, "lenient must not narrow the background child either").not.toContain("--tools");
     });
   });
 

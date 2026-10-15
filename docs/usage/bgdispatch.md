@@ -84,16 +84,24 @@ return handle;
 
 Input fields are the foreground binding's fields plus two:
 
-| field           | type                            | default                  | meaning                                  |
-| --------------- | ------------------------------- | ------------------------ | ---------------------------------------- |
-| `agent`         | `string`                        | omitted = generalist     | optional: narrow the child               |
-| `task`          | `string`                        | — (required)             | task text handed to the child            |
-| `cwd`           | `string`                        | the run's cwd            | child working directory                  |
-| `agentScope`    | `"user" \| "project" \| "both"` | `"user"`                 | which agent directories are searched     |
-| `model`         | `string`                        | agent markdown's `model` | model override                           |
-| `thinkingLevel` | `string`                        | `"off"`                  | thinking-level override                  |
-| `background`    | `boolean`                       | `false`                  | long-lived dispatch                      |
-| `label`         | `string`                        | `task.slice(0, 64)`      | human label on the handle and the record |
+| field           | type                               | default                  | meaning                                  |
+| --------------- | ---------------------------------- | ------------------------ | ---------------------------------------- |
+| `agent`         | `string`                           | omitted = generalist     | optional: narrow the child               |
+| `task`          | `string`                           | — (required)             | task text handed to the child            |
+| `cwd`           | `string`                           | the run's cwd            | child working directory                  |
+| `agentScope`    | `"user" \| "project" \| "both"`    | `"user"`                 | which agent directories are searched     |
+| `model`         | `string`                           | agent markdown's `model` | model override                           |
+| `thinkingLevel` | `string`                           | `"off"`                  | thinking-level override                  |
+| `background`    | `boolean`                          | `false`                  | long-lived dispatch                      |
+| `label`         | `string`                           | `task.slice(0, 64)`      | human label on the handle and the record |
+| `readOnly`      | `boolean \| "strict" \| "lenient"` | omitted = no tier        | ask for a read-only child (ADR-0041)     |
+
+`readOnly` is a mode, not a role, so it beats the agent's declared `tools:` outright rather than
+merging with it. `"strict"` (and `true`, its short spelling) narrows the child's tools to the read
+set — no `bash`, no `edit`, no `write` — so it cannot modify anything; `"lenient"` leaves the tool
+list exactly as it would have been and only tells the child to work read-only. Strict is a
+capability narrowing, **not** a sandbox: nothing here contains a hostile child, and a strict child
+cannot run tests or call `git`.
 
 On a refusal — depth cap, concurrency cap, unknown agent, or a spawn that never came up — the call
 resolves with a `DispatchResult` instead: `{ status: "rejected", started: false, errorMessage: … }`.

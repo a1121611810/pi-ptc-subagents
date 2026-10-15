@@ -69,7 +69,8 @@ and registers the extension in `~/.pi/agent/settings.json` automatically.
 `tools["<name>"](args)`. Every binding lives in the one `tools` table —
 there is no `pi` global in the worker — so the parallel binding named
 `pi.dispatch` is reached as `tools["pi.dispatch"](args)` and takes a single
-object (`{ task, agent?, cwd?, agentScope?, model?, thinkingLevel?, background?, label? }`),
+object (`{ task, agent?, cwd?, agentScope?, model?, thinkingLevel?, background?, label?,
+readOnly? }`),
 not a positional argument list. Two
 kinds:
 
@@ -93,7 +94,9 @@ by `agentScope`. Naming one is optional — ADR-0039 — because the child is a 
 dispatch prompt is APPENDED to pi's own system prompt, and no `--tools` flag is passed unless the
 definition declares `tools:`. A definition can therefore only take capability away; there is none it
 can add. A dispatch that names none gets the **generalist child** — pi's own system prompt, pi's full
-toolset, no model pin, reported as an empty `agentName`.
+toolset, no model pin, reported as an empty `agentName`. A definition is not the only narrowing
+axis: ADR-0041 puts a **read-only tier** on the call site, and where the two meet the call site wins
+outright, so a definition's declared `tools:` is not consulted when a tier was asked for.
 
 _Avoid_: "preset agent" / "default agent" for the generalist. Nothing ships in the package, and the
 generalist is the child pi already is, not a definition this project wrote and installs. Also avoid
