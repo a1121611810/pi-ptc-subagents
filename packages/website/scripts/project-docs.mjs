@@ -137,7 +137,13 @@ function rewriteTarget(target, fromRel) {
 
   // Anything else that climbs out of its directory points into the repository.
   if (isRepoRelative) {
-    const resolved = resolve(REPO_ROOT, dirname(fromRel), target);
+    // The fragment is split off before resolving. `resolve()` keeps it in the string, so
+    // `../../README.md#trust-posture-read-me` became a path ending in `#trust-posture-read-me`,
+    // and existsSync() is false for it no matter what is on disk -- which is how one correct
+    // link in docs/usage/structured-results.md took the website build down on 2026-10-14. The
+    // sibling branch above already separates the fragment; this one has to as well.
+    const [pathPart, fragment] = target.split('#');
+    const resolved = resolve(REPO_ROOT, dirname(fromRel), pathPart);
     const relToRepo = relative(REPO_ROOT, resolved);
     if (!existsSync(resolved) || relToRepo.startsWith('..')) {
       throw new Error(
@@ -147,7 +153,7 @@ function rewriteTarget(target, fromRel) {
           `  dead-link check, so the build stops here instead.`
       );
     }
-    return `${BLOB}/${relToRepo}`;
+    return `${BLOB}/${relToRepo}${fragment ? `#${fragment}` : ''}`;
   }
 
   return null;
