@@ -18,30 +18,22 @@
  * Run as part of the compat matrix's version-sensitive subset (`pnpm run compat:pi`), where the
  * installed pi IS the version under test.
  */
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { expect, test } from "vitest";
 import { createBuiltinBindings } from "../../src/runtime/bindings.ts";
+import { installedPiDir } from "../helpers/pi-compat-probe.ts";
 
-function piPkgDir(): string | undefined {
-  let dir = import.meta.dirname;
-  for (let depth = 0; depth < 8; depth += 1) {
-    const candidate = join(
-      dir,
-      "node_modules",
-      "@earendil-works",
-      "pi-coding-agent",
-      "package.json",
-    );
-    if (existsSync(candidate)) return dirname(candidate);
-    const parent = dirname(dir);
-    if (parent === dir) return undefined;
-    dir = parent;
-  }
-  return undefined;
-}
-
-const PKG_DIR = piPkgDir();
+/**
+ * The installed pi's package root, or `undefined` when no pi is installed.
+ *
+ * Asked of the one module that answers it for every version-sensitive file in this repo
+ * (`tests/helpers/pi-compat-probe.ts`), rather than walked a third time here. This file's whole
+ * subject is a property of a PARTICULAR pi's bash, and a local walk is a second opinion about which
+ * pi that is — the disagreement this repository is paid to avoid. Same root the differential oracle
+ * and the capability probes read, so `skipIf` cannot be reached here while those run.
+ */
+const PKG_DIR = installedPiDir(import.meta.dirname);
 
 /**
  * Whether the installed bash uses the `isError` channel (pi >= 1.0.0). Decided by reading the

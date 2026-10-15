@@ -33,6 +33,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   third state so a skipped leg is never mistaken for a passing one. See
   [docs/agents/pi-compat-matrix.md](docs/agents/pi-compat-matrix.md).
 
+- **The declared peer floor is now a floor you can actually compile against.** `peerDependencies`
+  says `>=0.86.0`, but `tsc --noEmit` over pi 0.86.0 used to report 20 errors — the package ran
+  there and failed to typecheck, which is the worst of both. It now reports 0, and
+  `pnpm run compat:pi 0.86.0` passes every step. The package owns the three post-0.86.0 type
+  surfaces (`ToolExposure`, and `outputSchema` / `exposure` / `defaultActive` on `ToolDefinition`)
+  so `src/` depends on no pi newer than the floor; those fields arrived in 0.99.0, and a pi that
+  does not read them is unaffected by their presence.
+
+  Note the two floors are different things: **0.99.0 is where those capabilities appear** —
+  `isError`, codemode, `exposure`, `structuredContent` — and this package still falls back
+  below it. **0.86.0 is the floor it compiles and runs on.** An earlier revision of these notes
+  recorded 0.86.x/0.87.x as type-broken; that was measured before this work and no longer holds.
+
 ### Documentation
 
 - Measured capability and feature-surface matrices across all 14 published pi versions from

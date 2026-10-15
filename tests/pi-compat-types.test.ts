@@ -46,9 +46,12 @@
  * without running anything.
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+const TESTS_DIR = dirname(fileURLToPath(import.meta.url));
+const SRC_TOOLS = join(TESTS_DIR, "..", "src", "tools");
 import { describe, expect, test } from "vitest";
 
 const REPO_ROOT = fileURLToPath(new URL("../", import.meta.url));
@@ -251,4 +254,44 @@ export { p3, p4a, p4b, p4c, p5 };
 `);
     expect(diagnostics).toEqual([]);
   });
+});
+
+test("every tool declaration site routes through defineCompatTool, not pi's own defineTool", () => {
+  // #192's core deliverable is that src/ compiles on pi 0.86.0. That is only true while the
+  // three post-0.86.0 fields travel through OUR wrapper: pi's own defineTool accepts them on
+  // 0.99.0+ and rejects them on the floor, so a site that quietly went back to pi's function
+  // would compile here (the pinned pi is 1.0.0) and break only on the floor tree -- which the
+  // default gate never runs. Measured: reverting child-report-tool.ts to pi's defineTool,
+  // import and all, leaves `tsc` at 0 errors and 111 targeted tests green.
+  //
+  // So the migration is pinned here rather than left to the floor leg alone.
+  //
+  // The wrapper module is excluded: it calls pi's defineTool on purpose (that is what it
+  // wraps), so a hit there is the seam itself rather than a site that skipped it.
+  const files = readdirSync(SRC_TOOLS).filter(
+    (f) => f.endsWith(".ts") && f !== "pi-compat-types.ts",
+  );
+  expect(files.length, "the scan has to find the tool modules").toBeGreaterThan(5);
+
+  const offenders: string[] = [];
+  for (const file of files) {
+    const source = readFileSync(join(SRC_TOOLS, file), "utf8");
+    const calls = source.match(/\bdefineTool\s*\(/g) ?? [];
+    if (calls.length > 0) {
+      offenders.push(`${file}: ${calls.length} raw defineTool call(s)`);
+    }
+  }
+  expect(
+    offenders,
+    "a raw pi defineTool call compiles on the pinned pi and breaks on the floor; route it " +
+      "through defineCompatTool instead",
+  ).toEqual([]);
+
+  // The wrapper has to actually be used, or the guard above would pass on a tree where
+  // nobody declares a tool at all.
+  const wrapperUses = files.reduce((n, file) => {
+    const source = readFileSync(join(SRC_TOOLS, file), "utf8");
+    return n + (source.match(/\bdefineCompatTool\s*\(/g) ?? []).length;
+  }, 0);
+  expect(wrapperUses, "the compat wrapper has to have call sites").toBeGreaterThan(0);
 });

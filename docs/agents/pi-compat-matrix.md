@@ -67,11 +67,20 @@ Three corrections this table forced, all caught by measuring instead of citing:
    the API appeared. What those missing APIs cost us below 0.99.0 is recorded under "The < 1.0.0
    (and 0.99.0) runtime note" below — a different thing from failing to compile.
 2. **0.86.0 is the declared floor and this package compiles and runs on it.** Measured 2026-10-14:
-   `tsc --noEmit` reports **0 errors** on 0.86.0, 0.86.1 and 0.87.1 (the three versions the peer
-   range and this matrix actually exercise), and `pnpm run compat:pi 0.86.0` passes every step —
+   `tsc --noEmit` reports **0 errors** on 0.86.0, 0.86.1 and 0.87.1, and `pnpm run compat:pi`
+   passes every step on **0.86.0 and 0.86.1** —
    install, resolved-version, typecheck, lint, fmt:check, build, tests, throw-path leg,
    verify:dist. An earlier revision of this document recorded these versions as type-broken (9
    errors on 0.86.1/0.87.1). That measurement was taken before #192 landed and no longer holds.
+
+   **0.87.1 is the exception: it compiles but does not pass the matrix.** `compat:pi 0.87.1`
+   fails exactly one step, `tests`, because `codemode-switch-differential.test.ts` has no
+   measured column for 0.87.x and deliberately refuses to fall back to a neighbouring version's
+   one — an unmeasured version is a failure there, not a skip. So the 0-errors claim above is
+   about typecheck and stops there; it is not a claim that 0.87.1 is a green matrix leg. 0.87.1
+   sits outside `PI_COMPAT_VERSIONS` (`0.86.0`, `1.0.0`, `1.2.0`), so the default run never
+   touches it.
+
 3. **The 1.2.0-only features are smaller than the changelog suggests**: `normalizePath` on
    patterns, `reachesTools`, the `messageType` union, exit-1 truncation, and the published
    schemas — each inert or handled for this package (see the 1.2.0 section below).

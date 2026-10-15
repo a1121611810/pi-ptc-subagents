@@ -259,6 +259,22 @@ question), "is codemode enabled" (the tool is separately registered inactive via
 `defaultActive: false`, which this switch does not read), "extension enabled"
 (ambiguous between the extension loading and the tool being in the active set).
 
+**`detectedSurfaceMode`** — the pure function behind _surface mode_: where
+that term's answer is actually computed. Exported from the package root, so the
+decision can be driven from a **built artifact** rather than only from the
+source module. It reads exactly three arguments and nothing else — the three
+probes, already resolved: `CodemodePresence`, `CodemodeSwitch`,
+`CodemodeActivation`. It returns `"subagents"` only when all three hold (the
+directory is on disk, the extension is not switched off, the tool is
+**active**), and returns the named `FALLBACK_SURFACE_MODE` — `"full"` — in
+every other case, a probe that could not answer included. The answer is a
+`SurfaceMode`, one of `SURFACE_MODES`. `detectSurfaceMode` is the wrapper
+around it: that one runs the probes and returns them alongside the result, which
+is the `DetectedSurface` `session_start` reports on. ADR-0026, ADR-0027,
+ADR-0029. _Avoid_: "surface decision" (ambiguous — it is both the question and
+this function; say which), "detectSurfaceMode" (that one resolves the probes
+first, so a caller already holding the three answers does not need it).
+
 **structured result** — the `structuredContent` a model-facing tool returns
 alongside its `content`, declared by an `outputSchema`, for **programmatic
 callers only**: pi's `codemode` scripts receive it instead of the text, and it
@@ -430,6 +446,40 @@ max-depth attributes, which are pi-ptc-specific. ADR-0016 Recursive section, ADR
 version exposes `ptc_run_code` to avoid collision with pi's hypothetical
 future native `run_code`, plus a sidekick `ptc_workflow` for structured
 (with `meta` + `args`) runs.
+
+### Which pi: two floors, not one
+
+This package makes a RANGE claim about pi, and the range is not the same
+object as the capability set. Both numbers below are real and neither is
+"the" floor; calling either one that is how the other one gets used.
+
+**declared floor** — the lower bound `peerDependencies` writes down:
+`@earendil-works/pi-coding-agent: ">=0.86.0"`. It is a claim about **this
+package** — the oldest pi it installs and runs on — and it is measured, not
+aspirational: `src/` typechecks against that version's tree with zero errors
+and the package installs and runs on it. That holds because the three fields pi
+grew onto `ToolDefinition` after it (`outputSchema`, `exposure`,
+`defaultActive`) are declared locally in `CompatToolDefinition` instead of
+being read from pi; on a floor pi they are **inert**, and an unread optional
+field still registers and runs. The dev dependency pins `^1.0.0`, so the
+default gate measures the middle of the range and `compat:pi` is what measures
+the edge. The measured table is `docs/agents/pi-compat-matrix.md`. _Avoid_:
+"floor" unqualified (there are two), "minimum supported pi" (same number, but
+it reads like a capability claim, which is the confusion this section exists to
+stop), "supported pi version" (every version in the range is supported; the
+declared floor is where the claim starts, not where features start).
+
+**capability floor** — the version at which a given pi API **appears**, and for
+every API this package leans on that is **0.99.0**: not 1.0.0, and not the
+declared floor. `AgentToolResult.isError`, pi's own `codemode` extension,
+`ToolExposure` and the `exposure` field, and the `structuredContent` forward
+are all present in 0.99.0 and absent below it. Below that line the gap is a
+**capability absence, not a defect** — there is no `codemode` to hand
+orchestration to, so _surface mode_ detection resolves to `full` anyway, and
+this package compiles and runs there without any of the four. _Avoid_: "floor"
+unqualified (both terms are floors), "minimum pi version" (that is the declared
+floor), "0.99.0 is the floor" (true of these four capabilities, false of
+`peerDependencies`, and the two are set independently).
 
 ## Worker lifecycle (ADR-0017)
 

@@ -53,6 +53,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "vitest";
 import { readCodemodeSwitch } from "../../src/mode/ptc-mode.ts";
+import { installedPiDir } from "../helpers/pi-compat-probe.ts";
 import { removeTempDir } from "../helpers/ptc.ts";
 
 /**
@@ -65,28 +66,24 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 /**
  * `dist/core/package-manager.js` inside the installed pi, or `undefined` when it is not there.
  *
- * Walked up from this file rather than resolved through the package's `exports` map, for two
- * reasons: the map does not expose this internal module, and the package is ESM-only so
- * `require.resolve` on its main entry fails outright ("No \"exports\" main defined").
+ * WHICH pi is one answer, from `installedPiDir` in `tests/helpers/pi-compat-probe.ts` — the module
+ * that exists because five version-sensitive files asking "which pi am I on" five different ways is
+ * how five probes drift into disagreeing with each other. This file used to answer it TWICE, with
+ * two independent walks of its own (the other for the version string below), which is exactly the
+ * shape that helper exists to remove; both now read the one root.
+ *
+ * What stays local is the path INSIDE that root, joined here rather than resolved through the
+ * package's `exports` map, for two reasons: the map does not expose this internal module, and the
+ * package is ESM-only so `require.resolve` on its main entry fails outright
+ * ("No \"exports\" main defined"). The helper deliberately stops at the DIRECTORY — a reader that
+ * answered with a file's content could not be turned into an import specifier without a second
+ * walk, which is the thing this line exists to delete.
  */
 function packageManagerPath(): string | undefined {
-  let dir = import.meta.dirname;
-  for (let depth = 0; depth < 8; depth += 1) {
-    const candidate = join(
-      dir,
-      "node_modules",
-      "@earendil-works",
-      "pi-coding-agent",
-      "dist",
-      "core",
-      "package-manager.js",
-    );
-    if (existsSync(candidate)) return candidate;
-    const parent = dirname(dir);
-    if (parent === dir) return undefined;
-    dir = parent;
-  }
-  return undefined;
+  const piDir = installedPiDir(import.meta.dirname);
+  if (piDir === undefined) return undefined;
+  const candidate = join(piDir, "dist", "core", "package-manager.js");
+  return existsSync(candidate) ? candidate : undefined;
 }
 
 const PM_PATH = packageManagerPath();
@@ -121,11 +118,12 @@ const AVAILABLE = PM !== undefined;
 /**
  * The installed pi's own version, read off its artifact rather than assumed.
  *
- * `packageManagerPath()` above already walks up to the installed package; this reads the
+ * `packageManagerPath()` above already resolved the installed package root; this reads the
  * `package.json` beside that `dist/`, which is the only honest source for which pi is being
- * asked. `scripts/pi-compat-matrix.mjs` reads it the same way for the same reason: the version
- * decides which measured column applies, and a version string typed into this file would be the
- * very thing under test.
+ * asked. Both take the root from `installedPiDir`, so the version and the resolver under test can
+ * no longer come from two different walks. `scripts/pi-compat-matrix.mjs` reads it the same way for
+ * the same reason: the version decides which measured column applies, and a version string typed
+ * into this file would be the very thing under test.
  *
  * The string `unknown` rather than `undefined`, so a tree with no pi installed is a VALUE a test
  * asserts about rather than a control-flow branch. No column can match it, so the guard test at
@@ -133,24 +131,14 @@ const AVAILABLE = PM !== undefined;
  * compare against when there is no pi to compare it to.
  */
 const INSTALLED_PI_VERSION: string = ((): string => {
-  let dir = import.meta.dirname;
-  for (let depth = 0; depth < 8; depth += 1) {
-    const manifest = join(
-      dir,
-      "node_modules",
-      "@earendil-works",
-      "pi-coding-agent",
-      "package.json",
-    );
-    if (existsSync(manifest)) {
-      const parsed = JSON.parse(readFileSync(manifest, "utf8")) as { version?: string };
-      return parsed.version ?? "unknown";
-    }
-    const parent = dirname(dir);
-    if (parent === dir) return "unknown";
-    dir = parent;
-  }
-  return "unknown";
+  // The helper answers `undefined` for "no pi installed"; the conversion to the `unknown` STRING is
+  // the part that is this file's, and the reason for it is above.
+  const piDir = installedPiDir(import.meta.dirname);
+  if (piDir === undefined) return "unknown";
+  const parsed = JSON.parse(readFileSync(join(piDir, "package.json"), "utf8")) as {
+    version?: string;
+  };
+  return parsed.version ?? "unknown";
 })();
 
 /**

@@ -129,20 +129,6 @@ export interface PiCompatCapabilities {
 }
 
 /**
- * Read one installed-pi file, for a test that must QUOTE it rather than branch on it.
- *
- * Exposed on purpose: a branch assertion that re-derives its own condition by calling
- * `probePiCapabilities` a second time proves nothing, because a probe whose matcher was mutated
- * returns the mutated answer every time. Measured — forcing `structuredContentOnTheWire` to
- * `true` on the 0.86.0 floor left `tests/unit/dispatch-child-report.test.ts` entirely green,
- * because its "each arm re-derives the probe" guard read the same forced object. The guard has to
- * come back to the FILE, not to the probe.
- */
-export function installedPiSource(fromDir: string, ...parts: string[]): string {
-  return piFile(installedPiDir(fromDir), ...parts);
-}
-
-/**
  * Resolve all three capabilities in ONE pass over the installed tree.
  *
  * `fromDir` is a test file's own directory (`import.meta.dirname`), so the walk starts where the
@@ -167,35 +153,6 @@ export function probePiCapabilities(fromDir: string): PiCompatCapabilities {
       codemodeExecute,
     ),
   };
-}
-
-/**
- * Whether pi honours `defaultActive: false` — the difference between "the field is not typed"
- * and "the field is read but changes nothing".
- *
- * **Measured, and on the floor the declaration is inert.** pi 0.86.1's `_refreshToolRegistry`
- * (`dist/core/agent-session.js`) handles a newly-registered tool with
- *
- *     else if (!options?.activeToolNames) {
- *         for (const toolName of this._toolRegistry.keys()) {
- *             if (!previousRegistryNames.has(toolName)) {
- *                 nextActiveToolNames.push(toolName);
- *             }
- *         }
- *     }
- *
- * — one check, and it is about RECENCY, not activation. pi 1.0.0's same loop calls
- * `_isActivatedOnRegistration(toolName)`, i.e.
- * `_isDeclarable(name) && ...?.definition.defaultActive !== false`. So on the floor this package's
- * `ptc_child_report` carries `defaultActive: false` into a parent session and is activated there
- * anyway: "registered in the parent but never activated there" is a distinction pi 0.86.1 cannot
- * express, which is why the tests assert what the floor CAN honour instead.
- *
- * Exported as a helper rather than re-derived per file so that the claim — and the reason it is
- * true — lives in one place that every consumer reads the same way.
- */
-export function defaultActiveIsHonoured(capabilities: PiCompatCapabilities): boolean {
-  return capabilities.defaultActiveRead;
 }
 
 /**

@@ -4,12 +4,17 @@
  *
  * ## The problem
  *
- * `package.json` declares `peerDependencies.@earendil-works/pi-coding-agent: ">=0.86.0"`, and
- * `tsc --noEmit` over the floor tree produces 20 errors, 9 of them from `src/` — two because
- * `ToolExposure` is not an exported member there, and seven because a `ToolDefinition` object
- * literal is rejected for carrying `outputSchema` / `exposure` / `defaultActive`. None of that
- * is a behaviour gap: the package installs and runs on 0.86.0 (measured across 14 versions, 210
- * feature checks), so the declaration was honest about runtime and dishonest about types.
+ * `package.json` declares `peerDependencies.@earendil-works/pi-coding-agent: ">=0.86.0"`.
+ * Before this module existed, `tsc --noEmit` over the floor tree produced 20 errors, 9 of them
+ * from `src/`: two because `ToolExposure` was not an exported member there, and seven because a
+ * `ToolDefinition` object literal was rejected for carrying `outputSchema` / `exposure` /
+ * `defaultActive`. Post #193 that number is 0 — see the floor leg of `compat:pi 0.86.0`. The
+ * numbers below are the state this module was written against, kept so the reasoning stays
+ * checkable; they are not the current state.
+ *
+ * None of that was a behaviour gap: the package installed and ran on 0.86.0 (measured across 14
+ * versions, 210 feature checks), so the declaration was honest about runtime and dishonest about
+ * types.
  *
  * Both problems have one root cause, measured rather than assumed:
  *
