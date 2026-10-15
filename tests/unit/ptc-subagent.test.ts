@@ -870,6 +870,29 @@ describe("ptc_subagent structuredContent", () => {
     });
   });
 
+  test("the tier line LEADS the text, so the model reads it before the child's prose", async () => {
+    /*
+     * The ordering, and it is a claim the row above cannot make: that row proves a line EXISTS,
+     * not that it is in front. It is in front because the tier is a fact about what the child was
+     * ALLOWED to do, and a model that has already read the child's report has started reasoning
+     * about a child whose capabilities it does not know yet.
+     *
+     * COUNTERFACTUAL: move `tierText` to the END of the `text` array in
+     * `src/tools/subagent.ts`, and this is the only row that reds — the assertions above still
+     * pass, because they test for presence and not for position.
+     */
+    await withAgent(async (dir) => {
+      const text = (await dispatchForeground(dir, { readOnly: "strict" })).content[0]?.text ?? "";
+      expect(text).toContain("read-only tier");
+      const tierAt = text.indexOf("read-only tier");
+      const reportAt = text.indexOf("child report");
+      const proseAt = text.indexOf(FOREGROUND_ANSWER);
+      expect(reportAt, "the child report block is there to order against").toBeGreaterThan(-1);
+      expect(tierAt, "tier above the report block").toBeLessThan(reportAt);
+      expect(tierAt, "and above the child's own prose").toBeLessThan(proseAt);
+    });
+  });
+
   test("a background handle states its tier in the text the caller sees now", async () => {
     /*
      * The handle branch is where this is cheapest to get wrong: a `DispatchHandle` has nowhere to

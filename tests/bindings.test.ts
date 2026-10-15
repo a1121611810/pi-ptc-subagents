@@ -453,6 +453,78 @@ test(
   options,
 );
 
+test(
+  "a refusal on the binding front states the tier the caller asked for",
+  async () => {
+    /*
+     * The two refusals this binding produces BEFORE `dispatch()` runs — a malformed agent name and
+     * a raw schema failure — are the only `DispatchResult`s in the package that never pass through
+     * `dispatch()`'s refusal factories, and `withReadOnlyTier` lives on those factories. So they
+     * were the two places where a requested tier was dropped from the result: measured on the same
+     * input, `dispatch({agent:"", readOnly:"strict"})` returned `readOnlyTier: "strict"` while
+     * `binding.execute({agent:"", task:"t", readOnly:"strict"})` returned no such key at all.
+     *
+     * ADR-0041 §Reporting says the field "is present whenever a tier was requested". This row is
+     * the production path for that claim on this front — a PTC programme dispatching through the
+     * parallel binding, which is not the same as the `dispatch()` seam.
+     *
+     * COUNTERFACTUAL, measured: delete `withReadOnlyTier` from the two refusal literals in
+     * `src/runtime/bindings.ts` and this row goes red twice over — the binding returns no tier,
+     * and the `dispatch()` comparison beside it still does, which is the divergence itself.
+     */
+    const dir = await makeTempDir();
+    try {
+      await mkdir(join(dir, ".pi", "agents"), { recursive: true });
+      await writeFile(
+        join(dir, ".pi", "agents", "probe.md"),
+        "---\nname: probe\n---\nYou probe.\n",
+      );
+      const bindings = createBuiltinBindings({
+        cwd: dir,
+        names: ["read"],
+        includeDispatch: true,
+      });
+      const binding = bindings.get(DISPATCH_BINDING_NAME);
+      if (binding === undefined) throw new Error("pi.dispatch binding is missing");
+      const call = { callId: 0 } as never;
+
+      for (const [label, args] of [
+        ["a malformed agent name", { agent: "  ", task: "t", agentScope: "project" }],
+        ["a raw schema failure", { agent: "probe", task: "t", agentScope: "everywhere" }],
+      ] as const) {
+        const viaBinding = (await binding.execute({ ...args, readOnly: "strict" }, call)) as {
+          status: string;
+          readOnlyTier?: string;
+        };
+        expect(viaBinding.status, `${label} is refused`).toBe("rejected");
+        expect(
+          viaBinding.readOnlyTier,
+          `${label}: the binding front must state the tier the caller asked for, exactly as ` +
+            `dispatch() does for the same input`,
+        ).toBe("strict");
+
+        const viaDispatch = (await dispatch(
+          { agent: args.agent as string, task: "t", readOnly: "strict" } as never,
+          { callId: 0, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          { slots: new DispatchSlotCounter(8) },
+        )) as { status: string; readOnlyTier?: string };
+        expect(viaDispatch.readOnlyTier, `${label}: and the two fronts must agree`).toBe(
+          viaBinding.readOnlyTier,
+        );
+      }
+
+      // And the absence half, so the field cannot simply be stamped on everything.
+      const untiered = (await binding.execute({ agent: "  ", task: "t" }, call)) as {
+        readOnlyTier?: string;
+      };
+      expect("readOnlyTier" in untiered, "no tier asked for, so no tier is claimed").toBe(false);
+    } finally {
+      await removeTempDir(dir);
+    }
+  },
+  options,
+);
+
 // ---------------------------------------------------------------------------
 // The THROW channel of the binding failure cap.
 //

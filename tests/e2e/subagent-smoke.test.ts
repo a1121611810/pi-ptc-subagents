@@ -262,13 +262,19 @@ describe("a read-only tier is decided at the call site (ADR-0041)", () => {
      * no tier at all — a full-capability child for a caller who asked for read-only. Under a
      * string-only union the schema refuses every one of them before any of this matters.
      *
+     * `false` is in the loop on its own account, and it is the row a reviewer of `11b1659` asked
+     * for: `false` used to be a VALID no-tier spelling, and under the string enum it is not one
+     * any more. Measured before this row existed — adding `readOnly === false ||` back to
+     * `isUsableReadOnlyRequest` left the whole repository green, because nothing had pinned which
+     * of the two contracts the guard was on.
+     *
      * The dispatch-level guard stays as defence in depth (direct `dispatch()` callers build
      * their own arguments), so the counterfactual holds: without it, `readOnly: "readonly"`
      * would still come back `rejected` today — but that is a property of today's schema, not of
      * the function's contract, which is why the guard is not deleted.
      */
     await withFakePi(async (cwd) => {
-      for (const notATier of [1, 0, true, "true", "readonly", "Strict"] as const) {
+      for (const notATier of [1, 0, true, false, "true", "1", "readonly", "Strict"] as const) {
         // `as unknown as DispatchInput`: the point of the row is a VALUE the declared type
         // forbids. Casting to `never` would also erase the return type, and `started` /
         // `errorMessage` are the whole claim.

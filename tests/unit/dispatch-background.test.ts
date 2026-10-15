@@ -386,8 +386,9 @@ describe("dispatch background spawn", () => {
      * `DispatchHandle` and there is no `DispatchResult` to carry it — so this row also pins the
      * decision, not just the value.
      *
-     * Expectations are the two ADR-0041 tier literals and the one fold (`true` -> `strict`),
-     * read off the record the spawn wrote. COUNTERFACTUAL: write the tier only at the terminal
+     * Expectations are the two ADR-0041 tier literals, read off the record the spawn wrote —
+     * there is no third, because the boolean short spelling was removed when the schema became a
+     * string enum. COUNTERFACTUAL: write the tier only at the terminal
      * transition instead of at spawn, and this row is red on the `running` read below — which is
      * also the failure it is for, since a task polled while it is still running is exactly when
      * a caller has no other place to look.

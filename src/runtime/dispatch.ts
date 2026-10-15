@@ -237,9 +237,11 @@ export interface DispatchInput {
    */
   label?: string;
   /**
-   * ADR-0041: ask for a read-only child. `true` and `"strict"` are the SAME request, not
-   * two tiers — `resolveReadOnlyTier` folds one into the other, so `true` never survives as
-   * a state of its own. `false` asks for nothing and is indistinguishable from omitting it.
+   * ADR-0041: ask for a read-only child. Two tiers, two spellings, no third: a boolean was
+   * tried first and removed, because pi's validator COERCES a `Type.Boolean()` member of the
+   * schema and `readOnly: 0` then silently became "no tier" — a full-capability child for a
+   * caller who asked to be read-only. An absent or `null` value means no tier; `false` is not a
+   * spelling of anything and is refused.
    *
    * The two tiers are a capability narrowing and a posture, and the difference is meant to
    * be visible at a glance: `strict` replaces the child's tool list (so it cannot write),
@@ -2261,10 +2263,12 @@ export async function dispatch(
 ): Promise<DispatchResult | DispatchHandle> {
   // ADR-0041 §Constraint compliance, FIRST — above the background branch so both fronts get it,
   // and above every gate so nothing is minted, spawned or reserved for a request that is not
-  // one. pi's validator cannot close this (see {@link isUsableReadOnlyRequest}): `readOnly: 1`
-  // passes the schema, and depending on which seam it arrives over it is either silently coerced
-  // into a strict tier or read as no tier at all -- a full-capability child for a caller who
-  // asked for a read-only one. Refused, never coerced.
+  // one. On both PRODUCTION fronts this is defence in depth: the schema is a string enum, so pi's
+  // validator already refused `true`, `0`, `"true"` and the rest before this line runs
+  // (see {@link isUsableReadOnlyRequest}). What this guards is the seam the schema does not
+  // govern — a caller that reaches `dispatch()` and builds its own arguments — where a
+  // wrong-typed value would otherwise be read as no tier at all, i.e. a full-capability child
+  // for a caller who asked for a read-only one. Refused, never coerced.
   if (!isUsableReadOnlyRequest(input.readOnly)) {
     return invalidReadOnlyRequestResult(input.readOnly);
   }
