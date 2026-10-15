@@ -72,6 +72,27 @@ child's tools without re-deriving it from the agent roster. The cost is real —
 the task record and the output projection so the background front is not the one front that stays
 silent — and it was paid knowingly, after first deciding not to.
 
+### The tier is reported TWICE, because the schema field has no reader
+
+`readOnlyTier` on the result and `read_only_tier` in `structuredContent` are the right shape for a
+**program**. They are not enough for the thing user story 10 is actually about.
+
+`ptc_subagent` is a `direct` tool, and pi never hands a `direct` tool's `structuredContent` to the
+model — this repository already records that fact at `src/tools/subagent.ts`, where it is why
+declaring `outputSchema` is free. So the projection reaches codemode scripts and reaches nothing
+else. A parent model reading the tool result never sees the tier.
+
+The second report is therefore a rendered line, above the child report block and above the
+child's prose, because it is a fact about what the child was _allowed to do_ and the model should
+read it before anything it might attribute to the child. It appears on the settled path and on the
+background handle, and it is absent when no tier was requested — the spec's own rule, and the only
+honest option on a surface the model reads.
+
+The lenient line says its tools are **UNCHANGED**. That clause is not filler: a model told only
+"lenient" would reasonably assume the write tools had been removed and would then report a
+guarantee it does not have. Both halves of the tier are stated, including the half that is a
+promise rather than a narrowing.
+
 ### The invalid-value guard is real, and it is not on the path the hole is on
 
 There is no schema this can be closed with, and the reason is worth recording because it is not

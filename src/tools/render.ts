@@ -40,7 +40,12 @@ import type {
 } from "../runtime/protocol.ts";
 // Type-only, so the worker's module graph gains no edge to the dispatcher: a `ChildReport` and a
 // `ChildReportChannel` are read off a `DispatchResult` by the tool, never constructed here.
-import type { ChildReport, ChildReportChannel, ChildReportFinding } from "../runtime/dispatch.ts";
+import type {
+  ChildReport,
+  ChildReportChannel,
+  ChildReportFinding,
+  ReadOnlyTier,
+} from "../runtime/dispatch.ts";
 import { CHILD_REPORT_MAX_FINDINGS } from "../runtime/child-report.ts";
 import { MAX_LINE_CHARS, renderModelValue, sanitizeText } from "./text.ts";
 import { DEFAULT_SHIMMER_INTERVAL_MS, type ShimmerState, withShimmer } from "./shimmer.ts";
@@ -612,6 +617,9 @@ export function renderValueTree(
 /** Section label of the rendered block; the header the model is told to look for. */
 export const CHILD_REPORT_HEADER = "child report";
 
+/** Header for the read-only tier line; see {@link renderReadOnlyTierText}. */
+export const READ_ONLY_TIER_HEADER = "read-only tier";
+
 /** ADR-0032 §Rendering commits to 20; the withheld count is stated on the last findings row. */
 export { CHILD_REPORT_MAX_FINDINGS };
 
@@ -749,6 +757,33 @@ function noReportBlock(channel: ChildReportChannel): string {
  * renders as a report anyway — the value is the more specific statement, and the channel in the
  * header still says where it came from.
  */
+/**
+ * Render the read-only tier the child actually ran under, as one line the model reads (ADR-0041).
+ *
+ * This line exists because `structuredContent` cannot do the job. `ptc_subagent` is a `direct`
+ * tool, and pi never hands `structuredContent` to the model for one — the repo records that at
+ * `src/tools/subagent.ts` and this is the consequence. Spec user story 10 is written for the model
+ * ("I want to be told which tier took effect, so I can report honestly to my own user"), so the
+ * model is the front that has to be told.
+ *
+ * Absent when no tier was requested, which is the spec's own rule ("present whenever a tier was
+ * requested") and is also the only honest option: a line saying "no tier" on every ordinary
+ * dispatch would be a statement nobody asked for, and this surface already spends a line per
+ * dispatch on text the model reads.
+ *
+ * The lenient row says what it does NOT do. A model told only "lenient" would reasonably assume
+ * the write tools were removed, and would then report a guarantee it does not have.
+ */
+export function renderReadOnlyTierText(tier: ReadOnlyTier | undefined): string {
+  if (tier === undefined) return "";
+  const row =
+    tier === "strict"
+      ? "the child's tool list was narrowed to the read set, so it was never offered a write tool"
+      : "the child's tool list is UNCHANGED — it was told to work without modifying anything, and " +
+        "nothing here prevents it from doing so";
+  return `${READ_ONLY_TIER_HEADER} (${tier})\n${TREE_LAST}${row}`;
+}
+
 export function renderChildReportText(
   report: ChildReport | undefined,
   channel: ChildReportChannel,

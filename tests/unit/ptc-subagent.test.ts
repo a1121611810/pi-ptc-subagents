@@ -837,6 +837,57 @@ describe("ptc_subagent structuredContent", () => {
     });
   });
 
+  test("the tier reaches the MODEL, which is the only front that can act on it", async () => {
+    /*
+     * ADR-0041 §Reporting. `read_only_tier` rides `structuredContent`, and a `direct` tool's
+     * `structuredContent` has no reader — pi never hands it to the model. Spec user story 10 is
+     * written for the model, so this line is the whole delivery and the schema field is not.
+     *
+     * Counterfactual, and the obvious wrong version: keep the tier in `structuredContent` only.
+     * Every assertion in the two projection tests above still passes, because they read the
+     * projection and not the text.
+     */
+    await withAgent(async (dir) => {
+      const textOf = async (extra: Record<string, unknown>) =>
+        (await dispatchForeground(dir, extra)).content[0]?.text ?? "";
+
+      const strict = await textOf({ readOnly: "strict" });
+      expect(strict, "the model is told the tier, and which tier").toContain("read-only tier");
+      expect(strict).toContain("strict");
+      expect(strict, "and what strict actually did").toContain("never offered a write tool");
+
+      const lenient = await textOf({ readOnly: "lenient" });
+      expect(lenient).toContain("read-only tier");
+      expect(lenient).toContain("lenient");
+      // The row that earns the line: a model told only "lenient" would report a guarantee it
+      // does not have, so the text has to say the tools are still there.
+      expect(lenient, "lenient must not read as a narrowing").toContain("UNCHANGED");
+
+      const untiered = await textOf({});
+      expect(untiered, "no tier asked for, so the spec says no line").not.toContain(
+        "read-only tier",
+      );
+    });
+  });
+
+  test("a background handle states its tier in the text the caller sees now", async () => {
+    /*
+     * The handle branch is where this is cheapest to get wrong: a `DispatchHandle` has nowhere to
+     * carry the tier, so the code re-derives it off the params. That derivation is only worth
+     * anything if the value reaches the caller, and the handle is the ONE moment the caller learns
+     * the child exists — so if the line is missing here, the parent model has already spent a
+     * turn and has nothing to report.
+     */
+    await withAgent(async (dir) => {
+      const { result } = await dispatchBackground(dir, { readOnly: "strict" });
+      const text = result.content[0]?.text ?? "";
+      expect(text).toContain("read-only tier");
+      expect(text).toContain("strict");
+      // And the handle's own line still leads — the tier is an addition, not a replacement.
+      expect(text.indexOf("read-only tier")).toBeGreaterThan(text.indexOf("background task"));
+    });
+  });
+
   test("the settled projection carries the tier too, which the sweep cannot see either", async () => {
     // The other of the two writers, with the same reason and the same measurement: neutering
     // `tierField` on the settled path (`outcome.readOnlyTier === undefined ? {} : {}`) left the

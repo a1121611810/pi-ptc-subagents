@@ -43,7 +43,7 @@ import {
 } from "../runtime/dispatch.ts";
 import type { DispatchHandle } from "../runtime/task-registry.ts";
 import type { ULID } from "../runtime/task-storage.ts";
-import { renderChildReportText } from "./render.ts";
+import { renderChildReportText, renderReadOnlyTierText } from "./render.ts";
 
 /** Anything this module returns is one of the two dispatch shapes. */
 export type SubagentOutcome = DispatchResult | DispatchHandle;
@@ -364,7 +364,14 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
           ...(handleTier === undefined ? {} : { read_only_tier: handleTier }),
         };
         return {
-          content: [{ type: "text" as const, text: HANDLE_TEXT + taskId }],
+          content: [
+            {
+              type: "text" as const,
+              text: [HANDLE_TEXT + taskId, renderReadOnlyTierText(handleTier)]
+                .filter((part) => part.length > 0)
+                .join("\n\n"),
+            },
+          ],
           details,
           structuredContent: structured,
         };
@@ -406,7 +413,14 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
       // and the block is emitted whether or not a report arrived, because an unmarked gap reads as
       // an empty result.
       const reportBlock = renderChildReportText(report, outcome.reportChannel);
-      const text = [reportBlock, outcome.text].filter((part) => part.length > 0).join("\n\n");
+      // ADR-0041: the tier goes FIRST, above the report block and the child's prose. It is a fact
+      // about what the child was allowed to do, so the model should read it before anything it
+      // might attribute to the child -- and it is the only surface that reaches the model at all,
+      // because `structuredContent` has no reader for a `direct` tool.
+      const tierText = renderReadOnlyTierText(outcome.readOnlyTier);
+      const text = [tierText, reportBlock, outcome.text]
+        .filter((part) => part.length > 0)
+        .join("\n\n");
       return {
         content: [{ type: "text" as const, text }],
         details,

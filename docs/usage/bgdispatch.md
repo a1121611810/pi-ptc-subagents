@@ -104,6 +104,11 @@ handed byte-for-byte the list an untiered dispatch would have handed it, and is 
 read-only. Strict is a capability narrowing, **not** a sandbox: nothing here contains a hostile
 child, and a strict child cannot run tests or call `git`.
 
+The tier that took effect is reported twice, because the two readers are different. A program
+reads `readOnlyTier` on the result — `readOnlyTier` on the record, `read_only_tier` in the
+projection — and a **model** reads a rendered line above the child report, since pi never hands a
+`direct` tool's `structuredContent` to the model. Neither line appears when no tier was requested.
+
 On a refusal — depth cap, concurrency cap, unknown agent, or a spawn that never came up — the call
 resolves with a `DispatchResult` instead: `{ status: "rejected", started: false, errorMessage: … }`.
 The binding never throws, so branch on the shape:

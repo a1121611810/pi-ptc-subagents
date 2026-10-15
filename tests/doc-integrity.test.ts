@@ -1365,15 +1365,15 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
    * 记录任何一条的容差都大。一个会在别人的版本更新时变红的门，教出来的是忽略红。
    */
   const PIN_TOKENS: Readonly<Record<string, string>> = {
-    "docs/adr/0013-ptc-row-compact-summary.md:140 -> src/tools/render.ts:83":
+    "docs/adr/0013-ptc-row-compact-summary.md:140 -> src/tools/render.ts:88":
       "MAX_CODE_LINES_EXPANDED = 3",
-    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:146": "function firstLine(",
-    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:902": "function errorText(",
-    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:1059": "errorText(result)",
-    "docs/adr/0013-ptc-row-compact-summary.md:176 -> render.ts:1153": "errorText(result)",
-    "docs/adr/0013-ptc-row-compact-summary.md:177 -> render.ts:1155": "MAX_LOG_LINES_EXPANDED",
-    "docs/adr/0013-ptc-row-compact-summary.md:178 -> render.ts:130": "function alignRow(",
-    "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:1150":
+    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:151": "function firstLine(",
+    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:937": "function errorText(",
+    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:1094": "errorText(result)",
+    "docs/adr/0013-ptc-row-compact-summary.md:176 -> render.ts:1188": "errorText(result)",
+    "docs/adr/0013-ptc-row-compact-summary.md:177 -> render.ts:1190": "MAX_LOG_LINES_EXPANDED",
+    "docs/adr/0013-ptc-row-compact-summary.md:178 -> render.ts:135": "function alignRow(",
+    "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:1185":
       "The failure text is the reason",
     "docs/adr/0016-ptc-dispatch-binding.md:41 -> src/runtime/dispatcher.ts:438":
       "new DispatchSlotCounter(",
@@ -1402,7 +1402,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:208":
       "export const SUBAGENT_OUTPUT_SCHEMA",
     "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1659": "function accumulateUsage(",
-    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:413":
+    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:427":
       "structuredContent: structured,",
     "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:231":
       "outputSchema: LIST_OUTPUT_SCHEMA,",
@@ -1421,14 +1421,14 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
 
   /** 上面那份基线，原样；两条断言共用它，避免「改了数组忘了表」这种漂移。 */
   const IN_REPO_PIN_BASELINE: readonly string[] = [
-    "docs/adr/0013-ptc-row-compact-summary.md:140 -> src/tools/render.ts:83",
-    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:146",
-    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:902",
-    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:1059",
-    "docs/adr/0013-ptc-row-compact-summary.md:176 -> render.ts:1153",
-    "docs/adr/0013-ptc-row-compact-summary.md:177 -> render.ts:1155",
-    "docs/adr/0013-ptc-row-compact-summary.md:178 -> render.ts:130",
-    "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:1150",
+    "docs/adr/0013-ptc-row-compact-summary.md:140 -> src/tools/render.ts:88",
+    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:151",
+    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:937",
+    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:1094",
+    "docs/adr/0013-ptc-row-compact-summary.md:176 -> render.ts:1188",
+    "docs/adr/0013-ptc-row-compact-summary.md:177 -> render.ts:1190",
+    "docs/adr/0013-ptc-row-compact-summary.md:178 -> render.ts:135",
+    "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:1185",
     // Hand-confirmed line by line, 2026-09-30 (review round 5). The extractor resolves this
     // one only because the path is qualified: bare `dispatcher.ts` is ambiguous in this repo, and
     // the rule is to refuse rather than guess. Line 438 is
@@ -1507,7 +1507,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1636",
     "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:208",
     "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1659",
-    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:413",
+    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:427",
     "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:231",
     "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1506",
     // 新增 1 条（2026-10-12，ADR-0039）：目标行已逐条核对。
@@ -1641,9 +1641,12 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       doc: "docs/adr/0013-ptc-row-compact-summary.md",
       line: 140,
       file: "render.ts",
-      targetLine: 83,
+      targetLine: 88,
     };
-    const pin = `docs/adr/0013-ptc-row-compact-summary.md:140 -> render.ts:83`;
+    // 派生而非重写。`targetLine` 与 pin 里的行号曾经是两个各自写死的数字，于是一次「重钉全部锚点」
+    // 的批量替换只改了后者：正例查不到 token 而静默跳过，反例因此从 1 条变成 0 条——反事实夹具
+    // 自己失效，而且**它自己报不出来**，因为失效的方式就是不再报错。由同一个来源生成，两者无法失配。
+    const pin = `${synthesis.doc}:${synthesis.line} -> ${synthesis.file}:${synthesis.targetLine}`;
     const target = inRepoTarget(synthesis);
     expect(target, "反事实要落在真实文件上，落空就测不到真逻辑").not.toBeNull();
     const actualLine = readFileSync(target!, "utf8").split("\n")[synthesis.targetLine - 1]!;
