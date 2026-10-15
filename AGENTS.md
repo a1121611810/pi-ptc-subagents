@@ -47,6 +47,19 @@ Anything left in `SYSTEM-ONLY` is a missing anchor. This check is not optional: 
 
 `tests/ocr-anchor-coverage.test.ts` mechanises the invariants: no orphan rule file (a rule nothing references is dead — `general.md` was one for its entire life while SKILL.md and this file cited it as a live source), no dangling anchor target, catch-all last, catch-all merges the system rule, and `Source: Project` + resolved rule title for 8 sentinels. Its `ocr`-dependent assertions use `test.skipIf` so a machine without `ocr` reports SKIPPED rather than passing silently.
 
+## Dispatching sub-agents
+
+Parallel dispatch needs **disjoint ownership**. Two axes reading cost nothing; two builders editing
+one file overwrite each other unnoticed, and the half-applied state surfaces later as a diff-review
+finding. Name each builder's files before spawning.
+
+**Own only what you changed.** Rewriting neighbouring lines you did not need to touch -- a reformat, a
+drive-by fix -- is how your patch becomes someone else's conflict.
+
+A builder that finds its file rewritten **reports the collision and stops**. Measured twice in one
+round: the recovery (`git show HEAD` + rebuild) cost more than the collision, and the second rebuild
+shipped a commit message whose numbers contradicted the document inside the same commit.
+
 ## Stopping a review loop
 
 A review round with no stopping condition becomes a generator, not a detector: the reviewer is asked

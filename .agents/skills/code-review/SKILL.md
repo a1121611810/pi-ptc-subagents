@@ -52,7 +52,7 @@ compatibility: >
    codegraph callers <符号>                          # 5 个以上 callers 时拿总计数再下钻
    ```
    CodeGraph 不可用时退化为 grep:见下方「退化通道」。
-6. **并行 spawn 两个 sub-agent**(general-purpose 或本仓库 ptc_run_code / ptc_workflow sub-agent):
+6. **并行 spawn 两个 sub-agent**(general-purpose 或本仓库 ptc_run_code / ptc_workflow sub-agent)。**两轴都只读** —— 它们只审阅,不写文件:
    - **Standards 轴**:对照 AGENTS.md + 测试硬约束 6 条(`docs/testing-constraints.md`)+ `docs/adr/`(21 篇 ADR)+ catch-all 兜底规则 `.opencodereview/rules/general.md`(Fowler 12 条 baseline + 触发式维度表已实体化在那里)。
    - **Spec 轴**:OCR 拿到的 per-file rule groups 当 checklist;每个文件按 checklist 走。audit 1(blast radius)用 CodeGraph 证据;audit 2(Oracle check)用反事实判据 + 6 条硬约束;声明驱动关系按 `ptc-config-wiring.md` 的读点纪律走。
      Spec sub-agent brief **必须**逐字包含下方「Spec 轴强制增量」全部指令原文。

@@ -24,7 +24,7 @@
   "env": {
     "builtin": true
   },
-  "ignorePatterns": ["docs/prototypes/**", "packages/website/**"],
+  "ignorePatterns": ["docs/prototypes/**", "packages/website/**", "docs/research/**"],
   "overrides": [
     {
       "files": ["src/tools/pi-compat-types.ts"],

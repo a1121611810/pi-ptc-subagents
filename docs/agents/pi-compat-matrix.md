@@ -32,9 +32,10 @@ the binding contract, tool visibility).
 
 Probed 2026-10-14 across **all 14 published versions** (each installed into its own tree, then
 statically probed over the installed artifacts by the throwaway probe
-`.scratch/prototype-pi086-runtime/capability-probe.mjs`; the 0.86.0 / 0.86.1 / 0.99.0 / 1.0.0 /
+`../research/pi-compat-probes-20261014/capability-probe.mjs`; the 0.86.0 / 0.86.1 / 0.99.0 / 1.0.0 /
 1.2.0 columns additionally runtime-verified by `probe-runtime.mjs` loading the real built dist).
-Those probes are **one-off prototypes under `.scratch/`**, not tracked tooling — they are the
+Those probes are one-off prototypes kept in
+[`docs/research/pi-compat-probes-20261014/`](../research/pi-compat-probes-20261014/) — they are the
 evidence behind this table, and nothing in the gate depends on them still being there.
 
 | capability point                                           | 0.86.0 | 0.86.1 | 0.87.0 | 0.87.1 | 0.99.0 | 0.99.1 | 0.99.2 | 1.0.0 | 1.0.1 | 1.0.2 | 1.0.3 | 1.0.4 | 1.1.0 | 1.2.0 |
@@ -107,10 +108,9 @@ truncated response — is handled by `truncationFailureMessage` in `src/runtime/
 
 Static capability probes say what pi HAS; they do not say what this package DOES. That needs a
 second probe: drive the real built dist through factory + session_start + /ptc + a real PTC
-program, per version. That probe (`.scratch/prototype-pi086-runtime/surface-probe.mjs`, driven
-across all 14 trees by `run-surface-matrix.mjs`, measured 2026-10-14) is a throwaway `.scratch/`
-prototype, not tracked tooling - it is the evidence behind this table and nothing in the gate runs
-it. Fourteen versions times fifteen features = 210 checks, all pass - including on the four
+program, per version. That probe (`../research/pi-compat-probes-20261014/surface-probe.mjs`, driven
+across all 14 trees by `run-surface-matrix.mjs`, measured 2026-10-14) is a one-off prototype, not
+gate tooling - it is the evidence behind this table and nothing in the gate runs it. Fourteen versions times fifteen features = 210 checks, all pass - including on the four
 pre-0.99.0 versions, which are not type-broken:
 
 | feature                                                          | 0.86.0-0.87.1        | 0.99.0-1.2.0           |
@@ -237,7 +237,7 @@ differs on a pre-codemode pi:
 Not a cost, worth stating so it is never re-classified as one: `structuredContent` is documented
 as not-sent-to-the-model, and on a pre-codemode pi the only programmatic caller (codemode) does
 not exist - so its absence is invisible to the model. Evidence: the throwaway prototype probe and
-its verdict (`.scratch/prototype-pi086-runtime/`, `VERDICT.md` v2; `probe-runtime.mjs` loads the
+its verdict (`../research/pi-compat-probes-20261014/`, `VERDICT.md` v2; `probe-runtime.mjs` loads the
 real built dist against a real installed tree through a realpath-resolving module loader). That
 directory is a disposable prototype area, not tracked tooling - the lasting record is the two
 tables above.
@@ -283,7 +283,7 @@ first.
 
 Add it to `PI_COMPAT_VERSIONS` in `scripts/pi-compat-matrix.mjs` **and add a column to the
 capability table above**. Probing the installed tree for that column means writing a probe of the
-kind left behind under `.scratch/prototype-pi086-runtime/` — one install, one line of answers per
+kind left behind under `../research/pi-compat-probes-20261014/` — one install, one line of answers per
 capability. Those prototypes are not tracked tooling and are expected to be disposable; the
 tracked artifact is the table row and the matrix entry.
 
