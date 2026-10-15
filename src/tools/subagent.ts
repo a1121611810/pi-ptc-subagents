@@ -43,7 +43,8 @@ import {
 } from "../runtime/dispatch.ts";
 import type { DispatchHandle } from "../runtime/task-registry.ts";
 import type { ULID } from "../runtime/task-storage.ts";
-import { renderChildReportText, renderReadOnlyTierText } from "./render.ts";
+import { renderChildReportText } from "./render.ts";
+import { renderReadOnlyTierText } from "./read-only-tier-text.ts";
 
 /** Anything this module returns is one of the two dispatch shapes. */
 export type SubagentOutcome = DispatchResult | DispatchHandle;

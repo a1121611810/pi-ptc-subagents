@@ -44,6 +44,7 @@ import type { ReadOnlyTier } from "../runtime/dispatch.ts";
 import { applyAdr0015Truncation, type OutputStorage } from "../runtime/output-storage.ts";
 import { OUTPUT_PREVIEW_MAX_BYTES, type TaskRegistry } from "../runtime/task-registry.ts";
 import type { TaskRecord, TaskStatus, ULID } from "../runtime/task-storage.ts";
+import { renderReadOnlyTierText } from "./read-only-tier-text.ts";
 import { createTaskPanelRenderers } from "./task-panel-render.ts";
 import { sanitizeText } from "./text.ts";
 
@@ -538,6 +539,13 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
           ? details.output
           : `(no output yet; task ${taskId} is ${record.status})`;
       const text = reportBlock === undefined ? body : `${reportBlock}\n${body}`;
+      // ADR-0041 §Reporting: the tier, on the THIRD model-facing surface. `structuredContent`
+      // and `details` both carry it below, but neither reaches the model — this tool is `direct`,
+      // and a parent PTC program that polls a SETTLED background child reads this text and
+      // nothing else. Without the line, the background front is the one front that stays silent
+      // about the tier, which is the exact thing the field was added to prevent.
+      const tierText = renderReadOnlyTierText(record.readOnlyTier);
+      const textWithTier = tierText.length === 0 ? text : `${tierText}\n${text}`;
       // Same computed values, projected onto the declared schema. `status` is free here:
       // `record` is already loaded for the existence check above.
       const structuredContent: Static<typeof OUTPUT_OUTPUT_SCHEMA> = {
@@ -552,7 +560,7 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
         ...(record.readOnlyTier === undefined ? {} : { read_only_tier: record.readOnlyTier }),
         ...(record.report === undefined ? {} : { report: record.report }),
       };
-      return { content: [{ type: "text", text }], details, structuredContent };
+      return { content: [{ type: "text", text: textWithTier }], details, structuredContent };
     },
 
     ...createTaskPanelRenderers("task-output"),

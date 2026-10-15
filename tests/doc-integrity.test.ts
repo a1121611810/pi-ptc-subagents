@@ -1365,15 +1365,15 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
    * 记录任何一条的容差都大。一个会在别人的版本更新时变红的门，教出来的是忽略红。
    */
   const PIN_TOKENS: Readonly<Record<string, string>> = {
-    "docs/adr/0013-ptc-row-compact-summary.md:140 -> src/tools/render.ts:88":
+    "docs/adr/0013-ptc-row-compact-summary.md:140 -> src/tools/render.ts:83":
       "MAX_CODE_LINES_EXPANDED = 3",
-    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:151": "function firstLine(",
-    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:937": "function errorText(",
-    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:1094": "errorText(result)",
-    "docs/adr/0013-ptc-row-compact-summary.md:176 -> render.ts:1188": "errorText(result)",
-    "docs/adr/0013-ptc-row-compact-summary.md:177 -> render.ts:1190": "MAX_LOG_LINES_EXPANDED",
-    "docs/adr/0013-ptc-row-compact-summary.md:178 -> render.ts:135": "function alignRow(",
-    "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:1185":
+    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:146": "function firstLine(",
+    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:902": "function errorText(",
+    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:1059": "errorText(result)",
+    "docs/adr/0013-ptc-row-compact-summary.md:176 -> render.ts:1153": "errorText(result)",
+    "docs/adr/0013-ptc-row-compact-summary.md:177 -> render.ts:1155": "MAX_LOG_LINES_EXPANDED",
+    "docs/adr/0013-ptc-row-compact-summary.md:178 -> render.ts:130": "function alignRow(",
+    "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:1150":
       "The failure text is the reason",
     "docs/adr/0016-ptc-dispatch-binding.md:41 -> src/runtime/dispatcher.ts:438":
       "new DispatchSlotCounter(",
@@ -1399,12 +1399,12 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     "docs/adr/0031-open-source-and-publish-authority.md:129 -> src/runtime/limits.ts:4":
       "The numbers are DSH's",
     "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1631": "function assistantText(",
-    "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:208":
+    "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:209":
       "export const SUBAGENT_OUTPUT_SCHEMA",
     "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1654": "function accumulateUsage(",
-    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:427":
+    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:428":
       "structuredContent: structured,",
-    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:231":
+    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:232":
       "outputSchema: LIST_OUTPUT_SCHEMA,",
     "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1501":
       "export function childToolList(",
@@ -1421,14 +1421,14 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
 
   /** 上面那份基线，原样；两条断言共用它，避免「改了数组忘了表」这种漂移。 */
   const IN_REPO_PIN_BASELINE: readonly string[] = [
-    "docs/adr/0013-ptc-row-compact-summary.md:140 -> src/tools/render.ts:88",
-    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:151",
-    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:937",
-    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:1094",
-    "docs/adr/0013-ptc-row-compact-summary.md:176 -> render.ts:1188",
-    "docs/adr/0013-ptc-row-compact-summary.md:177 -> render.ts:1190",
-    "docs/adr/0013-ptc-row-compact-summary.md:178 -> render.ts:135",
-    "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:1185",
+    "docs/adr/0013-ptc-row-compact-summary.md:140 -> src/tools/render.ts:83",
+    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:146",
+    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:902",
+    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:1059",
+    "docs/adr/0013-ptc-row-compact-summary.md:176 -> render.ts:1153",
+    "docs/adr/0013-ptc-row-compact-summary.md:177 -> render.ts:1155",
+    "docs/adr/0013-ptc-row-compact-summary.md:178 -> render.ts:130",
+    "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:1150",
     // Hand-confirmed line by line, 2026-09-30 (review round 5). The extractor resolves this
     // one only because the path is qualified: bare `dispatcher.ts` is ambiguous in this repo, and
     // the rule is to refuse rather than guess. Line 438 is
@@ -1483,12 +1483,15 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     //        （2026-10-14 复核：#193 在 ptc-task.ts 顶部加了一行 pi-compat-types 的 import，
     //        三处声明整体后移一行）
     //  130 → dispatch.ts:1501 = `export function childToolList(`，即合并进子进程 --tools 的那个函数
-    //        （2026-10-15 三次重钉。**归因改正**：先前这条把位移记在 ADR-0041 名下，是错的。
-    //        `git log -S` 指向 60bda39（ADR-0032 的渲染提交 / #103），它往 render.ts 加了 206 行，
-    //        把顶部的 MAX_CODE_LINES_EXPANDED 等常量整体下推——**那一次与 ADR-0041 无关**，
-    //        而 ADR-0041 改的是 dispatch.ts 里的三处。两处曾被混为一谈。
-    //        ADR-0041 确实也动了 dispatch.ts：ReadOnlyTier / resolveReadOnlyTier 插进
-    //        DispatchInput，lenient 子句常量其后又插入一处，11b1659 再删掉布尔分支。
+    //        （2026-10-15 四次重钉。**归因错了两次，这才记下来**：
+    //        第一次把位移记在 ADR-0041 名下；第二次「改正」成 60bda39（ADR-0032 的渲染提交 / #103）
+    //        ——而 `git merge-base --is-ancestor 60bda39 main` 为真，说明它早就在基线上，
+    //        **不可能**造成本次位移。真因是 4e966c5（档位写入渲染文本）：它往 render.ts 插进了
+    //        renderReadOnlyTierText，一次插桩 + 一次移动，两次各推移锚点 19 行。
+    //        前两次归因都是**没查就写**：一次凭印象，一次是 `git log -S` 搜错了字符串
+    //        （搜 `function noReportBlock`，返回 ADR-0032 时代的提交，不是位移来源）。
+    //        教训：写归因要 `git log -S` 搜**本次改动在本文件新增的那个符号**，并用
+    //        `--is-ancestor main` 排除「早就在基线上」的提交。
     //        四处引用逐条重读目标行确认内容未变，然后按目标行重新测得行号。
     //        **不写“整体后移 N 行”**：聚合数无法事后复算，而不同的锚点前方的改动量各不相同）
     //
@@ -1511,10 +1514,10 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // 所以这里是**删一条**而不是改行号，本轮唯一的删除项，**新增 0 条**。
     // 同一次编辑把 ADR-0032 里 123 那条**在文档里**的行号推到 130（引用目标未动，仍是 1031）。
     "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1631",
-    "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:208",
+    "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:209",
     "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1654",
-    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:427",
-    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:231",
+    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:428",
+    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:232",
     "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1501",
     // 新增 1 条（2026-10-12，ADR-0039）：目标行已逐条核对。
     "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:115 -> src/index.ts:534",

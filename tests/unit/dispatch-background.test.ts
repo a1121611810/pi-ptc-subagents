@@ -369,6 +369,26 @@ describe("dispatch background spawn", () => {
       const opts = h.lifecycle.getRecordedOpts(h.lifecycle.handleAt(0));
       const prompt = await readFile(opts.promptFile!, "utf8");
       expect(prompt).toContain("You were dispatched read-only");
+
+      // **The clause's CONTENT, not its greeting.** Four assertions in this repository used to
+      // check only `You were dispatched read-only` — the first four words — and a mutation audit
+      // measured that the clause could then be weakened to "do not create or delete files" (drop
+      // `modify` — the write most likely to happen) or replaced wholesale by "do not write
+      // files", with the WHOLE suite green and `tsc` clean. ADR-0041 §Decision makes this clause
+      // the entire effect of the lenient tier, so an unpinned clause is an unpinned tier.
+      //
+      // Each of the three claims below is a separate promise the clause makes, so each is asserted
+      // separately: a failure names which promise went missing.
+      expect(prompt, "it names all three writes it forbids, not just the greeting").toContain(
+        "create, modify or delete files",
+      );
+      expect(prompt, "and that running commands counts as writing").toContain("run commands");
+      expect(
+        prompt,
+        "and it says the tools are still there — without that the child would read the clause " +
+          "as a narrowing that silently failed",
+      ).toContain("all still available");
+
       // And the tier it did NOT apply: a lenient child keeps the full toolset.
       const argv = h.lifecycle.getRecordedArgv(h.lifecycle.handleAt(0));
       expect(argv, "lenient must not narrow the background child either").not.toContain("--tools");
@@ -1457,7 +1477,11 @@ describe("background output persistence", () => {
         undefined,
         undefined,
         undefined as never,
-      )) as
+        // `as unknown as`, not `as`: pi 0.86.0's `AgentToolResult` has no `structuredContent`
+        // at all, so a direct cast to a type that REQUIRES one is TS2352 on the declared floor.
+        // Measured by `pnpm run compat:pi 0.86.0` — this file was the only failure in the whole
+        // floor leg, and `as` was the whole of it.
+      )) as unknown as
         | {
             details: { readOnlyTier?: string; output: string };
             structuredContent: { read_only_tier?: string };
@@ -1508,7 +1532,9 @@ describe("background output persistence", () => {
         undefined,
         undefined,
         undefined as never,
-      )) as { details: object; structuredContent: object } | undefined;
+        // Same floor reason as the cast above: `structuredContent` does not exist on
+        // pi 0.86.0's `AgentToolResult`.
+      )) as unknown as { details: object; structuredContent: object } | undefined;
       expect(Object.hasOwn(result?.structuredContent ?? {}, "read_only_tier")).toBe(false);
       expect(Object.hasOwn(result?.details ?? {}, "readOnlyTier")).toBe(false);
     });

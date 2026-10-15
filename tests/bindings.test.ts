@@ -10,7 +10,14 @@ import {
   DISPATCH_PARAMETERS,
   bindingFailureMessage,
 } from "../src/runtime/bindings.ts";
-import { DispatchSlotCounter, dispatch, type DispatchInput } from "../src/runtime/dispatch.ts";
+import {
+  DispatchSlotCounter,
+  dispatch,
+  isUsableReadOnlyRequest,
+  resolveReadOnlyTier,
+  type DispatchInput,
+  type ReadOnlyTier,
+} from "../src/runtime/dispatch.ts";
 import { resolveBindingNames } from "../src/tools/common.ts";
 import { makeTempDir, removeTempDir, RUN_TIMEOUT_MS } from "./helpers/ptc.ts";
 
@@ -708,3 +715,56 @@ test(
   },
   options,
 );
+
+test("the schema and the resolver name the SAME two tiers", () => {
+  /*
+   * The tier vocabulary is spelled out in five places: the `ReadOnlyTier` type, the resolver, the
+   * guard, the hand-written schema type and the runtime schema object. Nothing NAMES the
+   * invariant that they agree — which is different from nothing catching a violation of it.
+   *
+   * **`tsc` does catch both directions, and this record says so because the first draft of this
+   * comment claimed it did not.** A mutation audit reported that adding a literal to the runtime
+   * union leaves `tsc` green; measured, it does not: `DISPATCH_PARAMETERS: DispatchParameters`
+   * makes the object literal non-assignable and TS2322 fires at the annotation (verified). The
+   * other direction is covered because the resolver compares against `ReadOnlyTier` and stops
+   * covering when the union grows.
+   *
+   * So the net is real but IMPLICIT — it exists only because somebody wrote the annotation and
+   * the exhaustive comparison, and neither line says "this is where the tiers are decided". This
+   * row makes the invariant explicit, names both sides, and fails with the schema's literal list
+   * in the diff, which is a better error message than a 400-character TS2322.
+   *
+   * COUNTERFACTUAL: add `Type.Literal("advisory")` to the runtime union in
+   * `src/runtime/bindings.ts` and this is the row that reds.
+   */
+  const schemaLiterals = (
+    DISPATCH_PARAMETERS.properties as {
+      readOnly?: { anyOf?: { const?: unknown }[] };
+    }
+  ).readOnly?.anyOf?.map((entry) => entry.const);
+  expect(
+    schemaLiterals,
+    "the runtime schema's readOnly union is readable as a list of literals",
+  ).toEqual(["strict", "lenient"]);
+
+  // And the other direction: every literal the schema names, the resolver actually resolves —
+  // and to itself, not to something wider or narrower.
+  for (const literal of schemaLiterals ?? []) {
+    expect(
+      resolveReadOnlyTier(literal as ReadOnlyTier),
+      `"${String(literal)}" is advertised by the schema, so the resolver must implement it`,
+    ).toBe(literal);
+    expect(
+      isUsableReadOnlyRequest(literal),
+      `"${String(literal)}" is a tier, so the guard must accept it`,
+    ).toBe(true);
+  }
+
+  // The no-tier spellings, stated here rather than left to the rows above: exactly two, and
+  // nothing else. A third ("no" / "off" / "none") would be a value the code silently treats as
+  // no-tier without the schema saying so.
+  expect(isUsableReadOnlyRequest(undefined)).toBe(true);
+  expect(isUsableReadOnlyRequest(null)).toBe(true);
+  expect(isUsableReadOnlyRequest("")).toBe(false);
+  expect(isUsableReadOnlyRequest("off")).toBe(false);
+});

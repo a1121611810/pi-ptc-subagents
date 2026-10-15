@@ -203,9 +203,11 @@ other behaviour stays in the e2e file — a fact about the seam, not a gap in th
   and a writing fix in one turn should not need two sessions. Rejected.
 - **The tier in agent-definition frontmatter.** Reinstates the wrong home this decision removes,
   and the parser's exact key set is pinned by an existing test. Rejected.
-- **A boolean short spelling (`readOnly: true`).** Shipped, then reversed when measured: pi
+- **A boolean short spelling (`readOnly: true`).** Built, then reversed when measured: pi
   coerces the boolean union, so `readOnly: 0` silently became no tier — a full-capability child
-  for a caller who asked to be read-only. Reversed on the measurement, not on taste.
+  for a caller who asked to be read-only. Reversed on the measurement, not on taste, and before
+  release: an earlier draft of this line said "shipped", which is false — **no published tag
+  contains `readOnly` at all** (`git grep readOnly <tag> -- src` returns nothing on all 21).
 - **Refusing upstream of the coercion** (`prepareArguments`, or the binding's pre-validation
   `raw` read). Recorded while the boolean union was the design and the schema could not close
   the hole. Moot once the union went string-only: the schema closes it before the coercion

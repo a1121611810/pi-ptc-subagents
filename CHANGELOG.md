@@ -15,10 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ls`, plus the child report tool when the report contract is on — so the write tools are never
   declared to the child and it cannot call them. Lenient leaves the tool list exactly as it would
   have been and adds one line to the `<pi-ptc-context>` block the child already receives.
-  The parameter shipped with a boolean short spelling first; it was reversed when measured,
-  because pi's validator coerces booleans — `readOnly: 0` silently became "no tier", a
-  full-capability child for a caller who asked to be read-only — and a string enum refuses every
-  wrong-typed value at the schema instead.
+  The design first carried a boolean short spelling, and it was reversed before release rather
+  than after: measured, pi's validator coerces booleans — `readOnly: 0` would have silently
+  become "no tier", a full-capability child for a caller who asked to be read-only — and a string
+  enum refuses every wrong-typed value at the schema instead. No released version ever shipped
+  the boolean form.
   A tier set on the call beats an agent definition's declared `tools:` for strict; for lenient
   there is no precedence question, because the tier does not touch the tool list at all.
   Nothing breaks for anyone who does not pass it: an ordinary dispatch's argv and prompt are

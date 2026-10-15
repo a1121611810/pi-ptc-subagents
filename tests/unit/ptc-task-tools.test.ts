@@ -161,6 +161,7 @@ function fixtureRecord(overrides: Partial<RecordInput> = {}): RecordInput {
     spawnSource: { kind: "ptc-program", callerId: CALLER },
     parentTaskId: undefined,
     sessionFile: undefined,
+    readOnlyTier: undefined,
     ...overrides,
   };
 }
@@ -319,6 +320,80 @@ describe("ptc_task_output", () => {
     expect(result.details.outputPreview).toBe(SMALL_OUTPUT);
     expect(result.details.outputTruncated).toBe(false);
     expect(result.details.outputFullPath).toBeUndefined();
+  });
+
+  test("a polled background child STATES its tier, in the text and in both projections", async () => {
+    /*
+     * ADR-0041 §Reporting names three model-facing surfaces and this is the third. A parent PTC
+     * program polling a SETTLED background child reads `ptc_task_output`'s TEXT — `structuredContent`
+     * and `details` both carry the tier, but neither reaches the model for a `direct` tool. Before
+     * this row the text omitted it, so a background parent could never learn what tier its child
+     * ran under: the exact silence the field was added to prevent, on the one front that polls.
+     *
+     * All three surfaces are asserted in one row because they are three projections of ONE value,
+     * and the failure this is guarding against is them disagreeing — which is what a reader of the
+     * product cannot see and a reader of the code has to check by hand.
+     *
+     * COUNTERFACTUAL: drop `tierText` from the returned text in `src/tools/ptc-task.ts` and this
+     * row reds on its first assertion while the two projection assertions keep passing.
+     */
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_2, { readOnlyTier: "strict" });
+    await h.outputs.writeOutput(TASK_2, "found it");
+    const tool = createPtcTaskOutputTool(h.registry, h.outputs);
+
+    const result = await tool.execute(
+      "call-1",
+      { taskId: TASK_2 },
+      undefined,
+      undefined,
+      undefined as never,
+    );
+
+    // `as unknown as` twice over, and both for the declared floor: pi 0.86.0's
+    // `AgentToolResult` has neither a typed `content[].text` narrow enough to read nor a
+    // `structuredContent` property at all, so both accesses are TS2339 there. Measured by
+    // `pnpm run compat:pi 0.86.0` — this is the same floor fact the `dispatch-background`
+    // casts carry, hit from the other side.
+    const view = result as unknown as {
+      content?: { text?: string }[];
+      structuredContent?: { read_only_tier?: string };
+    };
+    const text = view.content?.[0]?.text ?? "";
+    expect(text, "the model reads this text, so the tier must be in it").toContain(
+      "read-only tier",
+    );
+    expect(text, "and which tier").toContain("strict");
+    expect(
+      text.indexOf("read-only tier"),
+      "and above the child's own output, for the same reason the settled path puts it first",
+    ).toBeLessThan(text.indexOf("found it"));
+    expect(result.details.readOnlyTier, "details carries the record's camelCase spelling").toBe(
+      "strict",
+    );
+    expect(view.structuredContent?.read_only_tier, "and the projection its snake_case").toBe(
+      "strict",
+    );
+  });
+
+  test("and stays silent about a tier when none was asked for", async () => {
+    // The absence half: without it, a line on every poll would be a claim nobody asked for.
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_2);
+    await h.outputs.writeOutput(TASK_2, "plain child");
+    const tool = createPtcTaskOutputTool(h.registry, h.outputs);
+
+    const result = await tool.execute(
+      "call-1",
+      { taskId: TASK_2 },
+      undefined,
+      undefined,
+      undefined as never,
+    );
+
+    const view = result as unknown as { content?: { text?: string }[] };
+    expect(view.content?.[0]?.text ?? "").not.toContain("read-only tier");
+    expect(result.details.readOnlyTier).toBeUndefined();
   });
 
   test("reads the record through registry.get, not a MAX_SAFE_INTEGER query scan (§3 O(1) read)", async () => {
