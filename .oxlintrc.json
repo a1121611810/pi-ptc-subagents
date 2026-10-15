@@ -7,9 +7,28 @@
   "categories": {
     "correctness": "error"
   },
-  "rules": {},
+  "rules": {
+    "no-restricted-imports": [
+      "error",
+      {
+        "paths": [
+          {
+            "name": "@earendil-works/pi-coding-agent",
+            "importNames": ["defineTool"],
+            "message": "Build tools with defineCompatTool (src/tools/pi-compat-types.ts): pi's own defineTool rejects outputSchema / exposure / defaultActive on the declared floor (pi 0.86.0), so a site importing it directly compiles on the pinned pi and breaks on the floor (#192)."
+          }
+        ]
+      }
+    ]
+  },
   "env": {
     "builtin": true
   },
-  "ignorePatterns": ["docs/prototypes/**", "packages/website/**"]
+  "ignorePatterns": ["docs/prototypes/**", "packages/website/**"],
+  "overrides": [
+    {
+      "files": ["src/tools/pi-compat-types.ts"],
+      "rules": { "no-restricted-imports": "off" }
+    }
+  ]
 }
