@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **The PTC tool descriptions now state how a `codemode` script reaches the parallel binding.**
+  Measured in the 2026-10-16 dispatch-loop spike: a script that decides to fan out enumerates its
+  own tool table, finds no `pi.dispatch` — correctly, the binding is never a codemode tool on any
+  surface — and nothing model-facing said the two-hop path (`codemode` → `ptc_run_code` /
+  `ptc_workflow` → `tools["pi.dispatch"]`) existed. The script's author read that silence as a
+  missing registration and fell back to `ptc_subagent`, which worked but left the compose-from-a-
+  script path untaught. The binding's own calling convention was already documented in both
+  descriptions, but those sentences address a reader _inside_ a program; the new note addresses a
+  reader inside the script. One shared constant renders into both descriptions, so the two
+  surfaces cannot drift. Model-facing text only: no tool, argument, or behaviour changed.
+
 ## [3.3.0] - 2026-10-16
 
 ### Added

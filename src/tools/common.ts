@@ -184,6 +184,25 @@ export const PTC_TOOL_GUIDELINES: readonly string[] = [
   "Use ptc_workflow instead of ptc_run_code when the work has named phases and the user benefits from seeing progress narration.",
 ];
 
+/**
+ * How a `codemode` script reaches the parallel binding, stated on both PTC surfaces.
+ *
+ * Measured 2026-10-16 (spike round 2, the dispatch-loop e2e note,
+ * `docs/research/dispatch-loop-e2e-spike-20261016.md`): a
+ * `codemode` script that decides to fan out looks in its own tool table, finds no `pi.dispatch`,
+ * and nothing model-facing says the two-hop path exists — the script's author then reads the
+ * silence as "this install does not register the binding" and falls back. The binding's own
+ * calling convention is already stated in both descriptions, but those sentences address a reader
+ * *inside* a program; this note is the one that addresses a reader inside the script.
+ *
+ * One shared constant rather than a sentence per surface, so the two cannot drift — the same
+ * reason `BINDING_CONTRACT` is a module-owned string (ADR-0024).
+ */
+export const PTC_BINDING_REACH_NOTE: string =
+  "A `codemode` script cannot call the parallel binding directly: `pi.dispatch` is never in " +
+  "that script's own tool table, on any surface. A script reaches it by calling `ptc_run_code` " +
+  "or `ptc_workflow` and using the binding inside the program.";
+
 /** Tool name per worker surface — the names the model calls and reads in failure messages. */
 export const SURFACE_TOOL_NAME: Record<PtcSurface, string> = {
   run_code: "ptc_run_code",

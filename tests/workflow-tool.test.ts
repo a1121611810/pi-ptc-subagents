@@ -6,7 +6,7 @@
  */
 import { expect, test } from "vitest";
 import type { AgentToolResult, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { PtcToolDetails } from "../src/tools/common.ts";
+import { PTC_BINDING_REACH_NOTE, type PtcToolDetails } from "../src/tools/common.ts";
 import { createPtcWorkflowTool } from "../src/tools/workflow.ts";
 import { captureRegisteredTools, RUN_TIMEOUT_MS, toolContext } from "./helpers/ptc.ts";
 
@@ -72,6 +72,9 @@ test("the description lists the four helpers and says there is no agent()", asyn
   // binding manifest.
   expect(description, "shows the string-indexed dispatch form").toContain('tools["pi.dispatch"]');
   expect(description, "names the introspection global").toContain("ptcBindings");
+  expect(description, "carries the same reach note as ptc_run_code").toContain(
+    PTC_BINDING_REACH_NOTE,
+  );
   expect(description).toMatch(/`meta\.phases`/);
   expect(description).toMatch(/`args`/);
 });

@@ -33,6 +33,7 @@ import type { WorkerPool } from "../runtime/worker-pool.ts";
 import {
   codeRunFailedError,
   createSubCallUpdater,
+  PTC_BINDING_REACH_NOTE,
   PTC_TOOL_GUIDELINES,
   PTC_WORKFLOW_SNIPPET,
   renderToolResult,
@@ -59,6 +60,8 @@ const DESCRIPTION = [
   'its literal dot name — call it with string indexing: `await tools["pi.dispatch"]({ agent, task })`;',
   "the run's actual bound names are on the `ptcBindings` global. What comes back is the script's",
   "return value, its `log`/`phase` narration and its `console.log` output.",
+  "",
+  PTC_BINDING_REACH_NOTE,
   "",
   BINDING_CONTRACT,
   "",

@@ -32,6 +32,7 @@ import { BINDING_CONTRACT } from "./binding-contract.ts";
 import {
   codeRunFailedError,
   createSubCallUpdater,
+  PTC_BINDING_REACH_NOTE,
   PTC_RUN_CODE_SNIPPET,
   PTC_TOOL_GUIDELINES,
   renderToolResult,
@@ -59,6 +60,8 @@ const DESCRIPTION = [
   "foreground dispatches compose under `Promise.all` exactly like the built-in calls. The run's",
   "actual bound names (this run, not a static list) are on the `ptcBindings` global, so the program",
   "never has to guess what is bound.",
+  "",
+  PTC_BINDING_REACH_NOTE,
   "",
   BINDING_CONTRACT,
   "",

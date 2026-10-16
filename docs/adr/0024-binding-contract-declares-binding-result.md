@@ -182,6 +182,15 @@ from. The whole-request figure is deliberately not quoted: it depends on a prefi
 the model never sees on its own, and a number nobody can re-derive from this
 repository is not worth having here.
 
+The live figure has moved twice since. Measured 2026-10-16 on the shipped descriptions:
+the registered `ptc_run_code` description is **2957 characters / 740 estimated tokens**,
+of which the 2026-10-16 codemode-reach note is 242 characters / 61 tokens (a 240-character
+sentence plus its separator) — `ptc_workflow` measures 2698 / 675 the same way, for the
+same 242/61. Subtracting the note gives 2715 / 679, not the 672 recorded above: the first
+move was not this note but the 2026-10-13 bash-opt-in rewrite of the same `DESCRIPTION`
+lines. Do not derive today's figure by adding to the ones above; re-measure. The floor and
+ceiling above bound the contract block alone; the prose around it is bounded by nothing.
+
 ## Consequences
 
 - The model can write a correct first program instead of discovering the shape by
