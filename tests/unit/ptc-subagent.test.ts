@@ -336,6 +336,21 @@ const CHILD_REPORT_LITERAL = {
   files_touched: ["src/runtime/dispatch.ts", "tests/unit/ptc-subagent.test.ts"],
 } as const;
 
+/**
+ * The host's own counter for the settled fixture child (issue #199), fed in through the child's
+ * `message_end` — the only source a host-side count can have.
+ *
+ * The numbers are a REAL rendered row rather than invented ones (constraint #2):
+ * `docs/research/dispatch-loop-e2e-spike-20261016.md` §9.1 ("Q-optout — #199 confirmed, on two
+ * surfaces", round 4) quotes the report-bearing child's render as
+ * `usage: input=31995 output=5888 cost=0.01763178 turns=8`. `turns` is re-measured for THIS
+ * fixture rather than copied: the child below emits one `message_end`, and one is what the host
+ * counted, so the expected value points at something this file controls.
+ */
+const FOREGROUND_USAGE_INPUT = { input: 31_995, output: 5_888, cost: 0.01763178 };
+/** The four display fields that feed the transcript row and the projection: `turns` is one. */
+const FOREGROUND_USAGE_VIEW = { ...FOREGROUND_USAGE_INPUT, turns: 1 };
+
 describe("ptc_subagent", () => {
   test("a background call spawns a child and hands back a task id the model can use", async () => {
     // Spec testing decision: the IO boundary has BOTH directions, and the spawn direction is
@@ -773,7 +788,8 @@ describe("ptc_subagent structuredContent", () => {
       // sweep over the other two would never see that key emitted and could not catch it going
       // undeclared. The fourth is a TIERED dispatch, because `read_only_tier` is ADR-0041's "the
       // tier that took effect is reported" and a key emitted only on a path this sweep does not
-      // walk is a key the sweep cannot vouch for.
+      // walk is a key the sweep cannot vouch for. The fifth carries `message_end` usage, which is
+      // #199's key: a settled child with no report at all, which is the branch that key exists for.
       //
       // What this sweep CANNOT do, and why the two rows below it exist: it unions every outcome
       // into one Set, so a key supplied by any single row satisfies it for all of them. Adding a
@@ -790,11 +806,16 @@ describe("ptc_subagent structuredContent", () => {
             ),
           ),
           ...Object.keys(structuredOf(await dispatchForeground(dir, { readOnly: "strict" }))),
+          ...Object.keys(
+            structuredOf(
+              await dispatchForegroundSaying(dir, "no report here", FOREGROUND_USAGE_INPUT),
+            ),
+          ),
         ]),
       ].sort();
       const declared = Object.keys(SUBAGENT_OUTPUT_SCHEMA.properties ?? {}).sort();
       expect(emitted, "every emitted key is a declared one").toEqual(declared);
-      // And the projection stays LEAN -- six keys, none of them the `details` spelling, and no
+      // And the projection stays LEAN -- seven keys, none of them the `details` spelling, and no
       // field that exists only to say "this does not apply". `report_channel` is the exception
       // that proves the rule: it exists ONLY to say that `report` does not apply, and it is here
       // because ADR-0032 makes an unstated degradation a defect.
@@ -805,6 +826,7 @@ describe("ptc_subagent structuredContent", () => {
         "report_channel",
         "status",
         "task_id",
+        "usage",
       ]);
       expect(declared, "snake_case, like pi's own builtins").not.toContain("taskId");
       expect(declared).not.toContain("exitCode");
@@ -945,6 +967,63 @@ describe("ptc_subagent structuredContent", () => {
       // dropped key is a shape change a value comparison can report as equal.
       expect(Object.keys(JSON.parse(JSON.stringify(handle)))).toHaveLength(3);
       expect(Object.keys(JSON.parse(JSON.stringify(finished)))).toHaveLength(3);
+    });
+  });
+
+  test("a settled child that reported nothing still hands the script its counter", async () => {
+    /*
+     * The surface #199 was filed for on this side: `structuredContent` used to carry tokens only
+     * inside `report`, so a settled child with `report_channel: "none"` (or `"opted-out"`) was
+     * invisible to any accounting a codemode script does — measured in the spike as
+     * `{status, exit_code, report_channel}` with no usage at all, while `DispatchResult.usage`
+     * sat there unprojected.
+     *
+     * COUNTERFACTUAL: drop `...usageField` from the settled branches in `src/tools/subagent.ts`
+     * and every `usage` assertion here goes red; the text is asserted with it because the two
+     * channels are required to state the same four numbers.
+     */
+    await withAgent(async (dir) => {
+      const result = await dispatchForegroundSaying(dir, "no report here", FOREGROUND_USAGE_INPUT);
+      const structured = structuredOf(result);
+      const text = result.content[0]?.text ?? "";
+
+      expect(structured.report_channel, "the child ran and did not comply").toBe("none");
+      expect(Object.hasOwn(structured, "report")).toBe(false);
+      expect(structured.usage).toStrictEqual(FOREGROUND_USAGE_VIEW);
+      // `toEqual` ignores an `undefined`-valued key and the sandbox sees what `JSON.stringify`
+      // produced, so the round trip is what proves the key survives the boundary.
+      expect(JSON.parse(JSON.stringify(structured))).toStrictEqual(structured);
+      // The transcript says the same thing, in the renderer's own rounding (four decimals,
+      // trailing zeros dropped) and its own pluralisation.
+      expect(text, "the model reads the counter too").toContain("in 31995");
+      expect(text, "including output").toContain("out 5888");
+      expect(text, "and cost").toContain("cost 0.0176");
+      // The whole row up to its line end, not the `1 turn` substring: "11 turns" contains "1 turn"
+      // AND "1 turns" is the substring's own extension, so the substring form survives a
+      // double-counted or mis-pluralised run. The trailing newline is what makes this literal exact.
+      expect(text, "one message_end is one turn").toContain(
+        "└─ usage   in 31995 · out 5888 · cost 0.0176 · 1 turn\n",
+      );
+      // Nothing else: no report arrived, so no report section may appear beside the counter.
+      expect(text).toContain("no child report was returned");
+      expect(
+        text,
+        "no summary row — the block is still just the marker plus the counter",
+      ).not.toContain("summary");
+    });
+  });
+
+  test("a background handle claims no counter — nothing has been measured yet", async () => {
+    // The absence half on this surface, and it is not the same claim as the row above: a handle's
+    // child is still running for the last time this projection was written, so "no usage" means
+    // "not measured", which is why the key is omitted rather than zeroed. `for-the-model` and
+    // `for-the-script` agree here because the handle's text carries no counter either.
+    await withAgent(async (dir) => {
+      const { result } = await dispatchBackground(dir);
+      const structured = structuredOf(result);
+
+      expect(Object.hasOwn(structured, "usage"), "the key is ABSENT, not zeroed").toBe(false);
+      expect(result.content[0]?.text ?? "").not.toContain("usage");
     });
   });
 
@@ -1111,6 +1190,15 @@ describe("ptc_subagent renders the child report into the text the model reads", 
       }
       // And the host's usage, not the child's: `usage` came from this file's `message_end`.
       expect(report?.usage).toEqual({ input: 1200, output: 340, cost: 0.0123, turns: 1 });
+      // Issue #199: the report keeps that four-field view UNCHANGED while the top-level key states
+      // the same four numbers, from the canonical accumulator. Decision 2's invariant — when both
+      // carriers are present they agree — checked here because it is the one place both are in
+      // reach at once, and the two channels must not disagree about one measurement.
+      expect(structured.usage).toEqual({ input: 1200, output: 340, cost: 0.0123, turns: 1 });
+      expect(
+        Object.keys(structured.usage as object).sort(),
+        "four display fields, never the six-field accumulator",
+      ).toEqual(["cost", "input", "output", "turns"]);
     });
   });
 

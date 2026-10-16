@@ -386,7 +386,11 @@ ADR-0016.
 **child report** — the structured value a dispatched child produces and
 the host hands back, carrying exactly four things: `summary` (one line, the
 child's own words), `findings` (each with `what` and independent `evidence`),
-`files_touched`, and `usage`. It arrives over one of two channels — a report
+`files_touched`, and `usage` — its four-field derived view (`input`, `output`,
+`cost`, `turns`) of the counter the _TaskRecord_ carries: the record's own
+six-field `usage` is the canonical copy, written on every terminal close for a
+child the host started, so a non-reporting or failed child still accounts for
+what it cost. It arrives over one of two channels — a report
 **tool** the child calls (preferred) or a fenced JSON block in the child's
 final text (the fallback) — and the result **always names which channel
 delivered it**, including when none did: `tool`, `prompt-json`, `none` (the
@@ -646,15 +650,23 @@ and ends when that session ends or is replaced
 completion (`lost_on_session_restart`). See ADR-0022 + ADR-0023.
 
 **TaskRecord** — session-level _TaskRegistry_ row tracking the full
-lifecycle of one background child. 19-field schema (ADR-0022 §3's code block;
-its "21 fields" heading is an authoring miscount) plus two
-optional owner-identity fields (`ownerPid`, `ownerBootMs`, ADR-0023)
-stamped at spawn, persisted to `<sessionDir>/tasks/<taskId>.json` per R1,
-plus two optional _child report_ fields (`report`, `reportChannel`,
-ADR-0032) written only when the record reaches `succeeded` — so a
-still-running or failed task carries neither, because "has not reported
-yet" is not "reported nothing". Independent of `DispatchResult` and
-`SubCallRecord`. See ADR-0022 + ADR-0023 + ADR-0032.
+lifecycle of one background child. 25 fields today: ADR-0022 §3's code block,
+which lists 20 of them since the 2026-10-16 amendment added its top-level
+`usage` to the original 19 (the block's "21 fields" heading is the authoring
+miscount it always was), plus two optional owner-identity fields (`ownerPid`,
+`ownerBootMs`, ADR-0023) stamped at spawn, plus two optional _child report_
+fields (`report`, `reportChannel`, ADR-0032) written only when the record
+reaches `succeeded` — so a still-running or failed task carries neither, because
+"has not reported yet" is not "reported nothing" — plus the optional
+`readOnlyTier` (ADR-0041). The block's `usage` is the host's own six-field
+counter, written on every terminal close for a child the host actually started:
+independent of `reportChannel` and of the close outcome, so a `none` /
+`opted-out` or failed child still accounts for what it cost, while a record
+written before the field existed, a child that never started, and a `lost`
+record carry none. Persisted to `<sessionDir>/tasks/<taskId>.json` per R1.
+Independent of `DispatchResult` and `SubCallRecord` — the _child report_'s
+four-field `usage` view is derived from the record's own counter, not a second
+one. See ADR-0022 + ADR-0023 + ADR-0032 + ADR-0041.
 
 **TaskStatus** — the 6-state enum for `TaskRecord.status`:
 `running / stopping / succeeded / failed / canceled / lost`. The `queued`

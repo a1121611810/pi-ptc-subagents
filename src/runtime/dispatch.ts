@@ -2146,11 +2146,19 @@ async function dispatchBackground(
             taskId,
             exitCode,
             reportChannel: extraction.reportChannel,
-            // ADR-0032: `usage` is the host's own counter, accumulated off the child's
-            // `message_end` blocks exactly as the foreground loop does and stamped HERE rather
-            // than read off the report the child declared — a model cannot know its token count.
-            // The registry applies the pair only when this close resolves `succeeded`, so
-            // handing it a report on a failed child is not a way to persist one.
+            // ADR-0032's counter on its own carrier (issue #199): the host's own count,
+            // accumulated off the child's `message_end` blocks exactly as the foreground loop
+            // does — a model cannot know its token count, so it is observed, never declared.
+            // Passed UNCONDITIONALLY: outside the report spread below and outside any outcome
+            // check, so a `none` / `opted-out` / failed / canceled child still accounts for what
+            // it cost. The registry applies it on every close outcome it can produce; `undefined`
+            // here means the child never emitted a usage block, and leaves the field absent
+            // rather than writing a zeroed one.
+            usage,
+            // The report's four-field `usage` view is derived from that SAME accumulator
+            // instance, so the two carriers cannot disagree about input / output / cost / turns
+            // when both are present. The registry applies the pair only when this close resolves
+            // `succeeded`, so handing it a report on a failed child is not a way to persist one.
             ...(extraction.report === undefined
               ? {}
               : {

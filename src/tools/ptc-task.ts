@@ -40,7 +40,7 @@ import {
   type ChildReport,
   type ChildReportChannel,
 } from "../runtime/child-report.ts";
-import type { ReadOnlyTier } from "../runtime/dispatch.ts";
+import type { DispatchUsage, ReadOnlyTier } from "../runtime/dispatch.ts";
 import { applyAdr0015Truncation, type OutputStorage } from "../runtime/output-storage.ts";
 import { OUTPUT_PREVIEW_MAX_BYTES, type TaskRegistry } from "../runtime/task-registry.ts";
 import type { TaskRecord, TaskStatus, ULID } from "../runtime/task-storage.ts";
@@ -325,6 +325,49 @@ export interface PtcTaskOutputDetails {
  */
 export const MAX_RENDERED_REPORT_FINDINGS: number = CHILD_REPORT_MAX_FINDINGS;
 
+/** The four display fields the report's `usage` view, this tool's text line and its projection share. */
+type DisplayUsage = ChildReport["usage"];
+
+/**
+ * The four-field view of the record's six-field accumulator (issue #199): `input` / `output` /
+ * `cost` / `turns`, the same four {@link ChildReport} carries. It is a projection, not a second
+ * measurement — one function, so the line the text prints and the object `structuredContent`
+ * carries cannot disagree about the numbers.
+ */
+function projectUsage(usage: DispatchUsage): DisplayUsage {
+  return { input: usage.input, output: usage.output, cost: usage.cost, turns: usage.turns };
+}
+
+/**
+ * The host's counter as one line — the format the report block has always printed, reused verbatim
+ * for the children that have no report block to print it in, so a reader parses one spelling.
+ */
+function formatUsageLine(usage: DisplayUsage): string {
+  return (
+    `usage: input=${String(usage.input)} output=${String(usage.output)} ` +
+    `cost=${String(usage.cost)} turns=${String(usage.turns)}`
+  );
+}
+
+/**
+ * One `<child-report>` element with no report inside it: the channel, the sentence that says what
+ * the absence means, and — since issue #199 — the host's usage line when the record carries one.
+ *
+ * Three sentences, three different claims (see the callers); what they share is the shape. The
+ * usage line goes where the full report block puts it: last, inside the element. A record with no
+ * `usage` (one written before the field existed, or a child the host never measured) produces
+ * exactly the string this helper produced before it had a usage parameter.
+ */
+function noReportElement(
+  channel: ChildReportChannel,
+  sentence: string,
+  usage: DisplayUsage | undefined,
+): string {
+  const head = `<child-report channel="${channel}">${sentence}`;
+  if (usage === undefined) return `${head}</child-report>`;
+  return `${head}\n${formatUsageLine(usage)}\n</child-report>`;
+}
+
 /**
  * Render one record's persisted child report (ADR-0032), or `undefined` when the record carries
  * none — the `running` and `failed` cases, where "has not reported yet" is the honest answer and
@@ -334,16 +377,24 @@ export const MAX_RENDERED_REPORT_FINDINGS: number = CHILD_REPORT_MAX_FINDINGS;
  * marker ADR-0032 requires: the child's prose follows it, and the model is told the prose is not
  * backed by a report rather than being left to infer it from the absence of one.
  *
+ * Issue #199: every branch here also states the host's own counter when the record has one
+ * (`record.usage`), including the branches that render no report. A `none` / `opted-out` /
+ * anomalous child still ran and still cost what it cost, and ADR-0032's channel is what
+ * distinguishes those outcomes — not a missing measurement.
+ *
  * Shape follows the `<bg-task-notification>` XML the same subsystem emits, so a model reading
  * both surfaces sees one convention: the channel is always an attribute, the payload is the body.
  */
 export function renderChildReport(record: TaskRecord): string | undefined {
   const channel = record.reportChannel;
   if (channel === undefined) return undefined;
+  const usage = record.usage === undefined ? undefined : projectUsage(record.usage);
   if (channel === "none") {
-    return (
-      '<child-report channel="none">the child produced no report; it did not comply with the ' +
-      "report contract. What follows is its prose, unbacked by a report.</child-report>"
+    return noReportElement(
+      channel,
+      "the child produced no report; it did not comply with the report contract. What follows " +
+        "is its prose, unbacked by a report.",
+      usage,
     );
   }
   if (channel === "opted-out") {
@@ -351,17 +402,22 @@ export function renderChildReport(record: TaskRecord): string | undefined {
     // resolves `succeeded` carrying this channel and no report, which is an ORDINARY outcome, not
     // a writer that broke a promise. Rendering it in anomaly voice told the model a channel was
     // announced when nobody was ever asked. `tools/render.ts` got the same fix in 29b3a9a.
-    return (
-      '<child-report channel="opted-out">this agent opts out of the report contract, so none ' +
-      "was asked for; the prose below is the whole of what it produced, and nothing is " +
-      "missing.</child-report>"
+    return noReportElement(
+      channel,
+      "this agent opts out of the report contract, so none was asked for; the prose below is " +
+        "the whole of what it produced, and nothing is missing.",
+      usage,
     );
   }
   const report = record.report;
   if (report === undefined) {
     // Anomaly branch: a channel was announced and nothing arrived. Reachable if some writer other
     // than the registry ever sets one, and stated rather than silently skipped when it does.
-    return `<child-report channel="${channel}">the record names channel ${channel} but carries no report.</child-report>`;
+    return noReportElement(
+      channel,
+      `the record names channel ${channel} but carries no report.`,
+      usage,
+    );
   }
   const lines = [`<child-report channel="${channel}">`, `summary: ${report.summary}`];
   const shown = report.findings.slice(0, MAX_RENDERED_REPORT_FINDINGS);
@@ -376,11 +432,10 @@ export function renderChildReport(record: TaskRecord): string | undefined {
       ? "files_touched: (none)"
       : `files_touched: ${report.files_touched.join(", ")}`,
   );
-  // The host's counter, not the child's claim — see ChildReportPayload.
-  lines.push(
-    `usage: input=${String(report.usage.input)} output=${String(report.usage.output)} ` +
-      `cost=${String(report.usage.cost)} turns=${String(report.usage.turns)}`,
-  );
+  // The host's counter, not the child's claim — see ChildReportPayload. This branch prints the
+  // REPORT's four-field view, which the canonical accumulator feeds (§199's rule: the two agree
+  // on these fields), so a report-bearing child is not re-sourced and the line appears once.
+  lines.push(formatUsageLine(report.usage));
   lines.push("</child-report>");
   return lines.join("\n");
 }
@@ -461,6 +516,22 @@ const OUTPUT_OUTPUT_SCHEMA = Type.Object({
       }),
     }),
   ),
+  usage: Type.Optional(
+    Type.Object(
+      {
+        input: Type.Number({
+          description: "Host-observed input tokens (never the child's claim).",
+        }),
+        output: Type.Number({ description: "Host-observed output tokens." }),
+        cost: Type.Number({ description: "Host-observed cost." }),
+        turns: Type.Number({ description: "Host-observed assistant turns." }),
+      },
+      {
+        description:
+          "The host's own count for this child, in the same four fields `report.usage` carries (ADR-0032, issue #199). ABSENT when no top-level count was recorded: a `running` / `stopping` task has not closed yet, a `lost` record was never observed closing, and a record written before the field existed carries none — a pre-change record that has a report still renders the report's own host-stamped numbers. Present on every close outcome including `failed` and `canceled`, and independent of `report_channel` — so a child that reported nothing still accounts for what it cost. The text block states the same four numbers on the `usage: …` line.",
+      },
+    ),
+  ),
 });
 
 /**
@@ -520,6 +591,15 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
       // (the pump persisted both through the same terminal write), so the two cannot describe
       // different messages. Both are absent together.
       const reportBlock = renderChildReport(record);
+      // Issue #199: the host's counter, projected once so the text line and `structuredContent`
+      // cannot disagree. It is read off the RECORD, not off the report — that is what makes it
+      // available to a child that reported nothing.
+      const usage = record.usage === undefined ? undefined : projectUsage(record.usage);
+      // Issue #199 decision 4 scoped the model-facing half: the text line above and the
+      // `structuredContent` projection below carry the counter. `details` deliberately stays
+      // without a `usage` field — the TUI task panel draws no usage cell for any record, so a
+      // `details.usage` would be inert there. (ADR-0041's `readOnlyTier` does sit on `details`;
+      // the two placements are separate calls, recorded here so neither reads as an oversight.)
       const details: PtcTaskOutputDetails = {
         taskId,
         output: truncation.text,
@@ -538,7 +618,13 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
         details.output.length > 0
           ? details.output
           : `(no output yet; task ${taskId} is ${record.status})`;
-      const text = reportBlock === undefined ? body : `${reportBlock}\n${body}`;
+      // Issue #199: a started child the host measured that has NO block to print the line in. A
+      // `failed` or `canceled` record carries neither a report nor a channel (ADR-0032: "has not
+      // reported yet" is not "reported nothing"), so there is no `<child-report>` element to put it
+      // inside — it goes exactly where a block would go, above the prose, in the same format. A
+      // task with a block never takes this path, so the line is rendered once either way.
+      const head = reportBlock ?? (usage === undefined ? undefined : formatUsageLine(usage));
+      const text = head === undefined ? body : `${head}\n${body}`;
       // ADR-0041 §Reporting: the tier, on the THIRD model-facing surface. `structuredContent`
       // and `details` both carry it below, but neither reaches the model — this tool is `direct`,
       // and a parent PTC program that polls a SETTLED background child reads this text and
@@ -559,6 +645,11 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
         ...(record.reportChannel === undefined ? {} : { report_channel: record.reportChannel }),
         ...(record.readOnlyTier === undefined ? {} : { read_only_tier: record.readOnlyTier }),
         ...(record.report === undefined ? {} : { report: record.report }),
+        // Issue #199: the host's counter, on the projection as well as in the text (ADR-0028:
+        // shaped to match what the model was shown). Same four fields, same numbers, and present
+        // exactly when the record has them — a `running` task, a `lost` record and a pre-#199
+        // record carry no key at all rather than a zeroed one.
+        ...(usage === undefined ? {} : { usage }),
       };
       return { content: [{ type: "text", text: textWithTier }], details, structuredContent };
     },

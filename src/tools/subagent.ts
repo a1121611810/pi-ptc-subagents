@@ -205,6 +205,14 @@ type SubagentStructuredContent =
  * a definition's declared `tools:` visible to a script instead of something the script has to
  * infer from an agent file it may never have read. ABSENT when no tier was asked for, on every
  * branch, including the background handle's.
+ *
+ * `usage` (issue #199) is the host's own counter, and it is projected from `DispatchResult.usage`
+ * rather than from `report.usage` -- which is the whole point: before this key, a child that
+ * delivered no report (`none`, `opted-out`, or a settled call with no report at all) had no token
+ * accounting anywhere a script could read. Four fields, the same ones the rendered `usage` row
+ * prints, so the two channels state the same numbers. ABSENT for a background handle, whose child
+ * has not been measured yet, and for a child that emitted no usage block; never zeroed to say
+ * "not measured".
  */
 export const SUBAGENT_OUTPUT_SCHEMA: SubagentOutputSchema = Type.Object({
   task_id: Type.Optional(
@@ -255,6 +263,20 @@ export const SUBAGENT_OUTPUT_SCHEMA: SubagentOutputSchema = Type.Object({
         turns: Type.Number({ description: "Assistant turns, counted by the host." }),
       }),
     }),
+  ),
+  usage: Type.Optional(
+    Type.Object(
+      {
+        input: Type.Number({ description: "Input tokens, counted by the host." }),
+        output: Type.Number({ description: "Output tokens, counted by the host." }),
+        cost: Type.Number({ description: "Total cost, counted by the host." }),
+        turns: Type.Number({ description: "Assistant turns, counted by the host." }),
+      },
+      {
+        description:
+          "The host's own count for this child: the same four fields `report.usage` carries, projected from the `DispatchResult.usage` accumulator (ADR-0032, issue #199). ABSENT for a background handle, which has measured nothing yet, and for a child that emitted no usage block. Present on every settled call REGARDLESS of `report_channel`, so a child that reported nothing still accounts for what it cost — the text render states the same four numbers on its `usage` row.",
+      },
+    ),
   ),
 });
 
@@ -388,15 +410,38 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
       // the same value-level absence every other optional key on this surface uses.
       const tierField =
         outcome.readOnlyTier === undefined ? {} : { read_only_tier: outcome.readOnlyTier };
+      // Issue #199: the host's counter on its own key, sourced from the `DispatchResult`
+      // accumulator rather than from `report.usage` -- that is what makes it present on a child
+      // that delivered NO report. The four display fields are the ones the text render prints, so
+      // a script reading this key and a model reading that row see the same numbers. Spread, so a
+      // child the host never measured emits no key at all. A background handle never reaches this
+      // branch, and has nothing measured yet -- its absence is correct.
+      const usageField =
+        outcome.usage === undefined
+          ? {}
+          : {
+              usage: {
+                input: outcome.usage.input,
+                output: outcome.usage.output,
+                cost: outcome.usage.cost,
+                turns: outcome.usage.turns,
+              },
+            };
       const structured: SubagentStructuredContent =
         details.exitCode === undefined
-          ? { status: details.status, report_channel: outcome.reportChannel, ...tierField }
+          ? {
+              status: details.status,
+              report_channel: outcome.reportChannel,
+              ...tierField,
+              ...usageField,
+            }
           : report === undefined
             ? {
                 status: details.status,
                 exit_code: details.exitCode,
                 report_channel: outcome.reportChannel,
                 ...tierField,
+                ...usageField,
               }
             : {
                 status: details.status,
@@ -404,6 +449,7 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
                 report_channel: outcome.reportChannel,
                 report,
                 ...tierField,
+                ...usageField,
               };
       // ADR-0032 §Rendering: the report has to be IN the text, not only in `structuredContent`. That
       // reason was once stated as "on this surface there is no `codemode`", which stopped being true
@@ -413,7 +459,7 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
       // and the child's prose after it, so the model reads the conclusion before the reasoning --
       // and the block is emitted whether or not a report arrived, because an unmarked gap reads as
       // an empty result.
-      const reportBlock = renderChildReportText(report, outcome.reportChannel);
+      const reportBlock = renderChildReportText(report, outcome.reportChannel, outcome.usage);
       // ADR-0041: the tier goes FIRST, above the report block and the child's prose. It is a fact
       // about what the child was allowed to do, so the model should read it before anything it
       // might attribute to the child -- and it is the only surface that reaches the model at all,

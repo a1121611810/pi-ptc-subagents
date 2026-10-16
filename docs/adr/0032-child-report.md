@@ -17,7 +17,7 @@ Both kinds of caller are worse off than they need to be, for different reasons:
   is prose. To use it, the program — or the model writing the program — parses English. That is the
   least reliable link in the chain.
 - A **model** using `ptc_subagent` gets the same prose and has nowhere else to look. The tool
-  already declares an `outputSchema` (`src/tools/subagent.ts:209`), but ADR-0028 established that
+  already declares an `outputSchema` (`src/tools/subagent.ts:217`), but ADR-0028 established that
   `structuredContent` is "not sent to the model".
   **Amended 2026-10-09:** this bullet used to add _"and in `surface mode: subagents` there is no
   `codemode`, so that channel currently reaches nobody"_, which stopped being true when ADR-0025
@@ -52,7 +52,7 @@ Measured against the installed artifact, not the release notes.
 3. **`tool_execution_end.result.structuredContent` _is_ reachable.** It is the full
    `AgentToolResult` (`pi-agent-core/dist/types.d.ts:370-391`), emitted verbatim at
    `pi-agent-core/dist/agent-loop.js:640-648`. This repo already depends on that mechanism
-   (`src/tools/subagent.ts:428`, `src/tools/ptc-task.ts:232, 471, 630`).
+   (`src/tools/subagent.ts:474`, `src/tools/ptc-task.ts:232, 556, 744`).
 
 So a structured return is reachable exactly two ways, and neither is enforced by pi: prompt the
 child into emitting JSON, or give it a tool whose declared schema the host reads back.
@@ -61,8 +61,8 @@ child into emitting JSON, or give it a tool whose declared schema the host reads
 
 A dispatched child produces a **child report**: a structured value crossing the child→parent
 boundary. It carries four things and no more — `summary` (one line, the child's own words),
-`findings` (each with `what` and independent `evidence`), `files_touched`, and `usage`. The child's
-prose is preserved alongside it, never replaced.
+`findings` (each with `what` and independent `evidence`), `files_touched`, and `usage` (amended
+2026-10-16, see below). The child's prose is preserved alongside it, never replaced.
 
 ### Two channels, both implemented
 
@@ -192,10 +192,29 @@ script silently losing three findings is worse than a long read.
 The child's prose follows the rendered block — conclusion first, reasoning second. The program-facing surface gets the field, not the rendering; a program is not a display
 surface.
 
+### Where `usage` is carried (amended 2026-10-16, #199)
+
+The report keeps its `usage` exactly as decided above: four fields, the same view the report block
+renders. What #199 changes is where the host's counter is **persisted**. On the background front a
+started child's `TaskRecord` now carries it too, on a top-level `usage` field holding the full
+six-field `DispatchUsage` (`input`, `output`, `cacheRead`, `cacheWrite`, `cost`, `turns`), and
+that copy is written on **every terminal close for any child the host actually started** —
+independent of `reportChannel` and of the close outcome. So a `none` / `opted-out` child still
+accounts for what it cost, and so does one that failed or was canceled; only a child that never
+started (and a record written before the field existed, and a `lost` record) carries none. The
+report's four fields are the _view_, the record's six are the _carrier_, and the four they share
+agree because both come off the same accumulator. `none` and `opted-out` get identical
+accounting — the channel distinction stays in `reportChannel` alone — and the two report fields
+themselves stay `succeeded`-only.
+
 ## Consequences
 
 - A program can branch on a child's findings without parsing English.
 - `usage` becomes visible to both callers, so a child that is not earning its cost can be seen.
+  **Amended 2026-10-16 (#199):** on the background front that no longer waits on a report — the
+  record's top-level counter is written on every terminal close for a child the host started, so
+  a `none` / `opted-out` child, and a child that failed or was canceled, are all still
+  cost-visible.
 - **The tool channel may be the minority path in the field**, inverting the stated preference. See
   the bet above.
 - A child that ignores the contract is reported as having ignored it. A degradation path no test can

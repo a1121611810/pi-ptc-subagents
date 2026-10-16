@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **A dispatched child's token usage is persisted on the task record, so a child that reported
+  nothing still accounts for what it cost (issue #199).** `TaskRecord` gains a top-level optional
+  `usage` — the host's own six-field counter (`input`, `output`, `cacheRead`, `cacheWrite`, `cost`,
+  `turns`), accumulated from the child's assistant `message_end` blocks — written on **every**
+  terminal close for any child the host actually started, independent of `reportChannel` and of the
+  outcome: a `"none"` / `"opted-out"` child is accounted for, and so is one that closed `failed` or
+  `canceled`. The same measurement now reaches both model-facing readers of that child:
+  `ptc_task_output` prints the host's `usage:` line for a child that has no report block to put it
+  in, the foreground `ptc_subagent` renders it as a `usage` row in the child-report block it
+  already emitted, and both tools' `structuredContent` gains a top-level `usage` with the same four
+  numbers the text shows. **`report.usage` is unchanged**: still the four-field view (`input`,
+  `output`, `cost`, `turns`), still written only when the close resolves `succeeded` with a report,
+  and still what the report block renders — the two agree on the fields they share because both are
+  read off the same accumulator. An absent `usage` is a claim rather than a gap: a `running` task
+  has not closed yet, a `lost` record was never observed closing, a child that never started has
+  nothing to account for, and a record written before the field existed carries none — while a
+  record without one renders the block it rendered before, unchanged. ADR-0022 §3 and ADR-0032
+  record the amendment.
+
 ## [3.2.0] - 2026-10-15
 
 ### Added

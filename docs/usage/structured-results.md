@@ -36,12 +36,12 @@ for (const t of rows.tasks) {
 }
 ```
 
-| tool              | `structuredContent`                                                                                                         |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `ptc_task_list`   | `{ tasks: [{ id, status, agent, depth, label, output_bytes?, error_message? }], count }`                                    |
-| `ptc_task_output` | `{ task_id, status, output, output_bytes, output_preview?, output_truncated, output_full_path?, report_channel?, report? }` |
-| `ptc_task_stop`   | `{ task_id, status, from_status, stop_reason? }`                                                                            |
-| `ptc_subagent`    | `{ task_id?, status, exit_code? }`                                                                                          |
+| tool              | `structuredContent`                                                                                                                                  |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ptc_task_list`   | `{ tasks: [{ id, status, agent, depth, label, output_bytes?, error_message? }], count }`                                                             |
+| `ptc_task_output` | `{ task_id, status, output, output_bytes, output_preview?, output_truncated, output_full_path?, report_channel?, read_only_tier?, report?, usage? }` |
+| `ptc_task_stop`   | `{ task_id, status, from_status, stop_reason? }`                                                                                                     |
+| `ptc_subagent`    | `{ task_id?, status, exit_code?, report_channel, read_only_tier?, report?, usage? }`                                                                 |
 
 Optional keys are **omitted**, never present-and-null, so `Object.hasOwn(t, "error_message")` is
 the test for "this task had an error", not `t.error_message !== undefined`.
@@ -53,6 +53,16 @@ Two fields carry the useful asymmetry:
   without parsing prose.
 - `ptc_task_output`: `status` is the task's current state, so a polling script does not need a
   second `ptc_task_list` call.
+
+`usage` (issue #199) is the host's own count — `input`, `output`, `cost`, `turns`, the same four
+fields `report.usage` carries — and it is sourced from the record's / result's own accumulator
+rather than from the report. That is what makes it readable for a child with **no** report: a
+`report_channel` of `none` or `opted-out`, and a failed or canceled `ptc_task_output`, still
+account for what the child cost. Absent means no top-level count was recorded: a running task,
+a `lost` record, a record written before the field existed (its report, when one exists, still
+renders the report's own host-stamped numbers), or a background handle in
+`ptc_subagent`. The text block states the same four numbers on its `usage` line, so the two
+channels never disagree about a measurement.
 
 ## What it is not
 

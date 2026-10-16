@@ -176,6 +176,64 @@ describe("InMemoryTaskStorage: task CRUD (loadTask / saveTask / deleteTask)", ()
     expect(Object.hasOwn(loaded as object, "reportChannel")).toBe(false);
   });
 
+  /**
+   * Issue #199: the host-observed usage accumulator rides the record with the same discipline as
+   * every other field. Six fields, not the report's four — `cacheRead` / `cacheWrite` have no home
+   * in the derived view, so a round-trip that went through `report.usage` would silently drop them
+   * and still look complete.
+   */
+  test("saveTask + loadTask round-trip preserves the host-observed usage accumulator (#199)", async () => {
+    const storage: TaskStorage = new InMemoryTaskStorage();
+    const record = fixtureTask({
+      status: "failed",
+      usage: { input: 900, output: 260, cacheRead: 7, cacheWrite: 11, cost: 0.0123, turns: 1 },
+    });
+    await storage.saveTask(record);
+
+    const loaded = await storage.loadTask(record.id);
+    expect(loaded).toEqual(record);
+    expect(loaded?.usage).toEqual({
+      input: 900,
+      output: 260,
+      cacheRead: 7,
+      cacheWrite: 11,
+      cost: 0.0123,
+      turns: 1,
+    });
+    // Deep-cloned like the rest of the record: mutating the caller's accumulator after the save
+    // must not rewrite what was persisted.
+    (record.usage as { output: number }).output = 99_999;
+    const reread = await storage.loadTask(record.id);
+    expect(reread?.usage?.output).toBe(260);
+  });
+
+  /**
+   * A record written before the field existed. The claim is not only "the new key is absent" but
+   * "nothing else about the record changed": the fixture is deep-equal after a save/load cycle,
+   * and the report — the other carrier of usage — is untouched.
+   */
+  test("a legacy record without the usage field round-trips unchanged (#199)", async () => {
+    const storage: TaskStorage = new InMemoryTaskStorage();
+    const record = fixtureTask({
+      status: "succeeded",
+      report: {
+        summary: "written before the carrier existed",
+        findings: [{ what: "usage lived in the report", evidence: "report.usage: input=900" }],
+        files_touched: ["src/runtime/dispatch.ts"],
+        usage: { input: 900, output: 260, cost: 0.0123, turns: 1 },
+      },
+      reportChannel: "prompt-json",
+    });
+    await storage.saveTask(record);
+
+    const loaded = await storage.loadTask(record.id);
+    expect(Object.hasOwn(loaded as object, "usage")).toBe(false);
+    // Field for field, not a spot check: a normalizer that "helpfully" filled the new field in
+    // while leaving the rest looking right would fail here.
+    expect(loaded).toEqual(record);
+    expect(loaded?.report?.usage).toEqual({ input: 900, output: 260, cost: 0.0123, turns: 1 });
+  });
+
   test("a legacy record without owner fields round-trips with the fields absent", async () => {
     const storage: TaskStorage = new InMemoryTaskStorage();
     const record = fixtureTask();

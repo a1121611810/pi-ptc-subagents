@@ -10,11 +10,13 @@
  *
  * Design notes:
  *
- * - **Spec source of truth** for TaskRecord's 19 pre-ownership fields is ADR-0022 §3 (Decision
- *   §3, whose code block lists 19 — its "21 fields" heading is an authoring miscount); ADR-0023
- *   adds two optional owner-identity fields (`ownerPid` / `ownerBootMs`) on top, absent on
- *   pre-upgrade legacy records, making 21 in the interface today; ADR-0032 adds two more optional
- *   report fields (`report` / `reportChannel`), written only on a `succeeded` record. For
+ * - **Spec source of truth** for TaskRecord's 20 pre-ownership fields is ADR-0022 §3 (Decision
+ *   §3, whose code block lists 19 originals — its "21 fields" heading is an authoring miscount —
+ *   plus `usage`, added by the 2026-10-16 #199 amendment and written on every terminal close of
+ *   a child the host actually started); ADR-0023 adds two optional owner-identity fields
+ *   (`ownerPid` / `ownerBootMs`) on top, absent on pre-upgrade legacy records; ADR-0032 adds two
+ *   optional report fields (`report` / `reportChannel`), written only on a `succeeded` record;
+ *   ADR-0041 adds `readOnlyTier` — 25 fields in the interface today (20 + 2 + 2 + 1). For
  *   Subscription it is §5.
  *   The field set is locked at the
  *   interface — adapters may add private
@@ -49,7 +51,7 @@
 import { ok as assertPresent } from "node:assert/strict";
 
 import type { ChildReport, ChildReportChannel } from "./child-report.ts";
-import type { ReadOnlyTier } from "./dispatch.ts";
+import type { DispatchUsage, ReadOnlyTier } from "./dispatch.ts";
 import type { ULID } from "./ulid.ts";
 
 /**
@@ -74,12 +76,14 @@ export interface TaskSpawnSource {
 }
 
 /**
- * Session-level row tracking the lifecycle of one background child. 19 ADR-0022 §3 fields (its
- * "21 fields" heading is an authoring miscount) plus two optional ADR-0023 owner-identity
- * fields — 21 today, persisted as-is. Optional fields are absent on
- * records still `running` (e.g. `finishedAt` / `exitCode` / `outputRef` are written at
+ * Session-level row tracking the lifecycle of one background child. 20 pre-ownership fields since
+ * the 2026-10-16 #199 amendment (19 ADR-0022 §3 originals — its "21 fields" heading is an
+ * authoring miscount — plus `usage`), two optional ADR-0023 owner-identity fields, two ADR-0032
+ * report fields and ADR-0041's `readOnlyTier`; 25 today, persisted as-is. Optional fields are
+ * absent on records still `running` (e.g. `finishedAt` / `exitCode` / `outputRef` are written at
  * transition time, not at spawn) and `ownerPid` / `ownerBootMs` are absent on pre-upgrade
- * legacy records.
+ * legacy records. The `report` / `reportChannel` pair is absent unless the record reached
+ * `succeeded` (ADR-0032); `usage` is written on every terminal close once a child started.
  */
 export interface TaskRecord {
   id: ULID;
@@ -148,6 +152,15 @@ export interface TaskRecord {
    * tier was asked for, which is the same claim the foreground result's absent field makes.
    */
   readOnlyTier?: ReadOnlyTier;
+  /**
+   * Host-observed token usage for this child (ADR-0032's counter, moved to its own carrier).
+   * Written on every terminal close for any child the host actually started — independent of
+   * `reportChannel` and of the close outcome — so a `none` / `opted-out` child, or one that
+   * failed, still accounts for what it cost. The full six-field `DispatchUsage` accumulator;
+   * `report.usage` remains the four-field derived view the report block renders.
+   * Absent on records written before this field existed, and on children that never started.
+   */
+  usage?: DispatchUsage;
 }
 
 /**
