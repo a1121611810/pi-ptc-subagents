@@ -14,6 +14,7 @@ import { expect, test, vi } from "vitest";
 import type { AgentToolResult, Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
   createSubCallUpdater,
+  PTC_BINDING_REACH_NOTE,
   SUB_CALL_UPDATE_THROTTLE_MS,
   type PtcToolDetails,
 } from "../src/tools/common.ts";
@@ -193,7 +194,32 @@ test("the description tells the model how to reach tools and what comes back", a
   expect(description).toMatch(/return value/);
   expect(description, "states the surface has no helpers").toMatch(/has no\s+helpers/i);
   expect(description, "points at the surface that does").toMatch(/ptc_workflow/);
+  expect(description, "states how a codemode script reaches the binding").toContain(
+    PTC_BINDING_REACH_NOTE,
+  );
   expect(description).not.toMatch(/sandbox/i);
+});
+
+test("the reach note names the reader, both entry points and the table the binding is absent from", () => {
+  // The one model-facing sentence that answers "I am a `codemode` script; how do I fan out?".
+  // Measured 2026-10-16 (spike round 2): without it, a script author enumerates its own tool
+  // table, finds no `pi.dispatch`, and reads the silence as "this install does not register the
+  // binding". What these assertions pin: the six tokens/clauses below, so deleting or rewording
+  // any half turns a named test red. What they do NOT pin: polarity — a rewrite that keeps every
+  // pinned token and inverts the meaning still passes (round-2 review measured four such
+  // paraphrases green). The oracle for polarity is the A/B run recorded on #200, not this test;
+  // do not add more substring pins chasing it.
+  expect(PTC_BINDING_REACH_NOTE, "names the reader").toContain("`codemode`");
+  expect(PTC_BINDING_REACH_NOTE, "names the binding it is about").toContain("`pi.dispatch`");
+  expect(PTC_BINDING_REACH_NOTE, "states the absence from the tool table").toMatch(/never in/);
+  expect(PTC_BINDING_REACH_NOTE, "names the first entry point").toContain("`ptc_run_code`");
+  expect(PTC_BINDING_REACH_NOTE, "names the second entry point").toContain("`ptc_workflow`");
+  expect(PTC_BINDING_REACH_NOTE, "states the positive half: the way out is a call").toMatch(
+    /reaches it by calling/,
+  );
+  expect(PTC_BINDING_REACH_NOTE, "states where the binding is used: inside the program").toMatch(
+    /using the binding inside the program/,
+  );
 });
 
 test("the description documents the always-bound pi.dispatch binding (pitfalls #1/#4/#5)", async () => {
