@@ -1365,15 +1365,15 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
    * 记录任何一条的容差都大。一个会在别人的版本更新时变红的门，教出来的是忽略红。
    */
   const PIN_TOKENS: Readonly<Record<string, string>> = {
-    "docs/adr/0013-ptc-row-compact-summary.md:140 -> src/tools/render.ts:83":
+    "docs/adr/0013-ptc-row-compact-summary.md:140 -> src/tools/render.ts:89":
       "MAX_CODE_LINES_EXPANDED = 3",
-    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:146": "function firstLine(",
-    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:902": "function errorText(",
-    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:1059": "errorText(result)",
-    "docs/adr/0013-ptc-row-compact-summary.md:176 -> render.ts:1153": "errorText(result)",
-    "docs/adr/0013-ptc-row-compact-summary.md:177 -> render.ts:1155": "MAX_LOG_LINES_EXPANDED",
-    "docs/adr/0013-ptc-row-compact-summary.md:178 -> render.ts:130": "function alignRow(",
-    "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:1150":
+    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:152": "function firstLine(",
+    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:945": "function errorText(",
+    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:1102": "errorText(result)",
+    "docs/adr/0013-ptc-row-compact-summary.md:176 -> render.ts:1196": "errorText(result)",
+    "docs/adr/0013-ptc-row-compact-summary.md:177 -> render.ts:1198": "MAX_LOG_LINES_EXPANDED",
+    "docs/adr/0013-ptc-row-compact-summary.md:178 -> render.ts:136": "function alignRow(",
+    "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:1193":
       "The failure text is the reason",
     "docs/adr/0016-ptc-dispatch-binding.md:41 -> src/runtime/dispatcher.ts:438":
       "new DispatchSlotCounter(",
@@ -1399,10 +1399,10 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     "docs/adr/0031-open-source-and-publish-authority.md:129 -> src/runtime/limits.ts:4":
       "The numbers are DSH's",
     "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1631": "function assistantText(",
-    "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:209":
+    "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:217":
       "export const SUBAGENT_OUTPUT_SCHEMA",
     "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1654": "function accumulateUsage(",
-    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:428":
+    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:474":
       "structuredContent: structured,",
     "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:232":
       "outputSchema: LIST_OUTPUT_SCHEMA,",
@@ -1421,14 +1421,27 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
 
   /** 上面那份基线，原样；两条断言共用它，避免「改了数组忘了表」这种漂移。 */
   const IN_REPO_PIN_BASELINE: readonly string[] = [
-    "docs/adr/0013-ptc-row-compact-summary.md:140 -> src/tools/render.ts:83",
-    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:146",
-    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:902",
-    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:1059",
-    "docs/adr/0013-ptc-row-compact-summary.md:176 -> render.ts:1153",
-    "docs/adr/0013-ptc-row-compact-summary.md:177 -> render.ts:1155",
-    "docs/adr/0013-ptc-row-compact-summary.md:178 -> render.ts:130",
-    "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:1150",
+    // 2026-10-16 第八次复核（#199：usage 升为记录的一等载体，render.ts / subagent.ts 的改动把
+    // 下面 10 条引用整体后移）。逐条按**内容**核对后改正，ADR 正文的行号与本表同步改：
+    //   140 → render.ts 83→89（`MAX_CODE_LINES_EXPANDED = 3`，区间 89-96）
+    //   174 → 146→152（`function firstLine(`）、902→945（`function errorText(`）、
+    //          1059→1102（`failed: ${errorText(result)}`）
+    //   176 → 1153→1196（fallback 的 `errorText(result)`）
+    //   177 → 1155→1198（`MAX_LOG_LINES_EXPANDED`）
+    //   178 → 130→136（`function alignRow(`）
+    //   182 → 1150→1193（"The failure text is the reason"，区间 1193-1182）
+    //   0032:20 → subagent.ts 209→217（`export const SUBAGENT_OUTPUT_SCHEMA`）
+    //   0032:55 → subagent.ts 428→474（settled 路径的 `structuredContent: structured,`）
+    // 顺带改正一处**既有**、本门不钉的散文漂移：ADR-0032 同一引用里的 `ptc-task.ts:471, 630`
+    // 早已不是 outputSchema 行，本次与 232 一起写成 `232, 556, 744`（三条声明的实际行）。
+    "docs/adr/0013-ptc-row-compact-summary.md:140 -> src/tools/render.ts:89",
+    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:152",
+    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:945",
+    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:1102",
+    "docs/adr/0013-ptc-row-compact-summary.md:176 -> render.ts:1196",
+    "docs/adr/0013-ptc-row-compact-summary.md:177 -> render.ts:1198",
+    "docs/adr/0013-ptc-row-compact-summary.md:178 -> render.ts:136",
+    "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:1193",
     // Hand-confirmed line by line, 2026-09-30 (review round 5). The extractor resolves this
     // one only because the path is qualified: bare `dispatcher.ts` is ambiguous in this repo, and
     // the rule is to refuse rather than guess. Line 438 is
@@ -1469,15 +1482,17 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     //   11 → dispatch.ts:1631 = `function assistantText(event: ParsedAgentEvent)`
     //        （2026-10-14 复核：pi 1.2.0 print-mode 截断修复在 dispatch.ts 加了
     //        PI_TRUNCATION_WARNING / truncationFailureMessage，assistantText 及其后整体后移）
-    //   20 → subagent.ts:197  = `export const SUBAGENT_OUTPUT_SCHEMA: SubagentOutputSchema`
+    //   20 → subagent.ts:217  = `export const SUBAGENT_OUTPUT_SCHEMA: SubagentOutputSchema`
+    //        （2026-10-16 复核：197 是更早快照；#199 在 subagent.ts 顶部加了 usage 字段后实测 217）
     //   27 → dispatch.ts:1654 = `function accumulateUsage(`（usage 的累加点，前景后台共用）
-    //   55 → subagent.ts:413 = 把投影写进 `structuredContent:` 的那一行（settled 路径）
+    //   55 → subagent.ts:474 = 把投影写进 `structuredContent:` 的那一行（settled 路径）
+    //        （2026-10-16 复核：#199 的 usage 字段把该行从 428 推到 474；413 是更早快照）
     //        （2026-10-14 复核：#193 把 subagent.ts 也纳入了 defineCompatTool 写域，
     //        outputSchema 处新增了一段「floor 上惰性」的说明注释，该行从 368 移到 381）
     //        （2026-10-15 复核：ADR-0041 的上报字段让 handle 分支也 return 了一份投影，
     //        于是 `structuredContent: structured,` 出现两次：369（handle）与 413（settled）。
     //        本条按原意钉 settled 那一处；369 是 ADR-0032 之后新增的，不在本 ADR 的断言面内）
-    //   55 → ptc-task.ts:231 = `outputSchema: LIST_OUTPUT_SCHEMA,`
+    //   55 → ptc-task.ts:232 = `outputSchema: LIST_OUTPUT_SCHEMA,`（2026-10-16：与 556, 744 同批核对）
     //        （2026-10-14 复核：#193 在 ptc-task.ts 顶部加了一行 pi-compat-types 的 import，
     //        该行后移；2026-10-15 随 4e966c5 再后移一行至 231）
     //        （2026-10-14 复核：#193 在 ptc-task.ts 顶部加了一行 pi-compat-types 的 import，
@@ -1514,9 +1529,9 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // 所以这里是**删一条**而不是改行号，本轮唯一的删除项，**新增 0 条**。
     // 同一次编辑把 ADR-0032 里 123 那条**在文档里**的行号推到 130（引用目标未动，仍是 1031）。
     "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1631",
-    "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:209",
+    "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:217",
     "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1654",
-    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:428",
+    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:474",
     "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:232",
     "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1501",
     // 新增 1 条（2026-10-12，ADR-0039）：目标行已逐条核对。

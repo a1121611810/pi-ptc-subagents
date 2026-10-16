@@ -60,6 +60,7 @@
  */
 
 import type { ChildReport, ChildReportChannel } from "./child-report.ts";
+import type { DispatchUsage } from "./dispatch.ts";
 import type { TaskEvent, TaskFilter, TaskRecord, TaskStorage, TaskStatus } from "./task-storage.ts";
 import type { ULID } from "./task-storage.ts";
 import { createUlidMinter, type UlidMinter } from "./ulid.ts";
@@ -163,6 +164,12 @@ export type TaskCommand =
    * place a degradation could go unstated) but the pair is applied ONLY when this close resolves
    * `succeeded` — see {@link DefaultTaskRegistry}.
    *
+   * `usage` is ADR-0032's host-observed token counter, as the pump accumulated it off the child's
+   * assistant `message_end` blocks (issue #199). Unlike `report` it is applied on EVERY close
+   * outcome — a `failed`, `canceled`, `none`-channel or `opted-out` child still accounts for what
+   * it cost — so it is a piece of its own, not part of the `succeeded` pair above. Absent when the
+   * child emitted no usage block the host could read.
+   *
    * `stderrDiagnostic` is the host's own stderr inference ({@link PI_TRUNCATION_WARNING},
    * pi 1.2.0's print-mode truncation warning), carried separately from `childError` so the two
    * sources keep their precedence: a child that reported its own failure wins, and the stderr
@@ -180,6 +187,7 @@ export type TaskCommand =
       stderrDiagnostic?: string;
       report?: ChildReport;
       reportChannel: ChildReportChannel;
+      usage?: DispatchUsage;
     };
 
 /** Outcome of one successful command: the persisted record, emitted events, and cursor. */
@@ -676,6 +684,12 @@ export class DefaultTaskRegistry implements TaskRegistry {
    * `failed` or `canceled` record therefore carries NO `report` and NO `reportChannel` — not an
    * empty report and not a `none` marker. A child that did not finish has not reported, and "has
    * not reported yet" is a different claim from "complied with nothing to say".
+   *
+   * The host-observed `usage` accumulator (issue #199) is deliberately NOT part of that
+   * `succeeded` conditional. Spending tokens is not reporting: a child the host actually started
+   * cost what it cost however the close resolved and whether or not a report was asked for, so
+   * `usage` is applied on every outcome this handler can produce (`succeeded`, `failed`,
+   * `canceled`). A `lost` record — no close was ever observed — keeps it absent, correctly.
    */
   async #resolveExit(
     command: Extract<TaskCommand, { kind: "resolve-exit" }>,
@@ -704,6 +718,9 @@ export class DefaultTaskRegistry implements TaskRegistry {
       outputBytes: command.outputBytes,
       outputPreview: command.outputPreview,
       errorMessage: resolveExitErrorMessage(record, command, to, producedText),
+      // The host's own counter, on EVERY close outcome and independent of the report pair below.
+      // `undefined` (nothing observed) leaves the field absent rather than writing a zeroed one.
+      usage: command.usage,
       // A non-succeeded close contributes no report fields at all: `undefined` here means
       // "leave the record's absent report alone", never "write an empty one".
       ...(to === "succeeded"
@@ -745,6 +762,8 @@ export class DefaultTaskRegistry implements TaskRegistry {
       /** ADR-0032; only ever set by the `succeeded` branch of #resolveExit. */
       report?: ChildReport;
       reportChannel?: ChildReportChannel;
+      /** ADR-0032's counter (issue #199); set on EVERY close outcome, not just `succeeded`. */
+      usage?: DispatchUsage;
     },
   ): Promise<TransitionResult> {
     const now = Math.max(0, Math.floor(ctx.clock()));
@@ -764,6 +783,10 @@ export class DefaultTaskRegistry implements TaskRegistry {
     // `none` marker with no report is exactly the non-compliant case and must survive.
     if (fields.report !== undefined) updated.report = fields.report;
     if (fields.reportChannel !== undefined) updated.reportChannel = fields.reportChannel;
+    // ADR-0032's counter, on its own carrier (issue #199): applied whenever the close observed
+    // one, independent of `to` and of the report pair above. A record that reaches a terminal
+    // state without it (a `lost` reclaim, a close with no usage block) leaves the key absent.
+    if (fields.usage !== undefined) updated.usage = fields.usage;
     if (fields.reason !== undefined) {
       // The generic `reason` lands in the field ADR-0022 §8 gives that state: stopReason for
       // the stop states, errorMessage for the failure states. Explicit fields win.

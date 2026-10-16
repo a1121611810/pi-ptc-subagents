@@ -18,7 +18,7 @@
  * what the renderer happened to produce.
  */
 import { describe, expect, test } from "vitest";
-import type { ChildReport } from "../../src/runtime/dispatch.ts";
+import type { ChildReport, DispatchUsage } from "../../src/runtime/dispatch.ts";
 import {
   CHILD_REPORT_HEADER,
   CHILD_REPORT_MAX_EVIDENCE_CHARS,
@@ -378,5 +378,112 @@ describe("the no-report block names each channel's actual claim (ADR-0032)", () 
     expect(rendered).toContain("the tool channel was announced but no report reached the host");
     expect(rendered).not.toContain("did not comply");
     expect(rendered).not.toContain("opts out");
+  });
+});
+
+/**
+ * The host's canonical counter (issue #199), six fields, in the shape `DispatchResult.usage` and
+ * `TaskRecord.usage` carry it.
+ *
+ * REAL measured values rather than invented ones (constraint #2), assembled field by field: the
+ * round-3 table in `docs/research/dispatch-loop-e2e-spike-20261016.md` §7.1 ("Q2 — what crossed
+ * each hop") prints its q1 row as input 12 114 / output 4 333 / cacheRead 214 016 / turns 10;
+ * that table has no cost column, so `cost` is 0 — the value round 2's Q1 row prints (§6.1, "What
+ * the parent did instead": `input=21636 output=3514 cost=0`). The table prints no `cacheWrite`
+ * either; the parent row in §5.2 (0) is the only value this model ever showed.
+ *
+ * Six fields is the point of the fixture, but the row cannot expose the difference: the renderer
+ * reads only four keys (`reportUsageText`), so a six-field accumulator passed through renders
+ * byte-identically. The projection is pinned by the key-set assertions instead —
+ * `Object.keys(structured.usage)` → the four display fields — in `tests/unit/ptc-subagent.test.ts`
+ * ("the structured channel carries the report whole") and `tests/unit/ptc-task-tools.test.ts`
+ * ("a succeeded none-channel child states the counter").
+ */
+const HOST_USAGE: DispatchUsage = {
+  input: 12_114,
+  output: 4_333,
+  cacheRead: 214_016,
+  cacheWrite: 0,
+  cost: 0,
+  turns: 10,
+};
+
+/** The one usage row, as every block that states it must spell it. */
+const HOST_USAGE_ROW = "usage   in 12114 · out 4333 · cost 0 · 10 turns";
+
+describe("the usage row reads the host's own carrier, not only the report (issue #199)", () => {
+  /*
+   * ADR-0032 made the report's four sections the block, and `usage` was one of them — so a child
+   * that delivered no report had no counter anywhere the model can see, even though the host had
+   * measured it. #199 splits the two claims: the report is what the child handed over, the counter
+   * is what the host observed, and only the first one can be absent.
+   *
+   * COUNTERFACTUAL for this whole describe: source the row from `report.usage` only (the pre-#199
+   * code — `noReportBlock(channel)` with no third argument, and `reportUsageText(report.usage)`),
+   * and the first two rows below go red on their row assertions while the absence rows stay green.
+   */
+  test("a no-report child the host measured still states the counter", () => {
+    const block = renderChildReportText(undefined, "none", HOST_USAGE);
+
+    // The ADR-0032 marker is intact: the report really did not arrive.
+    expect(block).toContain(CHILD_REPORT_HEADER);
+    expect(block).toContain("channel: none");
+    expect(block).toContain("did not comply with the contract");
+    // And the host's counter is stated anyway, as the last row of the same block.
+    expect(block, "the four display fields, in the row's own format").toContain(HOST_USAGE_ROW);
+    expect(block, "the row hangs off the gutter the full block uses").toContain(
+      `└─ ${HOST_USAGE_ROW}`,
+    );
+    // Fixed order, as in the report block: the sentence that says what is missing, then the
+    // measurement. It is the LAST row in both shapes.
+    expect(indexOf(block, "did not comply")).toBeLessThan(indexOf(block, HOST_USAGE_ROW));
+  });
+
+  test("opted-out gets the same row: the channels differ, the accounting does not", () => {
+    // #199 decision 3: `none` and `opted-out` are two claims about the REPORT, so they must not
+    // diverge on the counter. The comparison is positional (`└─ usage…` to the end), so the two
+    // channels' different sentences cannot mask a different row.
+    const none = renderChildReportText(undefined, "none", HOST_USAGE);
+    const optedOut = renderChildReportText(undefined, "opted-out", HOST_USAGE);
+    const rowOf = (block: string) => block.slice(indexOf(block, "└─ usage"));
+
+    expect(optedOut).toContain("opts out of the report contract");
+    expect(rowOf(optedOut), "the identical row, character for character").toBe(rowOf(none));
+  });
+
+  test("a report-bearing block sources the row from the canonical carrier", () => {
+    // The differential that pins WHERE the row reads from. The two fixtures deliberately disagree
+    // so the preference is observable: the report claims four fields the record does not carry,
+    // which is the shape a stale report would have if a writer ever stamped one without the
+    // accumulator. `report.usage` stays the fallback for a caller that has only the report — the
+    // second assertion — so removing the third argument cannot regress the old path.
+    const staleReport: ChildReport = {
+      ...COMPLIANT_REPORT,
+      usage: { input: 7, output: 8, cost: 9, turns: 3 },
+    };
+
+    const block = renderChildReportText(staleReport, "prompt-json", HOST_USAGE);
+
+    expect(block).toContain("summary");
+    expect(block, "the canonical numbers are the ones rendered").toContain(HOST_USAGE_ROW);
+    expect(block, "and the report's stale copy is not").not.toContain("in 7 · out 8");
+    expect(
+      renderChildReportText(COMPLIANT_REPORT, "prompt-json"),
+      "with no canonical carrier the report's own view is still rendered",
+    ).toContain("in 1200 · out 340 · cost 0.0123 · 4 turns");
+  });
+
+  test("a child the host never measured gets no row, in either block shape", () => {
+    // The absence half, and it needs to hold on both sides: a row emitted for a child nothing
+    // measured would claim a measurement the host did not make, which is the same defect as the
+    // silent omission pointing the other way. `usage` is the only word this renderer could add
+    // here, so its absence is checkable.
+    expect(renderChildReportText(undefined, "none"), "no canonical carrier, no row").not.toContain(
+      "usage",
+    );
+    expect(
+      renderChildReportText(undefined, "opted-out"),
+      "and the second no-report channel behaves the same",
+    ).not.toContain("usage");
   });
 });

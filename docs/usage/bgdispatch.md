@@ -236,11 +236,22 @@ A child that ignored the contract is reported as having ignored it:
 `usage` is measured by the host from the child's own `message_end` blocks. A child is never asked
 for its token count and a child-declared `usage` is discarded, because a model cannot know it.
 
-**When there is no report block at all** — a task that is still `running`, `stopping`, `failed`,
-`canceled` or `lost` — that is a claim, not a gap. Those records carry neither `report` nor
-`reportChannel`: a child that has not finished has not reported _yet_, and "has not reported yet"
-is a different claim from "ran and complied with nothing to say" (`reportChannel: "none"`). The
-record's status and `errorMessage` are what describe those tasks.
+That measurement is independent of the report channel: the record carries the host's own six-field
+counter (`input`, `output`, `cacheRead`, `cacheWrite`, `cost`, `turns`), written on every terminal
+close for a child the host actually started — so a `none` / `opted-out` child, and one that failed
+or was canceled, still shows what it cost. The `usage:` line in the block above is the report's
+four-field view of that counter, and a started child with **no** report block shows the
+host-measured `usage:` line as well; the structured projections carry it too, shaped to match what
+the model was shown.
+
+**When there is no report block at all** — a task that is still `running` or `stopping`, or one
+that ended `failed`, `canceled` or `lost` — the absent report is a claim, not a gap. Those records
+carry neither `report` nor `reportChannel`: a child that has not finished has not reported _yet_,
+and "has not reported yet" is a different claim from "ran and complied with nothing to say"
+(`reportChannel: "none"`). Usage is a separate claim: `failed` and `canceled` are terminal closes
+of a started child, so their records still carry the host-measured `usage`; `running` / `stopping`
+have simply not reached a close yet, and a `lost` record carries none. The record's status and
+`errorMessage` are what describe those tasks.
 
 **`ptc_task_stop`** — ask a running task to stop.
 
@@ -423,7 +434,7 @@ The task state goes through the `TaskStorage` seam. There are two adapters: an i
 under the session directory so a restart can reconcile:
 
 ```text
-<sessionDir>/tasks/<taskId>.json                                 # the TaskRecord: 19 ADR-0022 §3 fields + 2 optional ADR-0023 owner fields = 21 today, plus 2 optional ADR-0032 report fields on a succeeded record (atomic temp+rename)
+<sessionDir>/tasks/<taskId>.json                                 # the TaskRecord, 25 fields today: 19 ADR-0022 §3 originals plus the 2026-10-16 `usage`, 2 optional ADR-0023 owner fields, 2 optional ADR-0032 report fields on a succeeded record, and the optional ADR-0041 `readOnlyTier` (atomic temp+rename)
 <sessionDir>/subscriptions/<subscriberId>-<taskId>.json          # the per-subscriber cursor (atomic temp+rename)
 <sessionDir>/events/<subscriberId>-<taskId>.jsonl                # append-only newline-delimited events
 <sessionDir>/tasks/<taskId>/output.log                           # the captured output

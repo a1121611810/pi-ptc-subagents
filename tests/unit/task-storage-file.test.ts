@@ -287,6 +287,57 @@ describe("FileTaskStorage: task CRUD (loadTask / saveTask / deleteTask)", () => 
     }
   });
 
+  /**
+   * Issue #199: the host-observed usage accumulator is durable with the rest of the record. The
+   * assertions read the RAW file, not only the reopened record, because a reader-side default
+   * could otherwise supply the field and make an adapter that never wrote it look correct — the
+   * whole-record `JSON.stringify` is what makes this pass, and a field-picking serializer fails
+   * here. The second record is the pre-#199 shape: on disk with no `usage` key at all.
+   */
+  test("persists the usage accumulator to disk, and leaves a pre-#199 record without one", async () => {
+    const base = await makeBase();
+    try {
+      const usage = {
+        input: 900,
+        output: 260,
+        cacheRead: 7,
+        cacheWrite: 11,
+        cost: 0.0123,
+        turns: 1,
+      };
+      const writer: TaskStorage = new FileTaskStorage(base);
+      const withUsage = fixtureTask({
+        id: "01JBZ00000000000000000000B" as ULID,
+        status: "failed",
+        usage,
+      });
+      const legacy = fixtureTask({
+        id: "01JBZ00000000000000000000C" as ULID,
+        status: "succeeded",
+        reportChannel: "none",
+      });
+      await writer.saveTask(withUsage);
+      await writer.saveTask(legacy);
+
+      const rawWithUsage = JSON.parse(
+        await readFile(join(base, "tasks", withUsage.id + ".json"), { encoding: "utf8" }),
+      ) as Record<string, unknown>;
+      expect(rawWithUsage.usage).toEqual(usage);
+      const rawLegacy = JSON.parse(
+        await readFile(join(base, "tasks", legacy.id + ".json"), { encoding: "utf8" }),
+      ) as Record<string, unknown>;
+      expect(Object.hasOwn(rawLegacy, "usage")).toBe(false);
+
+      // A second adapter over the same base sees exactly the bytes that were written, in both
+      // directions: the field survives for the new shape, and nothing is synthesized for the old.
+      const reader: TaskStorage = new FileTaskStorage(base);
+      expect(await reader.loadTask(withUsage.id)).toEqual(withUsage);
+      expect(await reader.loadTask(legacy.id)).toEqual(legacy);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
   test("loadTask returns null for an unknown id (ENOENT = absent, not a throw)", async () => {
     const base = await makeBase();
     try {

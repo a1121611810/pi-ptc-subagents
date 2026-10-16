@@ -709,8 +709,11 @@ const REPORT_TEXT =
 const REPORT_USAGE = {
   input: 900,
   output: 260,
-  cacheRead: 0,
-  cacheWrite: 0,
+  // Non-zero on purpose: the report's four-field view drops these two, so an accumulator that
+  // round-tripped the derived view instead of the block would lose exactly them and still look
+  // right against a zeros-only fixture.
+  cacheRead: 7,
+  cacheWrite: 11,
   cost: { total: 0.0123 },
 };
 
@@ -1615,5 +1618,387 @@ describe("background output persistence", () => {
       expect(warnings).toHaveLength(1);
       expect(warnings[0]).toContain("output persistence for task " + handle.taskId);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+//  host-observed usage, on every close (issue #199)
+// ---------------------------------------------------------------------------
+
+/**
+ * The six-field accumulator the host keeps over a child's assistant `message_end` blocks, for the
+ * same `REPORT_USAGE` literal the report fixtures above hand their children: input 900, output 260,
+ * cost 0.0123, one turn — plus the two cache counters the report's four-field view does not carry.
+ * Written out by hand rather than read back out of the accumulator, so the expectation has an
+ * independent source (testing-constraints #4).
+ */
+const RECORD_USAGE = {
+  input: 900,
+  output: 260,
+  cacheRead: 7,
+  cacheWrite: 11,
+  cost: 0.0123,
+  turns: 1,
+};
+
+/** The four fields the record's own carrier shares with `report.usage` (ADR-0032's derived view). */
+const REPORT_VIEW_USAGE = { input: 900, output: 260, cost: 0.0123, turns: 1 };
+
+const OPTOUT_AGENT = "bg-probe-optout";
+const OPTOUT_AGENT_MD =
+  "---\nname: bg-probe-optout\nchildReport: false\n---\nYou probe, having asked for nothing.\n";
+
+/**
+ * A project-scope cwd holding ONLY the opted-out agent. Deliberately not folded into `withAgent`:
+ * that fixture's dir also backs the "registered agents: [bg-probe]" assertion, and a second
+ * definition there would rewrite a list a different test pins.
+ */
+async function withOptOutAgent<T>(body: (dir: string) => Promise<T>): Promise<T> {
+  const dir = await makeTempDir();
+  try {
+    await mkdir(join(dir, ".pi", "agents"), { recursive: true });
+    await writeFile(join(dir, ".pi", "agents", OPTOUT_AGENT + ".md"), OPTOUT_AGENT_MD, {
+      encoding: "utf-8",
+    });
+    return await body(dir);
+  } finally {
+    await removeTempDir(dir);
+  }
+}
+
+/**
+ * Emit one assistant message carrying the fixture usage block, then close the child. `text`
+ * omitted means an empty assistant message — the shape pi writes for a turn that produced no
+ * content at all.
+ */
+function driveClose(
+  h: Harness,
+  index: number,
+  close: { code: number | null; text?: string },
+): void {
+  const handle = h.lifecycle.handleAt(index);
+  h.lifecycle.pushEvent(handle, {
+    type: "message_end",
+    message: {
+      role: "assistant",
+      stopReason: "stop",
+      content: close.text === undefined ? [] : [{ type: "text", text: close.text }],
+      usage: REPORT_USAGE,
+    },
+  });
+  h.clock.set(1500);
+  h.lifecycle.resolveExit(handle, close.code, null);
+}
+
+/** A record as persisted BEFORE the usage carrier existed: no `usage` key at all, report intact. */
+function legacySucceededRecord(id: ULID): TaskRecord {
+  return {
+    id,
+    label: "legacy",
+    agentName: AGENT,
+    depth: 1,
+    status: "succeeded",
+    createdAt: 1000,
+    startedAt: 1000,
+    finishedAt: 1500,
+    durationMs: 500,
+    transitionAt: 1500,
+    outputRef: "memory:tasks/" + id + "/output.log",
+    outputBytes: 4,
+    outputPreview: "PONG",
+    exitCode: 0,
+    spawnSource: { kind: "ptc-program", callerId: "owner-legacy" },
+    report: {
+      summary: "a report from before the carrier existed",
+      findings: [{ what: "usage lived in the report", evidence: "report.usage: input=900" }],
+      files_touched: ["src/runtime/dispatch.ts"],
+      usage: { input: 900, output: 260, cost: 0.0123, turns: 1 },
+    },
+    reportChannel: "prompt-json",
+  };
+}
+
+/**
+ * Run `ptc_task_output` over one task and hand back both of its read surfaces: `text` is
+ * `content[0].text`, the render the model actually reads (report block, usage line, prose after
+ * it), and `details` is the TUI's structure. Comparing `details.output` alone compares the
+ * child's PROSE — a difference in the block rendered above it never reaches that field.
+ */
+async function readBackOutput(
+  tool: ReturnType<typeof createPtcTaskOutputTool>,
+  taskId: ULID,
+): Promise<{
+  text: string;
+  details: { output: string; taskId: string };
+}> {
+  const result = (await tool.execute(
+    "call-1",
+    { taskId },
+    undefined,
+    undefined,
+    undefined as never,
+  )) as unknown as
+    | {
+        content: Array<{ type: string; text?: string }>;
+        details: { output: string; taskId: string };
+      }
+    | undefined;
+  if (result === undefined) throw new Error("ptc_task_output returned no result");
+  const text = result.content[0]?.text;
+  if (text === undefined) throw new Error("ptc_task_output returned no text block");
+  return { text, details: result.details };
+}
+
+/**
+ * The block `ptc_task_output` returned for {@link legacySucceededRecord}'s report BEFORE #199 —
+ * the base-commit `renderChildReport`'s `prompt-json` branch, quoted rather than rebuilt from
+ * today's code. A record carrying no `usage` (one written before the field existed) has to still
+ * produce exactly this, which is what makes the change additive for old records.
+ */
+const LEGACY_PROMPT_JSON_BLOCK =
+  '<child-report channel="prompt-json">\n' +
+  "summary: a report from before the carrier existed\n" +
+  "findings (1):\n" +
+  "  1. usage lived in the report — evidence: report.usage: input=900\n" +
+  "files_touched: src/runtime/dispatch.ts\n" +
+  "usage: input=900 output=260 cost=0.0123 turns=1\n" +
+  "</child-report>";
+
+describe("background pump: host-observed usage survives every close (issue #199)", () => {
+  /**
+   * The `none` channel — a child that answered in prose and ignored the report contract. It is
+   * `succeeded` with no report at all, so before this ticket it was also the case that vanishing
+   * number: the one place its cost could have been written was a report that does not exist.
+   */
+  test("a child that answered in prose only (channel none) still accounts for its usage", async () => {
+    await withAgent(async (dir) => {
+      const h = createHarness({ start: 1000 });
+      const handle = asHandle(
+        await dispatch(
+          { agent: AGENT, task: "prose only", background: true, agentScope: "project" },
+          { callId: 40, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          h.deps,
+        ),
+      );
+      driveClose(h, 0, { code: 0, text: "Here is the answer, in prose only." });
+
+      const record = await waitForTerminal(h.storage, handle.taskId);
+      expect(record.status).toBe("succeeded");
+      // The non-compliance marker stays exactly what it was: no report is fabricated.
+      expect(record.reportChannel).toBe("none");
+      expect(Object.hasOwn(record, "report")).toBe(false);
+      // ...and the cost is still accounted for, which is the whole of this ticket.
+      expect(record.usage).toEqual(RECORD_USAGE);
+    });
+  });
+
+  test("an opted-out child still accounts for its usage", async () => {
+    await withOptOutAgent(async (dir) => {
+      const h = createHarness({ start: 1000 });
+      const handle = asHandle(
+        await dispatch(
+          { agent: OPTOUT_AGENT, task: "no report asked", background: true, agentScope: "project" },
+          { callId: 41, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          h.deps,
+        ),
+      );
+      driveClose(h, 0, { code: 0, text: "An answer nobody asked to have summarised." });
+
+      const record = await waitForTerminal(h.storage, handle.taskId);
+      expect(record.status).toBe("succeeded");
+      // Nobody asked, so there is no report and no compliance claim — `opted-out` says exactly
+      // that, and it is not a reason for the spend to go unrecorded.
+      expect(record.reportChannel).toBe("opted-out");
+      expect(Object.hasOwn(record, "report")).toBe(false);
+      expect(record.usage).toEqual(RECORD_USAGE);
+    });
+  });
+
+  test("a child that ran and closed failed still accounts for its usage", async () => {
+    await withAgent(async (dir) => {
+      const h = createHarness({ start: 1000 });
+      const handle = asHandle(
+        await dispatch(
+          { agent: AGENT, task: "dies after answering", background: true, agentScope: "project" },
+          { callId: 42, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          h.deps,
+        ),
+      );
+      driveClose(h, 0, { code: 1, text: "half an answer before it died" });
+
+      const record = await waitForTerminal(h.storage, handle.taskId);
+      expect(record.status).toBe("failed");
+      // The report pair is still absent (ADR-0032: a child that did not finish has not reported),
+      // which is precisely why the counter needs its own carrier.
+      expect(Object.hasOwn(record, "report")).toBe(false);
+      expect(Object.hasOwn(record, "reportChannel")).toBe(false);
+      expect(record.usage).toEqual(RECORD_USAGE);
+    });
+  });
+
+  test("a canceled child still accounts for its usage", async () => {
+    await withAgent(async (dir) => {
+      const h = createHarness({ start: 1000 });
+      const callerId = "owner-1";
+      const handle = asHandle(
+        await dispatch(
+          { agent: AGENT, task: "long", background: true, agentScope: "project" },
+          { callId: 43, cwd: dir, depth: 0, maxDispatchDepth: 3, callerId },
+          h.deps,
+        ),
+      );
+      await h.registry.transition(
+        { kind: "stop", taskId: handle.taskId, reason: "model stop" },
+        { clock: h.clock.clock, callerId },
+      );
+      driveClose(h, 0, { code: 0, text: "text that arrived after the stop" });
+
+      const record = await waitForTerminal(h.storage, handle.taskId);
+      // ADR-0022 §8: the stop wins the terminal decision, so this close resolves `canceled`
+      // rather than `succeeded` (the same edge `background stop signal ladder` pins).
+      expect(record.status).toBe("canceled");
+      expect(Object.hasOwn(record, "report")).toBe(false);
+      // Tokens were spent before the signal landed, and a canceled task still cost them.
+      expect(record.usage).toEqual(RECORD_USAGE);
+    });
+  });
+
+  test("both carriers exist and the four shared fields agree", async () => {
+    await withAgent(async (dir) => {
+      const h = createHarness({ start: 1000 });
+      const handle = asHandle(
+        await dispatch(
+          { agent: AGENT, task: "report", background: true, agentScope: "project" },
+          { callId: 44, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          h.deps,
+        ),
+      );
+      driveClose(h, 0, { code: 0, text: REPORT_TEXT });
+
+      const record = await waitForTerminal(h.storage, handle.taskId);
+      expect(record.status).toBe("succeeded");
+      expect(record.reportChannel).toBe("prompt-json");
+      // Each carrier against the same observed block, independently...
+      expect(record.usage).toEqual(RECORD_USAGE);
+      expect(record.report?.usage).toEqual(REPORT_VIEW_USAGE);
+      // ...and against each other. A second accumulator instance would not fail either assertion
+      // above on its own — it would need the two to drift first — so this is the invariant that
+      // would make one child carry two different truths, stated on its own.
+      expect(record.report?.usage?.input).toBe(record.usage?.input);
+      expect(record.report?.usage?.output).toBe(record.usage?.output);
+      expect(record.report?.usage?.cost).toBe(record.usage?.cost);
+      expect(record.report?.usage?.turns).toBe(record.usage?.turns);
+    });
+  });
+
+  /**
+   * A refusal never started a child, so there is nothing that could have spent anything. The
+   * assertion is the empty record list rather than a missing field on a record: "no usage" here
+   * means "no record", and a task row must not be invented to carry a zero.
+   */
+  test("a refusal (depth gate / unknown agent) leaves no record for a usage to live on", async () => {
+    const h = createHarness();
+    const gated = asResult(
+      await dispatch(
+        { agent: AGENT, task: "x", background: true },
+        { callId: 45, cwd: process.cwd(), depth: 3, maxDispatchDepth: 3 },
+        h.deps,
+      ),
+    );
+    const unknown = asResult(
+      await dispatch(
+        { agent: "__bg_missing_agent__", task: "x", background: true },
+        { callId: 46, cwd: process.cwd(), depth: 0, maxDispatchDepth: 3 },
+        h.deps,
+      ),
+    );
+
+    expect(gated.status).toBe("rejected");
+    expect(gated.started).toBe(false);
+    expect(unknown.status).toBe("rejected");
+    expect(unknown.started).toBe(false);
+    expect(h.lifecycle.spawnCount).toBe(0);
+    expect(await allTasks(h.storage)).toEqual([]);
+  });
+
+  test("a live child has no usage yet, and the N+1th refusal adds no record that could", async () => {
+    await withAgent(async (dir) => {
+      const h = createHarness({ limit: 1 });
+      const first = asHandle(
+        await dispatch(
+          { agent: AGENT, task: "one", background: true, agentScope: "project" },
+          { callId: 47, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          h.deps,
+        ),
+      );
+      // The child has answered and the host has counted, but the record has not been written by
+      // a close yet — the counter is a close-time write, not a spawn-time or live one.
+      h.lifecycle.pushEvent(h.lifecycle.handleAt(0), {
+        type: "message_end",
+        message: {
+          role: "assistant",
+          stopReason: "stop",
+          content: [{ type: "text", text: "PONG" }],
+          usage: REPORT_USAGE,
+        },
+      });
+      const live = await h.storage.loadTask(first.taskId);
+      expect(live?.status).toBe("running");
+      expect(Object.hasOwn(live as object, "usage")).toBe(false);
+
+      const refused = asResult(
+        await dispatch(
+          { agent: AGENT, task: "two", background: true, agentScope: "project" },
+          { callId: 48, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          h.deps,
+        ),
+      );
+      expect(refused.errorMessage).toBe(BG_CONCURRENCY_REFUSAL);
+      expect(await allTasks(h.storage)).toHaveLength(1);
+      expect(h.lifecycle.spawnCount).toBe(1);
+
+      h.clock.set(1500);
+      h.lifecycle.resolveExit(h.lifecycle.handleAt(0), 1, null);
+      const closed = await waitForTerminal(h.storage, first.taskId);
+      expect(closed.status).toBe("failed");
+      expect(closed.usage).toEqual(RECORD_USAGE);
+    });
+  });
+
+  test("a legacy record with no usage field reads and renders exactly as one with it", async () => {
+    // A record written before this field existed, side by side with an otherwise identical one
+    // that carries it. Differential oracle (testing-constraints #4 source 5): the two inputs
+    // differ in exactly one key, so any difference in what the record layer hands back — or in
+    // what the model-facing render says — is that key leaking.
+    const h = createHarness({ start: 1000 });
+    const outputStorage = new InMemoryOutputStorage();
+    const legacyId = "01JBZ0000000000000000000L1" as ULID;
+    const carrierId = "01JBZ0000000000000000000L2" as ULID;
+    const legacy = legacySucceededRecord(legacyId);
+    await h.storage.saveTask(legacy);
+    await h.storage.saveTask({ ...legacy, id: carrierId, usage: RECORD_USAGE });
+    await outputStorage.writeOutput(legacyId, "PONG");
+    await outputStorage.writeOutput(carrierId, "PONG");
+
+    const tool = createPtcTaskOutputTool(h.registry, outputStorage);
+    const legacyRead = await readBackOutput(tool, legacyId);
+    const carrierRead = await readBackOutput(tool, carrierId);
+
+    // The render, not just `details.output`: that field is the child's PROSE, which both records
+    // were given identically ("PONG"), so it cannot see the block above it growing a zeroed
+    // `usage: input=0 output=0 cost=0 turns=0` line. The legacy record's text is pinned to the
+    // pre-#199 block verbatim — a literal with an independent source, not a value read back out
+    // of today's renderer.
+    expect(legacyRead.text).toBe(`${LEGACY_PROMPT_JSON_BLOCK}\nPONG`);
+    // ...and byte-identically to the same record carrying the carrier, which is the claim in the
+    // test's name: the missing key changes nothing a model can read.
+    expect(legacyRead.text).toBe(carrierRead.text);
+    expect(legacyRead.details.output).toBe(carrierRead.details.output);
+    expect(legacyRead.details.output).toContain("PONG");
+    // The legacy record gains NOTHING on the way through — no synthesized accumulator, and no
+    // other field rewritten.
+    const reloaded = await h.storage.loadTask(legacyId);
+    expect(Object.hasOwn(reloaded as object, "usage")).toBe(false);
+    expect(reloaded).toEqual(legacy);
   });
 });

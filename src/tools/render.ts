@@ -38,9 +38,15 @@ import type {
   SubCallRecord,
   SubCallStatus,
 } from "../runtime/protocol.ts";
-// Type-only, so the worker's module graph gains no edge to the dispatcher: a `ChildReport` and a
-// `ChildReportChannel` are read off a `DispatchResult` by the tool, never constructed here.
-import type { ChildReport, ChildReportChannel, ChildReportFinding } from "../runtime/dispatch.ts";
+// Type-only, so the worker's module graph gains no edge to the dispatcher: a `ChildReport`, a
+// `ChildReportChannel` and the host's `DispatchUsage` accumulator are read off a `DispatchResult`
+// (or off a `TaskRecord`) by the tool, never constructed here.
+import type {
+  ChildReport,
+  ChildReportChannel,
+  ChildReportFinding,
+  DispatchUsage,
+} from "../runtime/dispatch.ts";
 import { CHILD_REPORT_MAX_FINDINGS } from "../runtime/child-report.ts";
 import { TREE_LAST } from "./read-only-tier-text.ts";
 import { MAX_LINE_CHARS, renderModelValue, sanitizeText } from "./text.ts";
@@ -607,6 +613,13 @@ export function renderValueTree(
 //
 // The order is fixed — summary, findings, files touched, usage — and the child's prose is
 // appended AFTER this block, so the model reads the conclusion first and the reasoning second.
+//
+// Issue #199: the `usage` row reads the HOST'S OWN carrier — `TaskRecord.usage` /
+// `DispatchResult.usage`, the six-field accumulator — when the caller has one, and falls back to
+// the report's four-field view only when it does not. That is what lets a started child with NO
+// report (a `none` or `opted-out` child) still account for what it cost: the block is rendered
+// around the absence, and the counter is a fact about the child rather than a section of the
+// report. A caller that hands in no usage at all gets exactly the block it got before.
 // ---------------------------------------------------------------------------
 
 /** Section label of the rendered block; the header the model is told to look for. */
@@ -718,12 +731,34 @@ function fileRows(files: readonly string[], withheld: number): string[] {
 }
 
 /**
+ * One section as a row: the connector, the label in the {@link LABEL_WIDTH} gutter, the head. It
+ * is shared with {@link noReportBlock} so a `usage` row reads the same in a block that has a
+ * report and in one that does not.
+ */
+function sectionRow(section: ReportSection, isLast: boolean): string {
+  // `padEnd` alone glues an exactly-LABEL_WIDTH label to its content (`findingsArray(2)`); the
+  // extra space is the separator `subRowsFor` already learned the same way.
+  const gutter =
+    section.label.length >= LABEL_WIDTH ? `${section.label} ` : section.label.padEnd(LABEL_WIDTH);
+  return treeTruncateIndent(
+    `${isLast ? TREE_LAST : TREE_FIRST}${gutter}${section.head}`,
+    MAX_LINE_CHARS,
+  );
+}
+
+/**
  * The block a caller gets instead of a report: the header, the channel, and ONE row saying the
  * report did not arrive. It is deliberately NOT an empty report — no summary, no `Array(0)`
- * findings, no usage — because an empty report reads as "the child found nothing" rather than
- * "the child told us nothing", and those are different facts.
+ * findings — because an empty report reads as "the child found nothing" rather than "the child
+ * told us nothing", and those are different facts.
+ *
+ * `usage` is NOT part of that contrast (issue #199). The four absent sections all describe the
+ * report, which did not arrive; the counter is a measurement of the CHILD, which did run, so a
+ * child the host measured states it here too — in the same row format the full block ends with,
+ * and in the same position (last). A child the host never measured renders exactly the block this
+ * function has always returned, byte for byte.
  */
-function noReportBlock(channel: ChildReportChannel): string {
+function noReportBlock(channel: ChildReportChannel, usage: DispatchUsage | undefined): string {
   // Three channels, three DIFFERENT claims, and conflating any two of them is the failure this
   // function exists to avoid. A two-branch version read "opted-out" as "announced but never
   // arrived", which is worse than silence: it tells the model a contract was broken when the
@@ -737,7 +772,12 @@ function noReportBlock(channel: ChildReportChannel): string {
           "is the whole of what it produced, and nothing is missing"
         : `the ${channel} channel was announced but no report reached the host; ` +
           "the child's prose below is everything it produced";
-  return `${CHILD_REPORT_HEADER} (channel: ${channel})\n${TREE_LAST}${row}`;
+  const header = `${CHILD_REPORT_HEADER} (channel: ${channel})`;
+  if (usage === undefined) return `${header}\n${TREE_LAST}${row}`;
+  return `${header}\n${TREE_FIRST}${row}\n${sectionRow(
+    { label: "usage", head: reportUsageText(usage), rows: [] },
+    true,
+  )}`;
 }
 
 /**
@@ -748,12 +788,24 @@ function noReportBlock(channel: ChildReportChannel): string {
  * reads off `DispatchResult`; passing a `report` with `channel: "none"` is a caller error and
  * renders as a report anyway — the value is the more specific statement, and the channel in the
  * header still says where it came from.
+ *
+ * `usage` is the HOST'S canonical carrier (issue #199) — `DispatchResult.usage` in the foreground,
+ * `TaskRecord.usage` behind a background record — and it is what the `usage` row reads when it is
+ * there. Two consequences, both intended:
+ *
+ *  - the row survives the report's absence, because the counter is a fact about the child rather
+ *    than a section of the report (see {@link noReportBlock});
+ *  - when both carriers are present the row states the canonical numbers. They are required to
+ *    agree on the four shared fields, so this is a sourcing rule rather than a value change — but
+ *    it is the canonical one that is authoritative, and the fallback to `report.usage` exists only
+ *    so a caller holding an older record's report still renders one.
  */
 export function renderChildReportText(
   report: ChildReport | undefined,
   channel: ChildReportChannel,
+  usage?: DispatchUsage,
 ): string {
-  if (report === undefined) return noReportBlock(channel);
+  if (report === undefined) return noReportBlock(channel, usage);
   const shownFindings = report.findings.slice(0, CHILD_REPORT_MAX_FINDINGS);
   const withheldFindings = report.findings.length - shownFindings.length;
   const shownFiles = report.files_touched.slice(0, CHILD_REPORT_MAX_FILES);
@@ -770,22 +822,13 @@ export function renderChildReportText(
       head: countHead(report.files_touched.length),
       rows: fileRows(shownFiles, withheldFiles),
     },
-    { label: "usage", head: reportUsageText(report.usage), rows: [] },
+    { label: "usage", head: reportUsageText(usage ?? report.usage), rows: [] },
   ];
 
   const rows: string[] = [`${CHILD_REPORT_HEADER} (channel: ${channel})`];
   sections.forEach((section, index) => {
     const isLast = index === sections.length - 1;
-    // `padEnd` alone glues an exactly-LABEL_WIDTH label to its content (`findingsArray(2)`);
-    // the extra space is the separator `subRowsFor` already learned the same way.
-    const gutter =
-      section.label.length >= LABEL_WIDTH ? `${section.label} ` : section.label.padEnd(LABEL_WIDTH);
-    rows.push(
-      treeTruncateIndent(
-        `${isLast ? TREE_LAST : TREE_FIRST}${gutter}${section.head}`,
-        MAX_LINE_CHARS,
-      ),
-    );
+    rows.push(sectionRow(section, isLast));
     // Rows below a section hang at the section's own column, carrying the connector chain's
     // continuation bar — the same `TREE_CONT_FIRST` / `TREE_CONT_LAST` the value tree passes down.
     const continuation = isLast ? TREE_CONT_LAST : TREE_CONT_FIRST;

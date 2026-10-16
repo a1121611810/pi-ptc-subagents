@@ -54,6 +54,7 @@ import {
   type PtcTaskStopDetails,
 } from "../../src/tools/ptc-task.ts";
 import type { ChildReport } from "../../src/runtime/child-report.ts";
+import type { DispatchUsage } from "../../src/runtime/dispatch.ts";
 import { readStructuredContent } from "../helpers/pi-compat-probe.ts";
 // Aliased on import: the describe block below is about the RENDERER, and a local alias keeps the
 // assertions reading as renderer assertions rather than reaching through a tool-execution harness.
@@ -1183,5 +1184,265 @@ describe("ptc_task_output renders an opted-out background child correctly (ADR-0
     expect(rendered).toContain("but carries no report");
     expect(rendered).not.toContain("opts out of the report contract");
     expect(rendered).not.toContain("did not comply");
+  });
+});
+
+// ---------------------------------------------------------------------------
+//  issue #199: the host's counter on a child that has no report block
+// ---------------------------------------------------------------------------
+
+/**
+ * The host's canonical six-field accumulator, in the shape `TaskRecord.usage` carries it (#199).
+ *
+ * REAL measured values, not invented ones (constraint #2), assembled field by field: the
+ * round-3 table in `docs/research/dispatch-loop-e2e-spike-20261016.md` §7.1 ("Q2 — what crossed
+ * each hop") prints its q1 row as input 12 114 / output 4 333 / cacheRead 214 016 / turns 10;
+ * that table has no cost column, so `cost` is 0 — the value round 2's Q1 row prints (§6.1, "What
+ * the parent did instead": `input=21636 output=3514 cost=0`). The table prints no `cacheWrite`
+ * either; the parent row in §5.2 (0) is the only value this model ever showed.
+ */
+const HOST_USAGE: DispatchUsage = {
+  input: 12_114,
+  output: 4_333,
+  cacheRead: 214_016,
+  cacheWrite: 0,
+  cost: 0,
+  turns: 10,
+};
+
+/**
+ * The four DISPLAY fields — the ones `report.usage`, the text line and every projection share. A
+ * six-field fixture with a 214k `cacheRead` makes the projection observable: passing the
+ * accumulator through instead of projecting it fails the key assertion below.
+ */
+const HOST_USAGE_VIEW = { input: 12_114, output: 4_333, cost: 0, turns: 10 };
+
+/** The one line both shapes print, in the format ADR-0032's report block has always used. */
+const HOST_USAGE_LINE = "usage: input=12114 output=4333 cost=0 turns=10";
+
+/**
+ * `PERSISTED_REPORT` with its `usage` set to the four-field view of {@link HOST_USAGE} — #199
+ * decision 2's invariant (they agree on the shared fields when both are present), made a fixture.
+ */
+const PERSISTED_REPORT_WITH_HOST_USAGE: ChildReport = {
+  ...PERSISTED_REPORT,
+  usage: HOST_USAGE_VIEW,
+};
+
+/**
+ * The block `ptc_task_output` returned for a `none`-channel child BEFORE #199 — the `channel ===
+ * "none"` branch of `renderChildReport` at the base commit, one sentence and no counter. A record
+ * with no `usage` (one written before the field existed) has to still produce exactly this, which
+ * is what makes the change additive for old records.
+ */
+const LEGACY_NONE_BLOCK =
+  '<child-report channel="none">the child produced no report; it did not comply with the ' +
+  "report contract. What follows is its prose, unbacked by a report.</child-report>";
+
+/**
+ * Drive `TASK_1` to a terminal close that carries {@link HOST_USAGE}, then read it back through
+ * the tool. `extra` is the close's own shape (exit code, report, channel); `usage` is always the
+ * canonical accumulator, because that is what the pump hands the registry.
+ */
+async function readClosedTask(
+  h: Harness,
+  extra: {
+    exitCode: number;
+    reportChannel: "tool" | "prompt-json" | "none" | "opted-out";
+    report?: ChildReport;
+  },
+): Promise<{
+  result: { content: Array<{ type: string; text?: string }>; details: PtcTaskOutputDetails };
+  text: string;
+  structured: Record<string, unknown>;
+}> {
+  await h.registry.transition(
+    {
+      kind: "resolve-exit",
+      taskId: TASK_1,
+      exitCode: extra.exitCode,
+      outputBytes: Buffer.byteLength(SMALL_OUTPUT, "utf8"),
+      ...(extra.report === undefined ? {} : { report: extra.report }),
+      reportChannel: extra.reportChannel,
+      usage: HOST_USAGE,
+    },
+    { clock: h.clock.clock, callerId: CALLER },
+  );
+  await h.outputs.writeOutput(TASK_1, SMALL_OUTPUT);
+  const tool = createPtcTaskOutputTool(h.registry, h.outputs);
+  const result = await callTool<PtcTaskOutputDetails>(tool, { taskId: TASK_1 });
+  return {
+    result,
+    text: textOf(result),
+    structured: await callStructured<Record<string, unknown>>(tool, { taskId: TASK_1 }),
+  };
+}
+
+describe("ptc_task_output states the host's counter for a child with no report (#199)", () => {
+  /*
+   * The hole #199 closes on this surface: `usage` used to be reachable only through
+   * `<child-report>`'s body, so a child the host MEASURED but which delivered no report — the
+   * `none` and `opted-out` channels, and every `failed` / `canceled` close — showed no token
+   * accounting anywhere a model could read it. The counter is a fact about the child, not a
+   * section of the report, so it is stated either way, in one format.
+   *
+   * COUNTERFACTUAL for the whole describe: revert `renderChildReport` to reading only the report
+   * (the base-commit version) and drop the `usage` spread from `structuredContent` — the
+   * none / opted-out / failed / canceled rows below go red on every counter assertion, while the
+   * report-bearing and running rows stay green (they carry no counter claim of their own).
+   */
+  test("a succeeded none-channel child states the counter, in the text and the projection", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    h.clock.set(1500);
+
+    const { text, structured } = await readClosedTask(h, { exitCode: 0, reportChannel: "none" });
+
+    // ADR-0032's marker is intact — the report really did not arrive.
+    expect(text).toContain('<child-report channel="none">');
+    expect(text).toContain("did not comply with the report contract");
+    // And the host's counter is inside the same element, last, in the report block's own format.
+    expect(text).toContain(HOST_USAGE_LINE);
+    expect(text.indexOf(HOST_USAGE_LINE)).toBeLessThan(text.indexOf("</child-report>"));
+    // The projection states the same four numbers, as four fields.
+    expect(structured.usage).toStrictEqual(HOST_USAGE_VIEW);
+    expect(Object.keys(structured.usage as object).sort()).toEqual([
+      "cost",
+      "input",
+      "output",
+      "turns",
+    ]);
+    // No report was delivered, so nothing claims one.
+    expect(Object.hasOwn(structured, "report")).toBe(false);
+    expect(Object.hasOwn(structured, "report_channel")).toBe(true);
+  });
+
+  test("opted-out is treated identically: the channel differs, the accounting does not", async () => {
+    // #199 decision 3. The two channels are different claims about the REPORT; the counter was
+    // measured the same way, so an accounting surface that separated them would be inventing a
+    // difference the record does not carry.
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    h.clock.set(1500);
+
+    const { text, structured } = await readClosedTask(h, {
+      exitCode: 0,
+      reportChannel: "opted-out",
+    });
+
+    expect(text).toContain("opts out of the report contract");
+    expect(text).toContain(HOST_USAGE_LINE);
+    expect(structured.report_channel).toBe("opted-out");
+    expect(structured.usage).toStrictEqual(HOST_USAGE_VIEW);
+  });
+
+  test("a failed child states the counter, without claiming a report block", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    h.clock.set(1500);
+
+    // The close carries a report, which the registry refuses on a non-`succeeded` outcome: a child
+    // that did not finish has not reported. The counter is NOT part of that refusal.
+    const { text, structured } = await readClosedTask(h, {
+      exitCode: 1,
+      reportChannel: "prompt-json",
+      report: PERSISTED_REPORT,
+    });
+
+    expect((await h.registry.get(TASK_1))?.status).toBe("failed");
+    expect(text, "no block exists for a failed close (ADR-0032)").not.toContain("<child-report");
+    expect(text, "and the counter is stated anyway").toContain(HOST_USAGE_LINE);
+    expect(text, "above the child's prose, where a block would have been").toBe(
+      `${HOST_USAGE_LINE}\n${SMALL_OUTPUT}`,
+    );
+    expect(structured.usage).toStrictEqual(HOST_USAGE_VIEW);
+    expect(Object.hasOwn(structured, "report")).toBe(false);
+    expect(Object.hasOwn(structured, "report_channel")).toBe(false);
+  });
+
+  test("a canceled child states it too — the stop owns the outcome, not the counter", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    h.clock.set(1500);
+    await h.registry.transition(
+      { kind: "stop", taskId: TASK_1, reason: "user asked" },
+      { clock: h.clock.clock, callerId: CALLER },
+    );
+
+    const { text, structured } = await readClosedTask(h, { exitCode: 0, reportChannel: "none" });
+
+    expect((await h.registry.get(TASK_1))?.status).toBe("canceled");
+    expect(text).not.toContain("<child-report");
+    expect(text).toContain(HOST_USAGE_LINE);
+    expect(structured.usage).toStrictEqual(HOST_USAGE_VIEW);
+  });
+
+  test("a report-bearing child renders its block once, with report.usage unchanged", async () => {
+    // The no-double-line rule: a child that DID report already states the counter inside its
+    // block, so the tool must not add a second one above it. `report.usage` is untouched (its
+    // four-field shape is the documented report contract), and the new top-level key states the
+    // same numbers because #199 decision 2 requires the two carriers to agree.
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    h.clock.set(1500);
+
+    const { result, text, structured } = await readClosedTask(h, {
+      exitCode: 0,
+      reportChannel: "prompt-json",
+      report: PERSISTED_REPORT_WITH_HOST_USAGE,
+    });
+
+    expect(
+      text.match(/usage: input=/g),
+      "exactly one counter line, inside the report",
+    ).toHaveLength(1);
+    expect(text).toContain(HOST_USAGE_LINE);
+    expect(text, "the block opens the text, as before").toContain(
+      '<child-report channel="prompt-json">',
+    );
+    expect(result.details.report).toStrictEqual(PERSISTED_REPORT_WITH_HOST_USAGE);
+    expect(structured.report).toStrictEqual(PERSISTED_REPORT_WITH_HOST_USAGE);
+    expect(structured.usage).toStrictEqual(HOST_USAGE_VIEW);
+  });
+
+  test("a running child states nothing: no close has happened, so nothing was measured", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    const tool = createPtcTaskOutputTool(h.registry, h.outputs);
+
+    const result = await callTool<PtcTaskOutputDetails>(tool, { taskId: TASK_1 });
+
+    expect(textOf(result)).toBe(`(no output yet; task ${TASK_1} is running)`);
+    const structured = await callStructured<Record<string, unknown>>(tool, { taskId: TASK_1 });
+    expect(Object.hasOwn(structured, "usage")).toBe(false);
+  });
+
+  test("a record written before the field existed renders byte-identically to today", async () => {
+    // The legacy path, and the reason it needs its own row: absence has to render as it always
+    // did, not as a zeroed row and not as an extra line. No `usage` is passed, so the record is
+    // exactly a pre-#199 one; the expected block is quoted from the base-commit renderer rather
+    // than built from the current code.
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    h.clock.set(1500);
+    await h.registry.transition(
+      {
+        kind: "resolve-exit",
+        taskId: TASK_1,
+        exitCode: 0,
+        outputBytes: Buffer.byteLength(SMALL_OUTPUT, "utf8"),
+        reportChannel: "none",
+      },
+      { clock: h.clock.clock, callerId: CALLER },
+    );
+    await h.outputs.writeOutput(TASK_1, SMALL_OUTPUT);
+    const tool = createPtcTaskOutputTool(h.registry, h.outputs);
+
+    const result = await callTool<PtcTaskOutputDetails>(tool, { taskId: TASK_1 });
+    const structured = await callStructured<Record<string, unknown>>(tool, { taskId: TASK_1 });
+
+    expect(textOf(result)).toBe(`${LEGACY_NONE_BLOCK}\n${SMALL_OUTPUT}`);
+    expect(Object.hasOwn(structured, "usage")).toBe(false);
+    expect(Object.hasOwn(structured, "report")).toBe(false);
   });
 });

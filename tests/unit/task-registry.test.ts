@@ -977,6 +977,163 @@ describe("TaskRegistry.resolve-exit", () => {
 
     expect((await h.storage.loadTask(TASK_1))?.status).toBe("succeeded");
   });
+
+  // -- issue #199: the host-observed usage accumulator ------------------------
+
+  /**
+   * The six-field accumulator the pump hands this command, with NON-zero cache counters: the
+   * report's four-field view drops them, so a writer that round-tripped the derived view instead
+   * of the accumulator would lose exactly those two and pass a zeros-only fixture.
+   */
+  const USAGE = {
+    input: 900,
+    output: 260,
+    cacheRead: 7,
+    cacheWrite: 11,
+    cost: 0.0123,
+    turns: 1,
+  };
+
+  /**
+   * THE row this ticket exists for: a child that ran, spent tokens and then failed — or was never
+   * asked for a report at all. It hands the command BOTH a report and a usage so the two
+   * assertions below are independent: the report pair is still dropped, the usage is not.
+   *
+   * Counterfactual: moving `usage` inside the `to === "succeeded"` spread in `#resolveExit` turns
+   * this red. So does reading the counter off `command.report?.usage` — a failed close does not
+   * persist the report, so there would be nothing left to read it back from.
+   */
+  test("a failed close persists the host-observed usage while the report pair stays absent", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+
+    const resolved = await h.registry.transition(
+      {
+        kind: "resolve-exit",
+        taskId: TASK_1,
+        exitCode: 1,
+        outputBytes: 7,
+        reportChannel: "prompt-json",
+        report: {
+          summary: "partial answer from a child that then died",
+          findings: [],
+          files_touched: [],
+          usage: { input: 900, output: 260, cost: 0.0123, turns: 1 },
+        },
+        usage: USAGE,
+      },
+      callContext(h, CALLER),
+    );
+
+    expect(resolved.record.status).toBe("failed");
+    expect(Object.hasOwn(resolved.record, "report")).toBe(false);
+    expect(Object.hasOwn(resolved.record, "reportChannel")).toBe(false);
+    expect(resolved.record.usage).toEqual(USAGE);
+    // And it is the PERSISTED record: a writer that put the counter on the returned copy only
+    // would satisfy every assertion above.
+    const stored = await h.storage.loadTask(TASK_1);
+    expect(stored?.usage).toEqual(USAGE);
+  });
+
+  /** The same rule on the cancel edge, which is the `stopping` -> `canceled` close. */
+  test("a canceled close persists the host-observed usage too", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    await h.registry.transition(
+      { kind: "stop", taskId: TASK_1, reason: "model stop" },
+      callContext(h, CALLER),
+    );
+
+    const resolved = await h.registry.transition(
+      {
+        kind: "resolve-exit",
+        taskId: TASK_1,
+        exitCode: 0,
+        outputBytes: 9,
+        reportChannel: "prompt-json",
+        usage: USAGE,
+      },
+      callContext(h, CALLER),
+    );
+
+    expect(resolved.record.status).toBe("canceled");
+    expect(Object.hasOwn(resolved.record, "report")).toBe(false);
+    expect(resolved.record.usage).toEqual(USAGE);
+  });
+
+  test("a succeeded close carries the usage on both carriers, and the shared four agree", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+
+    const resolved = await h.registry.transition(
+      {
+        kind: "resolve-exit",
+        taskId: TASK_1,
+        exitCode: 0,
+        outputBytes: 4,
+        reportChannel: "prompt-json",
+        report: {
+          summary: "the gate runs before discovery",
+          findings: [{ what: "slot first", evidence: "the acquire precedes discoverAgent" }],
+          files_touched: ["src/runtime/dispatch.ts"],
+          usage: { input: 900, output: 260, cost: 0.0123, turns: 1 },
+        },
+        usage: USAGE,
+      },
+      callContext(h, CALLER),
+    );
+
+    expect(resolved.record.status).toBe("succeeded");
+    expect(resolved.record.usage).toEqual(USAGE);
+    // The derived view keeps its four fields and drops the two cache counters (ADR-0032).
+    expect(resolved.record.report?.usage).toEqual({
+      input: 900,
+      output: 260,
+      cost: 0.0123,
+      turns: 1,
+    });
+    // The four shared fields, read off each carrier: one child must not carry two numbers for
+    // the same spend.
+    expect(resolved.record.report?.usage?.input).toBe(resolved.record.usage?.input);
+    expect(resolved.record.report?.usage?.output).toBe(resolved.record.usage?.output);
+    expect(resolved.record.report?.usage?.cost).toBe(resolved.record.usage?.cost);
+    expect(resolved.record.report?.usage?.turns).toBe(resolved.record.usage?.turns);
+  });
+
+  /**
+   * Absent is the claim "no accumulator was ever observed" — a `lost` record (no close at all),
+   * and a close whose child emitted no usage block. A zeroed accumulator would be a different,
+   * false claim: that the child ran and spent nothing.
+   */
+  test("a close with no usage observed leaves the field absent, not zeroed", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+
+    const resolved = await h.registry.transition(
+      { kind: "resolve-exit", taskId: TASK_1, exitCode: 0, outputBytes: 4, reportChannel: "none" },
+      callContext(h, CALLER),
+    );
+
+    expect(resolved.record.status).toBe("succeeded");
+    // `Object.hasOwn`, because `toBeUndefined()` also passes for an explicitly-undefined key —
+    // the shape an "always spread it" writer produces.
+    expect(Object.hasOwn(resolved.record, "usage")).toBe(false);
+    const stored = await h.storage.loadTask(TASK_1);
+    expect(Object.hasOwn(stored as object, "usage")).toBe(false);
+  });
+
+  test("a lost record keeps the field absent (no close was ever observed)", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+
+    const lost = await h.registry.transition(
+      { kind: "reconcile-lost", taskId: TASK_1, reason: "session_ended_while_running" },
+      callContext(h, CALLER),
+    );
+
+    expect(lost.record.status).toBe("lost");
+    expect(Object.hasOwn(lost.record, "usage")).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

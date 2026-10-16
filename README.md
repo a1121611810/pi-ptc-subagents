@@ -96,8 +96,10 @@ const [read, scoutA, scoutB] = await Promise.all([
 
 **The child report.** A dispatched child returns more than prose: under the report contract
 ([ADR-0032](./docs/adr/0032-child-report.md)) it hands back a `summary`, `findings` each
-carrying independent evidence, `files_touched`, and token usage the host measured. The
-result names the channel that delivered it — `"tool"`, `"prompt-json"`, or `"none"` — and
+carrying independent evidence, `files_touched`, and token usage the host measured. On the
+background path that same measurement is written to the task record itself, on every terminal
+close for a child that started — so a child that reported nothing, or failed, still shows what it
+cost. The result names the channel that delivered it — `"tool"`, `"prompt-json"`, or `"none"` — and
 `"none"` means the child ran but did not comply, which must not read as "returned nothing".
 An agent opts out with one frontmatter line, `childReport: false`, and its channel reads
 `"opted-out"`. `ptc_subagent` renders the same report into the text the model reads, bounded

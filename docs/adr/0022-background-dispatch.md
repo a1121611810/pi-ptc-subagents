@@ -6,7 +6,7 @@ Background dispatch is the long-lived variant. A child may outlive the spawn tur
 
 Status: accepted (2026-09-24). Behavior change on the program-visible side (new optional `{ background: true }` opt on the existing binding; new optional `subscribe` interface for cursor-based observation; new model-facing tools `ptc_task_list` / `ptc_task_output` / `ptc_task_stop`; new TaskRecord 21-field schema persisted under `<sessionDir>/`; new subscription event schema with `<bg-task-notifications>` parent + per-event `<bg-task-notification>` children). All changes are additive: existing foreground `pi.dispatch(...)` keeps its `DispatchResult` shape and semantics unchanged.
 
-> Amended by ADR-0023 (2026-09-29): task ownership. Records carry optional `ownerPid` / `ownerBootMs`, and the sweeps specified below (startup reconcile → `lost`, session shutdown → `session_ended_while_running`) are **owner-scoped** — a record is only reaped by a runtime instance that owns it; at startup reconcile it is also reaped when its owner process is dead, or when it predates ownership (`ownerPid` absent). ADR-0023's text governs the sweep semantics; the tables below remain as the pre-amendment specification — as do this document's four "21 fields" mentions (Status line, G1, §3 intro, §3 heading): §3's code block lists 19 fields, and ADR-0023's two owner fields bring the record to 21.
+> Amended by ADR-0023 (2026-09-29): task ownership. Records carry optional `ownerPid` / `ownerBootMs`, and the sweeps specified below (startup reconcile → `lost`, session shutdown → `session_ended_while_running`) are **owner-scoped** — a record is only reaped by a runtime instance that owns it; at startup reconcile it is also reaped when its owner process is dead, or when it predates ownership (`ownerPid` absent). ADR-0023's text governs the sweep semantics; the tables below remain as the pre-amendment specification — as do this document's four "21 fields" mentions (Status line, G1, §3 intro, §3 heading): §3's code block listed 19 fields at the time, and ADR-0023's two owner fields brought the record to 21. (Those counts are as of this note; the 2026-10-16 amendment below adds a field to the block and carries the current ones.)
 
 > Amended by §11 (2026-09-30): the five render caps of the background task panel are
 > registered with their values. §7 handed the panel's rendering to a follow-up without ever saying
@@ -33,6 +33,23 @@ Status: accepted (2026-09-24). Behavior change on the program-visible side (new 
 > so one failure has one verdict and one sentence in both paths. No schema change: a failing
 > `resolve-exit` may now write `errorMessage`, and the pump hands the registry the child's own
 > `stopReason: "error"` text when there is one.
+
+> **Amended by §3 (2026-10-16, issue #199): the record carries the child's usage, not only the
+> report.** `TaskRecord` gains an optional top-level `usage` — the full six-field `DispatchUsage`
+> the host accumulates from the child's `message_end` blocks (`input`, `output`, `cacheRead`,
+> `cacheWrite`, `cost`, `turns`) — written on **every terminal close for any child the host
+> actually started**: independent of `reportChannel` (a `none` / `opted-out` child still accounts
+> for what it cost) and of the close outcome (so does a child that failed or was canceled). It is
+> absent on records written before the field existed, on children that never started, and on
+> `lost` records. ADR-0032's report keeps its own `usage`, unchanged in shape — four fields
+> (`input`, `output`, `cost`, `turns`) derived from the same accumulator, still what the report
+> block renders — so the two agree on the four fields they share. `none` and `opted-out` get
+> identical accounting (the distinction stays in `reportChannel`), and the two report fields stay
+> `succeeded`-only: only usage decouples from the close outcome. §3's code block below now lists
+> **20** fields (its 19 originals plus this one); the record in the interface today is **25** —
+> those 20 plus ADR-0023's two owner fields, ADR-0032's two report fields, and ADR-0041's
+> `readOnlyTier`. The four "21 fields" mentions in this document stay the authoring miscount ADR-0023's note
+> already flagged; these are the counts now.
 
 ## Context
 
@@ -143,6 +160,13 @@ interface TaskRecord {
   parentTaskId?: ULID;
   sessionFile?: string; // v1 leaves this UNSET: the extension cannot learn pi's session-file
   // path, and a fabricated value is worse than an absent one (reopen R-m12)
+  // added 2026-10-16 (issue #199): the host's own six-field counter, written on every terminal
+  // close for a child the host actually started — independent of `reportChannel` and of the
+  // close outcome, so a `none` / `opted-out` or failed child still accounts for what it cost.
+  // `report.usage` remains the four-field derived view the report block renders; absent on
+  // records written before the field existed, on children that never started, and on `lost`
+  // records.
+  usage?: DispatchUsage;
 }
 ```
 
