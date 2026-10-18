@@ -1377,7 +1377,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       "The failure text is the reason",
     "docs/adr/0016-ptc-dispatch-binding.md:41 -> src/runtime/dispatcher.ts:438":
       "new DispatchSlotCounter(",
-    "docs/adr/0026-surface-default-is-detected.md:258 -> dispatch.ts:2070":
+    "docs/adr/0026-surface-default-is-detected.md:258 -> dispatch.ts:2122":
       "spawnOptions.sessionId = taskId;",
     // Confirmed line by line 2026-10-12 (re-checked after #187 moved it): line 505 is
     // `pi.registerTool(createChildReportTool(ptcDepth > 0));` -- the depth gate the ADR cites to
@@ -1398,15 +1398,15 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       "## Fail-safe on external loadout changes",
     "docs/adr/0031-open-source-and-publish-authority.md:129 -> src/runtime/limits.ts:4":
       "The numbers are DSH's",
-    "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1706": "function assistantText(",
+    "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1758": "function assistantText(",
     "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:217":
       "export const SUBAGENT_OUTPUT_SCHEMA",
-    "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1729": "function accumulateUsage(",
+    "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1781": "function accumulateUsage(",
     "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:474":
       "structuredContent: structured,",
     "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:232":
       "outputSchema: LIST_OUTPUT_SCHEMA,",
-    "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1576":
+    "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1628":
       "export function childToolList(",
   };
 
@@ -1459,7 +1459,10 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // 2026-10-18 第十次复核（#204）：**1998 → 2070**（+72）。位移来自本锚点上方新增的
     // opensLikeAgentDefinition 辅助函数、1185-1216 那段 JSDoc 的第三个桶、以及 roster 遍历里的
     // parse-failure warn。dispatch.ts 的行为没有变，逐条按**内容**核对后改正，未按算术平移。
-    "docs/adr/0026-surface-default-is-detected.md:258 -> dispatch.ts:2070",
+    // 2026-10-18 第十一次复核（#205）：**2070 → 2122**（+52）。同一锚点上方新增了
+    // scanAgentDefinitions 的三个声明与它那段 JSDoc。dispatch.ts 的行为没有变，逐条按**内容**
+    // 核对后改正，未按算术平移。
+    "docs/adr/0026-surface-default-is-detected.md:258 -> dispatch.ts:2122",
     // 2026-10-10 第七次复核：四条全部因本轮删除 surfaceMode 而位移，逐条核对内容后改正。
     //  29  → 628→1160 = `export function detectedSurfaceMode(`
     //  32  → 962→856  = decision-4 的 `if (surface.surfaceMode === "subagents" && !pi.getActiveTools()…`
@@ -1489,7 +1492,10 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // 2026-10-18 第十次复核（#204）：四条 dispatch.ts 锚点整体下移 **72 行**——1504→1576、
     // 1634→1706、1657→1729。位移来自本文件上方新增的 opensLikeAgentDefinition、JSDoc 的第三个
     // 桶、以及 parse-failure warn；dispatch.ts 的行为没有变，逐条按**内容**核对后改正。
-    //   11 → dispatch.ts:1706 = `function assistantText(event: ParsedAgentEvent)`
+    // 2026-10-18 第十一次复核（#205）：再下移 **52 行**——1576→1628、1706→1758、1729→1781。
+    // 位移同样在锚点上方：scanAgentDefinitions 的声明与其 JSDoc。dispatch.ts 的行为没有变，
+    // 逐条按**内容**核对后改正。
+    //   11 → dispatch.ts:1758 = `function assistantText(event: ParsedAgentEvent)`
     //        （2026-10-14 复核：pi 1.2.0 print-mode 截断修复在 dispatch.ts 加了
     //        PI_TRUNCATION_WARNING / truncationFailureMessage，assistantText 及其后整体后移）
     //        （2026-10-18 复核：1631→1634。#201 改的是 listRegisteredAgentEntries——让 roster 与
@@ -1497,7 +1503,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     //        五处 hunk 全落在 1188-1262，净增 3 行（17 增 14 删），本条锚点在其下方）
     //   20 → subagent.ts:217  = `export const SUBAGENT_OUTPUT_SCHEMA: SubagentOutputSchema`
     //        （2026-10-16 复核：197 是更早快照；#199 在 subagent.ts 顶部加了 usage 字段后实测 217）
-    //   33 → dispatch.ts:1729 = `function accumulateUsage(`（usage 的累加点，前景后台共用）
+    //   33 → dispatch.ts:1781 = `function accumulateUsage(`（usage 的累加点，前景后台共用）
     //        （2026-10-18 复核：1654→1657，+3，同上——#201 的 listRegisteredAgentEntries）
     //   55 → subagent.ts:474 = 把投影写进 `structuredContent:` 的那一行（settled 路径）
     //        （2026-10-16 复核：#199 的 usage 字段把该行从 428 推到 474；413 是更早快照）
@@ -1511,7 +1517,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     //        该行后移；2026-10-15 随 4e966c5 再后移一行至 231）
     //        （2026-10-14 复核：#193 在 ptc-task.ts 顶部加了一行 pi-compat-types 的 import，
     //        三处声明整体后移一行）
-    //  130 → dispatch.ts:1576 = `export function childToolList(`，即合并进子进程 --tools 的那个函数
+    //  130 → dispatch.ts:1628 = `export function childToolList(`，即合并进子进程 --tools 的那个函数
     //        （2026-10-18 复核：1501→1504，+3，同上——#201 的 listRegisteredAgentEntries）
     //        （2026-10-15 四次重钉。**归因错了两次，这才记下来**：
     //        第一次把位移记在 ADR-0041 名下；第二次「改正」成 60bda39（ADR-0032 的渲染提交 / #103）
@@ -1543,12 +1549,12 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // 行号**——留着一个指向已删行的引用，正是 `tests/doc-integrity.test.ts` 要抓的悬空引用。
     // 所以这里是**删一条**而不是改行号，本轮唯一的删除项，**新增 0 条**。
     // 同一次编辑把 ADR-0032 里 123 那条**在文档里**的行号推到 130（引用目标未动，仍是 1031）。
-    "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1706",
+    "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1758",
     "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:217",
-    "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1729",
+    "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1781",
     "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:474",
     "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:232",
-    "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1576",
+    "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1628",
     // 新增 1 条（2026-10-12，ADR-0039）：目标行已逐条核对。
     "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:115 -> src/index.ts:534",
   ];

@@ -98,6 +98,19 @@ toolset, no model pin, reported as an empty `agentName`. A definition is not the
 axis: _read-only tier_ is the other one, and where the two meet a strict tier at the call site
 decides the tool list outright.
 
+**Identity and precedence are both decided on the frontmatter, not the filesystem** (#205, #207).
+A definition's name is its `name:` field and nothing else: naming the file after it is the
+convention and nothing more, so `beta.md` carrying `name: gamma` is the agent `gamma` and is not
+reachable as `beta`, while a `.md` with no `name:` is not an agent at all. When one name is
+registered in BOTH scopes the **user** copy resolves — deliberately the opposite of pi's own
+subagent example README, Claude Code, OpenHands, Roo Code and the Agent Skills client guide, all of
+which say project wins. The reason is asymmetry of ownership: `~/.pi/agent/agents/` is a personal,
+machine-wide choice, while `<cwd>/.pi/agents/` is checked into a repository and shared, so letting
+the shared file silently override the personal one would make which definition runs depend on who
+checked out. It only bites for `agentScope: "both"`, which is not the default. Two files in ONE
+scope declaring one name is a mistake rather than a rule: entries are sorted by file name and the
+first keeps it, and the shadowed file is reported.
+
 _Avoid_: "preset agent" / "default agent" for the generalist. Nothing ships in the package, and the
 generalist is the child pi already is, not a definition this project wrote and installs. Also avoid
 "required": the name is the narrowing path, not the entry fee.

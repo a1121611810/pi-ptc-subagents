@@ -16,7 +16,7 @@
 
 import { describe, expect, test } from "vitest";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -25,6 +25,7 @@ import {
   discoverAgent,
   listRegisteredAgentEntries,
   listRegisteredAgents,
+  parseAgentMarkdown,
 } from "../../src/runtime/dispatch.ts";
 import { createPtcSubagentTool } from "../../src/tools/subagent.ts";
 import { DISPATCH_PARAMETERS } from "../../src/runtime/bindings.ts";
@@ -271,16 +272,33 @@ async function writeRawUser(home: string, fileName: string, content: string) {
  * test forgot to create would otherwise silently drop out of the oracle instead of failing.
  */
 function candidatesIn(dir: string): string[] {
-  return readdirSync(dir)
-    .filter((file) => file.endsWith(".md"))
-    .map((file) => file.slice(0, -".md".length))
-    .sort();
+  return [
+    ...new Set(
+      readdirSync(dir)
+        .filter((file) => file.endsWith(".md"))
+        .flatMap((file) => {
+          const stem = file.slice(0, -".md".length);
+          // Identity is the frontmatter `name:` since #205, so a fixture whose file name DISAGREES
+          // with it must contribute the declared name too. Deriving candidates from file stems alone
+          // made this oracle structurally blind to that shape: the declared name dropped out of the
+          // candidate set instead of failing the comparison, which is exactly what happened while
+          // #205 was still a bug.
+          const declared = parseAgentMarkdown(readFileSync(join(dir, file), "utf-8"))?.name;
+          return declared === undefined ? [stem] : [stem, declared];
+        }),
+    ),
+  ].sort();
 }
 
 describe("the roster advertises exactly what a dispatch can resolve (#201)", () => {
   test("the listed set equals the resolvable set for every way a file can lack a name", async () => {
     await withAgentDirs(async ({ home, project }) => {
       await writeAgent(project, "alpha", "Named in its own frontmatter.");
+      await writeRawProject(
+        project,
+        "beta.md",
+        "---\nname: gamma\ndescription: Renamed.\n---\nYou are gamma.\n",
+      );
       await writeRawProject(project, "nameless.md", NAMELESS);
       await writeRawProject(project, "body-only.md", BODY_ONLY);
       await writeRawProject(project, "empty.md", "");
@@ -292,11 +310,12 @@ describe("the roster advertises exactly what a dispatch can resolve (#201)", () 
         (name) => discoverAgent(name, project, "both", { homeDir: home }) !== null,
       );
 
-      // Only `alpha` names itself, so it is the only one a dispatch can resolve. Stated as a
-      // literal rather than as a copy of the roster, so the two assertions can actually differ.
-      expect(resolvable).toEqual(["alpha"]);
+      // Stated as a literal rather than as a copy of the roster, so the two assertions can
+      // actually differ. `gamma` is here because `beta.md` declares it; `beta` is absent because
+      // the file name is not an identity and `discoverAgent("beta")` resolves nothing.
+      expect(resolvable).toEqual(["alpha", "gamma"]);
       // THE INVARIANT. Counterfactual: restore the filename fallback in
-      // `listRegisteredAgentEntries` and this gains nameless / body-only / empty while
+      // `scanAgentDefinitions` and this gains nameless / body-only / empty / beta while
       // `resolvable` does not -> red.
       expect(listRegisteredAgents({ cwd: project, agentScope: "both", homeDir: home })).toEqual(
         resolvable,
@@ -365,18 +384,15 @@ describe("the roster advertises exactly what a dispatch can resolve (#201)", () 
   });
 
   /**
-   * The one case the invariant does NOT reach, recorded rather than left for the next reader to
-   * re-derive.
+   * Identity is the frontmatter `name:`; the file name is decorative (#205).
    *
-   * `discoverAgent` rebuilds the file path from the requested name, so it can only resolve an
-   * agent whose FILE name equals its frontmatter `name:`. An agent whose two disagree is
-   * advertised under the frontmatter name and is dispatchable under NEITHER name. That is the
-   * roster/discovery mismatch again, from a different cause — but it behaves identically before
-   * and after #201, which is scoped to the null parse, so this change neither introduced nor
-   * fixed it. pi's own loader keys agents by the frontmatter name and has no such constraint;
-   * this is a real divergence from pi, filed separately rather than folded in here.
+   * Before this, `discoverAgent` rebuilt the file path from the requested name AND required the
+   * parsed name to equal it, so a definition whose two disagreed was advertised under one name
+   * and resolvable under neither — the roster/discovery contradiction #201 fixed, reached by a
+   * different cause. It was filed rather than folded into #201 and stayed a live divergence from
+   * pi until now.
    */
-  test("an agent whose file name disagrees with its frontmatter name stays a separate mismatch", async () => {
+  test("a definition whose file name disagrees with its frontmatter name resolves under the declared name", async () => {
     await withAgentDirs(async ({ home, project }) => {
       await writeRawProject(
         project,
@@ -384,12 +400,15 @@ describe("the roster advertises exactly what a dispatch can resolve (#201)", () 
         "---\nname: gamma\ndescription: Renamed.\n---\nYou are gamma.\n",
       );
 
-      // Advertised under the frontmatter name — pi's rule, the one #201 settled.
+      // Advertised under the frontmatter name — the rule #201 settled, now one discovery honours.
       expect(listRegisteredAgents({ cwd: project, agentScope: "both", homeDir: home })).toEqual([
         "gamma",
       ]);
-      // ...and unresolvable under either name, because the path is rebuilt from the name.
-      expect(discoverAgent("gamma", project, "both", { homeDir: home })).toBeNull();
+      // Dispatchable under that same name. This assertion IS the fix; counterfactual: rebuild
+      // the path from the requested name in `discoverAgent` -> null -> red.
+      expect(discoverAgent("gamma", project, "both", { homeDir: home })?.name).toBe("gamma");
+      // And NOT under the file name: there is no file-name fallback (#201), so `beta` is not an
+      // agent at all. Counterfactual: restore the filename fallback -> non-null -> red.
       expect(discoverAgent("beta", project, "both", { homeDir: home })).toBeNull();
     });
   });

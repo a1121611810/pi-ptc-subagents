@@ -973,6 +973,180 @@ function opensLikeAgentDefinition(raw: string): boolean {
   return head === "---" || /^name[ \t]*:/.test(head);
 }
 
+/** One agent definition as {@link scanAgentDefinitions} found it: the full parse, plus where it came from. */
+interface ScannedDefinition {
+  readonly name: string;
+  /** The frontmatter `description`, trimmed; `""` when the definition declares none. */
+  readonly description: string;
+  readonly source: "user" | "project";
+  readonly filePath: string;
+  readonly model?: string;
+  readonly tools?: readonly string[];
+  readonly childReport?: boolean;
+  readonly systemPrompt: string;
+}
+
+interface AgentScan {
+  /** Keyed by the frontmatter `name:`; the first definition to claim a name keeps it. */
+  readonly definitions: ReadonlyMap<string, ScannedDefinition>;
+  /**
+   * Pre-formatted `console.warn` lines. The roster emits them; discovery deliberately does not,
+   * because every discovery refusal renders the roster, which emits them there.
+   */
+  readonly diagnostics: readonly string[];
+}
+
+/**
+ * The ONE traversal of the agents directories (#205). Both `discoverAgent` and
+ * `listRegisteredAgentEntries` read this, and that is the whole point: #201 established the
+ * invariant that the names a roster lists are the names a dispatch resolves, and two traversals
+ * are two places for the predicate and the scope precedence to be spelled slightly differently.
+ *
+ * A definition's identity is its frontmatter `name:` and nothing else. The file name is
+ * decorative: `beta.md` carrying `name: gamma` is the agent `gamma`. A `.md` carrying no `name:`
+ * is not an agent at all -- pi's own subagent loader skips such a definition and never derives
+ * identity from the file name -- so there is no fallback to the file name (#201).
+ *
+ * Two names, two answers, both resolved the same way as everywhere else in the ecosystem:
+ *
+ * - **Across scopes** — user wins over project, which is the OPPOSITE of pi's own subagent
+ *   example README, Claude Code, OpenHands, Roo Code and the Agent Skills client guide, all of
+ *   which say project-over-user. The divergence is deliberate (#207): a user's
+ *   `~/.pi/agent/agents/` entry is a personal, machine-wide choice, while a `<cwd>/.pi/agents/`
+ *   entry is checked into a repository and shared, so letting the shared file silently override
+ *   the personal one would make which definition runs depend on who checked out. It only bites
+ *   for `agentScope: "both"`, which is not the default.
+ * - **Within one scope** — two files declaring one name is a genuine mistake by the user, and
+ *   the Agent Skills client guide requires it be resolved deterministically AND that the
+ *   shadowed file be reported: "pick one and be consistent. Log a warning when a collision occurs
+ *   so the user knows a skill was shadowed." Entries are sorted by file name, so "first" means
+ *   first alphabetically rather than in filesystem order -- Claude Code admits its own behaviour
+ *   here is readdir order with no documented precedence, which is the non-deterministic option
+ *   this deliberately does not take.
+ *
+ * Per lookup directory:
+ *
+ * - **Silent** (no entries, no warn -- the path genuinely holds nothing to list): the agents
+ *   dir is absent, together with every component above it (the normal case for a project with
+ *   no `.pi/agents/`); the case where a component ABOVE it is a plain FILE, which makes it
+ *   impossible rather than broken and reports ENOTDIR instead of ENOENT; and a parent symlink
+ *   that resolves to a real directory that simply has no agents dir under it. All stay silent
+ *   because a refusal must not be cluttered for a project that simply has no agents.
+ * - **Observable** (a `console.warn` with the path and the OS code, then continue with the other
+ *   side): the path EXISTS but cannot be listed -- a file where the agents dir belongs (ENOTDIR),
+ *   a symlink at the agents path pointing at a file (ENOTDIR) or at a deleted target (ENOENT on
+ *   both readdir and a following stat), a broken symlink in a PARENT component (ENOENT/ENOTDIR
+ *   all the way down, invisible to a final-component lstat), or any other code (permissions, a
+ *   symlink loop / ELOOP, EIO).
+ *
+ * {@link isSilentReaddirMiss} carries the full, exhaustive enumeration of which errno shapes
+ * land in each bucket; this summary and it must not drift.
+ *
+ * A `.md` file that exists but cannot be read (permissions, wrong file type) is skipped with a
+ * diagnostic, so the failure is observable (testing-constraints #3). It is not registered under
+ * its file name, for the same reason a nameless one is not: `discoverAgent` cannot resolve it
+ * either, and a roster entry that nothing can dispatch is the identical contradiction (#201).
+ *
+ * A `.md` file that reads but does not PARSE is skipped and not registered either -- that part is
+ * #201 and unchanged. What #204 added is the third bucket, between "cannot read" and "was never
+ * a definition": a file whose head says it was written as a definition and then failed to parse
+ * gets its own diagnostic, naming the path. Without it the two readings collapse -- the roster
+ * says nothing either way, so "the agent I wrote vanished" is indistinguishable from "there were
+ * never any agents" until the user goes and reads the source.
+ *
+ * {@link opensLikeAgentDefinition} is what separates that bucket from the prose beside it, and it
+ * reads the FIRST non-blank line only. A file leading with `---`, or with a `name:` key, is
+ * definition-shaped; anything else is documentation kept beside the agents and stays silent.
+ * Anchoring on the head is what makes the silence safe -- a README whose body uses `---` as a
+ * rule, or mentions `name:` in a sentence, is not a broken definition.
+ *
+ * The registry is identical in all three buckets. This is about the signal, not the roster, and
+ * the roster's silence about a nameless definition is still the true answer (#201).
+ *
+ * Known limit: these warnings fire only when something renders the roster -- the pre-decision
+ * view or a refusal. No session-start scan reads the agents directories, so a broken definition
+ * nobody ever asks for by name is never announced. That predates #204 and is not addressed by
+ * it.
+ */
+function scanAgentDefinitions(input: RegisteredAgentsListInput): AgentScan {
+  const { userDir, projectDir, userRoot, projectRoot } = resolveAgentDirs(input);
+  const dirs: Array<{ dir: string; boundary: string; source: "user" | "project" }> = [];
+  if (input.agentScope === "user" || input.agentScope === "both") {
+    dirs.push({ dir: userDir, boundary: userRoot, source: "user" });
+  }
+  if (input.agentScope === "project" || input.agentScope === "both") {
+    dirs.push({ dir: projectDir, boundary: projectRoot, source: "project" });
+  }
+  const definitions = new Map<string, ScannedDefinition>();
+  const diagnostics: string[] = [];
+  for (const { dir, boundary, source } of dirs) {
+    let names: string[];
+    try {
+      names = fs.readdirSync(dir);
+    } catch (error) {
+      if (!isSilentReaddirMiss(dir, boundary, error)) {
+        diagnostics.push(
+          `pi.dispatch: cannot read agent directory ${dir} (${errnoCode(error)}); ` +
+            "the agents registered there are not listed",
+        );
+      }
+      continue;
+    }
+    // Sorted so the within-scope tie-break is "first alphabetically", not filesystem order.
+    names.sort();
+    for (const entry of names) {
+      if (!entry.endsWith(".md")) continue;
+      const filePath = path.join(dir, entry);
+      let raw: string;
+      try {
+        raw = fs.readFileSync(filePath, "utf-8");
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        diagnostics.push(`pi.dispatch: cannot read agent file ${filePath}: ${detail}; skipping it`);
+        continue;
+      }
+      const parsed = parseAgentMarkdown(raw);
+      // No fallback to the file name (#201). Identity is the frontmatter `name:`, so advertising a
+      // file name here would register an agent `discoverAgent` cannot resolve -- in the same
+      // message, which is what made the bug unreadable.
+      if (!parsed) {
+        if (opensLikeAgentDefinition(raw)) {
+          diagnostics.push(
+            `pi.dispatch: agent file ${filePath} looks like an agent definition but its ` +
+              "frontmatter did not parse (no usable `name:`); it is not listed and cannot be " +
+              "dispatched",
+          );
+        }
+        continue;
+      }
+      const incumbent = definitions.get(parsed.name);
+      if (incumbent) {
+        // Cross-scope shadowing is the documented rule (#207), not a mistake, so it is not a
+        // diagnostic. Two files in the SAME scope claiming one name is a mistake, and the Agent
+        // Skills client guide requires the loser be reported.
+        if (incumbent.source === source) {
+          diagnostics.push(
+            `pi.dispatch: agent name "${parsed.name}" is declared by both ${incumbent.filePath} ` +
+              `and ${filePath}; using ${incumbent.filePath} and shadowing the other (#205)`,
+          );
+        }
+        continue;
+      }
+      definitions.set(parsed.name, {
+        name: parsed.name,
+        description: (parsed.description ?? "").trim(),
+        source,
+        filePath,
+        ...(parsed.model !== undefined ? { model: parsed.model } : {}),
+        ...(parsed.tools !== undefined ? { tools: parsed.tools } : {}),
+        ...(parsed.childReport !== undefined ? { childReport: parsed.childReport } : {}),
+        systemPrompt: parsed.systemPrompt,
+      });
+    }
+  }
+  return { definitions, diagnostics };
+}
+
 /**
  * Discover an agent by name. Mirrors pi's subagent extension agentScope behaviour:
  * user-level (`~/.pi/agent/agents/`) is loaded by default; project-level
@@ -989,38 +1163,20 @@ export function discoverAgent(
   agentScope: "user" | "project" | "both",
   options?: { homeDir?: string },
 ): AgentConfigLike | null {
-  const { userDir, projectDir } = resolveAgentDirs({ cwd, agentScope, homeDir: options?.homeDir });
-  type Candidate = { path: string; source: "user" | "project" };
-  const candidates: Candidate[] = [];
-  if (agentScope === "user" || agentScope === "both") {
-    candidates.push({ path: path.join(userDir, name + ".md"), source: "user" });
+  const { definitions } = scanAgentDefinitions({ cwd, agentScope, homeDir: options?.homeDir });
+  const found = definitions.get(name);
+  if (found === undefined) return null;
+  const out: AgentConfigLike = {
+    name: found.name,
+    source: found.source,
+    systemPrompt: found.systemPrompt,
+  };
+  if (found.model !== undefined) (out as { model?: string }).model = found.model;
+  if (found.tools !== undefined) (out as { tools?: readonly string[] }).tools = found.tools;
+  if (found.childReport !== undefined) {
+    (out as { childReport?: boolean }).childReport = found.childReport;
   }
-  if (agentScope === "project" || agentScope === "both") {
-    candidates.push({ path: path.join(projectDir, name + ".md"), source: "project" });
-  }
-  for (const c of candidates) {
-    let raw: string;
-    try {
-      raw = fs.readFileSync(c.path, "utf-8");
-    } catch {
-      continue;
-    }
-    const parsed = parseAgentMarkdown(raw);
-    if (parsed && parsed.name === name) {
-      const out: AgentConfigLike = {
-        name: parsed.name,
-        source: c.source,
-        systemPrompt: parsed.systemPrompt,
-      };
-      if (parsed.model !== undefined) (out as { model?: string }).model = parsed.model;
-      if (parsed.tools !== undefined) (out as { tools?: readonly string[] }).tools = parsed.tools;
-      if (parsed.childReport !== undefined) {
-        (out as { childReport?: boolean }).childReport = parsed.childReport;
-      }
-      return out;
-    }
-  }
-  return null;
+  return out;
 }
 
 /**
@@ -1214,135 +1370,22 @@ export interface RegisteredAgentEntry {
 }
 
 /**
- * The agents registered under the effective scope — the same two directories
- * `discoverAgent` searches — each with its description and source. A file's name is its
- * frontmatter `name:` field and nothing else: a `.md` file carrying no `name:` is not an
- * agent at all. That is what pi's own subagent loader does — it skips a definition whose
- * frontmatter has no string `name` and never derives identity from the file name — so the
- * roster applies the SAME predicate `discoverAgent` applies rather than a second, looser one
- * (#201). The result is sorted and de-duplicated so the message built from it is
- * deterministic. Per lookup directory:
- *
- * - **Silent** (no entries, no warn — the path genuinely holds nothing to list): the agents
- *   dir is absent, together with every component above it (the normal case for a project with
- *   no `.pi/agents/`); the case where a component ABOVE it is a plain FILE, which makes it
- *   impossible rather than broken and reports ENOTDIR instead of ENOENT; and a parent symlink
- *   that resolves to a real directory that simply has no agents dir under it. All stay silent
- *   because a refusal must not be cluttered for a project that simply has no agents.
- * - **Observable** (`console.warn` with the path and the OS code, then continue with the other
- *   side): the path EXISTS but cannot be listed — a file where the agents dir belongs (ENOTDIR),
- *   a symlink at the agents path pointing at a file (ENOTDIR) or at a deleted target (ENOENT on
- *   both readdir and a following stat), a broken symlink in a PARENT component (ENOENT/ENOTDIR
- *   all the way down, invisible to a final-component lstat), or any other code (permissions, a
- *   symlink loop / ELOOP, EIO).
- *
- * {@link isSilentReaddirMiss} carries the full, exhaustive enumeration of which errno shapes
- * land in each bucket; this summary and it must not drift.
- *
- * A `.md` file that exists but cannot be read (permissions, wrong file type) is skipped, with
- * its own `console.warn` so the failure is observable (testing-constraints #3). It is not
- * listed under its file name, for the same reason a nameless one is not listed:
- * `discoverAgent` cannot resolve it either, and a roster entry that nothing can dispatch is
- * the identical contradiction (#201).
- *
- * A `.md` file that reads but does not PARSE is skipped and not listed too -- that part is #201
- * and unchanged. What #204 added is the third bucket, between "cannot read" and "was never a
- * definition": a file whose head says it was written as a definition and then failed to parse
- * gets its own `console.warn`, naming the path. Without it the two readings collapse -- the
- * roster says nothing either way, so "the agent I wrote vanished" is indistinguishable from
- * "there were never any agents" until the user goes and reads the source.
- *
- * {@link opensLikeAgentDefinition} is what separates that bucket from the prose beside it, and
- * it reads the FIRST non-blank line only. A file leading with `---`, or with a `name:` key, is
- * definition-shaped; anything else is documentation kept beside the agents and stays silent.
- * Anchoring on the head is what makes the silence safe -- a README whose body uses `---` as a
- * rule, or mentions `name:` in a sentence, is not a broken definition.
- *
- * The listing is identical in all three buckets. This is about the signal, not the roster, and
- * the roster's silence about a nameless definition is still the true answer (#201).
- *
- * Known limit: these warnings fire only when something renders this list -- the pre-decision
- * view or a refusal. No session-start scan reads the agents directories, so a broken definition
- * nobody ever asks for by name is never announced. That predates #204 and is not addressed by
- * it.
+ * The agents registered under the effective scope, for the roster a model reads before it
+ * decides whether to dispatch. A thin projection of {@link scanAgentDefinitions}, which owns
+ * every rule this used to spell out -- identity, scope precedence, the within-scope tie-break,
+ * and the three diagnostic buckets. It exists to emit that scan's diagnostics and to drop the
+ * fields the roster does not render, so nothing here can drift from what a dispatch resolves.
  */
 export function listRegisteredAgentEntries(
   input: RegisteredAgentsListInput,
 ): RegisteredAgentEntry[] {
-  const { userDir, projectDir, userRoot, projectRoot } = resolveAgentDirs(input);
-  const dirs: Array<{ dir: string; boundary: string; source: "user" | "project" }> = [];
-  if (input.agentScope === "user" || input.agentScope === "both") {
-    dirs.push({ dir: userDir, boundary: userRoot, source: "user" });
-  }
-  if (input.agentScope === "project" || input.agentScope === "both") {
-    dirs.push({ dir: projectDir, boundary: projectRoot, source: "project" });
-  }
-  // Keyed by name so a name present in both directories lists once, holding the user copy —
-  // the same precedence `discoverAgent` applies when it resolves a dispatch.
-  const entries = new Map<string, RegisteredAgentEntry>();
-  for (const { dir, boundary, source } of dirs) {
-    let names: string[];
-    try {
-      names = fs.readdirSync(dir);
-    } catch (error) {
-      if (!isSilentReaddirMiss(dir, boundary, error)) {
-        const code = errnoCode(error);
-        console.warn(
-          `pi.dispatch: cannot read agent directory ${dir} (${code}); ` +
-            "the agents registered there are not listed",
-        );
-      }
-      continue;
-    }
-    for (const entry of names) {
-      if (!entry.endsWith(".md")) continue;
-      const filePath = path.join(dir, entry);
-      let raw: string;
-      try {
-        raw = fs.readFileSync(filePath, "utf-8");
-      } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        console.warn(`pi.dispatch: cannot read agent file ${filePath}: ${detail}; skipping it`);
-        continue;
-      }
-      const parsed = parseAgentMarkdown(raw);
-      // No fallback to the file name (#201). `discoverAgent` requires the parsed frontmatter
-      // name to equal the requested one, so advertising a file name here would list an agent
-      // the refusal then denies -- in the same message, which is what made the bug unreadable.
-      //
-      // A parse failure is the same outcome for the roster but NOT the same story for the user,
-      // which is what #204 split out. Skipping is still right -- a definition with no usable
-      // `name:` is not an agent -- but a file whose HEAD announces it was written as one, and
-      // then failed to parse, is a definition the user wrote and silently lost. Warn on that
-      // one; stay silent on the prose kept beside the agents, which is the whole reason
-      // {@link opensLikeAgentDefinition} reads the first line and not the file.
-      if (!parsed) {
-        if (opensLikeAgentDefinition(raw)) {
-          console.warn(
-            `pi.dispatch: agent file ${filePath} looks like an agent definition but its ` +
-              "frontmatter did not parse (no usable `name:`); it is not listed and cannot be " +
-              "dispatched",
-          );
-        }
-        continue;
-      }
-      const name = parsed.name;
-      // Unreachable, and deliberately left as-is: `extractYamlString` returns undefined for an
-      // empty value and `parseAgentMarkdown` returns null on a falsy name, so anything reaching
-      // here already has a non-empty name. It is NOT a place to hang the #204 diagnostic --
-      // that has to sit on the parse failure above, which is where the file is still in hand.
-      if (name.length === 0) continue;
-      // `parseAgentMarkdown` yields `""` — not undefined — for an absent `description`, so the
-      // trim here is what separates "declares none" from "declares only whitespace".
-      if (entries.has(name)) continue;
-      entries.set(name, {
-        name,
-        description: (parsed?.description ?? "").trim(),
-        source,
-      });
-    }
-  }
-  return [...entries.values()];
+  const { definitions, diagnostics } = scanAgentDefinitions(input);
+  for (const message of diagnostics) console.warn(message);
+  return [...definitions.values()].map((definition) => ({
+    name: definition.name,
+    description: definition.description,
+    source: definition.source,
+  }));
 }
 
 /**
@@ -1400,6 +1443,12 @@ export function describeRegisteredAgentRoster(input: RegisteredAgentsListInput):
  * pitfall #2, 2026-09-29): the bare `unknown agent: undefined` message named nothing the
  * model could act on. Lists what IS registered under the effective scope, both lookup
  * paths, and the minimal agent-file shape (frontmatter `name:` + system prompt body).
+ *
+ * The file-shape guidance lives HERE and not in the tool description, which is what that
+ * description's own comment claims: both point at the refusal rather than restating it, so a
+ * copy cannot go stale — and `tests/unit/subagent-description.test.ts` fails if one appears in
+ * the description. #205 changed what the guidance has to say (the file name is not an identity;
+ * the `name:` header is), so it landed here, on the same one-home side of that rule.
  */
 export function describeRegisteredAgents(input: RegisteredAgentsListInput): string {
   const { userDir, projectDir } = resolveAgentDirs(input);
@@ -1407,9 +1456,12 @@ export function describeRegisteredAgents(input: RegisteredAgentsListInput): stri
   const names = registered.length > 0 ? "[" + registered.join(", ") + "]" : "(none)";
   return (
     `registered agents: ${names} — ` +
-    `agents load from ${userDir}/<name>.md (user scope) or ${projectDir}/<name>.md ` +
+    `agents load from ${userDir} (user scope) or ${projectDir} ` +
     `(project scope); register one as an agent markdown file: frontmatter header ` +
-    "(`---\\nname: <agent-name>\\n---`) followed by the system prompt body"
+    "(`---\\nname: <agent-name>\\n---`) followed by the system prompt body. " +
+    "the `name:` header IS the agent's name: naming the file after it is the convention, " +
+    "but the two are independent, so a definition is dispatchable under the name it declares " +
+    "even when the file is named otherwise"
   );
 }
 

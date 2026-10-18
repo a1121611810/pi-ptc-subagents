@@ -56,6 +56,9 @@ import {
 //  node:fs mock: agent markdown + prompt tmpfile stay in memory
 // ---------------------------------------------------------------------------
 
+/** The project agents directory `CWD` below resolves to; faked into the fs mock. */
+const AGENTS_DIR = "/integration/work/.pi/agents";
+
 const fsMock = vi.hoisted(() => ({
   agentName: "integration-bg-agent",
   agentMd: "---\nname: integration-bg-agent\n---\nYou are the background integration agent.\n",
@@ -68,9 +71,19 @@ vi.mock("node:fs", async (importOriginal) => {
     if (String(path).endsWith(fsMock.agentName + ".md")) return fsMock.agentMd;
     return (actual.readFileSync as (...args: unknown[]) => unknown)(path, options);
   }) as typeof actual.readFileSync;
+  // `readdirSync` needs faking too, and for a different reason than the read above. Agent
+  // resolution reads a DIRECTORY and matches each file's frontmatter `name:` (#205), so a
+  // mock that only faked `readFileSync` left the scan reading a directory that does not exist on
+  // disk (`CWD` is `/integration/work`) and every scenario in this suite refused with
+  // `registered agents: (none)`. The listing has to name the same file the read above returns.
+  const readdirSync = ((path: unknown, options?: unknown): unknown => {
+    if (String(path) === AGENTS_DIR) return [fsMock.agentName + ".md"];
+    return (actual.readdirSync as (...args: unknown[]) => unknown)(path, options);
+  }) as typeof actual.readdirSync;
   return {
     ...actual,
     readFileSync,
+    readdirSync,
     unlinkSync: (() => undefined) as unknown as typeof actual.unlinkSync,
     rmdirSync: (() => undefined) as unknown as typeof actual.rmdirSync,
     promises: {

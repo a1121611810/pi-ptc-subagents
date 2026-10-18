@@ -58,6 +58,9 @@ You are a research agent. ...
 
 The file's frontmatter `name:` is the name the dispatch uses, and it is the only thing that is — a
 `.md` file carrying no `name:` is not an agent at all, so it is neither listed nor dispatchable.
+The file name is conventional, not binding: `beta.md` whose frontmatter says `name: gamma` is the
+agent `gamma`, and it is not reachable as `beta`. That matches pi's own subagent loader and every
+comparable system; the file name is never an identity.
 One thing distinguishes a definition you wrote that silently failed from a file that was never a
 definition: a `.md` whose first non-blank line opens a frontmatter block or is a `name:` key, but
 which then fails to parse, is skipped _and_ reported — it emits a `console.warn` naming the path.

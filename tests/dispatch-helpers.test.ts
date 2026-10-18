@@ -10,6 +10,7 @@ import {
   discoverAgent,
   dispatch,
   dispatchConcurrencyLimitReached,
+  listRegisteredAgentEntries,
   listRegisteredAgents,
   parseAgentEvent,
   parseAgentMarkdown,
@@ -468,6 +469,82 @@ describe("registered-agent listing + actionable refusals (pitfall #2)", () => {
       );
 
       expect(listRegisteredAgents({ cwd, agentScope: "project", homeDir: cwd })).toEqual([]);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+      await removeTempDir(cwd);
+    }
+  });
+
+  test("listRegisteredAgents resolves a same-scope name collision deterministically and reports the loser", async () => {
+    // Two files in ONE scope declaring one name is a user mistake, and the Agent Skills client
+    // guide requires both halves of the answer: resolve it deterministically, and say which file
+    // lost. Cross-scope shadowing is the opposite case and is deliberately NOT a diagnostic —
+    // user-over-project is the documented rule (#207), not a fault.
+    //
+    // `zebra.md` sorts after `alpha.md`, so "first alphabetically" keeps `alpha.md`. That the
+    // tie-break is alphabetical rather than filesystem order is the point: readdirSync's order
+    // is undefined, and Claude Code documents its own behaviour here as "filesystem read order
+    // rather than a documented precedence".
+    const cwd = await makeTempDir();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await mkdir(join(cwd, ".pi", "agents"), { recursive: true });
+      const definition = (body: string) =>
+        ["---", "name: shared", `description: ${body}`, "---", body].join("\n");
+      await writeFile(join(cwd, ".pi", "agents", "zebra.md"), definition("Z."), "utf8");
+      await writeFile(join(cwd, ".pi", "agents", "alpha.md"), definition("A."), "utf8");
+
+      const entries = listRegisteredAgentEntries({
+        cwd,
+        agentScope: "project",
+        homeDir: cwd,
+      });
+      // ONE name survives, and it is the alphabetical first.
+      expect(entries).toHaveLength(1);
+      expect(entries[0]?.description).toBe("A.");
+      // And a dispatch agrees with the roster about WHICH copy — the #201 half that a
+      // names-only comparison cannot see.
+      expect(discoverAgent("shared", cwd, "project", { homeDir: cwd })?.systemPrompt).toBe("A.");
+      // The loser is named. Counterfactual: drop the shadow diagnostic -> red on the count.
+      expect(warn).toHaveBeenCalledTimes(1);
+      const warning = warn.mock.calls[0]?.[0] ?? "";
+      expect(warning).toContain('agent name "shared"');
+      expect(warning).toContain("shadowing");
+      expect(warning).toContain("zebra.md");
+      expect(warning).toContain("alpha.md");
+    } finally {
+      warn.mockRestore();
+      await removeTempDir(cwd);
+    }
+  });
+
+  test("listRegisteredAgents does not warn when the same name is declared once per scope", async () => {
+    // The other side of the rule above: user-over-project shadowing is the documented
+    // precedence (#207), so listing it would be crying wolf on every `agentScope: "both"`
+    // render for anyone who keeps a definition in both places.
+    const cwd = await makeTempDir();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await mkdir(join(cwd, ".pi", "agent", "agents"), { recursive: true });
+      await mkdir(join(cwd, ".pi", "agents"), { recursive: true });
+      const definition = (body: string) =>
+        ["---", "name: shared", `description: ${body}`, "---", body].join("\n");
+      await writeFile(
+        join(cwd, ".pi", "agent", "agents", "shared.md"),
+        definition("The user copy."),
+        "utf8",
+      );
+      await writeFile(
+        join(cwd, ".pi", "agents", "shared.md"),
+        definition("The project copy."),
+        "utf8",
+      );
+
+      const entries = listRegisteredAgentEntries({ cwd, agentScope: "both", homeDir: cwd });
+      expect(entries).toHaveLength(1);
+      expect(entries[0]?.source).toBe("user");
+      expect(discoverAgent("shared", cwd, "both", { homeDir: cwd })?.source).toBe("user");
       expect(warn).not.toHaveBeenCalled();
     } finally {
       warn.mockRestore();

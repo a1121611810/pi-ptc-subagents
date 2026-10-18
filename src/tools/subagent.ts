@@ -316,7 +316,7 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
       // (which names are registered, and what a definition file looks like) is rendered by
       // `describeRegisteredAgents` from the same resolver a dispatch uses. A copy here would be
       // the copy that goes stale. Same one-home rule the child-report work established.
-      "`agent` is optional — omit it and the child is a fresh generalist pi, with pi's own system prompt and pi's full toolset. Name one to narrow the child instead: an agent is a markdown file at ~/.pi/agent/agents/<name>.md for your machine, or <project>/.pi/agents/<name>.md for one project, and naming one can restrict the child's tools, pin its model, or append a role. A name with no file behind it is refused; the refusal lists what IS registered and how to write one.",
+      "`agent` is optional — omit it and the child is a fresh generalist pi, with pi's own system prompt and pi's full toolset. Name one to narrow the child instead: an agent is a markdown file in ~/.pi/agent/agents/ for your machine, or <project>/.pi/agents/ for one project, and naming one can restrict the child's tools, pin its model, or append a role. A name with no definition behind it is refused; the refusal lists what IS registered and how to write one.",
       // The pre-decision view (see describeRegisteredAgentRoster): names alone only help
       // someone who already suspects a name, and this reaches the model BEFORE any refusal.
       // Both this and the refusal render from listRegisteredAgentEntries — one traversal, one
