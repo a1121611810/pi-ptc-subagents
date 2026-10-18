@@ -200,6 +200,7 @@ type ToolCallLike = Parameters<typeof validateToolArguments>[1];
 type DispatchParameters = TObject<{
   agent: TString;
   task: TString;
+  goal: TOptional<TString>;
   cwd: TOptional<TString>;
   agentScope: TOptional<TUnion<[TLiteral<"user">, TLiteral<"project">, TLiteral<"both">]>>;
   model: TOptional<TString>;
@@ -230,6 +231,18 @@ export const DISPATCH_PARAMETERS: DispatchParameters = Type.Object({
     }),
   ),
   task: Type.String({ minLength: 1 }),
+  // ADR-0042. The description has to say WHEN to pass it, not only what it is: an optional
+  // parameter whose purpose is left implicit is one the model never uses, and an unused `goal`
+  // makes E3 measure nothing.
+  goal: Type.Optional(
+    Type.String({
+      description:
+        "Why this dispatch slice exists, in your own words: the intent behind cutting this task " +
+        "out, not the whole conversation and not the user's original request. Pass it when the " +
+        "task involves judgment or trade-offs, so the child can resolve ambiguities the task " +
+        "text leaves open instead of inventing context. Omit it for a fully specified task.",
+    }),
+  ),
   cwd: Type.Optional(Type.String()),
   // The default is "user", which does NOT see `<cwd>/.pi/agents/`. Without a description here
   // the model cannot know that, so it dispatches a project agent by name and gets a refusal —

@@ -87,12 +87,19 @@ const spawnFailure = vi.hoisted(() => ({ error: undefined as Error | undefined }
  * about argv, and argv is the only place it is visible from the foreground path: the background
  * path can read its own mock's recorder, this one cannot, so the mock records it here.
  */
-const childArgv = vi.hoisted(() => ({ calls: [] as string[][] }));
+const childArgv = vi.hoisted(() => ({ calls: [] as string[][], prompts: [] as string[] }));
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
+  const { readFileSync } = await import("node:fs");
   const fakeSpawn = (_command: string, args: readonly string[]): EventEmitter => {
     childArgv.calls.push([...args]);
+    // The dispatcher deletes the prompt tmpfile before `dispatch()` resolves, so the only moment
+    // its BYTES exist is here. Recorded rather than read later: a test that read the path after
+    // the call would get ENOENT and learn nothing about what the child was told.
+    const promptIndex = args.indexOf("--append-system-prompt");
+    const promptPath = promptIndex >= 0 ? args[promptIndex + 1] : undefined;
+    if (promptPath !== undefined) childArgv.prompts.push(readFileSync(promptPath, "utf8"));
     const proc = new EventEmitter() as EventEmitter & {
       stdout: EventEmitter;
       stderr: EventEmitter;
@@ -642,6 +649,33 @@ describe("dispatch() foreground carries the child report", () => {
       // places, because a child that takes either route has to be told.
       expect(prompt).toContain("must not report usage or token counts");
       expect(CHILD_REPORT_DESCRIPTION).toContain("Do not report usage or token counts");
+    });
+  });
+
+  test("the goal reaches the foreground child's prompt (ADR-0042)", async () => {
+    // The foreground half of the two-call-site rule. Both paths call `appendDepthHint` and both
+    // must pass `goal`; a one-sided wiring spawns children that look configured and silently
+    // lack the caller's reason, which no assertion on the report would notice.
+    await withAgent(async (dir) => {
+      childTranscript.lines = [...COMPLIANT_TRANSCRIPT];
+      childArgv.calls.length = 0;
+      childArgv.prompts.length = 0;
+
+      await dispatch(
+        {
+          agent: "reporter",
+          task: "check the gates",
+          goal: "we are preparing a release",
+          agentScope: "project",
+        },
+        { callId: 4, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+        { slots: new DispatchSlotCounter(4) },
+      );
+
+      const prompt = childArgv.prompts.at(-1);
+      if (prompt === undefined) throw new Error("no foreground child prompt was recorded");
+      expect(prompt).toContain("<pi-ptc-goal>");
+      expect(prompt).toContain("we are preparing a release");
     });
   });
 });

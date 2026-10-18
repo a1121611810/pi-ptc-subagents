@@ -395,6 +395,37 @@ describe("dispatch background spawn", () => {
     });
   });
 
+  test("the goal reaches the background child's prompt (ADR-0042)", async () => {
+    /*
+     * The background half of the two-call-site rule. `appendDepthHint` is called once on each
+     * path, and the foreground and background prompts are materialised separately — the argv
+     * builder they share cannot see this. Wiring only one side leaves a child that looks
+     * correctly configured and silently lacks the caller's reason.
+     *
+     * Counterfactual: drop `goal: input.goal` from the background call site and this is the
+     * single test that turns red.
+     */
+    await withAgent(async (dir) => {
+      const h = createHarness();
+      const result = await dispatch(
+        {
+          agent: AGENT,
+          task: "investigate",
+          goal: "we are preparing a release",
+          background: true,
+          agentScope: "project",
+        },
+        { callId: 11, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+        h.deps,
+      );
+      expect(asHandle(result).status).toBe("running");
+      const opts = h.lifecycle.getRecordedOpts(h.lifecycle.handleAt(0));
+      const prompt = await readFile(opts.promptFile!, "utf8");
+      expect(prompt).toContain("<pi-ptc-goal>");
+      expect(prompt).toContain("we are preparing a release");
+    });
+  });
+
   test("the record carries the tier that took effect, for a background child too (ADR-0041)", async () => {
     /*
      * The background half of "The tier that took effect is reported" (user story 17: background

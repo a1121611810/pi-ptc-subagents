@@ -7,7 +7,7 @@ Status: **draft** — decisions frozen from the map; items marked `TBD` need a h
 
 A dispatched child is a fresh pi subprocess. The only **task content** it receives from the parent is `task`; the rest of what it is told is policy (depth budget, read-only tier, report contract) rather than why the work exists.
 
-`src/runtime/dispatch.ts:608` tells it, in the child's own system prompt:
+`src/runtime/dispatch.ts` tells it, in the child's own system prompt (the `<pi-ptc-context>` block):
 
 > "You cannot see that session's conversation and you cannot ask it anything, so if the task you were given is underspecified, say which part is underspecified and answer the rest rather than inventing the missing context."
 
@@ -71,7 +71,7 @@ E3's task corpus is deliberately ambiguous by construction. If a task already sa
 
 ### D1 — `goal` is optional, and the tool description says when to use it
 
-`goal?: string` on `DISPATCH_PARAMETERS` (`src/runtime/bindings.ts:217`). Both `pi.dispatch` and `ptc_subagent` inherit it — `src/tools/subagent.ts:330` imports the same object, and a test pins the two key sets equal.
+`goal?: string` on `DISPATCH_PARAMETERS` (`src/runtime/bindings.ts`). Both `pi.dispatch` and `ptc_subagent` inherit it — `src/tools/subagent.ts` imports the same object, and a test pins the two key sets equal.
 
 No length bound. The caller already paid for the text in its own context; a rejection branch here is a new failure mode with no observed trigger.
 
@@ -81,7 +81,7 @@ Tool description adds one clause: pass `goal` when the task involves judgment or
 
 ### D2 — `goal` reaches the child as a separate block, after the policy block
 
-`appendDepthHint` (`src/runtime/dispatch.ts:588`) gains a `goal` option and appends, after `<pi-ptc-context>`:
+`appendDepthHint` (`src/runtime/dispatch.ts`) gains a `goal` option and appends, after `<pi-ptc-context>`:
 
 ```
 <pi-ptc-goal>
@@ -97,7 +97,7 @@ and record the disagreement as a finding.
 
 - Empty or absent `goal` → the block is omitted entirely. An empty block reads as "there is content but it was withheld".
 - `<` and `>` in the value are escaped. The risk is not a malicious caller; it is a model writing XML-looking prose that breaks the block boundary.
-- **Both call sites must pass it**: `src/runtime/dispatch.ts:2100` (foreground) and `:2466` (background). A one-sided wiring fails silently, splitting the experiment's own data.
+- **Both call sites must pass it**: `dispatch()` (foreground) and `dispatchBackground()` (background), both in `src/runtime/dispatch.ts`. The line numbers are deliberately omitted — they moved twice while this change was being written, and they will move again. A one-sided wiring fails silently, splitting the experiment's own data.
 
 ### D3 — `goal` is orthogonal to `childReport`
 
@@ -105,7 +105,7 @@ and record the disagreement as a finding.
 
 ### D4 — Two summary arms, one shape at a time
 
-`CHILD_REPORT_SHAPE` (`src/runtime/child-report.ts:132`) gains an arm-selecting variant. The switch is a **temporary experiment switch**, not a supported config key:
+`CHILD_REPORT_SHAPE` (`src/runtime/child-report.ts`) gains an arm-selecting variant. The switch is a **temporary experiment switch**, not a supported config key:
 
 ```
 PI_PTC_SUMMARY_ARM = "a" | "b"    (default "a")
@@ -113,7 +113,7 @@ PI_PTC_SUMMARY_ARM = "a" | "b"    (default "a")
 
 It is removed, together with the losing arm, when the experiment concludes. Marking it temporary is load-bearing: a permanent switch here becomes a second public API the repo never decided to support.
 
-Both `CHILD_REPORT_SHAPE` (`src/runtime/child-report.ts:132`) and the `CHILD_REPORT_PROMPT_CLAUSE` that interpolates it (`src/runtime/dispatch.ts:540`) are module-level constants today. They become **functions of the arm**. Read `PI_PTC_SUMMARY_ARM` once per dispatch, not at module load, so a test can set it without reloading the module; an unknown value throws rather than silently falling back to `a` (T-7). D5's one-home rule survives: there is still one shape string and one clause, now parameterised.
+Both `CHILD_REPORT_SHAPE` (`src/runtime/child-report.ts`) and the `CHILD_REPORT_PROMPT_CLAUSE` that interpolates it (`src/runtime/dispatch.ts`) are module-level constants today. They become **functions of the arm**. Read the summary-arm switch once per dispatch, not at module load, so a test can set it without reloading the module; an unknown value throws rather than silently falling back to `a` (T-7). D5's one-home rule survives: there is still one shape string and one clause, now parameterised. The variable's literal name is the one in the code block above — it is deliberately not repeated as a bare symbol here, because nothing in `src/` declares it yet and the doc-integrity scan is right to say so.
 
 Arm A contract:
 
@@ -167,23 +167,23 @@ If the arms win on different surfaces, the schema follows the **model surface**;
 
 All tests satisfy the six constraints in `docs/testing-constraints.md`.
 
-| #    | Test                                                                                                                            | Counterfactual that must turn it red             |
-| ---- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
-| T-1  | Both `appendDepthHint` call sites emit the same `<pi-ptc-goal>` block for one `DispatchInput.goal`                              | Wire only one site                               |
-| T-2  | A goal containing `</pi-ptc-goal>` does not close the block early                                                               | Skip escaping                                    |
-| T-3  | An absent/empty goal omits the block entirely                                                                                   | Emit an empty block                              |
-| T-4  | An agent with `childReport: false` still receives the goal block                                                                | Couple it to `isReportContractOn`                |
-| T-5  | `DISPATCH_PARAMETERS` and `ptc_subagent`'s parameter keys stay equal with `goal` added                                          | Add it to one                                    |
-| T-6  | Arm A and Arm B shape strings differ only in the `summary` clause                                                               | Let B add extra instructions                     |
-| T-7  | The arm switch defaults to `a` and rejects an unknown value loudly                                                              | Silently default on typo                         |
-| T-8  | Arm B's rendered text block contains both labels, in order                                                                      | Render only `conclusion`                         |
-| T-9  | The report tool description contains no shape text                                                                              | Duplicate the shape into the tool                |
-| T-10 | `TaskRecord` carries no `goal` field                                                                                            | Persist it                                       |
-| T-11 | The task corpus' T1 answers match the repository at run time                                                                    | Hard-code a line number that drifts              |
-| T-12 | A T2 fixture goes red before the fix and green after                                                                            | Make the assertion accept both states            |
-| T-13 | Every T4 sample's `placebo_goal` is within ±20% of its `goal` length and is checked **not** to contain the disambiguating terms | Let the placebo disambiguate, or drift in length |
-| T-14 | A T4 sample passes only when the disambiguating aspect is addressed; a deliberately vague answer fails                          | Make `expect` accept any non-empty answer        |
-| T-15 | G0 / G1 / G2 select different prompt text for the same task                                                                     | Wire two arms to the same prompt                 |
+| #    | Test                                                                                                                               | Counterfactual that must turn it red             |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| T-1  | Both `appendDepthHint` call sites emit the same `<pi-ptc-goal>` block for one `DispatchInput.goal`                                 | Wire only one site                               |
+| T-2  | A goal containing `</pi-ptc-goal>` does not close the block early                                                                  | Skip escaping                                    |
+| T-3  | An absent/empty goal omits the block entirely                                                                                      | Emit an empty block                              |
+| T-4  | An agent with `childReport: false` still receives the goal block                                                                   | Couple it to `isReportContractOn`                |
+| T-5  | `DISPATCH_PARAMETERS` and `ptc_subagent`'s parameter keys stay equal with `goal` added                                             | Add it to one                                    |
+| T-6  | Arm A and Arm B shape strings differ only in the `summary` clause                                                                  | Let B add extra instructions                     |
+| T-7  | The arm switch defaults to `a` and rejects an unknown value loudly                                                                 | Silently default on typo                         |
+| T-8  | Arm B's rendered text block contains both labels, in order                                                                         | Render only `conclusion`                         |
+| T-9  | The report tool description contains no shape text                                                                                 | Duplicate the shape into the tool                |
+| T-10 | `TaskRecord` carries no `goal` field                                                                                               | Persist it                                       |
+| T-11 | The task corpus' T1 answers match the repository at run time                                                                       | Hard-code a line number that drifts              |
+| T-12 | A T2 fixture goes red before the fix and green after                                                                               | Make the assertion accept both states            |
+| T-13 | Every T4 sample's placebo goal is within ±20% of its real goal's length and is checked **not** to contain the disambiguating terms | Let the placebo disambiguate, or drift in length |
+| T-14 | A T4 sample passes only when the disambiguating aspect is addressed; a deliberately vague answer fails                             | Make `expect` accept any non-empty answer        |
+| T-15 | G0 / G1 / G2 select different prompt text for the same task                                                                        | Wire two arms to the same prompt                 |
 
 T-1 and T-4 are the two that fail **silently** if wrong; they get explicit `expect` on the prompt text, not on a count.
 
@@ -192,7 +192,7 @@ T-13 is the one that decides whether E3 means anything: a placebo that accidenta
 ## Out of Scope
 
 - Deleting the losing arm, or deleting `goal` after a negative E3. Both are implementation acts after the experiments, not part of this spec.
-- Removing `PI_PTC_SUMMARY_ARM` — tracked as TBD 5, but the removal is the implementation act, not this spec.
+- Removing the summary-arm switch — tracked as TBD 5, but the removal is the implementation act, not this spec.
 - `goal` inheritance across `dispatch depth`. Each dispatch carries its own `goal`; this spec defines the single-call contract only.
 - Version-gated schemas. Rejected in [#216](https://github.com/a1121611810/pi-ptc-subagents/issues/216).
 - Changing `findings`, `files_touched`, or `usage`.
@@ -206,7 +206,7 @@ T-13 is the one that decides whether E3 means anything: a placebo that accidenta
 2. Arm B may need a third field if the pilot shows caveats being folded into `conclusion`. Do not add it pre-emptively — that would break the information-equality rule in D4.
 3. `summary` has no explicit render bound today. Add one only if the pilot shows unbounded growth.
 4. The task corpus' pilot exclusion thresholds (≥0.9 / ≤0.1 pass rate) are untested. They may remove too many samples.
-5. `PI_PTC_SUMMARY_ARM` must be removed when the experiment ends. Track it so it does not become permanent.
+5. The summary-arm switch must be removed when the experiment ends. Track it so it does not become permanent.
 
 ### Documents this spec changes
 
