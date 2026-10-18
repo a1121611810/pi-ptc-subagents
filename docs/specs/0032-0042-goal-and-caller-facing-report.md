@@ -114,20 +114,14 @@ and record the disagreement as a finding.
 
 All tests satisfy the six constraints in `docs/testing-constraints.md`.
 
-| #    | Test                                                                                               | Counterfactual that must turn it red  |
-| ---- | -------------------------------------------------------------------------------------------------- | ------------------------------------- |
-| T-1  | Both `appendDepthHint` call sites emit the same `<pi-ptc-goal>` block for one `DispatchInput.goal` | Wire only one site                    |
-| T-2  | A goal containing `</pi-ptc-goal>` does not close the block early                                  | Skip escaping                         |
-| T-3  | An absent/empty goal omits the block entirely                                                      | Emit an empty block                   |
-| T-4  | An agent with `childReport: false` still receives the goal block                                   | Couple it to `isReportContractOn`     |
-| T-5  | `DISPATCH_PARAMETERS` and `ptc_subagent`'s parameter keys stay equal with `goal` added             | Add it to one                         |
-| T-6  | Arm A and Arm B shape strings differ only in the `summary` clause                                  | Let B add extra instructions          |
-| T-7  | The arm switch defaults to `a` and rejects an unknown value loudly                                 | Silently default on typo              |
-| T-8  | Arm B's rendered text block contains both labels, in order                                         | Render only `conclusion`              |
-| T-9  | The report tool description contains no shape text                                                 | Duplicate the shape into the tool     |
-| T-10 | `TaskRecord` carries no `goal` field                                                               | Persist it                            |
-| T-11 | The task corpus' T1 answers match the repository at run time                                       | Hard-code a line number that drifts   |
-| T-12 | A T2 fixture goes red before the fix and green after                                               | Make the assertion accept both states |
+| #    | Test                                                                                               | Counterfactual that must turn it red |
+| ---- | -------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| T-1  | Both `appendDepthHint` call sites emit the same `<pi-ptc-goal>` block for one `DispatchInput.goal` | Wire only one site                   |
+| T-2  | A goal containing `</pi-ptc-goal>` does not close the block early                                  | Skip escaping                        |
+| T-3  | An absent/empty goal omits the block entirely                                                      | Emit an empty block                  |
+| T-4  | An agent with `childReport: false` still receives the goal block                                   | Couple it to `isReportContractOn`    |
+| T-5  | `DISPATCH_PARAMETERS` and `ptc_subagent`'s parameter keys stay equal with `goal` added             | Add it to one                        |
+| T-10 | `TaskRecord` carries no `goal` field                                                               | Persist it                           |
 
 T-1 and T-4 are the two that fail **silently** if wrong; they get explicit `expect` on the prompt text, not on a count.
 
