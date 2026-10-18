@@ -288,13 +288,15 @@ describe("registered-agent listing + actionable refusals (pitfall #2)", () => {
   const SCOUT_MD = "---\nname: scout\n---\nYou scout.\n";
   const REVIEWER_MD = "---\nname: reviewer\n---\nYou review.\n";
 
-  test("listRegisteredAgents reads the scope's dirs, frontmatter name with filename fallback", async () => {
+  test("listRegisteredAgents reads the scope's dirs and lists only definitions that name themselves", async () => {
     const home = await makeTempDir();
     const cwd = await makeTempDir();
     try {
       await mkdir(join(home, ".pi", "agent", "agents"), { recursive: true });
       await writeFile(join(home, ".pi", "agent", "agents", "scout.md"), SCOUT_MD);
-      // No frontmatter at all: the file name is the fallback name.
+      // No frontmatter at all, so no `name:`, so not an agent (#201). The file name is NOT a
+      // fallback: `discoverAgent("note-taker", ...)` returns null for this exact file, and
+      // listing it put both answers in one refusal.
       await writeFile(join(home, ".pi", "agent", "agents", "note-taker.md"), "just a body\n");
       // Not markdown: never an agent.
       await writeFile(join(home, ".pi", "agent", "agents", "README.txt"), "notes\n");
@@ -302,15 +304,11 @@ describe("registered-agent listing + actionable refusals (pitfall #2)", () => {
       await writeFile(join(cwd, ".pi", "agents", "reviewer.md"), REVIEWER_MD);
 
       // Names are sorted so the refusal message is deterministic.
-      expect(listRegisteredAgents({ cwd, agentScope: "user", homeDir: home })).toEqual([
-        "note-taker",
-        "scout",
-      ]);
+      expect(listRegisteredAgents({ cwd, agentScope: "user", homeDir: home })).toEqual(["scout"]);
       expect(listRegisteredAgents({ cwd, agentScope: "project", homeDir: home })).toEqual([
         "reviewer",
       ]);
       expect(listRegisteredAgents({ cwd, agentScope: "both", homeDir: home })).toEqual([
-        "note-taker",
         "reviewer",
         "scout",
       ]);
@@ -349,7 +347,7 @@ describe("registered-agent listing + actionable refusals (pitfall #2)", () => {
     }
   });
 
-  test("listRegisteredAgents warns and falls back to the filename when one agent file cannot be read", async () => {
+  test("listRegisteredAgents warns and skips an agent file it cannot read", async () => {
     // Genuine read failure (constraint #1/#3 dual to the absent-dir case above). The fixture
     // is a real DIRECTORY named `ghost.md`: readFileSync then fails with EISDIR on every
     // platform, whereas chmod-0 can still be readable by the owning user on some setups — so
@@ -360,16 +358,19 @@ describe("registered-agent listing + actionable refusals (pitfall #2)", () => {
       await mkdir(join(cwd, ".pi", "agents"), { recursive: true });
       await mkdir(join(cwd, ".pi", "agents", "ghost.md"));
 
-      // Behaviour preserved: the fallback filename still appears in the listing.
-      expect(listRegisteredAgents({ cwd, agentScope: "project", homeDir: cwd })).toEqual(["ghost"]);
-      // Constraint #3: the failure is observable. Counterfactual: deleting the console.warn
-      // from the read failure path leaves the spy at zero calls and fails this assertion;
-      // warning on the absent-dir path instead would fail the call count.
+      // Skipped, not listed under its file name (#201). `discoverAgent("ghost", ...)` reads
+      // this same path, hits the same EISDIR, and returns null — so listing it advertised an
+      // agent the refusal would deny. Counterfactual: restore the filename fallback -> red.
+      expect(listRegisteredAgents({ cwd, agentScope: "project", homeDir: cwd })).toEqual([]);
+      // Constraint #3: the failure is observable, so skipping is not a silent failure.
+      // Counterfactual: deleting the console.warn from the read failure path leaves the spy at
+      // zero calls and fails this assertion; warning on the absent-dir path instead would fail
+      // the call count.
       expect(warn).toHaveBeenCalledTimes(1);
       const warning = warn.mock.calls[0]?.[0] ?? "";
       expect(warning).toContain("pi.dispatch: cannot read agent file");
       expect(warning).toContain(join(cwd, ".pi", "agents", "ghost.md"));
-      expect(warning).toContain("falling back to the filename");
+      expect(warning).toContain("skipping it");
     } finally {
       warn.mockRestore();
       await removeTempDir(cwd);

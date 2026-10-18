@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **The agent roster and agent discovery now name the same agents.** A `.md` file whose frontmatter
+  carried no `name:` was advertised by the roster under its file name and refused by dispatch as an
+  unknown agent — in the same message, because the refusal renders that roster. A model told an
+  agent exists could not dispatch it, and the self-contradicting refusal made the real cause hard to
+  read. Identity is the frontmatter `name:` and nothing else, which is what pi's own subagent loader
+  does: it skips a definition whose frontmatter has no string `name`, and never derives identity
+  from the file name. The roster now applies the same predicate `discoverAgent` applies, so the
+  invariant — for one scope, the names the roster lists are the names a dispatch resolves — holds by
+  construction rather than by two patches that happen to agree. A file that exists but cannot be
+  read is likewise no longer listed under its file name; it still emits a `console.warn`, so that
+  failure remains observable. **Behaviour change:** a file relying on the file-name fallback stops
+  appearing in the roster, in the refusal's registry listing, and in the `ptc_subagent` tool
+  description. Add a frontmatter `name:` to keep it dispatchable.
+
 ## [3.3.1] - 2026-10-16
 
 ### Changed

@@ -501,7 +501,7 @@ describe("an unusable install says so instead of pretending", () => {
     });
   });
 
-  test("a file that exists but cannot be parsed shows up in the registry, unlike an absent one", async () => {
+  test("a file that exists but cannot be parsed is refused and not advertised, exactly like an absent one", async () => {
     await withFakePi(async (cwd) => {
       await mkdir(join(cwd, ".pi", "agents"), { recursive: true });
       await writeFile(
@@ -515,25 +515,33 @@ describe("an unusable install says so instead of pretending", () => {
       expect(result.errorMessage).toContain("unknown agent");
 
       /*
-       * The previous version of this test asserted `errorMessage` contains "broken" and called
-       * that the distinction. It is not one: the refusal embeds the REQUESTED name, so an agent
-       * called `broken` that does not exist anywhere produces the same substring. Measured:
-       * making `listRegisteredAgents` skip unparseable files — which makes the two cases literally
-       * identical — left this test green.
+       * **This assertion is inverted, and that is #201 landing as designed.**
        *
-       * What actually differs, and what a user needs: the refusal's registry listing. A file that
-       * is there but unparseable is still a file the directory holds, so it appears in the list
-       * the refusal prints. An absent one leaves the list empty. That is the line that has to be
-       * asserted for the distinction to be observable at all, and it is what turns red when the
-       * listing stops surfacing unparseable files.
+       * Two previous versions of this test, and why neither is what is asserted here:
+       *
+       * 1. It asserted `errorMessage` contains "broken". Not a distinction at all: the refusal
+       *    embeds the REQUESTED name, so an agent called `broken` that exists nowhere produces
+       *    the same substring. Measured: making `listRegisteredAgents` skip unparseable files —
+       *    which makes the two cases literally identical — left this version green.
+       * 2. It then asserted the registry listing contains `[broken]`, on the reasoning that a
+       *    file the directory visibly holds should be listed. That WAS a real distinction, and it
+       *    was pinned here deliberately, as a tripwire: this test was the line that turned red
+       *    when the listing stopped surfacing unparseable files. It has now turned red, because
+       *    the roster no longer substitutes the file name.
+       *
+       * The tripwire did its job, so the change behind it is the one worth pinning. Identity is
+       * the frontmatter `name:` — pi's subagent loader skips a definition without a string `name`
+       * and never derives identity from the file name — so this file is not an agent, the empty
+       * registry is the true answer, and the refusal must not name a file it just refused.
+       *
+       * Counterfactual: restore the file-name fallback in `listRegisteredAgentEntries` and the
+       * negative assertion below goes red.
        */
-      expect(result.errorMessage, "the registry lists the file that is there").toContain(
-        "[broken]",
-      );
       expect(
         result.errorMessage,
-        "and an absent agent is the other branch — verified by the case above",
-      ).toContain("registered agents:");
+        "the registry does not advertise a file it just refused",
+      ).not.toContain("[broken]");
+      expect(result.errorMessage).toContain("registered agents: (none)");
     });
   });
 });

@@ -1185,9 +1185,12 @@ export interface RegisteredAgentEntry {
 /**
  * The agents registered under the effective scope — the same two directories
  * `discoverAgent` searches — each with its description and source. A file's name is its
- * frontmatter `name:` field, falling back
- * to the file name (minus `.md`), mirroring how pi's own agent listers present agents
- * whose frontmatter is missing or malformed. Per lookup directory:
+ * frontmatter `name:` field and nothing else: a `.md` file carrying no `name:` is not an
+ * agent at all. That is what pi's own subagent loader does — it skips a definition whose
+ * frontmatter has no string `name` and never derives identity from the file name — so the
+ * roster applies the SAME predicate `discoverAgent` applies rather than a second, looser one
+ * (#201). The result is sorted and de-duplicated so the message built from it is
+ * deterministic. Per lookup directory:
  *
  * - **Silent** (no entries, no warn — the path genuinely holds nothing to list): the agents
  *   dir is absent, together with every component above it (the normal case for a project with
@@ -1205,10 +1208,11 @@ export interface RegisteredAgentEntry {
  * {@link isSilentReaddirMiss} carries the full, exhaustive enumeration of which errno shapes
  * land in each bucket; this summary and it must not drift.
  *
- * A `.md` file that exists but cannot be read (permissions, wrong file type) still contributes
- * its filename fallback, with its own `console.warn` so the failure is observable
- * (testing-constraints #3). The result is sorted and de-duplicated so the message built
- * from it is deterministic.
+ * A `.md` file that exists but cannot be read (permissions, wrong file type) is skipped, with
+ * its own `console.warn` so the failure is observable (testing-constraints #3). It is not
+ * listed under its file name, for the same reason a nameless one is not listed:
+ * `discoverAgent` cannot resolve it either, and a roster entry that nothing can dispatch is
+ * the identical contradiction (#201).
  */
 export function listRegisteredAgentEntries(
   input: RegisteredAgentsListInput,
@@ -1240,22 +1244,21 @@ export function listRegisteredAgentEntries(
     }
     for (const entry of names) {
       if (!entry.endsWith(".md")) continue;
-      const fallback = entry.slice(0, -".md".length);
       const filePath = path.join(dir, entry);
       let raw: string;
       try {
         raw = fs.readFileSync(filePath, "utf-8");
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
-        console.warn(
-          `pi.dispatch: cannot read agent file ${filePath}: ${detail}; falling back to the filename`,
-        );
-        if (!entries.has(fallback))
-          entries.set(fallback, { name: fallback, description: "", source });
+        console.warn(`pi.dispatch: cannot read agent file ${filePath}: ${detail}; skipping it`);
         continue;
       }
       const parsed = parseAgentMarkdown(raw);
-      const name = parsed?.name ?? fallback;
+      // No fallback to the file name (#201). `discoverAgent` requires the parsed frontmatter
+      // name to equal the requested one, so advertising a file name here would list an agent
+      // the refusal then denies -- in the same message, which is what made the bug unreadable.
+      if (!parsed) continue;
+      const name = parsed.name;
       if (name.length === 0) continue;
       // `parseAgentMarkdown` yields `""` — not undefined — for an absent `description`, so the
       // trim here is what separates "declares none" from "declares only whitespace".

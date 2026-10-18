@@ -16,11 +16,13 @@
 
 import { describe, expect, test } from "vitest";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   describeRegisteredAgentRoster,
   describeRegisteredAgents,
+  discoverAgent,
   listRegisteredAgentEntries,
   listRegisteredAgents,
 } from "../../src/runtime/dispatch.ts";
@@ -232,5 +234,186 @@ describe("the scope default the model cannot see otherwise", () => {
      */
     expect(description, "states that the argument is optional").toMatch(/optional/i);
     expect(description, "and does not call it required").not.toMatch(/required/i);
+  });
+});
+
+/**
+ * #201 — the roster and discovery must name the same agents.
+ *
+ * The oracle here is the OTHER implementation, not a hand-written expectation: every candidate
+ * name in the scope is put to `discoverAgent` and the roster is asked for its list, and the two
+ * sets are compared. A disagreement is therefore measured rather than restated. Before the fix a
+ * file whose frontmatter carried no `name:` was advertised under its file name AND refused by the
+ * dispatch that renders that same roster — both answers in one message, which is what made the
+ * original report read like a fixture problem.
+ *
+ * Identity is the frontmatter `name:` because that is pi's rule: its subagent loader skips a
+ * definition with no string `name` and never derives identity from the file name. The roster now
+ * applies the predicate `discoverAgent` applies, instead of a second and looser one.
+ */
+
+/** Frontmatter without a `name:` — the exact fixture shape #201 was filed against. */
+const NAMELESS = "---\nchildReport: false\n---\nYou are nobody.\n";
+
+/** No frontmatter delimiter at all: also unparseable, by the same rule. */
+const BODY_ONLY = "just a body, no frontmatter at all\n";
+
+async function writeRawProject(project: string, fileName: string, content: string) {
+  await writeFile(join(project, ".pi", "agents", fileName), content);
+}
+
+async function writeRawUser(home: string, fileName: string, content: string) {
+  await writeFile(join(home, ".pi", "agent", "agents", fileName), content);
+}
+
+/**
+ * The candidate names in one agents directory, DISCOVERED rather than assumed — a fixture the
+ * test forgot to create would otherwise silently drop out of the oracle instead of failing.
+ */
+function candidatesIn(dir: string): string[] {
+  return readdirSync(dir)
+    .filter((file) => file.endsWith(".md"))
+    .map((file) => file.slice(0, -".md".length))
+    .sort();
+}
+
+describe("the roster advertises exactly what a dispatch can resolve (#201)", () => {
+  test("the listed set equals the resolvable set for every way a file can lack a name", async () => {
+    await withAgentDirs(async ({ home, project }) => {
+      await writeAgent(project, "alpha", "Named in its own frontmatter.");
+      await writeRawProject(project, "nameless.md", NAMELESS);
+      await writeRawProject(project, "body-only.md", BODY_ONLY);
+      await writeRawProject(project, "empty.md", "");
+      // Not markdown: never an agent, and never a candidate.
+      await writeRawProject(project, "README.txt", "notes\n");
+
+      const candidates = candidatesIn(join(project, ".pi", "agents"));
+      const resolvable = candidates.filter(
+        (name) => discoverAgent(name, project, "both", { homeDir: home }) !== null,
+      );
+
+      // Only `alpha` names itself, so it is the only one a dispatch can resolve. Stated as a
+      // literal rather than as a copy of the roster, so the two assertions can actually differ.
+      expect(resolvable).toEqual(["alpha"]);
+      // THE INVARIANT. Counterfactual: restore the filename fallback in
+      // `listRegisteredAgentEntries` and this gains nameless / body-only / empty while
+      // `resolvable` does not -> red.
+      expect(listRegisteredAgents({ cwd: project, agentScope: "both", homeDir: home })).toEqual(
+        resolvable,
+      );
+    });
+  });
+
+  test("a name defined in both scopes is advertised once and resolves to the same copy", async () => {
+    await withAgentDirs(async ({ home, project }) => {
+      await writeUserAgent(home, "shared", "The user-scope definition.");
+      await writeAgent(project, "shared", "The project-scope definition.");
+      await writeRawUser(home, "nameless.md", NAMELESS);
+
+      // De-duplicated: the same name in both scopes is ONE name, and asking about it twice would
+      // double it in the oracle and make the comparison fail for the wrong reason.
+      const candidates = [
+        ...new Set([
+          ...candidatesIn(join(home, ".pi", "agent", "agents")),
+          ...candidatesIn(join(project, ".pi", "agents")),
+        ]),
+      ].sort();
+      const resolvable = candidates.filter(
+        (name) => discoverAgent(name, project, "both", { homeDir: home }) !== null,
+      );
+
+      expect(resolvable).toEqual(["shared"]);
+      expect(listRegisteredAgents({ cwd: project, agentScope: "both", homeDir: home })).toEqual(
+        resolvable,
+      );
+      /*
+       * Precedence, cross-checked in BOTH directions rather than asserted once. The roster
+       * carries a `source` per entry and discovery returns the same field, so a roster that
+       * advertised the project copy while dispatch resolved the user copy would survive a
+       * names-only comparison — this is the half that catches it.
+       */
+      const entries = listRegisteredAgentEntries({
+        cwd: project,
+        agentScope: "both",
+        homeDir: home,
+      });
+      expect(entries).toHaveLength(1);
+      expect(entries[0]?.source).toBe("user");
+      expect(discoverAgent("shared", project, "both", { homeDir: home })?.source).toBe("user");
+    });
+  });
+
+  test("a definition with no frontmatter name is named by neither the roster nor the refusal", async () => {
+    await withAgentDirs(async ({ home, project }) => {
+      await writeAgent(project, "research", "Project-level investigation.");
+      await writeRawProject(project, "nameless.md", NAMELESS);
+      await writeRawProject(project, "body-only.md", BODY_ONLY);
+
+      const input = { cwd: project, agentScope: "both" as const, homeDir: home };
+      const roster = describeRegisteredAgentRoster(input);
+      const refusal = describeRegisteredAgents(input);
+
+      expect(roster).toContain("research (project scope)");
+      // The original defect, in its reported shape: the refusal listed the very name it refused.
+      // Counterfactual: restore the filename fallback -> both strings name them -> red.
+      expect(roster).not.toContain("nameless");
+      expect(roster).not.toContain("body-only");
+      expect(refusal).toContain("registered agents: [research]");
+      expect(refusal).not.toContain("nameless");
+      expect(refusal).not.toContain("body-only");
+    });
+  });
+
+  /**
+   * The one case the invariant does NOT reach, recorded rather than left for the next reader to
+   * re-derive.
+   *
+   * `discoverAgent` rebuilds the file path from the requested name, so it can only resolve an
+   * agent whose FILE name equals its frontmatter `name:`. An agent whose two disagree is
+   * advertised under the frontmatter name and is dispatchable under NEITHER name. That is the
+   * roster/discovery mismatch again, from a different cause — but it behaves identically before
+   * and after #201, which is scoped to the null parse, so this change neither introduced nor
+   * fixed it. pi's own loader keys agents by the frontmatter name and has no such constraint;
+   * this is a real divergence from pi, filed separately rather than folded in here.
+   */
+  test("an agent whose file name disagrees with its frontmatter name stays a separate mismatch", async () => {
+    await withAgentDirs(async ({ home, project }) => {
+      await writeRawProject(
+        project,
+        "beta.md",
+        "---\nname: gamma\ndescription: Renamed.\n---\nYou are gamma.\n",
+      );
+
+      // Advertised under the frontmatter name — pi's rule, the one #201 settled.
+      expect(listRegisteredAgents({ cwd: project, agentScope: "both", homeDir: home })).toEqual([
+        "gamma",
+      ]);
+      // ...and unresolvable under either name, because the path is rebuilt from the name.
+      expect(discoverAgent("gamma", project, "both", { homeDir: home })).toBeNull();
+      expect(discoverAgent("beta", project, "both", { homeDir: home })).toBeNull();
+    });
+  });
+
+  /**
+   * pi's loader also requires a string `description`; this package tolerates an absent one. That
+   * divergence is not the #201 defect (the invariant is about NAMES) and is deliberately not
+   * changed here — the answer is pinned so the next reader does not have to re-derive which rule
+   * this package follows: an agent with a name and no description stays listed, stays
+   * dispatchable, and says so in the roster rather than vanishing from it.
+   */
+  test("a name with no description stays listed and dispatchable, and the roster states it", async () => {
+    await withAgentDirs(async ({ home, project }) => {
+      await writeAgent(project, "silent", null);
+
+      expect(listRegisteredAgents({ cwd: project, agentScope: "both", homeDir: home })).toEqual([
+        "silent",
+      ]);
+      expect(discoverAgent("silent", project, "both", { homeDir: home })?.systemPrompt).toBe(
+        "You are silent.",
+      );
+      expect(
+        describeRegisteredAgentRoster({ cwd: project, agentScope: "both", homeDir: home }),
+      ).toContain("silent (project scope): (no description given)");
+    });
   });
 });

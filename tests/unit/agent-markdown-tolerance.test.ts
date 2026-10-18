@@ -1,5 +1,6 @@
 /**
- * T3 (#180): agent files survive the shapes real editors write, and a broken one says so.
+ * T3 (#180): agent files survive the shapes real editors write, and a malformed one is not an
+ * agent.
  *
  * Two separate defects, and the second is what makes the first worth fixing.
  *
@@ -8,9 +9,15 @@
  * reads, from every layer above, as "no such agent". So a perfectly good agent file silently
  * stopped being an agent.
  *
- * Worse, "the file is there but I could not parse it" and "the file is not there" collapsed into
- * the same outcome. Without the distinction the only way to learn that your agent file had been
- * re-saved with CRLF is to go read the bytes yourself.
+ * "The file is there but I could not parse it" and "the file is not there" collapsed into the same
+ * outcome, which is the half of the problem the tolerance above removes for the shapes real
+ * editors actually write.
+ *
+ * **What remains after that is deliberate (#201).** A file that is genuinely malformed -- no
+ * frontmatter delimiter at all -- is still not an agent, and it is now also absent from the
+ * registry, because the roster advertising a name that dispatch refuses is the contradiction that
+ * issue was filed about. See the last test in this block for why an empty listing is the true
+ * answer there rather than a silent loss.
  *
  * **The fixtures below carry real `\r\n` and real `\uFEFF`.** That is the whole test. Written as
  * `.join("\n")` or with an escaped `\r` that never reaches the parser, they would pass against the
@@ -87,7 +94,7 @@ describe("unparseable is distinguishable from absent", () => {
   /** A definition whose body exists but whose frontmatter cannot be a frontmatter. */
   const UNPARSEABLE = ["name: reviewer", "---", "Review a diff."].join("\n");
 
-  test("a path that exists but does not parse is reported differently from one that does not exist", async () => {
+  test("a path that exists but does not parse does not resolve as an agent", async () => {
     const home = await mkdtemp(join(tmpdir(), "ptc-agent-parse-"));
     const cwd = await mkdtemp(join(tmpdir(), "ptc-agent-cwd-"));
     try {
@@ -95,8 +102,14 @@ describe("unparseable is distinguishable from absent", () => {
       await writeFile(join(home, ".pi", "agent", "agents", "reviewer.md"), UNPARSEABLE, "utf8");
       const found = discoverAgent("reviewer", cwd, "user", { homeDir: home });
       // The signature cannot carry the reason -- it is a lookup, and a lookup that cannot resolve
-      // returns null. What this pins is that the two cases do NOT collapse at this layer, so the
-      // refusal above it has something to say.
+      // returns null.
+      //
+      // This test used to be titled "is reported differently from one that does not exist", and
+      // the difference it named is GONE as of #201: an unparseable file and an absent one now
+      // produce the same refusal, because the roster no longer substitutes the file name. What
+      // survives is the half of the invariant that lives at THIS layer, and it is the half the
+      // roster depends on — a file with no usable frontmatter name is not an agent, so there is
+      // nothing for the roster to advertise on its behalf.
       expect(found, "an unparseable file does not resolve as an agent").toBeNull();
       expect(UNPARSEABLE, "and the file genuinely is there").not.toBe("");
     } finally {
@@ -105,7 +118,7 @@ describe("unparseable is distinguishable from absent", () => {
     }
   });
 
-  test("the listing surfaces the unparseable file rather than dropping it silently", async () => {
+  test("a file whose frontmatter cannot parse is not listed as an agent", async () => {
     const { listRegisteredAgents } = await import("../../src/runtime/dispatch.ts");
     const home = await mkdtemp(join(tmpdir(), "ptc-agent-list-"));
     const cwd = await mkdtemp(join(tmpdir(), "ptc-agent-cwd2-"));
@@ -113,11 +126,23 @@ describe("unparseable is distinguishable from absent", () => {
     try {
       await mkdir(join(home, ".pi", "agent", "agents"), { recursive: true });
       await writeFile(join(home, ".pi", "agent", "agents", "broken.md"), UNPARSEABLE, "utf8");
-      // A file whose frontmatter cannot parse still appears in the listing under its filename,
-      // the same way a file that cannot be READ falls back to its filename. Without this the
-      // session-start check reports "no agent configured" for a directory that visibly has one,
-      // and the user has no way to tell which half of the story is true.
-      expect(listRegisteredAgents({ cwd, agentScope: "user", homeDir: home })).toContain("broken");
+
+      /*
+       * **The contract REVERSED here in #201, on purpose.** This test used to require the file
+       * to be listed under its filename, on the reasoning that "no agent configured" for a
+       * directory that visibly holds one leaves the user no way to tell which half of the story
+       * is true.
+       *
+       * That reasoning bought exactly the ambiguity #201 was filed about: the roster advertised a
+       * name `discoverAgent` refuses, and the refusal prints the roster, so one message carried
+       * both answers at once. Identity is the frontmatter `name:` because pi's subagent loader
+       * skips a definition without one and never derives identity from the file name — so this
+       * file is not an agent, and a registry listing nothing is the TRUE answer rather than a
+       * silent loss.
+       *
+       * Counterfactual: restore the file-name fallback in `listRegisteredAgentEntries` -> red.
+       */
+      expect(listRegisteredAgents({ cwd, agentScope: "user", homeDir: home })).toEqual([]);
     } finally {
       await rm(home, { recursive: true, force: true });
       await rm(cwd, { recursive: true, force: true });

@@ -56,7 +56,8 @@ tools: read, grep, find, ls
 You are a research agent. ...
 ```
 
-The file's frontmatter `name:` is the name the dispatch uses (the file name is the fallback).
+The file's frontmatter `name:` is the name the dispatch uses, and it is the only thing that is — a
+`.md` file carrying no `name:` is not an agent at all, so it is neither listed nor dispatchable.
 `description:` is what the model reads to decide whether to name this agent at all, so it is worth
 writing as a trigger condition rather than a title. `tools:` restricts the child to that list; a
 definition that omits it leaves pi's full toolset in place, exactly as the generalist has it.
