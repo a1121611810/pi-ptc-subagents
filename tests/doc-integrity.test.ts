@@ -1491,7 +1491,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     //        五处 hunk 全落在 1188-1262，净增 3 行（17 增 14 删），本条锚点在其下方）
     //   20 → subagent.ts:217  = `export const SUBAGENT_OUTPUT_SCHEMA: SubagentOutputSchema`
     //        （2026-10-16 复核：197 是更早快照；#199 在 subagent.ts 顶部加了 usage 字段后实测 217）
-    //   27 → dispatch.ts:1657 = `function accumulateUsage(`（usage 的累加点，前景后台共用）
+    //   33 → dispatch.ts:1657 = `function accumulateUsage(`（usage 的累加点，前景后台共用）
     //        （2026-10-18 复核：1654→1657，+3，同上——#201 的 listRegisteredAgentEntries）
     //   55 → subagent.ts:474 = 把投影写进 `structuredContent:` 的那一行（settled 路径）
     //        （2026-10-16 复核：#199 的 usage 字段把该行从 428 推到 474；413 是更早快照）
