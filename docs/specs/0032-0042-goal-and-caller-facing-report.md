@@ -35,18 +35,7 @@ The child is told, in that block, that the task remains the deliverable and the 
 
 `goal` is **orthogonal to `childReport`**. An agent that opts out of the report contract still receives the goal, because the two switches answer different questions (output contract vs input context).
 
-### 2. `summary` — a caller-facing interpretation
-
-Two arms are built and measured; one ships.
-
-- **Arm A** — `summary` stays `string`; only the prompt contract changes, from "what you concluded" to "what this means for the caller".
-- **Arm B** — `summary` becomes `{ conclusion: string, implication: string }`.
-
-Arm B carries **the same information as Arm A**, only structured. That equality is a hard requirement: if B also adds instructions, the experiment measures instruction volume rather than shape.
-
-Both arms keep one schema-level rule: `summary` states meaning, `findings` state facts, and the same statement must not appear in both.
-
-### 3. The experiments
+### 2. The experiment
 
 Both changes are decided by measurement, not argument.
 
@@ -66,6 +55,11 @@ E3's task corpus is deliberately ambiguous by construction. If a task already sa
 7. As a maintainer, I want a pre-registered "cut both" outcome, so that a difference between arms is never mistaken for value.
 8. As a maintainer, I want `goal` validated against a **placebo**, so that "extra context helps" is never reported as "the intent helps".
 9. As a maintainer, I want the `goal` experiment to run before the summary experiment, so that a negative result removes work instead of leaving it built.
+
+> **Updated 2026-10-19.** The summary-shape arms (formerly D4–D7) and the provenance fields of
+> ADR-0042 were built and measured. Neither survived: the summary shape did not improve a
+> parent's judgement, and the provenance enum collapsed to a single label. Both are removed.
+> This spec now covers `goal` and the experiment that validated it.
 
 ## Implementation Decisions
 
@@ -103,54 +97,7 @@ and record the disagreement as a finding.
 
 `isReportContractOn(agent)` continues to gate **only** `CHILD_REPORT_PROMPT_CLAUSE` and the report tool in `childToolList`. No new `goal: false` switch. The privacy boundary is the caller's: if an agent must not see a goal, the caller must not pass one.
 
-### D4 — Two summary arms, one shape at a time
-
-`CHILD_REPORT_SHAPE` (`src/runtime/child-report.ts`) gains an arm-selecting variant. The switch is a **temporary experiment switch**, not a supported config key:
-
-```
-PI_PTC_SUMMARY_ARM = "a" | "b"    (default "a")
-```
-
-It is removed, together with the losing arm, when the experiment concludes. Marking it temporary is load-bearing: a permanent switch here becomes a second public API the repo never decided to support.
-
-Both `CHILD_REPORT_SHAPE` (`src/runtime/child-report.ts`) and the `CHILD_REPORT_PROMPT_CLAUSE` that interpolates it (`src/runtime/dispatch.ts`) are module-level constants today. They become **functions of the arm**. Read the summary-arm switch once per dispatch, not at module load, so a test can set it without reloading the module; an unknown value throws rather than silently falling back to `a` (T-7). D5's one-home rule survives: there is still one shape string and one clause, now parameterised. The variable's literal name is the one in the code block above — it is deliberately not repeated as a bare symbol here, because nothing in `src/` declares it yet and the doc-integrity scan is right to say so.
-
-Arm A contract:
-
-```
-"summary"      — what your result means for the caller: what changes because
-                 of it, or what they should do with it. Not a restatement of
-                 the findings.
-"findings"     — ... State facts here, not advice.
-"files_touched" — ...
-Say what it means in "summary" and what is true in "findings". Do not make the
-same statement twice. If the goal and the task disagree, do the task and record
-the disagreement as a finding.
-```
-
-Arm B contract replaces the `summary` clause with:
-
-```
-"summary"      — an object with exactly these keys:
-                   "conclusion"  — one line: what you concluded.
-                   "implication" — what your result means for the caller ...
-```
-
-Both arms keep `findings` and `files_touched` byte-identical.
-
-### D5 — The shape has exactly one home
-
-Per ADR-0032, the contract lives in the prompt (`CHILD_REPORT_SHAPE`), and `src/tools/child-report-tool.ts` points at it rather than repeating it. Adding an arm does not add a home; it adds a branch inside the existing one.
-
-### D6 — Render bounds are unchanged
-
-20 findings, 20 files touched, 150 characters of evidence per finding. Arm B's `summary` object is rendered as two labelled lines; it gets no new bound in this spec (`TBD` if the pilot shows it growing without limit).
-
-### D7 — One schema, decided by the model-surface cells
-
-If the arms win on different surfaces, the schema follows the **model surface**; the script surface gets a documented workaround (`read findings`), not a field. Basis: ADR-0032 declares the model reading the prose to be the primary channel. See [#211](https://github.com/a1121611810/pi-ptc-subagents/issues/211).
-
-### D8 — Experiment shape is fixed
+### D4 — E3, the experiment that decided `goal`
 
 - **E3 `goal` validation** — three arms: **G0** (no goal), **G1** (real goal), **G2** (**placebo goal**: same length, plausible, does not disambiguate). Run **before E1**, because a negative result removes D1–D3 and the whole T4 corpus.
 - **T4 task class** — intent-sensitive tasks: the `task` text is deliberately ambiguous, the `goal` disambiguates it, and the check only passes if the child resolved the right aspect. At least 6 samples. Without this class the experiment measures nothing.
@@ -212,7 +159,6 @@ T-13 is the one that decides whether E3 means anything: a placebo that accidenta
 
 - `CONTEXT.md` — add `goal`; amend `child report` for the new `summary` semantics.
 - `docs/adr/0032-child-report.md` — amend for the two-arm summary contract.
-- **ADR-0042 (to be written)** — the `goal` parameter is a public contract and a real trade-off: a child gains context and loses a stated boundary. It needs its own record, and this spec's filename carries its number.
 
 ### The question E3 answers
 
