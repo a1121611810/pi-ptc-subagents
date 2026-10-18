@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.4.0] - 2026-10-19
+
+### Added
+
+- **`goal` on a dispatch.** `pi.dispatch` and `ptc_subagent` take an optional `goal`: the caller's
+  reason for this dispatch slice, not the conversation and not the user's original request. The
+  child receives it as its own `<pi-ptc-goal>` block after the host's policy block, and is told the
+  task remains the deliverable. Measured across five model configurations on twelve conflict
+  fixtures: 35 discordant pairs favoured the real goal, none favoured either control, and an
+  equal-length placebo passed 2 of 60 runs. See ADR-0042.
+- `docs/research/wayfinder-208-negative-results.md` records two candidate features that were built,
+  measured, and dropped (the summary arms and the provenance fields), with the method notes that
+  make their negative results reusable.
+
 ## [3.3.3] - 2026-10-18
 
 ### Fixed
