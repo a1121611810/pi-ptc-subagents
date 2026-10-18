@@ -943,6 +943,37 @@ export function parseAgentMarkdown(content: string): {
 }
 
 /**
+ * Whether a `.md` file's head says it was written AS an agent definition, as opposed to being
+ * prose kept beside the agents (#204).
+ *
+ * `parseAgentMarkdown` returns a bare `null`, so a caller cannot tell "no frontmatter" from
+ * "frontmatter without a `name:`" — and that distinction is the whole question. Both readings
+ * mean the file is not an agent (#201), but only one of them means the user wrote something and
+ * it silently failed, so only one of them may be silent.
+ *
+ * The discrimination is the FIRST non-blank line, never the whole file. A file is definition-
+ * shaped when that line opens a frontmatter block (`---`) or is a `name:` key — the second form
+ * being the real one, since a definition saved with its opening delimiter lost still leads with
+ * its own `name:`. Anchoring on the head is what keeps prose out: a README whose body uses `---`
+ * as a horizontal rule, or mentions `name:` in a sentence, is documentation kept beside the
+ * agents, and Claude Code reaches the same verdict and the same silence for exactly this case
+ * (docs.claude.com/en/docs/claude-code/sub-agents, "Subagent files Claude Code skips").
+ *
+ * Deliberately not a `name:` scan anywhere in the file. That is the one discriminator the
+ * ecosystem does not use, and it has no false-positive story: any prose file that happens to
+ * mention the key would warn on every render of the roster.
+ */
+function opensLikeAgentDefinition(raw: string): boolean {
+  const firstLine = raw
+    .replace(/^\uFEFF/, "")
+    .split(/\r?\n/)
+    .find((line) => line.trim().length > 0);
+  if (firstLine === undefined) return false;
+  const head = firstLine.trim();
+  return head === "---" || /^name[ \t]*:/.test(head);
+}
+
+/**
  * Discover an agent by name. Mirrors pi's subagent extension agentScope behaviour:
  * user-level (`~/.pi/agent/agents/`) is loaded by default; project-level
  * (`<cwd>/.pi/agents/`) is loaded only when agentScope includes it.
@@ -1213,6 +1244,27 @@ export interface RegisteredAgentEntry {
  * listed under its file name, for the same reason a nameless one is not listed:
  * `discoverAgent` cannot resolve it either, and a roster entry that nothing can dispatch is
  * the identical contradiction (#201).
+ *
+ * A `.md` file that reads but does not PARSE is skipped and not listed too -- that part is #201
+ * and unchanged. What #204 added is the third bucket, between "cannot read" and "was never a
+ * definition": a file whose head says it was written as a definition and then failed to parse
+ * gets its own `console.warn`, naming the path. Without it the two readings collapse -- the
+ * roster says nothing either way, so "the agent I wrote vanished" is indistinguishable from
+ * "there were never any agents" until the user goes and reads the source.
+ *
+ * {@link opensLikeAgentDefinition} is what separates that bucket from the prose beside it, and
+ * it reads the FIRST non-blank line only. A file leading with `---`, or with a `name:` key, is
+ * definition-shaped; anything else is documentation kept beside the agents and stays silent.
+ * Anchoring on the head is what makes the silence safe -- a README whose body uses `---` as a
+ * rule, or mentions `name:` in a sentence, is not a broken definition.
+ *
+ * The listing is identical in all three buckets. This is about the signal, not the roster, and
+ * the roster's silence about a nameless definition is still the true answer (#201).
+ *
+ * Known limit: these warnings fire only when something renders this list -- the pre-decision
+ * view or a refusal. No session-start scan reads the agents directories, so a broken definition
+ * nobody ever asks for by name is never announced. That predates #204 and is not addressed by
+ * it.
  */
 export function listRegisteredAgentEntries(
   input: RegisteredAgentsListInput,
@@ -1257,8 +1309,28 @@ export function listRegisteredAgentEntries(
       // No fallback to the file name (#201). `discoverAgent` requires the parsed frontmatter
       // name to equal the requested one, so advertising a file name here would list an agent
       // the refusal then denies -- in the same message, which is what made the bug unreadable.
-      if (!parsed) continue;
+      //
+      // A parse failure is the same outcome for the roster but NOT the same story for the user,
+      // which is what #204 split out. Skipping is still right -- a definition with no usable
+      // `name:` is not an agent -- but a file whose HEAD announces it was written as one, and
+      // then failed to parse, is a definition the user wrote and silently lost. Warn on that
+      // one; stay silent on the prose kept beside the agents, which is the whole reason
+      // {@link opensLikeAgentDefinition} reads the first line and not the file.
+      if (!parsed) {
+        if (opensLikeAgentDefinition(raw)) {
+          console.warn(
+            `pi.dispatch: agent file ${filePath} looks like an agent definition but its ` +
+              "frontmatter did not parse (no usable `name:`); it is not listed and cannot be " +
+              "dispatched",
+          );
+        }
+        continue;
+      }
       const name = parsed.name;
+      // Unreachable, and deliberately left as-is: `extractYamlString` returns undefined for an
+      // empty value and `parseAgentMarkdown` returns null on a falsy name, so anything reaching
+      // here already has a non-empty name. It is NOT a place to hang the #204 diagnostic --
+      // that has to sit on the parse failure above, which is where the file is still in hand.
       if (name.length === 0) continue;
       // `parseAgentMarkdown` yields `""` — not undefined — for an absent `description`, so the
       // trim here is what separates "declares none" from "declares only whitespace".

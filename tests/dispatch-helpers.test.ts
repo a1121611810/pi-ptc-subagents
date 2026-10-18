@@ -377,6 +377,104 @@ describe("registered-agent listing + actionable refusals (pitfall #2)", () => {
     }
   });
 
+  test("listRegisteredAgents warns about a definition-shaped file it cannot parse", async () => {
+    // Constraint #3, the dual the read-failure case above did not have: this file READS and then
+    // fails to PARSE. The fixture is #204's real shape -- a definition whose opening `---` was
+    // lost, so its first line is the `name:` key with a stray closing delimiter below it. The
+    // same sample is pinned as UNPARSEABLE in tests/unit/agent-markdown-tolerance.test.ts.
+    //
+    // Before #204 the two cases were indistinguishable from outside: the roster said nothing
+    // either way, so "the agent I wrote is missing" read the same as "no agents exist". Qwen
+    // Code's own history is the cautionary case -- its comment records that silent skipping was
+    // a bug they fixed for exactly this reason.
+    const cwd = await makeTempDir();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await mkdir(join(cwd, ".pi", "agents"), { recursive: true });
+      await writeFile(
+        join(cwd, ".pi", "agents", "broken.md"),
+        ["name: reviewer", "---", "Review a diff."].join("\n"),
+        "utf8",
+      );
+
+      // The ROSTER is unchanged by #204: a definition with no usable `name:` is not an agent,
+      // so listing nothing is still the true answer (#201). Only the signal is new.
+      // Counterfactual: restore the filename fallback -> red on this line.
+      expect(listRegisteredAgents({ cwd, agentScope: "project", homeDir: cwd })).toEqual([]);
+      // Counterfactual: delete the parse-failure console.warn and the spy stays at zero calls,
+      // which fails this line. Warning on an absent dir instead would make the count wrong too.
+      expect(warn).toHaveBeenCalledTimes(1);
+      const warning = warn.mock.calls[0]?.[0] ?? "";
+      expect(warning).toContain(join(cwd, ".pi", "agents", "broken.md"));
+      expect(warning).toContain("looks like an agent definition");
+      expect(warning).toContain("not listed");
+    } finally {
+      warn.mockRestore();
+      await removeTempDir(cwd);
+    }
+  });
+
+  test("listRegisteredAgents warns about a delimited file that declares no name", async () => {
+    // The OTHER parse failure the discriminator has to catch, and it is #201's own case: both
+    // delimiters are present and there is simply no `name:` to key the definition by.
+    const cwd = await makeTempDir();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await mkdir(join(cwd, ".pi", "agents"), { recursive: true });
+      await writeFile(
+        join(cwd, ".pi", "agents", "headless.md"),
+        ["---", "description: a definition whose name key is gone", "---", "Review a diff."].join(
+          "\n",
+        ),
+        "utf8",
+      );
+
+      expect(listRegisteredAgents({ cwd, agentScope: "project", homeDir: cwd })).toEqual([]);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0] ?? "").toContain(join(cwd, ".pi", "agents", "headless.md"));
+    } finally {
+      warn.mockRestore();
+      await removeTempDir(cwd);
+    }
+  });
+
+  test("listRegisteredAgents stays silent about prose kept beside the agents", async () => {
+    // The other half of #204's discriminator, and the test that makes its silence safe. A file
+    // whose first non-blank line is neither `---` nor a `name:` key was never written as a
+    // definition, so warning on it would make the warn meaningless -- every roster render in a
+    // repo with a README in `.pi/agents/` would cry wolf.
+    //
+    // `guide.md` is the one that matters: its BODY contains both a `---` rule and a sentence
+    // mentioning the `name:` key. Reading the whole file instead of its head would warn on it.
+    // Counterfactual: widen the discriminator to scan the whole file -> red on the call count.
+    const cwd = await makeTempDir();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await mkdir(join(cwd, ".pi", "agents"), { recursive: true });
+      await writeFile(join(cwd, ".pi", "agents", "README.md"), "# Agents\n\nHow to use these.\n");
+      await writeFile(join(cwd, ".pi", "agents", "notes.txt"), "name: not a definition\n");
+      await writeFile(
+        join(cwd, ".pi", "agents", "guide.md"),
+        [
+          "# Guide",
+          "",
+          "Every definition sets a `name:` key in its frontmatter.",
+          "",
+          "---",
+          "",
+          "The rule above is a horizontal rule, not a frontmatter delimiter.",
+        ].join("\n"),
+        "utf8",
+      );
+
+      expect(listRegisteredAgents({ cwd, agentScope: "project", homeDir: cwd })).toEqual([]);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+      await removeTempDir(cwd);
+    }
+  });
+
   test("listRegisteredAgents warns when the agents path is present but not a directory", async () => {
     // The present-but-broken twin of the absent-dir case above: a plain FILE sits where the
     // agents directory belongs, so readdirSync fails ENOTDIR on a path that EXISTS. Reporting

@@ -58,6 +58,11 @@ You are a research agent. ...
 
 The file's frontmatter `name:` is the name the dispatch uses, and it is the only thing that is — a
 `.md` file carrying no `name:` is not an agent at all, so it is neither listed nor dispatchable.
+One thing distinguishes a definition you wrote that silently failed from a file that was never a
+definition: a `.md` whose first non-blank line opens a frontmatter block or is a `name:` key, but
+which then fails to parse, is skipped _and_ reported — it emits a `console.warn` naming the path.
+Prose kept beside the agents (a `README.md`, a `notes.txt`) is skipped silently. Either way the
+roster listing is the same; only the signal differs.
 `description:` is what the model reads to decide whether to name this agent at all, so it is worth
 writing as a trigger condition rather than a title. `tools:` restricts the child to that list; a
 definition that omits it leaves pi's full toolset in place, exactly as the generalist has it.
