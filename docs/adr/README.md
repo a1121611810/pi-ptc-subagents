@@ -45,6 +45,7 @@ ADRs for pi-ptc-subagents, per `docs/agents/domain.md` (single-context repo).
 | [0039](./0039-an-omitted-agent-dispatches-a-generalist.md) | An omitted `agent` dispatches a generalist child; the package ships no preset                                 | accepted              |
 | [0040](./0040-bash-is-an-opt-in-binding.md)                | `bash` stays a known binding and leaves the default surface; an install opts it back in                       | accepted              |
 | [0041](./0041-read-only-is-a-call-site-tier.md)            | A read-only tier is a call-site decision (`strict` / `lenient`), and a narrowing rather than a boundary       | accepted              |
+| [0042](./0042-goal-on-dispatch.md)                         | A dispatch may carry the caller's reason, as context rather than authority                                    | accepted              |
 
 Numbering gaps are deliberate: 0001/0006 were reserved while wayfinder map #7 was charting and dropped when G1 resolved; keeping their slots means every cross-reference in the map and its tickets stays valid.
 

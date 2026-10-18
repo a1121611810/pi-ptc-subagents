@@ -424,6 +424,13 @@ _subagent_ is reserved for the top-level _subagent surface_, `CONTEXT.md`
 ADR-0032 §What pi 1.0.0 actually offers), "child result" (the child report is
 one field of a _DispatchResult_, not the whole of it).
 
+**goal** — the caller's reason for one dispatch slice, carried as an optional argument on
+`pi.dispatch` / `ptc_subagent` and delivered to the child as its own `<pi-ptc-goal>` block **after**
+the policy block. It is context, not authority: the task stays the deliverable, and a disagreement
+between the two is reported as a finding rather than acted on. Absent or blank emits no block at
+all. ADR-0042. _Avoid_: "context" (that is the host's `pi-ptc-context` policy block),
+"instructions" (it is not one), "prompt" (it is one input to it).
+
 **dispatch concurrency** — the hard cap on concurrently in-flight
 dispatch in one pi session. Default 8, configurable via
 `PtcConfig.dispatchConcurrency`; the live control is the
