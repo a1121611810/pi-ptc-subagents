@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.3] - 2026-10-18
+
+### Fixed
+
+- **An agent is now reachable under the name it declares, not only under its file name.** A definition
+  written at `beta.md` whose frontmatter said `name: gamma` was advertised by the roster as `gamma`
+  and refused by dispatch — under `gamma` the path was rebuilt to `gamma.md`, which did not exist,
+  and under `beta` the parsed name did not match the request, so **neither** name worked. Discovery
+  now reads the directory and matches each definition's frontmatter `name:`, which is what pi's own
+  subagent loader and every comparable system does. It shares one scan with the roster rather than
+  spelling the identity rule a second time, so the 3.3.2 invariant — for one scope, the names a
+  roster lists are the names a dispatch resolves — holds by construction rather than by two
+  traversals happening to agree. Two files in one scope declaring one name resolve to the first in
+  sorted file-name order, and the shadowed file is reported. Scope precedence is unchanged: user
+  scope still wins over project scope, and `agentScope` still defaults to `"user"`. **Behaviour
+  change:** a definition whose file name disagrees with its `name:` becomes dispatchable under the
+  declared name, and stops being reachable under the file name.
+
+- **A malformed agent definition is now reported instead of silently dropped.** A `.md` file in an
+  agents directory that could not be _read_ already warned, but one that could be read and not
+  _parsed_ — a definition saved with its opening `---` lost — produced no roster entry, no mention in
+  a refusal, and no message at all, so the user saw `registered agents: (none)` for a directory that
+  visibly held files. A file whose first non-blank line opens a frontmatter block, or is a `name:`
+  key, now emits a `console.warn` naming its path. Prose kept beside the agents — a `README.md`, a
+  `notes.txt` — stays silent, and the registry listing is unchanged either way.
+
+### Changed
+
+- **The `ptc_subagent` description and the unknown-agent refusal no longer imply that a definition's
+  file name is its identity.** Both previously pointed at `<name>.md` as the shape to write. The
+  refusal now states that the `name:` header is the agent's name, that naming the file after it is
+  the convention, and that the two are independent. Model-facing text only; no tool, argument or
+  return-value shape changed.
+
 ## [3.3.2] - 2026-10-18
 
 ### Fixed
