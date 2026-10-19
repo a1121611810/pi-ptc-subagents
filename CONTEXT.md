@@ -636,10 +636,13 @@ distinction with two differences: there is no sub-call tree under it, and its
 right-aligned meta states the dispatch **request** (`foreground`/`background`,
 the read-only tier, a _requested model_ when the call site pinned one) rather
 than the run's measured facts — so that meta is present from the first frame
-and only the shimmer band separates partial from settled. A dispatch that names no _requested model_ shows `model=inherit` when the host could read the
-caller's session model, and its expanded row names that inherited model; a pinned _requested
-model_ is stated instead. The _observed model_ is still a result fact, so it appears in the
-_tool-result text_, not in this request meta. _Avoid_: "running state", "loading state" (these collide
+and only the shimmer band separates partial from settled. A **generalist** dispatch (no agent
+named) that names no _requested model_ shows `model=inherit` when the host could read the
+caller's session model, and its expanded row names that inherited model; a named agent gets no
+such claim (its definition may pin the model above the session tier), and a pinned _requested
+model_ is stated instead. The inherited value is captured at the call's first render, so a later
+model switch does not change an already-rendered row. The _observed model_ is still a result
+fact, so it appears in the _tool-result text_, not in this request meta. _Avoid_: "running state", "loading state" (these collide
 with pi's own `toolPendingBg` / settled-state distinctions elsewhere in the TUI).
 
 **settled-state render** — the visual treatment after the run completes

@@ -27,10 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   control characters and head-capped at 200 characters before it enters model-facing text,
   because the pair is untrusted child wire data. See
   ADR-0044, ADR-0016 §"The child's model", and ADR-0022 §3 as amended.
-- **The `ptc_subagent` call row states the model the call will inherit.** When the call names no
-  model, the request row says `model=inherit` and its expanded view names the provider/id the
-  caller's session is on; a pinned `model` is stated as before. This is a request fact refreshed
-  at every turn start, not the observed model — the observed one still appears only after the
+- **The `ptc_subagent` call row states the model a generalist dispatch will inherit.** When the
+  call names no model and no agent (a generalist child, where a definition cannot pin the tier),
+  the request row says `model=inherit` and its expanded view names the provider/id the caller's
+  session is on; a named agent gets no such claim, and a pinned `model` is stated as before. This
+  is a request fact captured at the call's first render, so a later model switch does not change
+  an already-rendered row — and it is not the observed model, which still appears only after the
   child ran. ADR-0044.
 
 ### Changed
