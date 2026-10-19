@@ -175,6 +175,11 @@ export type TaskCommand =
    * sources keep their precedence: a child that reported its own failure wins, and the stderr
    * inference is what a silent non-zero exit falls back to. The registry reads it only on the
    * `failed` branch, exactly like `childError`.
+   *
+   * `provider` / `model` are the model the pump OBSERVED the child running (per-turn assistant
+   * `message_end` fields, last turn wins). They are stamped on the record on every close
+   * outcome, like `usage` and unlike the report pair: a failed or canceled child still ran a
+   * model. Absent means the child never emitted an observable assistant turn.
    */
   | {
       kind: "resolve-exit";
@@ -188,6 +193,8 @@ export type TaskCommand =
       report?: ChildReport;
       reportChannel: ChildReportChannel;
       usage?: DispatchUsage;
+      provider?: string;
+      model?: string;
     };
 
 /** Outcome of one successful command: the persisted record, emitted events, and cursor. */
@@ -721,6 +728,10 @@ export class DefaultTaskRegistry implements TaskRegistry {
       // The host's own counter, on EVERY close outcome and independent of the report pair below.
       // `undefined` (nothing observed) leaves the field absent rather than writing a zeroed one.
       usage: command.usage,
+      // P1: the observed model, on the same "every outcome" rule as `usage` for the same
+      // reason -- the model ran whether or not the close was a success.
+      provider: command.provider,
+      model: command.model,
       // A non-succeeded close contributes no report fields at all: `undefined` here means
       // "leave the record's absent report alone", never "write an empty one".
       ...(to === "succeeded"
@@ -764,6 +775,9 @@ export class DefaultTaskRegistry implements TaskRegistry {
       reportChannel?: ChildReportChannel;
       /** ADR-0032's counter (issue #199); set on EVERY close outcome, not just `succeeded`. */
       usage?: DispatchUsage;
+      /** Host-observed model pair (P1); set on EVERY close outcome the pump can produce. */
+      provider?: string;
+      model?: string;
     },
   ): Promise<TransitionResult> {
     const now = Math.max(0, Math.floor(ctx.clock()));
@@ -787,6 +801,10 @@ export class DefaultTaskRegistry implements TaskRegistry {
     // one, independent of `to` and of the report pair above. A record that reaches a terminal
     // state without it (a `lost` reclaim, a close with no usage block) leaves the key absent.
     if (fields.usage !== undefined) updated.usage = fields.usage;
+    // P1: one field at a time, like `usage`. A transcript may report a model without a
+    // provider, and dropping the half-observation would be worse than reporting it unqualified.
+    if (fields.provider !== undefined) updated.provider = fields.provider;
+    if (fields.model !== undefined) updated.model = fields.model;
     if (fields.reason !== undefined) {
       // The generic `reason` lands in the field ADR-0022 §8 gives that state: stopReason for
       // the stop states, errorMessage for the failure states. Explicit fields win.

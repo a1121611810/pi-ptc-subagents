@@ -460,19 +460,29 @@ type ToolExecuteContext = Parameters<ToolDefinition<any, any, any>["execute"]>[4
 /**
  * Minimal execution context for tool tests.
  *
- * The tool layer reads exactly one field — `cwd` (see `src/tools/common.ts`) — but the real
+ * The tool layer reads `cwd` (see `src/tools/common.ts`), and since ADR-0044 a dispatch-capable
+ * tool also reads `ctx.model` to inherit the caller session's current model — but the real
  * parameter type is pi's own `ToolExecuteContext` (above), so tests pass this narrowed object
  * through a cast rather than fabricating a whole session.
+ *
+ * `model` is OPTIONAL and its absence is meaningful: passing no model is the direct-library /
+ * pre-ADR-0044 / model-less-session shape, and `readContextModel` must fall back to pi's
+ * configured default there. The field is added structurally rather than through a named pi type
+ * because the declared 0.86.0 floor does not declare it (see `ToolExecuteContext`'s note).
  *
  * Where pi asks for the extension-tool pair, the stub answers both honestly rather than leaving
  * them undefined: an empty tool list, and an `executeTool` that refuses loudly. A test that
  * reaches for it is asking for behaviour no unit test wires up, and a thrown Error names that,
  * where a `TypeError: not a function` three frames later would not.
  */
-export function toolContext(cwd: string): ToolExecuteContext {
+export function toolContext(
+  cwd: string,
+  model?: { readonly provider: string; readonly id: string },
+): ToolExecuteContext {
   return {
     cwd,
     tools: [],
+    ...(model === undefined ? {} : { model }),
     executeTool() {
       throw new Error(
         "toolContext().executeTool is not wired in unit tests: a nested tool call needs the " +

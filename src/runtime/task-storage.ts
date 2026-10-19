@@ -79,11 +79,13 @@ export interface TaskSpawnSource {
  * Session-level row tracking the lifecycle of one background child. 20 pre-ownership fields since
  * the 2026-10-16 #199 amendment (19 ADR-0022 §3 originals — its "21 fields" heading is an
  * authoring miscount — plus `usage`), two optional ADR-0023 owner-identity fields, two ADR-0032
- * report fields and ADR-0041's `readOnlyTier`; 25 today, persisted as-is. Optional fields are
+ * report fields, ADR-0041's `readOnlyTier`, ADR-0043's `whySuppressed` and the host-observed
+ * `provider` / `model` pair; 28 today, persisted as-is. Optional fields are
  * absent on records still `running` (e.g. `finishedAt` / `exitCode` / `outputRef` are written at
  * transition time, not at spawn) and `ownerPid` / `ownerBootMs` are absent on pre-upgrade
  * legacy records. The `report` / `reportChannel` pair is absent unless the record reached
- * `succeeded` (ADR-0032); `usage` is written on every terminal close once a child started.
+ * `succeeded` (ADR-0032); `usage` and the observed-model pair are written on every terminal
+ * close once a child started.
  */
 export interface TaskRecord {
   id: ULID;
@@ -176,6 +178,24 @@ export interface TaskRecord {
    * Absent on records written before this field existed, and on children that never started.
    */
   usage?: DispatchUsage;
+  /**
+   * The provider that actually served this child, observed by the pump off the child's assistant
+   * `message_end` events (last turn wins). Persisted at the terminal close, on every outcome the
+   * close can produce -- a failed or canceled child still ran a model, and that is the fact the
+   * model-observability fix exists to state.
+   *
+   * Absent means no assistant turn was ever observed (the child never got a model turn, or the
+   * close resolved before one landed), which is a different claim from "ran on an unknown
+   * provider". A background dispatch that names no model runs on pi's configured default;
+   * `ptc_task_output` projects this pair back so a caller can finally see which default that was.
+   */
+  provider?: string;
+  /**
+   * The model id the child actually ran, observed like {@link provider}. Present even when
+   * `provider` is absent: a transcript may carry a model without a provider, and a
+   * half-observation is still an observation.
+   */
+  model?: string;
 }
 
 /**

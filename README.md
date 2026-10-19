@@ -79,6 +79,7 @@ const result = await tools["pi.dispatch"]({
 // result.status: "fulfilled" | "rejected"  (the binding never throws)
 // result.text:   final assistant text
 // result.usage:  { input, output, cacheRead, cacheWrite, cost, turns }
+// result.provider?, result.model?: the provider/model the child actually ran
 // result.exitCode, result.durationMs, result.stderr?, result.errorMessage?
 ```
 
@@ -115,6 +116,31 @@ at 20 findings with the withheld count stated in-band.
   `<pi-ptc-context depth="N" max-depth="M">` hint so it can budget its own recursion.
 - `signal` — when the parent run is cancelled, every in-flight child gets `SIGTERM` then
   `SIGKILL` after a 5-second grace window.
+
+### The child's model
+
+A dispatched child is a fresh `pi` subprocess and resolves its own model, first match wins:
+
+1. the dispatch's `model` argument;
+2. the named agent definition's frontmatter `model:`;
+3. **the caller session's current model** — read from the pi session that spawns the child;
+4. pi's configured default.
+
+Tier 3 is the behaviour change of [ADR-0044](./docs/adr/0044-a-dispatch-inherits-the-session-model.md):
+a session that switched provider or model mid-conversation carries that switch into the children it
+dispatches, instead of silently running them on pi's global default. Resolution happens once, at
+spawn — a model switched afterwards does not change a child that is already running, and a nested
+dispatch inherits the child's own session model. Pin the model at the call site or in the agent
+definition to opt out; there is no config key for it, and a direct library caller (or a pi that
+exposes no session model) falls back to pi's default exactly as before.
+
+The result says which model the child actually ran: `provider` / `model` on a foreground
+`DispatchResult`, the same optional pair on a background task record (which `ptc_task_output`
+renders as a line), and a `model: provider/id` line in `ptc_subagent`'s text. Absence means no
+assistant turn was observed — never "unknown model". When the child reported its own failure, a
+rejected dispatch now states that error verbatim as `errorMessage` instead of the generic
+`dispatch produced no final text`, so the foreground failure path matches the background one. Full
+guide: [`docs/usage/bgdispatch.md`](./docs/usage/bgdispatch.md#which-model-the-child-runs).
 
 ### Background dispatch
 

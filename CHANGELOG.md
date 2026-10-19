@@ -5,6 +5,61 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **A dispatch reports the model its child actually ran.** The model used to be resolved inside the
+  child and never came back: neither `pi.dispatch`'s `DispatchResult` nor a background
+  `TaskRecord` said which provider or model served the call, so a wrong-model delegation could
+  only be inferred from a failure after the fact. Both now carry optional `provider` / `model` —
+  observed by the host from the child's own assistant turns (last turn wins), not taken from the
+  request — and the model-facing surfaces state the same fact as a `model: provider/id` line on
+  `ptc_subagent` and `ptc_task_output` and as a `model=` fact in a refusal. A transcript that
+  carries only a model id reports the id alone; the absence of both means no assistant turn was
+  ever observed, not "the model is unknown". A background record gains the pair at the same
+  terminal close that writes `usage`, so a failed or canceled child that ran a model still states
+  it. Additive and backward compatible: old records and old result shapes keep working. See
+  ADR-0044, ADR-0016 §"The child's model", and ADR-0022 §3 as amended.
+
+### Changed
+
+- **BREAKING — a dispatch that names no model now runs on the caller session's current model, not
+  pi's global default.** `pi.dispatch` and `ptc_subagent` resolve the child's model first match
+  wins: the dispatch's `model` argument, then the agent definition's frontmatter `model:`, then
+  the calling session's **current** model, then pi's configured default. A session that switched
+  provider or model mid-conversation now carries that switch into its next dispatched child — the
+  background-dispatch guide previously said the opposite, and that statement is what this changes.
+  Resolution is a snapshot at spawn: a model switched after the child starts does not change it, a
+  nested dispatch inherits the child's own session model, and re-running the dispatch is how a
+  caller picks up a new model. Tiers 1–2 are unchanged, so pinning the model at the call site or in
+  the definition is the explicit opt-out; no config key and no `model: "inherit"` sentinel is
+  added. A direct library caller with no context model, an older pi, or a session started without a
+  model all fall through to pi's default exactly as before — the session read is structural, so
+  the declared 0.86.0 floor gains no new pi type dependency. See ADR-0044 for the decision and its
+  rejected alternatives.
+
+### Fixed
+
+- **A failed foreground dispatch no longer loses the child's own failure.** The child is a pi
+  subprocess: a rate limit or a model error can make it exit 0 after writing
+  `stopReason: "error"` and an `errorMessage` on its assistant turn. The foreground loop
+  discarded that text and reported the generic `dispatch produced no final text`, while the
+  background registry already recorded the child's reason (issue #70's rule). The close decision now
+  returns the child's reported error verbatim, using the background registry's rule — the child's
+  own error outranks the exit-code and truncation inference — with cancellation still first:
+  cancelled, then exit-0-with-text (fulfilled), then the child's error, then exit-0-without-text,
+  then truncation. It logs one warning on that newly diagnosed path only. `stderr` is no longer
+  described as guaranteed; `errorMessage` is the structured failure channel. This is
+  foreground/background parity: one verdict and one sentence for one failure. See ADR-0044
+  Decision 3 and ADR-0016 §Decision 3.
+- **`ptc_subagent refused the call: undefined` is gone.** A rejected dispatch without an
+  `errorMessage` used to render the literal string `undefined`, telling the model nothing the
+  dispatcher knew. The refusal now states the cause plus bounded facts the result already carries —
+  whether a child ran or the harness declined to start, the exit code, turns, report channel, and
+  the observed model when there is one — tail-bounded to 800 characters so a provider's actionable
+  status code survives the cut. See ADR-0044 Decision 3.
+
 ## [4.0.0] - 2026-10-19
 
 ### Added

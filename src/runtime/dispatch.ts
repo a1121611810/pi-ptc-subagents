@@ -53,6 +53,7 @@ import {
   type TaskRegistry,
 } from "./task-registry.ts";
 import type { OutputStorage } from "./output-storage.ts";
+import { formatSessionModel, type SessionModel } from "./session-model.ts";
 import { InMemoryTaskStorage, type TaskSpawnSource, type ULID } from "./task-storage.ts";
 
 // Re-exports keep existing imports working after BG-03 moved these definitions.
@@ -505,6 +506,23 @@ export interface DispatchResult {
   durationMs: number;
   exitCode: number;
   usage?: DispatchUsage;
+  /**
+   * The provider that actually served the child, observed off its assistant `message_end`
+   * events (the last turn wins).
+   *
+   * ABSENT is a claim: no assistant turn ever reached the host, so there was nothing to
+   * observe -- not "the model is unknown to us while the child ran". A dispatch that names no
+   * model runs on pi's configured default, and before this field the caller had no way to
+   * learn which default that was; a wrong-model incident was invisible on the one surface
+   * that had room to state it.
+   */
+  provider?: string;
+  /**
+   * The model id the child actually ran, observed like {@link provider}. Present even when
+   * the provider field is absent -- a transcript may carry a model without a provider, and
+   * dropping a half-observation would be worse than reporting it qualified by nothing.
+   */
+  model?: string;
   stderr?: string;
   errorMessage?: string;
   /** The child's child report, when one arrived over either channel. */
@@ -617,6 +635,17 @@ export interface DispatchContext {
    * so the session registry can reconstruct the task tree.
    */
   parentTaskId?: ULID;
+  /**
+   * ADR-0044: the caller session's current model, when the host could read one off pi's
+   * tool-execution context. It is the LAST resort of the dispatch model precedence
+   * (`input.model > agent markdown model > session model > pi's configured default`), so
+   * `undefined` keeps the pre-ADR-0044 behaviour exactly: a dispatch with no explicit model
+   * runs on pi's default.
+   *
+   * A snapshot, not a live reference: the child is spawned with the value resolved once, so
+   * switching the session model afterwards does not retro-change an already-running child.
+   */
+  sessionModel?: SessionModel;
 }
 
 /**
@@ -911,6 +940,18 @@ export interface CloseOutcomeInput {
    * errorMessage that names the cause is what a caller reads first.
    */
   stderr?: string;
+  /**
+   * The failure the child reported about itself, or `undefined` when it reported none.
+   *
+   * A rate-limited or model-errored child still exits 0: pi writes
+   * `stopReason: "error"` + `errorMessage` onto the assistant `message_end` (usually with
+   * empty content) and retries until it gives up, so the exit code carries no signal at all
+   * and the text is empty. The background pump has always turned that pair into the record's
+   * `errorMessage` (issue #70); the foreground path used to discard it and report only
+   * "dispatch produced no final text". Passing it here makes the two fronts reach the same
+   * verdict on the same transcript.
+   */
+  childError?: string;
 }
 
 /** Result of {@link decideCloseOutcome} — what the dispatcher commits to. */
@@ -927,13 +968,24 @@ export interface CloseOutcome {
  * (ADR-0016 §4) is to surface "dispatch cancelled" rather than leave the
  * caller guessing why an aborted run came back `rejected`.
  *
- * Non-cancellation cases follow the original close-handler ladder:
- *   - exit 0 with final text → fulfilled
- *   - exit 0 without final text → rejected (the model never answered)
+ * Non-cancellation cases follow the original close-handler ladder, with the child's own
+ * failure report inserted exactly where the background registry puts it:
+ *   - exit 0 with final text → fulfilled (a child that produced an answer is a success, even
+ *     if an earlier retry reported an error: the last turn is what the caller receives)
+ *   - a non-empty `childError` → rejected with that message UNWRAPPED, so the caller reads
+ *     the provider's own diagnosis ("429 …") rather than a paraphrase of it. This outranks
+ *     the exit-0 wording because a rate-limited child exits 0 with no text, and it outranks
+ *     the truncation inference because a self-reported failure is a better diagnosis than
+ *     one inferred from stderr.
+ *   - exit 0 without final text → rejected (the model never answered, and said nothing about why)
  *   - any other exit code → rejected; the errorMessage names a truncation when
  *     the child's stderr does (pi 1.2.0's print mode), and is absent otherwise.
  *     The spawn-error path labels its own failures with `failed to spawn pi: ...`
  *     before this function runs, so it never reaches the catch-all.
+ *
+ * The order mirrors `resolveExitErrorMessage` in `task-registry.ts` on purpose: one
+ * transcript must not resolve one way on the foreground front and another way on the
+ * background front (the failure issue #70 was about).
  */
 export function decideCloseOutcome(input: CloseOutcomeInput): CloseOutcome {
   if (input.aborted) {
@@ -941,6 +993,9 @@ export function decideCloseOutcome(input: CloseOutcomeInput): CloseOutcome {
   }
   if (input.exitCode === 0 && input.finalText.length > 0) {
     return { status: "fulfilled" };
+  }
+  if (input.childError !== undefined && input.childError.length > 0) {
+    return { status: "rejected", errorMessage: input.childError };
   }
   if (input.exitCode === 0) {
     return { status: "rejected", errorMessage: "dispatch produced no final text" };
@@ -1798,6 +1853,15 @@ export function childToolList(
 /**
  * Build the argv handed to the child pi subprocess. Model / thinking / tools / agentScope
  * precedence: dispatch input (call site) > agent markdown frontmatter > nothing.
+ *
+ * Model precedence has one more tier (ADR-0044): `input.model > agent.model > sessionModel >
+ * pi's configured default`. The session tier is the caller's CURRENT session model, which the
+ * host reads structurally off pi's tool-execution context -- so a dispatch that names nothing
+ * explicitly runs the model the caller is running instead of silently falling through to a
+ * global default the user may not have chosen. `sessionModel` is the optional fourth
+ * parameter, so existing direct callers (and the tests that pin argv without a context) keep
+ * the three-tier shape and the argv they had before.
+ *
  * The agent's system prompt (with the depth hint appended) is materialised to a tmpfile
  * and passed via --append-system-prompt, exactly as the subagent extension does.
  */
@@ -1805,9 +1869,16 @@ export function buildArgv(
   input: DispatchInput,
   agent: AgentConfigLike,
   promptFilePath: string,
+  sessionModel?: SessionModel,
 ): string[] {
   const args: string[] = ["--mode", "json", "-p", "--no-session"];
-  const model = input.model ?? agent.model;
+  // `||`, not `??`: a discovered agent whose markdown declares no `model:` reports that as the
+  // EMPTY STRING (`parseAgentMarkdown`), so a nullish-only chain would let "the agent names no
+  // model" shadow the session tier and silently drop the inheritance. The contract's middle tier
+  // is a model the agent NAMED; an empty value names nothing. The same reading covers an empty
+  // `input.model`: a caller that passes no model is not asking for the string "".
+  const model =
+    input.model || agent.model || (sessionModel ? formatSessionModel(sessionModel) : undefined);
   if (model) args.push("--model", model);
   /*
    * Default to --thinking off: a dispatched child is a tool call, not a long-form reasoning
@@ -1947,6 +2018,49 @@ function accumulateUsage(
   total.cost += message.usage.cost?.total ?? 0;
   total.turns += 1;
   return total;
+}
+
+/**
+ * The provider/model a child was observed running, accumulated from its assistant turns.
+ *
+ * Both fields are optional because the wire is observational: a transcript may carry a model
+ * without a provider, and an older pi may carry neither.
+ */
+export interface ObservedChildModel {
+  provider?: string;
+  model?: string;
+}
+
+/**
+ * Fold one assistant `message_end` into the observed-model record (last turn wins).
+ *
+ * Same shape of rule as {@link accumulateUsage} and the same reason for existing as one
+ * function: the foreground result's `provider`/`model` and the background record's must be
+ * the same observation of the same transcript, and a shared fold is stronger evidence of that
+ * than two loops that agree today. Non-assistant events and empty/absent fields are no-ops --
+ * a retry sequence ends on the turn that actually served the answer, which is the turn a
+ * caller wants named.
+ *
+ * Updating per FIELD rather than replacing the pair matters for a transcript that reports the
+ * provider on one turn and the model on another: the last value seen for each is kept.
+ */
+export function accumulateChildModel(
+  current: ObservedChildModel | undefined,
+  event: ParsedAgentEvent,
+): ObservedChildModel | undefined {
+  if (event.type !== "message_end" || event.message?.role !== "assistant") return current;
+  const provider = isNonEmptyString(event.message.provider) ? event.message.provider : undefined;
+  const model = isNonEmptyString(event.message.model) ? event.message.model : undefined;
+  if (provider === undefined && model === undefined) return current;
+  const next: ObservedChildModel = { ...current };
+  if (provider !== undefined) next.provider = provider;
+  if (model !== undefined) next.model = model;
+  return next;
+}
+
+/** A string that is actually there; the observation channels carry absent as `undefined`. */
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
 }
 
 /**
@@ -2258,7 +2372,9 @@ async function dispatchBackground(
     });
     const written = await promptFileWriter(agent.name, fullPrompt);
     tmp = written;
-    const argv = buildArgv(input, agent, written.filePath);
+    // ADR-0044: the session tier is resolved here, at spawn, so a model switch later in the
+    // caller's session cannot retro-change a child that is already running.
+    const argv = buildArgv(input, agent, written.filePath, ctx.sessionModel);
 
     const spawnOptions: ChildSpawnOptions = {
       cwd,
@@ -2345,6 +2461,11 @@ async function dispatchBackground(
     void (async (): Promise<void> => {
       let output = "";
       let childError: string | undefined;
+      // P1: the model the child actually ran, observed off its assistant turns -- the
+      // background counterpart of the foreground `finalize` stamp below. A dispatch that
+      // named no model runs on pi's configured default, and a background caller otherwise
+      // has no surface that could ever name it.
+      let childModel: ObservedChildModel | undefined;
       // ADR-0032: the same scan the foreground loop runs, so the two fronts cannot disagree
       // about whether a transcript carried a child report — over EITHER channel.
       const scan: ChildReportScan = newChildReportScan();
@@ -2362,6 +2483,7 @@ async function dispatchBackground(
             scan.prompt = extractChildReportFromText(text);
           }
           usage = accumulateUsage(usage, event);
+          childModel = accumulateChildModel(childModel, event);
           // The last error wins: a child that retried and then gave up reports the reason that
           // ended it, not the first transient one.
           const error = childAssistantError(event);
@@ -2442,6 +2564,12 @@ async function dispatchBackground(
             // here means the child never emitted a usage block, and leaves the field absent
             // rather than writing a zeroed one.
             usage,
+            // P1: the observed provider/model ride the close command so the registry can put
+            // them on the record. Applied on every close outcome, like `usage` -- a failed or
+            // canceled child still ran a model, and that is exactly the incident shape this
+            // field exists to make visible. Absent means no assistant turn was ever observed.
+            provider: childModel?.provider,
+            model: childModel?.model,
             // The report's four-field `usage` view is derived from that SAME accumulator
             // instance, so the two carriers cannot disagree about input / output / cost / turns
             // when both are present. The registry applies the pair only when this close resolves
@@ -2668,7 +2796,7 @@ export async function dispatch(
   let argv: readonly string[];
   try {
     tmp = await promptFileWriter(agent.name, fullPrompt);
-    argv = buildArgv(input, agent, tmp.filePath);
+    argv = buildArgv(input, agent, tmp.filePath, ctx.sessionModel);
   } catch (error) {
     slots.release();
     throw error;
@@ -2683,6 +2811,12 @@ export async function dispatch(
     const scan: ChildReportScan = newChildReportScan();
     let exitCode = -1;
     let stderrText = "";
+    // P0: the child's own failure report. The background pump has always folded this; the
+    // foreground front used to drop it, which is how a quota-exhausted child's "429 ..." became
+    // the generic "dispatch produced no final text" for a whole incident.
+    let childError: string | undefined;
+    // P1: the model the child actually ran, observed off its assistant turns.
+    let childModel: ObservedChildModel | undefined;
     let resolved = false;
     let cancelKillEscalation: (() => void) | undefined;
     let handle: ChildHandle | undefined;
@@ -2769,8 +2903,19 @@ export async function dispatch(
         };
       }
       if (usage) out.usage = usage;
+      // P1: only when an assistant turn was actually observed. Absent states "nothing to
+      // observe", not "we do not know" -- a refusal that never spawned has no turns at all.
+      if (childModel?.provider !== undefined) out.provider = childModel.provider;
+      if (childModel?.model !== undefined) out.model = childModel.model;
       if (stderrText.length > 0) out.stderr = stderrText;
       if (errorMessage) out.errorMessage = errorMessage;
+      // A rejected foreground close that the child itself diagnosed is the one case where no
+      // model-facing surface used to name the cause (the caller saw a generic sentence and the
+      // host operator saw nothing). Log it here, and only here: the abort, depth, concurrency
+      // and spawn refusals must stay as quiet as they were.
+      if (status === "rejected" && started && childError !== undefined) {
+        (deps.logger ?? DEFAULT_DISPATCH_LOGGER).warn("foreground dispatch failed: " + childError);
+      }
       resolve(out);
     };
 
@@ -2824,6 +2969,11 @@ export async function dispatch(
       try {
         for await (const ev of lifecycle.events(h)) {
           scanChildReportToolEvent(scan, ev);
+          childModel = accumulateChildModel(childModel, ev);
+          // Same last-error-wins fold as the background pump: a retry sequence ends on the
+          // reason that ended it, not the first transient one.
+          const error = childAssistantError(ev);
+          if (error !== undefined) childError = error;
           if (ev.type === "message_end" && ev.message && ev.message.role === "assistant") {
             const m = ev.message;
             usage = accumulateUsage(usage, ev);
@@ -2864,6 +3014,9 @@ export async function dispatch(
           // stderr() is called exactly once per close. On pi 1.2.0 a truncated print-mode
           // run lands here with a labelled errorMessage instead of the anonymous reject.
           stderr: stderrText,
+          // P0: the child's self-reported failure is the one diagnostic that describes an
+          // exit-0 silent child (the rate-limit / model-error shape).
+          childError,
         });
         finalize(status, errorMessage);
       } catch (err) {

@@ -1398,9 +1398,9 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     "docs/adr/0013-ptc-row-compact-summary.md:184 -> render.ts:136": "function alignRow(",
     "docs/adr/0013-ptc-row-compact-summary.md:188 -> render.ts:1297":
       "The failure text is the reason",
-    "docs/adr/0016-ptc-dispatch-binding.md:41 -> src/runtime/dispatcher.ts:438":
+    "docs/adr/0016-ptc-dispatch-binding.md:43 -> src/runtime/dispatcher.ts:447":
       "new DispatchSlotCounter(",
-    "docs/adr/0026-surface-default-is-detected.md:258 -> dispatch.ts:2277":
+    "docs/adr/0026-surface-default-is-detected.md:258 -> dispatch.ts:2393":
       "spawnOptions.sessionId = taskId;",
     // Confirmed line by line 2026-10-12 (re-checked after #187 moved it): line 505 is
     // `pi.registerTool(createChildReportTool(ptcDepth > 0));` -- the depth gate the ADR cites to
@@ -1421,21 +1421,21 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       "## Fail-safe on external loadout changes",
     "docs/adr/0031-open-source-and-publish-authority.md:129 -> src/runtime/limits.ts:4":
       "The numbers are DSH's",
-    "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1905": "function assistantText(",
-    "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:218":
+    "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1976": "function assistantText(",
+    "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:219":
       "export const SUBAGENT_OUTPUT_SCHEMA",
-    "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1928": "function accumulateUsage(",
-    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:494":
+    "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1999": "function accumulateUsage(",
+    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:564":
       "structuredContent: structured,",
-    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:233":
+    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:234":
       "outputSchema: LIST_OUTPUT_SCHEMA,",
     // 2026-10-19（#219-#222 · retro）：抽取器现在展开逗号后的数字，这两行才第一次进入判定面。
     // 它们一直是对的，只是以前没有任何东西检查；在这里补上，从此漂移会红。
-    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:584":
+    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:585":
       "outputSchema: OUTPUT_OUTPUT_SCHEMA,",
-    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:803":
+    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:813":
       "outputSchema: STOP_OUTPUT_SCHEMA,",
-    "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1775":
+    "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1830":
       "export function childToolList(",
   };
 
@@ -1457,6 +1457,23 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
    * 而分散的规则读起来像各自的例外——包括一次真的按注释里的旧数字去"修正"数组。
    */
   const IN_REPO_PIN_BASELINE: readonly string[] = [
+    // 2026-10-19 第十八次复核（ADR-0044 · P0 foreground 子进程错误 / P1 实际模型可观测 /
+    // P2 会话模型继承）。10 条 pin 位移，全部逐条打开目标行按**内容**核对后改正，PIN_TOKENS
+    // 的 value 一个未变；位移量在各锚点之间**不一致**，所以没有做算术平移：
+    //   dispatch.ts 2277→2393（+116）、1905→1976（+71）、1928→1999（+71）、1775→1830（+55）
+    //     ——P0 的 childError 累加 / foreground warn、P1 的 accumulateChildModel
+    //     （ObservedChildModel / isNonEmptyString）、DispatchResult.provider/model 字段、
+    //     DispatchContext.sessionModel 各自落在不同锚点上方。
+    //   subagent.ts 218→219（+1）、494→564（+70）——describeSettledFailure 与其有界格式、
+    //     P0/P1 的拒绝文本与 model 行。**settled 路径仍是 564；466 是后台 handle 分支的
+    //     同名 `structuredContent: structured,`，ADR-0032 引的是 settled 那条，别取错。**
+    //   ptc-task.ts 233→234（+1）、584→585（+1）、803→813（+10）——ptc_task_output 的
+    //     observed-model 行与 import。
+    //   dispatcher.ts 438→447（+9）——import 一行 + RunPtcProgramOptions.sessionModel 八行。
+    //     这一条的 target 在上一版 mapping 里被漏了，因为 ADR-0016 正文侧行号 41→43 已把它的
+    //     key 变成“未注册”，而内容校验只查已注册 key；是 baseline 相等断言先看见了文档侧变化。
+    //     教训：doc 行漂移会让 target 的内容校验暂时失明，re-pin 时必须重新核 target。
+    //   ADR-0016 文档侧 41→43 是 docs-writer 在引用上方插入 2 行所致，正文 target 同步 438→447。
     // 2026-10-16 第八次复核（#199：usage 升为记录的一等载体，render.ts / subagent.ts 的改动把
     // 下面 10 条引用整体后移）。逐条按**内容**核对后改正，ADR 正文的行号与本表同步改：
     //   140 → render.ts 83→89（`MAX_CODE_LINES_EXPANDED = 3`，区间 89-96）
@@ -1489,7 +1506,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // `const dispatchSlots = new DispatchSlotCounter(config.dispatchConcurrency);` -- the FALLBACK
     // counter, since :712 prefers `options.dispatchDeps?.slots ?? dispatchSlots`. ADR-0016 §2
     // names it as where the knob is read when nothing is injected.
-    "docs/adr/0016-ptc-dispatch-binding.md:41 -> src/runtime/dispatcher.ts:438",
+    "docs/adr/0016-ptc-dispatch-binding.md:43 -> src/runtime/dispatcher.ts:447",
     // 2026-10-10 第七次复核：**1096 → 1501**。1096 是一段 JSDoc 的开头，不是本 ADR 声称的
     // `spawnOptions.sessionId = taskId;`（那行在 1501）——而后者正是「同 id 重试从正常路径
     // 不可达」这个论断的落点。**既有漂移**，dispatch.ts 本轮未改，HEAD 上 1096 同样不是它。
@@ -1511,7 +1528,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // 锚点之前，所以四条恰好等量。**等量不等于可以算**：算术平移只在本轮成立，下一轮锚点
     // 分布在两个函数的两侧时就不成立。四条都按内容逐条核对后改正。
     // 上面这组是**当时值**（读法见本数组的头部说明）。
-    "docs/adr/0026-surface-default-is-detected.md:258 -> dispatch.ts:2277",
+    "docs/adr/0026-surface-default-is-detected.md:258 -> dispatch.ts:2393",
     // 2026-10-10 第七次复核：四条全部因本轮删除 surfaceMode 而位移，逐条核对内容后改正。
     //  29  → 628→1160 = `export function detectedSurfaceMode(`
     //  32  → 962→856  = decision-4 的 `if (surface.surfaceMode === "subagents" && !pi.getActiveTools()…`
@@ -1620,14 +1637,14 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     //   569 → 584 = `outputSchema: OUTPUT_OUTPUT_SCHEMA,`
     //   766 → 803 = `outputSchema: STOP_OUTPUT_SCHEMA,`
     // 233 = `outputSchema: LIST_OUTPUT_SCHEMA,` 未动。ADR-0032 正文同一行的引用同步改为 233, 584, 803。
-    "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1905",
-    "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:218",
-    "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1928",
-    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:494",
-    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:233",
-    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:584",
-    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:803",
-    "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1775",
+    "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1976",
+    "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:219",
+    "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1999",
+    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:564",
+    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:234",
+    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:585",
+    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:813",
+    "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1830",
     // 新增 1 条（2026-10-12，ADR-0039）：目标行已逐条核对。
     "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:115 -> src/index.ts:567",
   ];

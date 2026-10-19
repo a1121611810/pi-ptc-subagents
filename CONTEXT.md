@@ -96,7 +96,8 @@ by `agentScope`. Naming one is optional — ADR-0039 — because the child is a 
 dispatch prompt is APPENDED to pi's own system prompt, and no `--tools` flag is passed unless the
 definition declares `tools:`. A definition can therefore only take capability away; there is none it
 can add. A dispatch that names none gets the **generalist child** — pi's own system prompt, pi's full
-toolset, no model pin, reported as an empty `agentName`. A definition is not the only narrowing
+toolset, no model pinned by a definition (the _session model_ tier still applies — see _dispatch
+model inheritance_), reported as an empty `agentName`. A definition is not the only narrowing
 axis: _read-only tier_ is the other one, and where the two meet a strict tier at the call site
 decides the tool list outright.
 
@@ -381,6 +382,10 @@ concurrently); the PTC program composes with `Promise.all` /
 fresh `pi` subprocess (`--mode json -p` plus session-file flags from R1
 when `{ background: true }` is set) and returns a structured result
 (see _DispatchResult_ for foreground, _DispatchHandle_ for background).
+Its child's model resolves as the dispatch's `model` argument, the agent
+definition's frontmatter `model:`, the caller's _session model_, then pi's
+configured default — see _dispatch model inheritance_ and ADR-0044 — and the
+result states the model the child actually ran, not just the one requested.
 Subject to a session-wide _dispatch concurrency_ cap (default 8, matches pi's
 `subagent` extension `MAX_PARALLEL_TASKS`): one counter per pi session,
 spent by programs, by the `ptc_subagent` front, and by background children.
@@ -394,9 +399,38 @@ extension).
 Fields: `text` (final assistant text), `status` (`fulfilled` /
 `rejected`), `agentName`, `durationMs`, `exitCode`, `usage?` (input/output/
 cacheRead/cacheWrite/cost/turns; absent when the child reported no usage
-block), `stderr?`, `errorMessage?`. Shape matches `Promise.allSettled`
+block), `provider?` / `model?` (the provider/model the child actually ran,
+observed by the host from its assistant turns; absent means no assistant turn
+was observed, not "unknown"), `stderr?` (best-effort, never promised),
+`errorMessage?` (the structured failure channel — the child's own reported
+error, verbatim, when there is one; otherwise the exit-code / truncation
+diagnosis, or absent when there is none). Shape matches `Promise.allSettled`
 settled records, so PTC programs compose without `try/catch`. See
-ADR-0016.
+ADR-0016, ADR-0044.
+
+**session model** — the provider/model pair the caller's pi session is currently running, as pi
+places it on the tool-execution context it hands a tool's `execute`. Read structurally for the
+turn that issues the dispatch by `readContextModel`, validated and formatted as `provider/id` by
+`formatSessionModel`, carried as `SessionModel` (`{ provider, id }`) through the dispatch context,
+and resolved into the child's argv at spawn. It is a snapshot of the session's CURRENT model — not
+its configured default, and not necessarily the model an earlier turn ran: a mid-session switch
+changes it, while a model switched after a dispatch starts does not retro-change that child. `undefined` (no context model, or an unusable one) means "do not inherit"
+— the dispatch falls through to pi's configured default. ADR-0044.
+_Avoid_: "default model" (that is pi's configured fallback, the tier below this one), "parent model"
+(dispatch nesting is depth, not a session — a nested dispatch inherits its own session's model).
+
+**dispatch model inheritance** — the rule that a dispatch which names no model at its call site and
+whose agent definition names none runs on the caller's _session model_ instead of pi's configured
+default. First match wins: the dispatch's `model` argument, the agent definition's frontmatter
+`model:`, the session model, pi's default. Resolved once at spawn, so a nested dispatch inherits
+the child's own session model, while a direct library caller or a pi that exposes no context model
+falls through to pi's default — the pre-ADR-0044 behaviour. It is paired with observation:
+`DispatchResult` and `TaskRecord` carry the `provider` / `model` the child actually ran, and the
+model-facing surfaces render it as a `model: provider/id` line. Pin the model at the call site or
+in the definition to opt out; there is no config key. ADR-0044.
+_Avoid_: "model inheritance" unqualified (the caller's session is the source), "inherit the parent
+dispatch" (each level resolves against its own session context), "default model" (that is pi's
+configured fallback — the last tier, not the inherited one).
 
 **child report** — the structured value a dispatched child produces and
 the host hands back, carrying exactly four things: `summary` (one line, the
@@ -711,23 +745,26 @@ and ends when that session ends or is replaced
 completion (`lost_on_session_restart`). See ADR-0022 + ADR-0023.
 
 **TaskRecord** — session-level _TaskRegistry_ row tracking the full
-lifecycle of one background child. 25 fields today: ADR-0022 §3's code block,
-which lists 20 of them since the 2026-10-16 amendment added its top-level
-`usage` to the original 19 (the block's "21 fields" heading is the authoring
-miscount it always was), plus two optional owner-identity fields (`ownerPid`,
-`ownerBootMs`, ADR-0023) stamped at spawn, plus two optional _child report_
+lifecycle of one background child. 28 fields today: ADR-0022 §3's code block lists
+22 of them — its 19 originals (the block's "21 fields" heading is the authoring
+miscount it always was), the 2026-10-16 top-level `usage`, and the ADR-0044
+observed-model pair (`provider`, `model`, written at the same terminal close as
+`usage`: the model the child actually ran, absent when no assistant turn was
+observed) — and the rest are the two optional owner-identity fields (`ownerPid`,
+`ownerBootMs`, ADR-0023) stamped at spawn, the two optional _child report_
 fields (`report`, `reportChannel`, ADR-0032) written only when the record
 reaches `succeeded` — so a still-running or failed task carries neither, because
-"has not reported yet" is not "reported nothing" — plus the optional
-`readOnlyTier` (ADR-0041). The block's `usage` is the host's own six-field
-counter, written on every terminal close for a child the host actually started:
+"has not reported yet" is not "reported nothing" — the optional
+`readOnlyTier` (ADR-0041), and the optional `whySuppressed` (ADR-0043). The block's `usage` is the
+host's own six-field counter, written on every terminal close for a child the host actually
+started:
 independent of `reportChannel` and of the close outcome, so a `none` /
 `opted-out` or failed child still accounts for what it cost, while a record
 written before the field existed, a child that never started, and a `lost`
 record carry none. Persisted to `<sessionDir>/tasks/<taskId>.json` per R1.
 Independent of `DispatchResult` and `SubCallRecord` — the _child report_'s
 four-field `usage` view is derived from the record's own counter, not a second
-one. See ADR-0022 + ADR-0023 + ADR-0032 + ADR-0041.
+one. See ADR-0022 + ADR-0023 + ADR-0032 + ADR-0041 + ADR-0044.
 
 **TaskStatus** — the 6-state enum for `TaskRecord.status`:
 `running / stopping / succeeded / failed / canceled / lost`. The `queued`

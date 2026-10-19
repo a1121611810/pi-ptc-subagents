@@ -16,6 +16,7 @@
  * get from the native pipeline.
  */
 import { validateToolArguments } from "@earendil-works/pi-ai";
+import type { SessionModel } from "./session-model.ts";
 import type { ULID } from "./task-storage.ts";
 import {
   createBashTool,
@@ -143,6 +144,13 @@ export interface BindingContext {
    * output storage) so the binding's `dispatch()` call shares them.
    */
   dispatchDeps?: DispatchDeps;
+  /**
+   * ADR-0044: the caller session's current model, read by the host off pi's tool-execution
+   * context. The `pi.dispatch` binding forwards it into the `DispatchContext` so a dispatch
+   * that names no model explicitly inherits the session's. Absent for direct library callers
+   * and for a pi too old to pass `ctx.model`: both keep the pre-ADR-0044 behaviour.
+   */
+  sessionModel?: SessionModel;
 }
 
 export interface Binding {
@@ -577,6 +585,9 @@ export function createBuiltinBindings(options: CreateBuiltinBindingsOptions): Bi
             ...(context.callerId === undefined ? {} : { callerId: context.callerId }),
             ...(context.sessionDir === undefined ? {} : { sessionDir: context.sessionDir }),
             ...(context.parentTaskId === undefined ? {} : { parentTaskId: context.parentTaskId }),
+            // ADR-0044: the session-model tier of the dispatch argv precedence. Spread-as-absent
+            // so a context with no model keeps exactly the shape it had before this field.
+            ...(context.sessionModel === undefined ? {} : { sessionModel: context.sessionModel }),
           },
           context.dispatchDeps,
         );

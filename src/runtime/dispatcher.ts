@@ -34,6 +34,7 @@ import { BUILTIN_BINDING_NAMES, DISPATCH_BINDING_NAME, type BindingTable } from 
 import { DispatchSlotCounter, type DispatchDeps } from "./dispatch.ts";
 import { createWorkerEnv, effectiveTimeoutMs, resolveConfig } from "./limits.ts";
 import type { PtcConfig, PtcSurface } from "./limits.ts";
+import type { SessionModel } from "./session-model.ts";
 import type { ULID } from "./task-storage.ts";
 import {
   HOST_FRAME_KIND,
@@ -109,6 +110,14 @@ export interface RunPtcProgramOptions {
    * against this run's `dispatchConcurrency` for their whole lifetime.
    */
   dispatchDeps?: DispatchDeps;
+  /**
+   * ADR-0044: the caller session's current model, read by the entrypoint off pi's
+   * tool-execution context. Threaded to every binding call's context so `pi.dispatch` can
+   * inherit it when the call site and the agent markdown both name no model. Absent means
+   * no inheritance -- exactly the pre-ADR-0044 behaviour, which is what every direct library
+   * caller and every pi too old to pass `ctx.model` gets.
+   */
+  sessionModel?: SessionModel;
   /**
    * Optional worker pool (ADR-0017). Absent = spawn a fresh worker and terminate it
    * at run end (the original cold-start path). Present = the dispatcher acquires a
@@ -705,6 +714,10 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
           callerId: runId,
           ...(options.parentTaskId === undefined ? {} : { parentTaskId: options.parentTaskId }),
           ...(options.sessionDir === undefined ? {} : { sessionDir: options.sessionDir }),
+          // ADR-0044: one session-model value for the whole run, so every dispatch call the
+          // program makes resolves the same model tier. Spread-as-absent keeps the context
+          // shape unchanged for callers that have no ctx.model to offer.
+          ...(options.sessionModel === undefined ? {} : { sessionModel: options.sessionModel }),
           // ADR-0022 §9: a session-supplied counter wins; otherwise keep this run's own
           // counter as the default (nothing regresses for callers that pass no deps).
           dispatchDeps: {
