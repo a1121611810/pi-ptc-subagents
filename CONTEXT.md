@@ -43,8 +43,10 @@ _Avoid_: output, result (when you mean the return value).
 (`content[0].text`), assembled by `renderToolResult()`. This is what the model
 reads; it is not what the human sees. _Avoid_: output, "the result".
 
-**PTC row** — the TUI rendering a human reads, produced by `renderCall` /
-`renderResult` from the `details` payload. _Avoid_: output.
+**PTC row** — the TUI rendering a human reads, produced by a tool's `renderCall` /
+`renderResult` hooks rather than by the _tool-result text_. A tool may register both halves —
+the program pair and the three `ptc_task_*` panels do — or only the call half, as the
+_subagent surface_ does, leaving its result to pi's own text rendering. _Avoid_: output.
 
 **value tree** — the shape a **PTC row** gives a container **completion value**: one row per
 property (or array index), nested containers behind `├─` / `└─` / `│` connectors, bounded by
@@ -571,8 +573,13 @@ meaning ("booted"). No new frame kind.
 **partial-state render** — the visual treatment of a PTC row while a run is in
 flight (`isPartial: true`). Three visible parts: a shimmered description on
 the parent row, a sub-call tree under it, and right-aligned meta not yet
-present. _Avoid_: "running state", "loading state" (these collide with pi's
-own `toolPendingBg` / settled-state distinctions elsewhere in the TUI).
+present. The _subagent surface_'s call row joins the same partial/settled
+distinction with two differences: there is no sub-call tree under it, and its
+right-aligned meta states the dispatch **request** (`foreground`/`background`,
+the read-only tier, a pinned `model`) rather than the run's measured facts — so
+that meta is present from the first frame and only the shimmer band separates
+partial from settled. _Avoid_: "running state", "loading state" (these collide
+with pi's own `toolPendingBg` / settled-state distinctions elsewhere in the TUI).
 
 **settled-state render** — the visual treatment after the run completes
 (`isPartial: false`). Description is uniformly `accent` (no character is
@@ -618,9 +625,9 @@ lifecycle state — `startedAt` and the interval handle — lives in the
 pi rebuilds the row on every `updateDisplay()`, and the shimmer's own
 interval triggers one, so instance state would restart `startedAt`
 each tick (band frozen at position 0) and leak the previous interval.
-Used only by `PtcRow`'s call row — sub-call rows do not shimmer
-(US16). _Avoid_: "shimmer wrapper" (too generic), "shimmer component"
-(collides with the `Component` vocabulary elsewhere).
+Used by every PTC **call row** — the program rows and the _subagent surface_ row;
+sub-call rows do not shimmer (US16). _Avoid_: "shimmer wrapper" (too generic),
+"shimmer component" (collides with the `Component` vocabulary elsewhere).
 
 **ShimmerState** — the two-field bag `{ startedAt?, interval? }` that
 carries the shimmer across the row recreation pi performs. Owned by pi
@@ -677,6 +684,15 @@ Falls back to `JSON.stringify(args)` truncated to 40 chars when the
 selector misses — **the only place** `JSON.stringify` is acceptable on a
 sub-row. ADR-0021 §3. _Avoid_: "args display" (vague), "args format"
 (implies the JSON-format capability).
+
+**dispatch task** — the instruction prose a caller passes as `task` to
+`pi.dispatch(...)` or `ptc_subagent`: what the child is asked to do, sent as its
+user message (`Task: …`). It is not the whole assembled prompt (the appended
+system prompt carries the policy context), not the caller's reason (that is the
+dispatch `why`, ADR-0043), and not a **background task** (the _TaskRecord_
+lifecycle row a `{ background: true }` dispatch creates). _Avoid_: "task"
+unqualified (ambiguous between this and the lifecycle row), "prompt" (the
+assembled whole), "goal" (the retired name of `why`, ADR-0043).
 
 **DispatchHandle** — the thin 3-field snapshot returned by background
 `pi.dispatch(...)` when `{ background: true }` is set:

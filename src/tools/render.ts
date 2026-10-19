@@ -1393,7 +1393,7 @@ export function renderPtcToolResultExpanded(
 }
 
 /**
- * The `renderCall` / `renderResult` pair every PTC tool registers.
+ * The `renderCall` / `renderResult` pair the two program tools register.
  *
  * The two tools differ only by the surface label, so the wiring lives here once rather than
  * being copy-pasted per tool — a duplication that had already drifted once during review.
