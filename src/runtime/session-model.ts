@@ -75,9 +75,11 @@ function isUsableComponent(value: unknown): value is string {
  * when only the model was.
  *
  * The pair is accumulated field by field (a transcript may name a model on a turn that carries
- * no provider), so a formatter may not assume it is complete. `undefined` means NO assistant
- * turn was observed -- callers render no line for it rather than a placeholder, because
- * "the host saw no model" and "the model is called undefined" are different claims.
+ * no provider), so a formatter may not assume it is complete. `undefined` means no observed
+ * assistant turn NAMED the pair -- no turn at all, a pi within the declared floor whose turns do
+ * not report it, or a record written before the wire fields existed -- and callers render no
+ * line for it rather than a placeholder: "the host was given no name" and "the model is called
+ * undefined" are different claims.
  *
  * It lives HERE, in the module with no imports at all, and not in `tools/render.ts` where the
  * other shared render helpers live: `tools/ptc-task.ts` needs this formatter, and

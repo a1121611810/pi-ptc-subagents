@@ -95,6 +95,13 @@ the pair, which the structural read deliberately tolerates; and a record written
 existed. It never means the child "ran on an unknown model": the child may well have run a model
 the host was not given a name for.
 
+The rendering is defensive, because the pair is untrusted child wire data being interpolated into
+model-facing text: ANSI escape sequences and control characters are stripped before the value is
+used, and the rendered value is head-capped at **200 characters** so a `model:` line stays one
+bounded line. The cap keeps the front — a provider/model name is recognisable at its start, and a
+tail cut can only make it less identifiable — and it applies to the rendered value including the
+provider prefix.
+
 Why report a model the caller chose, or can now infer: resolution can land one tier below the call
 site (the definition's or the session's), and in the background case the caller is not present when
 the child runs. The result and the record are where the caller learns what its delegation actually

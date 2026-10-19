@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   carries only a model id reports the id alone; the absence of both means no observed assistant turn
   named the pair — no turn, a supported pi that does not report it, or an old record — not "the
   model is unknown". A background record gains the pair at the same terminal close that writes
-  `usage`, so a failed or canceled close that named a model still states it. Additive and backward compatible: old records and old result shapes keep working. See
+  `usage`, so a failed or canceled close that named a model still states it. Additive and backward compatible: old records and old result shapes keep working. The rendered value is stripped of ANSI escape sequences and control characters and head-capped at 200 characters before it enters model-facing text, because the pair is untrusted child wire data. See
   ADR-0044, ADR-0016 §"The child's model", and ADR-0022 §3 as amended.
 
 ### Changed

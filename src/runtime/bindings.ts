@@ -273,8 +273,9 @@ export const DISPATCH_PARAMETERS: DispatchParameters = Type.Object({
   model: Type.Optional(
     Type.String({
       description:
-        "Omit to inherit the caller session's current model; pass a model id (or let the agent " +
-        "definition pin one) to override.",
+        "Omit to inherit the caller session's current model (when this pi exposes one; otherwise " +
+        "pi's configured default applies); pass a model id (or let the agent definition pin one) to " +
+        "override.",
     }),
   ),
   thinkingLevel: Type.Optional(Type.String()),

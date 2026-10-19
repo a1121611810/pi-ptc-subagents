@@ -200,7 +200,7 @@ describe("formatObservedModel sanitizes the child-observed pair", () => {
   });
 
   test("the rendered value is capped at 200 characters, and the cap keeps the front", () => {
-    // Chosen truncation (Lead's contract): sanitize first ("M\nX" becomes "MX"), then keep the
+    // ADR-0044 Decision 2's rendering bound: sanitize first ("M\nX" becomes "MX"), then keep the
     // first 200 characters with no ellipsis. The provider prefix is part of the rendered VALUE,
     // so the total stays within the same bound.
     const modelOnly = formatObservedModel(undefined, INJECTED_MODEL);
