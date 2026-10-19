@@ -156,6 +156,19 @@ function firstLine(value: string): string {
   return truncateChars((line ?? "").trim(), MAX_ERROR_CHARS);
 }
 
+/**
+ * One-line failure reason for the panels, or `undefined` when there is nothing to show (P2,
+ * issue #70). `firstLine` is the helper the thrown-result row already uses: it sanitizes the raw
+ * provider text, takes the first non-blank line and caps it at {@link MAX_ERROR_CHARS}, so a
+ * multi-line error cannot break the row grid and no second cap constant is introduced. An empty or
+ * whitespace-only string is ABSENCE — a panel must never print a bare `error: `.
+ */
+function failureReason(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0) return undefined;
+  const line = firstLine(value);
+  return line.length === 0 ? undefined : line;
+}
+
 /** A missing/non-object `details` payload reads as an empty bag, never a throw. */
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
@@ -289,6 +302,17 @@ function taskRecordRow(record: TaskRecord, isLast: boolean, theme: Theme, now: n
   return { left: `${TREE_INDENT}${connector}${segments.join(theme.fg("dim", " · "))}` };
 }
 
+/**
+ * The two failure terminals whose reason deserves a second line: `failed` (the terminal close
+ * wrote `errorMessage`) and `lost` (ADR-0022 §8's recovery sweep wrote the reason it reconciled
+ * the record with). Every other state renders none, even if a record carries a stale field — the
+ * panel gates on the STATUS, because only a failure close records a failure reason.
+ */
+function taskFailureReason(record: TaskRecord): string | undefined {
+  if (record.status !== "failed" && record.status !== "lost") return undefined;
+  return failureReason(record.errorMessage);
+}
+
 function renderTaskList(details: unknown, ctx: RenderContext): TaskPanelRow {
   const raw = asRecord(details);
   const tasks = Array.isArray(raw.tasks) ? (raw.tasks as TaskRecord[]) : [];
@@ -305,9 +329,17 @@ function renderTaskList(details: unknown, ctx: RenderContext): TaskPanelRow {
   const hasLive = tasks.some((task) => isLiveStatus(task.status));
   const visible = tasks.slice(0, MAX_TASK_PANEL_ROWS);
   const tail = tasks.length - visible.length;
-  const rows = visible.map((task, index) =>
-    taskRecordRow(task, index === visible.length - 1 && tail === 0, ctx.theme, ctx.now),
-  );
+  const rows: RowLine[] = [];
+  visible.forEach((task, index) => {
+    rows.push(taskRecordRow(task, index === visible.length - 1 && tail === 0, ctx.theme, ctx.now));
+    // P2 / issue #70: the reason is a per-task ANNOTATION, not a task row — it explains the row
+    // above it and is never counted against MAX_TASK_PANEL_ROWS. The cap slices `tasks` above, so
+    // every visible record gets its annotation while the withheld tail gets neither kind of row.
+    const reason = taskFailureReason(task);
+    if (reason !== undefined) {
+      rows.push({ left: `${TREE_ROOT_CONT}${ctx.theme.fg("error", `error: ${reason}`)}` });
+    }
+  });
   if (tail > 0) {
     rows.push({
       left: `${TREE_INDENT}└─ ${ctx.theme.fg("dim", `…+${tail} more tasks`)}`,
@@ -353,6 +385,12 @@ function renderTaskOutput(details: unknown, ctx: RenderContext): TaskPanelRow {
       : undefined;
   const meta = outputMeta(outputBytes, truncated, ctx.theme);
   const items: RowLine[] = [];
+  // P2 / issue #70: the record's own failure reason reads FIRST — before the preview, the
+  // full-output pointer and the empty placeholder — because it explains whichever of them follows.
+  const reason = failureReason(raw.errorMessage);
+  if (reason !== undefined) {
+    items.push({ left: `${TREE_ROOT_CONT}${ctx.theme.fg("error", `error: ${reason}`)}` });
+  }
   if (output.length > 0) {
     const allLines = sanitizeText(output).split("\n");
     const shown = allLines.slice(0, MAX_OUTPUT_PREVIEW_LINES);

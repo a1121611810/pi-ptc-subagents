@@ -283,6 +283,190 @@ describe("task-output", () => {
 });
 
 // ---------------------------------------------------------------------------
+//  failure reason on both panels (issue #70, P2)
+// ---------------------------------------------------------------------------
+
+/**
+ * The captured 429 body from issue #70 — the same real literal the tool-level test uses. Real
+ * provider text, not an invented string (constraint #2).
+ */
+const ERROR_429 =
+  '429 {"type":"error","error":{"type":"rate_limit_error","message":"已达到 Token Plan 用量上限"}}';
+
+describe("task-output failure reason (issue #70)", () => {
+  test("renders the record's error BEFORE the output preview, in the error slot", () => {
+    const out = renderResult("task-output", {
+      taskId: TASK_ID,
+      output: "hello world",
+      outputBytes: 11,
+      outputTruncated: false,
+      errorMessage: ERROR_429,
+    });
+
+    expect(out).toContain("[error]error: " + ERROR_429 + "[/]");
+    expect(out.indexOf("error:")).toBeLessThan(out.indexOf("hello world"));
+  });
+
+  test("renders it before the empty-output placeholder too", () => {
+    // The zero-byte failed page is exactly issue #70's fixture: there is no preview to explain,
+    // so the reason must read first and the placeholder second.
+    const out = renderResult("task-output", {
+      taskId: TASK_ID,
+      output: "",
+      outputBytes: 0,
+      outputTruncated: false,
+      errorMessage: ERROR_429,
+    });
+
+    expect(out).toContain("[error]error: ");
+    expect(out).toContain("(no output yet)");
+    expect(out.indexOf("error:")).toBeLessThan(out.indexOf("(no output yet)"));
+  });
+
+  test("caps the reason at MAX_ERROR_CHARS (120) and keeps only its first line", () => {
+    const multiline = "quota exhausted " + "x".repeat(300) + "\nsecond line must not render";
+    const out = renderResult("task-output", {
+      taskId: TASK_ID,
+      output: "tail",
+      outputBytes: 4,
+      outputTruncated: false,
+      errorMessage: multiline,
+    });
+
+    const reasonLine = out.split("\n").find((line) => line.includes("[error]error: ")) ?? "";
+    const shown = reasonLine
+      .slice(reasonLine.indexOf("error: ") + "error: ".length)
+      .replace("[/]", "");
+    // 120 is the registered MAX_ERROR_CHARS value (.opencodereview/rules/ptc-render-bounds.md).
+    expect(shown).toHaveLength(120);
+    expect(shown.startsWith("quota exhausted ")).toBe(true);
+    expect(shown.endsWith("…")).toBe(true);
+    expect(out).not.toContain("second line must not render");
+  });
+
+  test("omits the line when the record carries no reason (absent or empty string)", () => {
+    const absent = renderResult("task-output", {
+      taskId: TASK_ID,
+      output: "tail",
+      outputBytes: 4,
+      outputTruncated: false,
+    });
+    const empty = renderResult("task-output", {
+      taskId: TASK_ID,
+      output: "tail",
+      outputBytes: 4,
+      outputTruncated: false,
+      errorMessage: "",
+    });
+
+    expect(absent).not.toContain("error:");
+    expect(empty).not.toContain("error:");
+  });
+
+  test("reads before the full-output pointer as well as the preview", () => {
+    // CHANGELOG / ADR §11 claim the reason comes ahead of the full-output pointer, not only the
+    // preview; pin that ordering on the shape that actually renders the pointer.
+    const out = renderResult("task-output", {
+      taskId: TASK_ID,
+      output: "tail only",
+      outputBytes: 90_000,
+      outputTruncated: true,
+      outputFullPath: "/tmp/full-output.txt",
+      errorMessage: ERROR_429,
+    });
+
+    expect(out).toContain("error: " + ERROR_429);
+    expect(out.indexOf("error:")).toBeLessThan(out.indexOf("/tmp/full-output.txt"));
+  });
+
+  test("the reason row does not consume the six-line preview cap", () => {
+    // ADR §11: the annotation is its own row and must not shorten the preview. Eight output
+    // lines still show six, with the two withheld stated in-band, alongside the reason row.
+    const out = renderResult("task-output", {
+      taskId: TASK_ID,
+      output: Array.from({ length: 8 }, (_unused, index) => "line" + String(index + 1)).join("\n"),
+      outputBytes: 48,
+      outputTruncated: false,
+      errorMessage: ERROR_429,
+    });
+
+    expect(out).toContain("error: " + ERROR_429);
+    expect(out).toContain("line6");
+    expect(out).not.toContain("line7");
+    expect(out).toContain("…+2 more lines");
+  });
+});
+
+describe("task-list failure reason (issue #70)", () => {
+  test("a failed record's row is followed by an indented error line", () => {
+    const out = renderResult("task-list", {
+      tasks: [makeRecord({ status: "failed", errorMessage: ERROR_429 })],
+      count: 1,
+    });
+
+    expect(out).toContain("[error]error: " + ERROR_429 + "[/]");
+    // Below its own summary row, at the tree's continuation column (TREE_ROOT_CONT = 3 spaces).
+    expect(out.indexOf("research X")).toBeLessThan(out.indexOf("error:"));
+    const reasonLine = out.split("\n").find((line) => line.includes("[error]error: ")) ?? "";
+    expect(reasonLine.startsWith("   [error]error: ")).toBe(true);
+  });
+
+  test("lost records state their recovery reason too", () => {
+    // ADR-0022 §8's recovery sweep writes the reason it reconciled the record with, so `lost` is
+    // a failure terminal for the same reason `failed` is.
+    const out = renderResult("task-list", {
+      tasks: [
+        makeRecord({ status: "lost", errorMessage: "host rebooted before the child closed" }),
+      ],
+      count: 1,
+    });
+
+    expect(out).toContain("[error]error: host rebooted before the child closed[/]");
+  });
+
+  test("non-failure records render no reason line, even with a stray errorMessage", () => {
+    // The panel gates on STATUS, not on the field being present: only failed/lost closes record a
+    // failure reason, and shouting a stale field on a succeeded row would be a false alarm.
+    const out = renderResult("task-list", {
+      tasks: [
+        makeRecord({
+          status: "succeeded",
+          durationMs: 1000,
+          finishedAt: BASE + 1000,
+          errorMessage: "stale",
+        }),
+      ],
+      count: 1,
+    });
+
+    expect(out).not.toContain("error:");
+  });
+
+  test("the reason line is an annotation: it does not consume the 32-task row budget", () => {
+    const tasks = Array.from({ length: 40 }, (_unused, index) => {
+      const padded = String(index).padStart(2, "0");
+      return makeRecord({
+        id: ("01JBZ0000000000000000000" + padded) as TaskRecord["id"],
+        label: "task-" + padded,
+        status: "failed",
+        errorMessage: "boom-" + padded,
+        createdAt: BASE + index,
+        durationMs: 1000,
+        finishedAt: BASE + index + 1000,
+      });
+    });
+
+    const out = renderResult("task-list", { tasks, count: tasks.length });
+
+    // MAX_TASK_PANEL_ROWS still counts TASKS: the 32 visible tasks each get their annotation line,
+    // and the 8 withheld tasks contribute neither a row nor a reason.
+    expect(out).toContain("error: boom-31");
+    expect(out).not.toContain("error: boom-32");
+    expect(out).toContain("…+8 more tasks");
+  });
+});
+
+// ---------------------------------------------------------------------------
 //  task-stop: terminal transition summary
 // ---------------------------------------------------------------------------
 
