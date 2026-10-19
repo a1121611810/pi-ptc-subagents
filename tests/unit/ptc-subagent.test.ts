@@ -499,6 +499,18 @@ describe("ptc_subagent", () => {
       throw new Error("ptc_subagent registered no renderCall");
     }
     const theme = plainTheme();
+    /**
+     * Cross-version render context (measured on 0.86.0 / 1.0.0 / 1.2.0 by
+     * `scripts/pi-compat-matrix.mjs`).
+     *
+     * pi 1.2.0's `ToolRenderContext` REQUIRES `outputPad`; pi 1.0.0 does not declare the field
+     * at all. A plain literal therefore cannot satisfy both ends — adding `outputPad` is an
+     * excess-property error on 1.0.0, omitting it is a missing-property error on 1.2.0. The
+     * fixture is read against the type of the context THAT pi build hands `renderCall` and
+     * asserted through `unknown`, so the one object compiles on every supported version. Nothing
+     * is lost by the cast: the renderer under test never reads `outputPad` (`grep outputPad
+     * src/` → no reference), it only receives the field because 1.2.0 declares it required.
+     */
     const context = {
       args: {},
       toolCallId: "call-visual-1",
@@ -513,7 +525,7 @@ describe("ptc_subagent", () => {
       showImages: false,
       isError: false,
       durationMs: undefined,
-    };
+    } as unknown as Parameters<typeof renderCall>[2];
     const args = { task: "do the thing\nsecond line", readOnly: "lenient" as const };
     const collapsed = renderCall(args, theme, context).render(80).join("\n");
     expect(collapsed).toContain("└─ subagent → (generalist)");
