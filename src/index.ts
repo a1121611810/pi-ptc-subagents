@@ -699,9 +699,9 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     description: "Show or toggle PTC mode",
     handler: async (args, ctx) => {
       const action = args.trim().toLowerCase();
-      // NOTE: `/ptc off` below turns PTC MODE off, which is unrelated to the extension surface.
-      // The `surface` subcommand that used to sit here went with the `surfaceMode` setting; there
-      // is no surface to set, and the surface in force is reported at `session_start`.
+      // NOTE: `/ptc off` below is PTC MODE and `/ptc why` is ADR-0043's dispatch-`why` switch --
+      // two switches. `surface` went with `surfaceMode`; the one in force reports at session start.
+      if (action === "why" || action.startsWith("why ")) return applyWhy(action.slice(4), ctx);
       if (action === "off") {
         if (!mode.enabled) {
           ctx.ui.notify("PTC mode is already off.", "info");
@@ -1056,7 +1056,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     // A persisted record is the user's most recent explicit intent: `/ptc off` survives a resume
     // even when the config still says default-on.
     const wantMode = persisted?.enabled ?? decision.enter;
-
+    applyPersistedWhy(ctx);
     if (decision.enter && wantMode) {
       enterMode(
         base,
@@ -1150,4 +1150,158 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
       },
     };
   });
+
+  /**
+   * ADR-0043: the `why` decision THIS SESSION made, or `undefined` while `ptc.json` still owns it.
+   *
+   * Session scope is the whole contract, not an implementation detail: the value lives in a session
+   * entry and never in the config file, so a new session starts from `ptc.json` again. That is the
+   * line between `/ptc why off` and hand-editing `"whyEnabled"` -- one decides about this
+   * conversation, the other about every future one -- and it is why nothing below opens the file.
+   *
+   * Held beside its only two accessors rather than beside the load-time `whyConfig` it shadows,
+   * because those two are the whole surface of this switch and a reader has to see them together
+   * to check they agree.
+   */
+  let whySession: boolean | undefined;
+
+  /**
+   * Restore this session's `why` record over the value `readWhyEnabledConfig` produced, at
+   * `session_start`.
+   *
+   * The same standing a `/ptc off` record has over `defaultMode` (see the `wantMode` line the
+   * caller reads): the user's most recent explicit intent about THIS session outranks the file, and
+   * "most recent" is why {@link readPersistedWhy} scans backwards -- `/ptc why on` after
+   * `/ptc why off` leaves two entries and the second one is the one that counts.
+   *
+   * Silent when there is no record, because there is nothing to reconcile: `ptc.json` already
+   * decided, and a notice about a switch the user never touched is the crying wolf the
+   * `surfaceMode` notice above is careful not to be.
+   */
+  function applyPersistedWhy(ctx: ExtensionContext): void {
+    const persisted = readPersistedWhy(ctx);
+    if (persisted === undefined) return;
+    whySession = persisted.enabled;
+    // The same object `getDispatchDeps` hands all three fronts, mutated rather than replaced --
+    // `background.dispatchDeps` is readonly, and it is read per dispatch, so this is the one write
+    // that reaches the next dispatch without an extension reload.
+    background.dispatchDeps.whyEnabled = persisted.enabled;
+  }
+
+  /**
+   * The last `why` record in this session, or `undefined` when it has none.
+   *
+   * Backwards, for the reason `readPersistedMode` scans backwards: the LAST record is the user's
+   * most recent intent, and a forward scan would answer with the first one they ever made.
+   *
+   * **A malformed `enabled` is not a record at all**, so it is skipped and the scan continues —
+   * the same rule `readWhyEnabledConfig` applies to a malformed `whyEnabled` in the config file,
+   * and for the same reason: the safe direction is the one that cannot silently take the feature
+   * away, and a reader that resolved `"true"` or a missing payload to `false` would remove the
+   * block for a session that never asked for that. Skipping rather than defaulting also leaves the
+   * PROVENANCE honest: when no readable record exists, `ptc.json` governs and the query says so,
+   * instead of a record nobody could read claiming to be the source.
+   *
+   * An earlier draft read this as `data?.enabled === true`, which resolves every non-`true` value
+   * — `"true"`, `1`, a missing key — to OFF, on the grounds that `readPersistedMode` does the same
+   * for the mode record. That is the wrong precedent: it copies a decision made for a DIFFERENT
+   * switch, whose failure mode was never argued on this axis, and it inverts the one principle
+   * this switch was built on.
+   */
+  function readPersistedWhy(ctx: ExtensionContext): { enabled: boolean } | undefined {
+    const entries = ctx.sessionManager.getEntries();
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      const entry = entries[index];
+      if (entry?.type !== "custom" || entry.customType !== PTC_WHY_ENTRY_TYPE) continue;
+      const enabled = (entry.data as { enabled?: unknown } | undefined)?.enabled;
+      // Not `return { enabled: true }`: a record we cannot read is not a weaker version of an
+      // instruction, it is the absence of one, and the file's value stands.
+      if (typeof enabled !== "boolean") continue;
+      return { enabled };
+    }
+    return undefined;
+  }
+
+  /**
+   * One sentence describing the switch, used by BOTH the toggles and the bare query.
+   *
+   * One formatter because a user who runs `/ptc why off` and then `/ptc why` has to read the same
+   * state described the same way, and two formatters for one fact is how they come to disagree.
+   *
+   * The source is half the sentence rather than a footnote: after `/ptc why off` the file still
+   * says what it always said, so a user who opens `ptc.json` to find out why this session behaves
+   * differently is looking at the wrong file unless the report says which one is in force.
+   */
+  function whyReport(enabled: boolean, source: "session" | "config"): string {
+    return [
+      `The dispatch \`why\` block is ${enabled ? "ON" : "OFF"}`,
+      source === "session" ? "(set by this session)" : "(set by ptc.json)",
+      enabled
+        ? "-- a dispatched child receives your reason. Run /ptc why off to stop handing it over."
+        : "-- a dispatched child does not receive your reason. Run /ptc why on to hand it over.",
+    ].join(" ");
+  }
+
+  /**
+   * `/ptc why [on|off]` -- ADR-0043's session switch, and the only thing it touches.
+   *
+   * Three properties a one-line `deps.whyEnabled = x` would each get wrong, which is why they are
+   * three lines here:
+   *
+   *   1. **Effective for the NEXT dispatch.** `background.dispatchDeps` is the single object every
+   *      dispatch front reads, so assigning there is what makes this take effect before the user's
+   *      next turn rather than at the next extension load.
+   *   2. **Durable for the session.** `pi.appendEntry` is the whole persistence, and it is the same
+   *      call `exitMode` makes: a session record survives a `/reload` and a resume, so the flag does
+   *      not silently lapse when the user reloads an extension.
+   *   3. **Nothing else.** No file is written, PTC mode is not touched, and an argument that is
+   *      not a value leaves every field above exactly as it was -- including the entry list, which
+   *      is the part a "close enough" handler still appends to.
+   *
+   * Repeating the current value is a NO-OP rather than a second entry, and it still REPORTS rather
+   * than warns: the entry would say what the file already says, and writing it would move the
+   * reported source from `ptc.json` to this session without the user having changed anything. The
+   * report is kept rather than replaced by a terser "already off" for the same reason `/ptc off`
+   * does not need one -- `/ptc why` doubles as the query, so every branch answers the question.
+   */
+  function applyWhy(arg: string, ctx: ExtensionContext): void {
+    const value = arg.trim().toLowerCase();
+    const current = whySession ?? whyConfig.whyEnabled;
+    const source: "session" | "config" = whySession === undefined ? "config" : "session";
+    if (value === "") {
+      ctx.ui.notify(whyReport(current, source), "info");
+      return;
+    }
+    if (value !== "on" && value !== "off") {
+      ctx.ui.notify(
+        '/ptc why takes "on" or "off", or nothing at all to report the current value -- not ' +
+          `"${arg.trim()}". Nothing changed.`,
+        "warning",
+      );
+      return;
+    }
+    const enabled = value === "on";
+    if (current === enabled) {
+      ctx.ui.notify(whyReport(enabled, source), "info");
+      return;
+    }
+    whySession = enabled;
+    background.dispatchDeps.whyEnabled = enabled;
+    pi.appendEntry(PTC_WHY_ENTRY_TYPE, { enabled });
+    ctx.ui.notify(whyReport(enabled, "session"), "info");
+  }
 }
+
+/**
+ * `customType` for this session's `why` record (`pi.appendEntry`).
+ *
+ * Separate from `PTC_MODE_ENTRY_TYPE` and it has to be: both readers scan the SAME entry list
+ * backwards for their own type, so a shared one would let `/ptc why off` restore as a mode record
+ * on the next `session_start` -- and `/ptc off` restore as a `why` decision. Two entry types, two
+ * independent switches, and neither recoverable as the other.
+ *
+ * Declared here rather than beside `PTC_MODE_ENTRY_TYPE` in `src/mode/ptc-mode.ts` because that
+ * module is PTC MODE's state machine; this switch has nothing to say about the loadout, and
+ * everything it touches lives in this file.
+ */
+export const PTC_WHY_ENTRY_TYPE = "ptc-why";
