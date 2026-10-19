@@ -20,18 +20,39 @@ const repoRoot = join(import.meta.dirname, "..", "..");
 const DIST = join(repoRoot, "dist", "index.js");
 const distAvailable = existsSync(DIST);
 
+/**
+ * Why these two tests carry an explicit timeout.
+ *
+ * They are the only tests in the suite that `await import()` the BUILT bundle, and the first
+ * import pays Vite's transform of a ~137 kB artifact inside the test body. Measured on this
+ * machine: the default 5 s budget is enough when the suite runs alone and NOT enough when it runs
+ * alongside anything else, where it fails as `Error: Test timed out in 5000ms` — a diagnostic that
+ * reads like a broken export and is not one. That sent a review round hunting a stale `dist` and a
+ * missing `detectedSurfaceMode`, twice, before the error text was read.
+ *
+ * 20 s is a ceiling on a cost that is normally ~1 s, not a budget the test is expected to spend.
+ * Raising the budget is the right fix here and would be the wrong one for an ordinary unit test:
+ * this one is slow because it crosses a build boundary by design, which is the property it exists
+ * to check.
+ */
+const DIST_IMPORT_TIMEOUT_MS = 20_000;
+
 const PRESENT = { present: true as const, how: "found" as const };
 const ABSENT = { present: false as const, how: "not-found" as const };
 
-test.skipIf(!distAvailable)("the built dist re-exports detectedSurfaceMode", async () => {
-  const mod: Record<string, unknown> = await import(DIST);
-  expect(typeof mod.detectedSurfaceMode, "the decision is reachable from the artifact").toBe(
-    "function",
-  );
-  // The factory-level seam stays exported too - production reaches the decision through it.
-  expect(typeof mod.detectSurfaceMode).toBe("function");
-  expect(typeof mod.probeCodemodePresence).toBe("function");
-});
+test.skipIf(!distAvailable)(
+  "the built dist re-exports detectedSurfaceMode",
+  async () => {
+    const mod: Record<string, unknown> = await import(DIST);
+    expect(typeof mod.detectedSurfaceMode, "the decision is reachable from the artifact").toBe(
+      "function",
+    );
+    // The factory-level seam stays exported too - production reaches the decision through it.
+    expect(typeof mod.detectSurfaceMode).toBe("function");
+    expect(typeof mod.probeCodemodePresence).toBe("function");
+  },
+  DIST_IMPORT_TIMEOUT_MS,
+);
 
 test.skipIf(!distAvailable)(
   "the decision is a pure function of the three probe answers: four combinations",
@@ -72,4 +93,5 @@ test.skipIf(!distAvailable)(
       }
     }
   },
+  DIST_IMPORT_TIMEOUT_MS,
 );

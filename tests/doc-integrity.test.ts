@@ -806,21 +806,40 @@ interface LineRef {
   readonly targetLine: number;
 }
 
-const FILE_LINE_REF = /\b([A-Za-z0-9_./-]+\.(?:ts|tsx|js|mjs|md|json)):(\d+)\b/g;
+/**
+ * `<file>:<line>` plus the comma-separated span that can follow it.
+ *
+ * The group after the colon takes `233, 569, 766` as a LIST. Before this, the reference stopped at
+ * the first number and the rest were bare text the extractor never looked at — which is how
+ * `docs/adr/0032-child-report.md` came to cite `ptc-task.ts:233, 556, 744` while the real lines
+ * were 233, 569 and 766: the gate checked 233, the other two drifted unobserved, and nothing said
+ * so. A citation that names three lines makes three claims, and a gate that checks one of them is
+ * a gate that can be satisfied while two thirds of the sentence is false.
+ *
+ * `-` ranges are deliberately NOT expanded. `ptc-mode.ts:27-31` names a span, not five separate
+ * claims; expanding it would require every line inside to carry the cited symbol, which is not what
+ * the sentence means. The first number is what a range can be checked against.
+ */
+const FILE_LINE_REF = /\b([A-Za-z0-9_./-]+\.(?:ts|tsx|js|mjs|md|json)):(\d+(?:\s*,\s*\d+)*)\b/g;
 
 function extractLineRefs(doc: DocEntry): LineRef[] {
   // 只掩围栏：`src/foo.ts:12` 这种引用就写在行内代码里，掩掉行内代码等于把引用全灭掉。
   const masked = maskFencedCode(doc.text);
   const refs: LineRef[] = [];
   for (const match of masked.matchAll(FILE_LINE_REF)) {
-    const targetLine = Number.parseInt(match[2] ?? "", 10);
-    if (!Number.isFinite(targetLine)) continue;
-    refs.push({
-      doc: doc.rel,
-      line: lineAt(masked, match.index),
-      file: match[1] ?? "",
-      targetLine,
-    });
+    const file = match[1] ?? "";
+    // One `LineRef` per number, all sharing the citing document line — which is what the prose
+    // does: three numbers on one line are three citations written once.
+    for (const part of (match[2] ?? "").split(",")) {
+      const targetLine = Number.parseInt(part.trim(), 10);
+      if (!Number.isFinite(targetLine)) continue;
+      refs.push({
+        doc: doc.rel,
+        line: lineAt(masked, match.index),
+        file,
+        targetLine,
+      });
+    }
   }
   return refs;
 }
@@ -1406,6 +1425,12 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       "structuredContent: structured,",
     "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:233":
       "outputSchema: LIST_OUTPUT_SCHEMA,",
+    // 2026-10-19（#219-#222 · retro）：抽取器现在展开逗号后的数字，这两行才第一次进入判定面。
+    // 它们一直是对的，只是以前没有任何东西检查；在这里补上，从此漂移会红。
+    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:569":
+      "outputSchema: OUTPUT_OUTPUT_SCHEMA,",
+    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:766":
+      "outputSchema: STOP_OUTPUT_SCHEMA,",
     "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1775":
       "export function childToolList(",
   };
@@ -1419,7 +1444,14 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
    */
   const PIN_TOKENS_COUNT_FLOOR = 21;
 
-  /** 上面那份基线，原样；两条断言共用它，避免「改了数组忘了表」这种漂移。 */
+  /**
+   * 上面那份基线，原样；两条断言共用它，避免「改了数组忘了表」这种漂移。
+   *
+   * **读法，说一次就够：数组是现值，下面的注释是移动史。** 每条注释记的是它那一轮复核**当时**
+   * 的数字与理由，后一轮可能又移过；所以注释里的 `1681→1691` 是历史，不是「现在应该在 1691」。
+   * 唯一会被机器检查的是数组条目，唯一该照着改的是数组条目。这条规则以前分散在几处注释里，
+   * 而分散的规则读起来像各自的例外——包括一次真的按注释里的旧数字去"修正"数组。
+   */
   const IN_REPO_PIN_BASELINE: readonly string[] = [
     // 2026-10-16 第八次复核（#199：usage 升为记录的一等载体，render.ts / subagent.ts 的改动把
     // 下面 10 条引用整体后移）。逐条按**内容**核对后改正，ADR 正文的行号与本表同步改：
@@ -1469,7 +1501,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // ADR-0043 那一段，whyBlock 的注记加了「块正文保留 goal 是刻意的」那一段，两处都在全部
     // 锚点之前，所以四条恰好等量。**等量不等于可以算**：算术平移只在本轮成立，下一轮锚点
     // 分布在两个函数的两侧时就不成立。四条都按内容逐条核对后改正。
-    // 上面这组是**当时值**，后续两轮又移动过；当前值以数组为准，最终一轮见下方第十五次复核。
+    // 上面这组是**当时值**（读法见本数组的头部说明）。
     "docs/adr/0026-surface-default-is-detected.md:258 -> dispatch.ts:2277",
     // 2026-10-10 第七次复核：四条全部因本轮删除 surfaceMode 而位移，逐条核对内容后改正。
     //  29  → 628→1160 = `export function detectedSurfaceMode(`
@@ -1572,13 +1604,14 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     //     handle 分支（406）；ADR-0032 引的是 settled 路径，取 494。
     // 2026-10-19 第十五次复核（#219-#222 · review round 2）：`resolveWhy` 的总域化注记又给
     // dispatch.ts 加了 10 行，四条锚点整体 +10（2267→2277、1895→1905、1918→1928、1765→1775）。
-    // 此次仍是等量位移，仍然逐条按内容核对。**上面第十二、十三次记的数字是当时值，不是现值**
-    // ——这份清单的分工是：数组是现值，注释是移动史；读现值只看数组。
+    // 此次仍是等量位移，仍然逐条按内容核对。读法见本数组的头部说明：数组是现值，注释是移动史。
     "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1905",
     "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:218",
     "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1928",
     "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:494",
     "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:233",
+    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:569",
+    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:766",
     "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1775",
     // 新增 1 条（2026-10-12，ADR-0039）：目标行已逐条核对。
     "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:115 -> src/index.ts:567",
@@ -1787,12 +1820,15 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       absolute: join(REPO_ROOT, "docs/adr/0020-ptc-row-pulse.md"),
       text: "Rendered in DSH's row (`ToolRow.tsx:212,222,226` and `ChatGroupSeat.tsx:117`).",
     });
-    // 一个行号跨度 `ToolRow.tsx:212,222,226` 抽三条：后两个逗号后的裸数字不带文件名，判定面只认
-    // `<file>:<line>` 形态，所以这里取首条 212 —— 这正是真实语料里的行为。
+    // 一个行号跨度 `ToolRow.tsx:212,222,226` 抽三条：逗号后的裸数字继承前面那个文件名，所以它们
+    // 是同一句话里的三个断言，不是一个断言加两个附注。**这条以前断的是「取首条 212」**——那时
+    // 后两个数字根本不进判定面，而 ADR-0032 的 `ptc-task.ts:233, 556, 744` 正是这么漂的：233 被
+    // 检查、556 与 744 无人过问，直到它们指到了无关行。三条都抽，才让「引用三行」意味着「三行
+    // 都被检查」。
     expect(
       samples.map((ref) => `${ref.file}:${ref.targetLine}`),
-      "抽取器要按 <file>:<line> 逐个抽出，且不把逗号后的裸数字当引用",
-    ).toEqual(["ToolRow.tsx:212", "ChatGroupSeat.tsx:117"]);
+      "抽取器要把逗号后的数字也算成引用，而不是只取首条",
+    ).toEqual(["ToolRow.tsx:212", "ToolRow.tsx:222", "ToolRow.tsx:226", "ChatGroupSeat.tsx:117"]);
     const first = samples[0];
     expect(first && inRepoTarget(first), "该样本指向 DSH 宿主文件，因此不在本仓校验面内").toBe(
       null,

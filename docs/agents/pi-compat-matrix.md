@@ -7,6 +7,15 @@ because the package makes a RANGE claim it never measured:
 - `devDependencies` pins `^1.0.0`, so the default gate measures one point of that range;
 - the project's stated policy is to track new pi releases, so the ceiling moves.
 
+**Those are three numbers, and the one on your PATH is a fourth.** `node_modules/@earendil-works/pi-coding-agent/package.json`
+records what the dependency tree resolved to; `pi --version` records what a user's terminal runs;
+neither is the declared floor and neither is necessarily the same as the other. Check both before
+saying what "pi does" — a claim read off `node_modules` describes the tree, not the machine. This
+is not hypothetical: a 2026-10-19 review asserted a capability was impossible, quoting 1.0.0 from
+`node_modules`, while the operator was running 1.3.0, where the same question had a different
+answer. The reader-visible version of that mistake is a wrong answer delivered with a file path
+attached, which is the most convincing shape a wrong answer takes.
+
 The matrix measures the ends. It is **not** part of the default gate: each version needs its own
 full install (~30-60 s each), which would multiply every contributor's gate by the matrix length
 for coverage the pinned version already provides. Run it when pi ships a release, when the peer

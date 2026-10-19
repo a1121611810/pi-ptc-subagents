@@ -92,8 +92,17 @@ Concretely, stop when **any** of these holds, and say which one:
 
 Two anti-patterns this repo paid for directly, both recorded in the rounds above: a **round that
 produces only records and tests is a signal to stop, not a round to build on**, and a **reviewer
-that finds something is not evidence the review process is working** -- a green suite is, and here
-the suite flakes 1 in 5, so that signal needs re-establishing rather than assuming.
+that finds something is not evidence the review process is working** -- a green suite is, and that
+signal needs re-establishing rather than assuming.
+
+**"The suite is flaky" is not a diagnosis, and this line used to stop there.** The measured case is
+`tests/unit/dist-surface-decision.test.ts`: it is the only test that `await import()`s the built
+bundle, the first import pays Vite's transform of a ~137 kB artifact, and under load that exceeds
+vitest's default 5 s. It fails as `Error: Test timed out in 5000ms`, which reads like a broken
+export and is not one -- two separate review passes hunted a stale `dist` and a missing
+`detectedSurfaceMode` before anyone read the error text. It now carries an explicit timeout, and
+the lesson generalizes: **read the failure text before naming the failure "flakiness"**, because a
+flake is a cause nobody has found yet, and the name ends the search.
 
 The corollary for the reviewer itself: **a round that finds a defect in the previous round's fix is
 the expected rate, not an alarm.** Five rounds in a row found one, which reads as "review is

@@ -30,6 +30,7 @@ compatibility: >
    ② 用户传入的路径;③ `docs/specs/`、`docs/adr/` 下与分支/功能匹配的文档;
    ④ 都不命中 → **询问用户**,不得默认挑一份最像的 ADR。
    取到的 spec 正文(含验收条件)存成临时 Markdown,然后**注入 OCR**(第 3 步的 `--background-file`)。无 spec 时 Spec 轴只输出 `no spec available` + Standards 轴结果并注明依据,**禁止用实现反推生成 spec**。
+   **背景文件有 8000 字符硬上限,超过时 OCR 直接 abort**(实测:`Error: background content is 14403 characters, exceeding the hard limit of 8000 (aborting)`)。一份 31 条 user story 的 spec 轻松超限,而 abort 发生在 preview 之前、输出只有一行——不按这个数预先裁,就会白跑一轮。裁法是只留 `Solution` / `Implementation Decisions` / `Testing Decisions` / `Out of Scope` 四节:Spec 轴判的是「实现是否忠实于要求」,user story 是要求的复述,决策节才是逐条可对照的验收面。裁完用 `wc -c` 确认,不要用行数估。
 3. **Health gate**:
    - `codegraph status` — 必须 "Files / Nodes / Edges" 都非零。失败 → 退化通道(见下方)。
    - `ocr --version` — 必须 >= 1.9.0。
