@@ -233,6 +233,14 @@ script that needs the exact bytes asks there rather than parsing the text line. 
 empty-log case: a child that died before writing output has no other model-facing evidence, so
 the reason is the one thing worth reading.
 
+The TUI panels attached to these calls say it too, without a pull: the `task-output` panel prints
+the record's failure reason as an `error: …` line first in the output block — ahead of the
+preview, the full-output pointer or the empty-output placeholder — and the `task-list` panel
+appends one to each `failed` / `lost` row whose record carries an `errorMessage`. Both reuse
+the panel's existing `MAX_ERROR_CHARS` bound (120, first non-blank line — ADR-0022 §11), so a
+failure reason never grows a row past one line; neither annotation is counted against the panel's
+row caps.
+
 #### The child report
 
 A background child's [child report](../adr/0032-child-report.md) is as inspectable as a
@@ -376,6 +384,7 @@ When a `TaskRecord` changes, the change is delivered to the model as a user-role
     transition-at-ms="1758700000123">
     <output-bytes>913</output-bytes>
     <!-- <error-message> only when the record carries one (failed / lost in practice) -->
+    <report-channel>tool</report-channel>
     <!-- <output-ref>…/tasks/01JBZ…/output.log</output-ref> once the log exists -->
     <output-preview>…only when outputBytes &lt;= 2048…</output-preview>
   </bg-task-notification>
@@ -396,6 +405,19 @@ When a `TaskRecord` changes, the change is delivered to the model as a user-role
   **The cap is this push surface's alone** — it bounds the batch. `ptc_task_output` states the
   record's full `errorMessage`, so a reader who needs the whole string pulls instead of being
   handed a truncated one.
+- **Report channel.** A `succeeded` event carries `<report-channel>` — `tool`, `prompt-json`,
+  `none` or `opted-out`, the same **total** field ADR-0032 defines — between `<error-message>`
+  and `<output-ref>`. It is rendered whenever the joined record carries a channel — in practice
+  the `succeeded` event alone; an event that cannot have a channel claim omits it (a running task
+  has not reported _yet_, and a `failed` / `lost` / `canceled` close has no report to describe),
+  so absence means "has not reported yet", never "reported nothing". (A `succeeded` record written
+  before ADR-0032 has no recorded channel either: there, absence means the field predates the
+  record.) The completion push
+  therefore states whether the child honoured the report contract, which previously took a
+  `ptc_task_output` poll to discover;
+  `none` means the child ran and ignored the contract, `opted-out` means the agent disabled it
+  (`childReport: false`) and nobody asked — different claims, kept unmerged. See
+  [The child report](#the-child-report) for what each channel means.
 - **Batch split.** A batch is split along event boundaries so its estimated payload stays within the
   default **100 KiB** budget (`DEFAULT_MAX_BATCH_BYTES = 100 * 1024`). The split never drops an event:
   an event that alone exceeds the budget gets its own batch. The cursor advances by _events_, not by

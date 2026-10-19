@@ -26,6 +26,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   future one". A resumed session restores the last record; a new one starts from the file. Bare
   `/ptc why` reports the value _and_ which of the two is in force, and an argument that is neither
   `on` nor `off` warns and changes nothing. See ADR-0043.
+- **A succeeded background task's completion notification now states its report channel.** The
+  `<bg-task-notification>` for a `succeeded` record gains a `<report-channel>` child —
+  `tool`, `prompt-json`, `none` or `opted-out`, the same **total** field ADR-0032 defines —
+  rendered between `<error-message>` and `<output-ref>`. Before this, a model that wanted to
+  know whether a finished child had honoured the report contract had to poll `ptc_task_output`;
+  the push it already receives now answers it, once per finished child. The element is absent from
+  every other event because only a `succeeded` close declares a channel: a running task has not
+  reported _yet_, and a `failed` / `lost` / `canceled` close has no report claim to state
+  (`none` and `opted-out` are claims about a finished child, not the absence of one). See
+  ADR-0022 §7 as amended (2026-10-19).
 
 ### Changed
 
@@ -50,6 +60,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default provider and hit a 429. No behaviour change — the resolution order is what the code
   already did, and the guide states it so the failure is also preventable. See the background
   dispatch guide, `docs/usage/bgdispatch.md`.
+- **The TUI task panel now shows why a background task failed.** The `task-output` panel prints
+  the record's failure reason as an `error: …` line first in the output block — ahead of the
+  preview or the empty-output placeholder — and the `task-list` panel appends one to each
+  `failed` / `lost` row whose record carries an `errorMessage`, so a child that died before
+  writing output stays legible in the panel instead of as an empty preview, without a
+  `ptc_task_output` call. A `lost` record carries the sweep's reason
+  (`session_ended_while_running` / `lost_on_session_restart`) and gets the row too; a
+  `canceled` task carries no reason and does not. Both rows reuse the panel's existing
+  `MAX_ERROR_CHARS` bound (120, first non-blank line), so no new cap or number is added, and
+  neither annotation counts against the panel's row caps — see ADR-0022 §11.
 
 ### Fixed
 

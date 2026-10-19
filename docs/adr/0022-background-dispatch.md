@@ -253,6 +253,7 @@ G2 verdict, locked:
     transition-at-ms="12345">
     <output-bytes>0</output-bytes>
     <!-- <error-message> only when the record carries one (failed / lost in practice) -->
+    <!-- <report-channel> on a succeeded event: tool | prompt-json | none | opted-out -->
     <!-- output-ref once output.log exists -->
     <!-- output-preview only when outputBytes <= 2048 -->
   </bg-task-notification>
@@ -269,6 +270,25 @@ XML-escaped — and only when the joined record carries one (`failed` / `lost` i
 child that died before writing output has a zero-byte log, so the notification is the only surface
 the model is shown without asking, and `status="failed"` alone is indistinguishable from an
 infrastructure fault. `ptc_task_output` states the same text for a reader who comes later.
+
+**`<report-channel>` (added 2026-10-19, the second §7 amendment of that date).** A `succeeded`
+event carries one more optional child,
+`<report-channel>tool|prompt-json|none|opted-out</report-channel>`, between `<error-message>` and
+`<output-ref>`. Its text is the record's `reportChannel` — ADR-0032's **total** field, always
+stated on a `succeeded` close — and the element is rendered whenever the joined record carries a
+channel: in practice the `succeeded` event alone, because the registry writes `reportChannel` on
+that close and no other. An event that cannot have a channel claim omits the element: a running
+task has not reported _yet_, and a `failed` / `lost` / `canceled` close has no report to
+describe, so absence means "has not reported yet", never "reported nothing". One historical
+caveat belongs with that reading: a `succeeded` record written before ADR-0032 has no
+`reportChannel` field either, so its absence there means the channel was never recorded — the
+same version-history exception ADR-0032 records for its own report fields. The distinction is
+load-bearing because `none` (the child ran and ignored the contract) and `opted-out` (nobody
+asked — the agent's frontmatter set `childReport: false`) are claims about a finished child, and
+a reader must not infer either from an absent element. Before this child element, the only way to learn whether a
+background child honoured the report contract was to poll `ptc_task_output`; the completion push
+the model already receives now states it once per finished child, and the pull remains the place
+to read the report body.
 
 A single batch carries N events. When a single-batch content exceeds the byte budget `DEFAULT_MAX_BATCH_BYTES = 100 * 1024` (100 KiB), the TaskRegistry splits along event boundaries into N batches. Each batch has its own `<bg-task-notifications>` parent. The model sees N consecutive parent tags; the cursor advances by N events, not N batches.
 
@@ -319,13 +339,13 @@ run row, never the panel), not any other file under `docs/`. The audit that foun
 (`docs/reviews/2026-09-29-ocr-rule-coverage-audit-3.md`) asked for a table of values, or for an
 explicit statement that the values have no independent source. This section is the first.
 
-| constant                   | value | what it bounds                                                            | block                  |
-| -------------------------- | ----- | ------------------------------------------------------------------------- | ---------------------- |
-| `MAX_LABEL_CHARS`          | 48    | one task's label on its list row (free text, sanitised before truncation) | `task-list`            |
-| `MAX_ERROR_CHARS`          | 120   | the first non-blank line of a failed call, on the `failed: …` row         | none — the failure row |
-| `MAX_OUTPUT_LINE_CHARS`    | 160   | one line of the stored output preview                                     | `task-output`          |
-| `MAX_OUTPUT_PREVIEW_LINES` | 6     | how many lines of the output preview the panel shows                      | `task-output`          |
-| `MAX_TASK_PANEL_ROWS`      | 32    | how many task rows `ptc_task_list` shows at once                          | `task-list`            |
+| constant                   | value | what it bounds                                                                                                                    | block                                                                                        |
+| -------------------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `MAX_LABEL_CHARS`          | 48    | one task's label on its list row (free text, sanitised before truncation)                                                         | `task-list`                                                                                  |
+| `MAX_ERROR_CHARS`          | 120   | the first non-blank line of a failure text: the `failed: …` call row, and since 2026-10-19 the panel's per-record `error: …` rows | all panels — the failed call row; `task-list` / `task-output` — the per-record `error:` rows |
+| `MAX_OUTPUT_LINE_CHARS`    | 160   | one line of the stored output preview                                                                                             | `task-output`                                                                                |
+| `MAX_OUTPUT_PREVIEW_LINES` | 6     | how many lines of the output preview the panel shows                                                                              | `task-output`                                                                                |
+| `MAX_TASK_PANEL_ROWS`      | 32    | how many task rows `ptc_task_list` shows at once                                                                                  | `task-list`                                                                                  |
 
 **Four of the five have no independent source; the fifth has a declared kinship, not a
 derivation.** 48, 120, 160 and 6 were chosen for the panel's readability and were not derived from
@@ -343,6 +363,17 @@ nothing to do with a row count. The registry still hands the renderer up to
 `DEFAULT_TASK_LIST_LIMIT` records; the panel withholds the tail behind `…+N more tasks`. All five
 are registered here as frozen contract values: changing any one of them is a behaviour change and
 needs a new ADR, not a number to edit in the implementation.
+
+**The two failure-reason rows added on 2026-10-19 are not a sixth cap.** The `task-output` panel
+prints the record's failure reason as an `error: …` line first in the output block, ahead of the
+preview, the full-output pointer or the empty-output placeholder, and the `task-list` panel
+appends one to a `failed` / `lost` row whose record carries an `errorMessage`. Both reuse
+`MAX_ERROR_CHARS` — first non-blank line, truncated to 120, the same value the `failed: …` call
+row uses — so the table above still holds five numbers and nothing new needs registering. The two
+rows are annotations, not content: the list annotation is not a task row and is never counted
+against `MAX_TASK_PANEL_ROWS`, and the output annotation does not consume
+`MAX_OUTPUT_PREVIEW_LINES` (the preview keeps its six lines). A `canceled` row prints no reason
+because the record carries none.
 
 `AGE_TICK_MS` in the same module is a redraw cadence, not a bound — nothing is withheld when it
 elapses, the live age simply ticks — so it is deliberately left out of the table above rather than
