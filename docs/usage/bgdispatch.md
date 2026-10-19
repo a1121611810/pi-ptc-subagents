@@ -304,9 +304,9 @@ have simply not reached a close yet, and a `lost` record carries none.
 For a `failed` or `lost` record that carries an `errorMessage`, the reason is now rendered
 rather than left on the record: `ptc_task_output` puts an `error=…` line ahead of the body, and
 the codemode projection exposes the record's `errorMessage` as `error_message`. That is what
-makes an empty log readable. The empty-output fallback agrees with it: a terminal task reads `(no output; task <id> is
-<status>)`, and only `running` / `stopping` keep the `yet` — a task that will never write
-again is not still waiting to write.
+makes an empty log readable. The empty-output fallback agrees with it: a terminal task reads
+`(no output; task <id> is <status>)`, and only `running` / `stopping` keep the `yet` — a task
+that will never write again is not still waiting to write.
 
 **`ptc_task_stop`** — ask a running task to stop.
 
