@@ -1377,36 +1377,36 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       "The failure text is the reason",
     "docs/adr/0016-ptc-dispatch-binding.md:41 -> src/runtime/dispatcher.ts:438":
       "new DispatchSlotCounter(",
-    "docs/adr/0026-surface-default-is-detected.md:258 -> dispatch.ts:2186":
+    "docs/adr/0026-surface-default-is-detected.md:258 -> dispatch.ts:2257":
       "spawnOptions.sessionId = taskId;",
     // Confirmed line by line 2026-10-12 (re-checked after #187 moved it): line 505 is
     // `pi.registerTool(createChildReportTool(ptcDepth > 0));` -- the depth gate the ADR cites to
     // explain why a generalist still gets the report tool.
-    "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:115 -> src/index.ts:534":
+    "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:115 -> src/index.ts:556":
       "createChildReportTool(ptcDepth > 0)",
-    "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:1134":
+    "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:1205":
       "export function detectedSurfaceMode(",
-    "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:974":
+    "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:1013":
       'getActiveTools().includes("codemode")',
-    "docs/adr/0029-surface-follows-codemode-activation.md:120 -> src/index.ts:974":
+    "docs/adr/0029-surface-follows-codemode-activation.md:120 -> src/index.ts:1013":
       'getActiveTools().includes("codemode")',
     "docs/adr/0029-surface-follows-codemode-activation.md:151 -> ptc-mode.ts:32":
       "## Fail-safe on external loadout changes",
-    "docs/adr/0029-surface-follows-codemode-activation.md:188 -> src/index.ts:923":
+    "docs/adr/0029-surface-follows-codemode-activation.md:188 -> src/index.ts:962":
       "if (detected.present && !known) {",
     "docs/adr/0030-surface-switch-reloads.md:94 -> ptc-mode.ts:32":
       "## Fail-safe on external loadout changes",
     "docs/adr/0031-open-source-and-publish-authority.md:129 -> src/runtime/limits.ts:4":
       "The numbers are DSH's",
-    "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1821": "function assistantText(",
-    "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:217":
+    "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1885": "function assistantText(",
+    "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:218":
       "export const SUBAGENT_OUTPUT_SCHEMA",
-    "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1844": "function accumulateUsage(",
-    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:474":
+    "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1908": "function accumulateUsage(",
+    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:494":
       "structuredContent: structured,",
-    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:232":
+    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:233":
       "outputSchema: LIST_OUTPUT_SCHEMA,",
-    "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1691":
+    "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1755":
       "export function childToolList(",
   };
 
@@ -1469,18 +1469,18 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // ADR-0043 那一段，whyBlock 的注记加了「块正文保留 goal 是刻意的」那一段，两处都在全部
     // 锚点之前，所以四条恰好等量。**等量不等于可以算**：算术平移只在本轮成立，下一轮锚点
     // 分布在两个函数的两侧时就不成立。四条都按内容逐条核对后改正。
-    "docs/adr/0026-surface-default-is-detected.md:258 -> dispatch.ts:2186",
+    "docs/adr/0026-surface-default-is-detected.md:258 -> dispatch.ts:2257",
     // 2026-10-10 第七次复核：四条全部因本轮删除 surfaceMode 而位移，逐条核对内容后改正。
     //  29  → 628→1160 = `export function detectedSurfaceMode(`
     //  32  → 962→856  = decision-4 的 `if (surface.surfaceMode === "subagents" && !pi.getActiveTools()…`
     //  105 → 962→856  = 同一处（ADR-0029 正文第二次引用它）
     //  129 → 27 保持    = ` * ## Fail-safe on external loadout changes`，本轮未移动
-    "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:1134",
-    "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:974",
-    "docs/adr/0029-surface-follows-codemode-activation.md:120 -> src/index.ts:974",
+    "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:1205",
+    "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:1013",
+    "docs/adr/0029-surface-follows-codemode-activation.md:120 -> src/index.ts:1013",
     "docs/adr/0029-surface-follows-codemode-activation.md:151 -> ptc-mode.ts:32",
     //  166 → 920→807 = `if (detected.present && !known) {`，即交叉核对那一条
-    "docs/adr/0029-surface-follows-codemode-activation.md:188 -> src/index.ts:923",
+    "docs/adr/0029-surface-follows-codemode-activation.md:188 -> src/index.ts:962",
     // 2026-10-03 第四次复核（ADR-0030）：0030 引 ptc-mode.ts:27-31 那段「loadout 被外部改写
     // 时模式如何退让」，27 行是段首。本轮该引用在**文档里**的行号因撤回声明从 68 前移到 83，
     // 引用目标（ptc-mode.ts:27）未动。ADR-0030 另外四处引用写的是 pi 宿主的行号而非本仓文件，
@@ -1560,14 +1560,23 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     //   11 → 1758→1811 = `function assistantText(`（childAssistantError 下方）
     //   33 → 1781→1834 = `function accumulateUsage(`
     //  130 → 1628→1681 = `export function childToolList(`
-    "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1821",
-    "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:217",
-    "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1844",
-    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:474",
-    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:232",
-    "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1691",
+    // 2026-10-19 第十四次复核（#220 · the whyEnabled switch）：11 条位移，来源是这一票给
+    // dispatch.ts / index.ts / ptc-mode.ts / subagent.ts / ptc-task.ts 都加了行。**位移量在
+    // 五条锚点之间各不相同**（dispatch.ts +71、index.ts +39、subagent.ts +20、ptc-task.ts +1、
+    // ptc-mode.ts +71），因为新增的 JSDoc 落在各自不同的函数之前——这正是按算术平移会全错的
+    // 那种分布。两条有多个候选、按内容判定的记录在下面。
+    //   src/index.ts:974→1013：974 那处有两个 `getActiveTools().includes("codemode")`，另一处
+    //     在 notifyCodemodeDrift 里（587）；ADR-0029 引的是 decision-4 那个 warning，取 1013。
+    //   subagent.ts:474→494：474 那处也有两个 `structuredContent: structured,`，另一处在后台
+    //     handle 分支（406）；ADR-0032 引的是 settled 路径，取 494。
+    "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1885",
+    "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:218",
+    "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1908",
+    "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:494",
+    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:233",
+    "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1755",
     // 新增 1 条（2026-10-12，ADR-0039）：目标行已逐条核对。
-    "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:115 -> src/index.ts:534",
+    "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:115 -> src/index.ts:556",
   ];
 
   test("仓库内引用清单是钉住的基线：新增一条就要有人重新确认一次", () => {

@@ -266,8 +266,9 @@ async function dispatchBackground(
 async function dispatchForeground(
   dir: string,
   extra?: Record<string, unknown>,
+  depsExtra?: Partial<DispatchDeps>,
 ): Promise<ObservedResult> {
-  return dispatchForegroundSaying(dir, FOREGROUND_ANSWER, undefined, extra);
+  return dispatchForegroundSaying(dir, FOREGROUND_ANSWER, undefined, extra, depsExtra);
 }
 
 /**
@@ -284,9 +285,10 @@ async function dispatchForegroundSaying(
   text: string,
   usage?: { input: number; output: number; cost: number },
   extra?: Record<string, unknown>,
+  depsExtra?: Partial<DispatchDeps>,
 ): Promise<ObservedResult> {
   const h = createHarness();
-  const tool = createPtcSubagentTool(baseOptions(dir, h.deps));
+  const tool = createPtcSubagentTool(baseOptions(dir, { ...h.deps, ...depsExtra }));
   const settled = run(tool, {
     agent: AGENT,
     agentScope: "project",
@@ -811,14 +813,30 @@ describe("ptc_subagent structuredContent", () => {
               await dispatchForegroundSaying(dir, "no report here", FOREGROUND_USAGE_INPUT),
             ),
           ),
+          // ADR-0043's `why_suppressed` needs a row of its own for the same reason `read_only_tier`
+          // does: it is emitted only when a `why` was passed AND the switch was off, so no earlier
+          // row in this sweep can produce it. Without this row the sweep would fail on a key that
+          // IS declared — which is the safe direction — but dropping the declaration would then
+          // pass here and fail on the live schema.
+          ...Object.keys(
+            structuredOf(
+              await dispatchForeground(
+                dir,
+                { why: "we are preparing a release" },
+                { whyEnabled: false },
+              ),
+            ),
+          ),
         ]),
       ].sort();
       const declared = Object.keys(SUBAGENT_OUTPUT_SCHEMA.properties ?? {}).sort();
       expect(emitted, "every emitted key is a declared one").toEqual(declared);
-      // And the projection stays LEAN -- seven keys, none of them the `details` spelling, and no
+      // And the projection stays LEAN -- eight keys, none of them the `details` spelling, and no
       // field that exists only to say "this does not apply". `report_channel` is the exception
       // that proves the rule: it exists ONLY to say that `report` does not apply, and it is here
-      // because ADR-0032 makes an unstated degradation a defect.
+      // because ADR-0032 makes an unstated degradation a defect. `why_suppressed` is the same
+      // shape of exception (ADR-0043): its ABSENCE is the claim, and it is emitted only when
+      // something was actually dropped.
       expect(declared).toEqual([
         "exit_code",
         "read_only_tier",
@@ -827,6 +845,7 @@ describe("ptc_subagent structuredContent", () => {
         "status",
         "task_id",
         "usage",
+        "why_suppressed",
       ]);
       expect(declared, "snake_case, like pi's own builtins").not.toContain("taskId");
       expect(declared).not.toContain("exitCode");

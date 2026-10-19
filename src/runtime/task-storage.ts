@@ -153,6 +153,21 @@ export interface TaskRecord {
    */
   readOnlyTier?: ReadOnlyTier;
   /**
+   * ADR-0043: `true` when the caller passed a `why` and this session's switch dropped it, so the
+   * child's prompt carried no `<pi-ptc-why>` block. Written at SPAWN, alongside `readOnlyTier`,
+   * because it too is a fact about the request rather than about the child's output.
+   *
+   * **The dropped value is deliberately not here.** ADR-0042 declined to persist `why` on the
+   * TaskRecord because the value is a caller-held fact, not a host-measured one. That reasoning
+   * reaches the value and stops at the event: "a suppression happened" is observed by the host and
+   * is the only thing a background caller can otherwise not learn, since a background dispatch
+   * returns a handle and has no result to put it on.
+   *
+   * Absent means no `why` was passed, which is the same claim the foreground
+   * `DispatchResult.whySuppressed`'s absence makes — the two fronts state one fact, not two.
+   */
+  whySuppressed?: true;
+  /**
    * Host-observed token usage for this child (ADR-0032's counter, moved to its own carrier).
    * Written on every terminal close for any child the host actually started — independent of
    * `reportChannel` and of the close outcome — so a `none` / `opted-out` child, or one that

@@ -168,6 +168,18 @@ export interface DispatchDeps {
    * can dereference the bytes (BG-07).
    */
   outputStorage?: OutputStorage;
+  /**
+   * ADR-0043: whether the caller may hand the child a `why`. Absent means ON, which is this
+   * package's default and the state ADR-0042's measurement was taken in — so every existing
+   * zero-argument call site keeps the behaviour it had before the switch existed.
+   *
+   * This is read ONCE, at extension load, and carried here rather than consulted per call for the
+   * reason #73 already records for `optInBindings`: a program must not be able to observe a
+   * dispatch surface different from the one the prompt that described it promised. A switch read
+   * per call would let the third dispatch of a run see a different answer from the first, with
+   * nothing in the transcript recording that it changed.
+   */
+  whyEnabled?: boolean;
 }
 
 /**
@@ -407,6 +419,44 @@ export function withReadOnlyTier(
   return tier === undefined ? result : { ...result, readOnlyTier: tier };
 }
 
+/**
+ * ADR-0043: decide what the child hears, and — in the same breath — whether the caller has to be
+ * told it heard nothing.
+ *
+ * These two answers are computed together on purpose. They are one decision, and a version that
+ * computed them in two places would let a blank value be "suppressed" (a warning about a value
+ * nobody sent) or a real value be dropped without the record (the silent failure this exists to
+ * prevent).
+ *
+ * A BLANK value is never suppressed. The caller wrote nothing, so nothing was withheld, and
+ * stamping the field there would train a reader to ignore it — the same reason an empty
+ * `<pi-ptc-why>` block is never emitted.
+ *
+ * The value is handed on already trimmed because {@link whyBlock} trims it anyway, and trimming
+ * here is what lets "was there actually anything to send" be a question about content rather than
+ * about whitespace.
+ */
+function resolveWhy(
+  input: DispatchInput,
+  enabled: boolean,
+): { why: string | undefined; suppressed: boolean } {
+  const trimmed = input.why?.trim() ?? "";
+  if (trimmed.length === 0) return { why: undefined, suppressed: false };
+  if (!enabled) return { why: undefined, suppressed: true };
+  return { why: trimmed, suppressed: false };
+}
+
+/**
+ * ADR-0043: stamp "a `why` was passed and this session dropped it" onto a result.
+ *
+ * Shaped exactly like {@link withReadOnlyTier} — absent means the claim does not apply — so a
+ * refusal carries it too. A refusal still consumed the caller's `why`, and a caller comparing two
+ * results should not have to know which shape it got to learn that.
+ */
+export function withWhySuppressed(result: DispatchResult, suppressed: boolean): DispatchResult {
+  return suppressed ? { ...result, whySuppressed: true } : result;
+}
+
 /** Token usage accumulated from the child's message_end events. Optional. */
 export interface DispatchUsage {
   input: number;
@@ -466,6 +516,20 @@ export interface DispatchResult {
    * background dispatch returns a `DispatchHandle` and has no result to put this on.
    */
   readOnlyTier?: ReadOnlyTier;
+  /**
+   * ADR-0043: `true` when the caller passed a `why` and this session's switch dropped it, so the
+   * child's prompt carries no `<pi-ptc-why>` block.
+   *
+   * ABSENT is a claim, not a gap: the caller passed nothing, so nothing was withheld. That is the
+   * distinction the field exists to make. Without it, a program that passes a `why` into a session
+   * with the switch off cannot tell "the child ignored my context" from "the child never received
+   * it" — and ADR-0042 spent 180 runs establishing that the difference is real.
+   *
+   * The dropped value is NOT recorded anywhere, on this result or on a TaskRecord. The fact that a
+   * suppression happened is host-observed and therefore worth persisting; the value was the
+   * caller's, and persisting it would be the thing ADR-0042 declined to do.
+   */
+  whySuppressed?: true;
 }
 
 /** Discovery of an agent by name; mirrors pi's subagent extension AgentConfig shape. */
@@ -2107,21 +2171,28 @@ async function dispatchBackground(
   deps: DispatchDeps,
   readOnlyTier: ReadOnlyTier | undefined,
 ): Promise<DispatchHandle | DispatchResult> {
+  // ADR-0043: resolved once, ABOVE every gate, for the same reason `readOnlyTier` is resolved
+  // above every gate on the foreground front. A refusal still consumed the caller's `why` — it was
+  // never delivered to any child — so a caller comparing a refusal against a fulfilled dispatch
+  // should not have to know which shape it got to learn that.
+  const resolvedWhy = resolveWhy(input, deps.whyEnabled !== false);
+  const finish = (result: DispatchResult): DispatchResult =>
+    withWhySuppressed(withReadOnlyTier(result, readOnlyTier), resolvedWhy.suppressed);
+
   const childDepth = ctx.depth + 1;
   if (childDepth > ctx.maxDispatchDepth) {
     // Background refusal (issue #68 part 4): teach the model to inspect in-flight tasks.
-    return withReadOnlyTier(backgroundDispatchDepthLimitReached(), readOnlyTier);
+    return finish(backgroundDispatchDepthLimitReached());
   }
   // Pitfall #2, split by issue #185: a name that was GIVEN and is unusable is a caller bug and
   // is reported before any slot is minted or held. A name that was NOT given is not a bug at
   // all — it selects the generalist child, resolved below like any other agent.
   if (isMalformedAgentName(input.agent)) {
-    return withReadOnlyTier(
+    return finish(
       missingAgentResult({
         cwd: input.cwd ?? ctx.cwd,
         agentScope: input.agentScope ?? "user",
       }),
-      readOnlyTier,
     );
   }
   // ADR-0022 §4/§9: mint the task id BEFORE acquiring its slot so the reservation is keyed by
@@ -2130,7 +2201,7 @@ async function dispatchBackground(
   const taskId = createULID();
   const slots = deps.slots ?? FALLBACK_DISPATCH_SLOTS;
   if (!slots.tryAcquire(taskId)) {
-    return withReadOnlyTier(backgroundDispatchConcurrencyLimitReached(), readOnlyTier);
+    return finish(backgroundDispatchConcurrencyLimitReached());
   }
 
   const clock = deps.clock ?? ((): number => Date.now());
@@ -2149,7 +2220,7 @@ async function dispatchBackground(
   const resolution = resolveDispatchAgent(input, cwd, agentScope);
   if (resolution.kind === "unknown") {
     slots.release(taskId);
-    return withReadOnlyTier(unknownAgentResult(resolution.name, agentScope, cwd), readOnlyTier);
+    return finish(unknownAgentResult(resolution.name, agentScope, cwd));
   }
   const agent = resolution.agent;
 
@@ -2163,7 +2234,7 @@ async function dispatchBackground(
     const fullPrompt = appendDepthHint(agent.systemPrompt, childDepth, ctx.maxDispatchDepth, {
       reportContract,
       readOnly: input.readOnly,
-      why: input.why,
+      why: resolvedWhy.why,
     });
     const written = await promptFileWriter(agent.name, fullPrompt);
     tmp = written;
@@ -2218,6 +2289,11 @@ async function dispatchBackground(
           // a failed or canceled read-only child was still dispatched read-only. Spread so an
           // untiered dispatch persists no key at all.
           ...(readOnlyTier === undefined ? {} : { readOnlyTier }),
+          // ADR-0043 on the background front, for the same reason the tier lives here: a
+          // background dispatch returns a DispatchHandle, so this record is the only place a
+          // background caller can learn its `why` was dropped. Same spread-as-absent rule, so an
+          // unsuppressed dispatch persists no key at all.
+          ...(resolvedWhy.suppressed ? { whySuppressed: true as const } : {}),
           // ADR-0022 §3 (v1, R-m12): `sessionFile` is left UNSET. The extension cannot know
           // pi's session-file path, and a fabricated value would be worse than an absent one;
           // a future reader that can learn it may fill the field in.
@@ -2406,22 +2482,19 @@ async function dispatchBackground(
     if (tmp !== undefined) cleanupTmp(tmp);
     slots.release(taskId);
     logger.warn("background dispatch failed for agent " + agent.name + ": " + message);
-    return withReadOnlyTier(
-      {
-        text: "",
-        status: "rejected",
-        started: childHandle !== undefined,
-        // The RESOLVED name, not `input.agent`: for a generalist there is no input name to report,
-        // and reporting the raw argument would print `undefined` into a field the schema types as a
-        // string.
-        agentName: agent.name,
-        durationMs: 0,
-        exitCode: -1,
-        reportChannel: "none",
-        errorMessage: "background dispatch failed: " + message,
-      },
-      readOnlyTier,
-    );
+    return finish({
+      text: "",
+      status: "rejected",
+      started: childHandle !== undefined,
+      // The RESOLVED name, not `input.agent`: for a generalist there is no input name to report,
+      // and reporting the raw argument would print `undefined` into a field the schema types as a
+      // string.
+      agentName: agent.name,
+      durationMs: 0,
+      exitCode: -1,
+      reportChannel: "none",
+      errorMessage: "background dispatch failed: " + message,
+    });
   }
 }
 
@@ -2474,6 +2547,14 @@ export async function dispatch(
   // The one resolution of the request in this function, so the value reported on every result
   // below cannot disagree with the value the argv and the prompt were built from.
   const readOnlyTier = resolveReadOnlyTier(input.readOnly);
+  // ADR-0043: the `why` decision, resolved once above every gate for the same reason, so a
+  // refusal that never reached a child still states that the caller's reason was dropped rather
+  // than delivered. `finish` is the one wrapper both facts go through, which is what keeps the two
+  // fronts from drifting apart on this — the failure this package has already paid for once, on
+  // the report channel.
+  const resolvedWhy = resolveWhy(input, deps.whyEnabled !== false);
+  const finish = (result: DispatchResult): DispatchResult =>
+    withWhySuppressed(withReadOnlyTier(result, readOnlyTier), resolvedWhy.suppressed);
 
   // ADR-0022 §1: the background opt switches the binding's tail. Pre-spawn refusals reuse
   // the foreground shapes, so the union stays even for a statically-background call.
@@ -2484,7 +2565,7 @@ export async function dispatch(
   // ADR-0016 Recursive dispatch: bound recursion explicitly.
   const childDepth = ctx.depth + 1;
   if (childDepth > ctx.maxDispatchDepth) {
-    return withReadOnlyTier(dispatchDepthLimitReached(), readOnlyTier);
+    return finish(dispatchDepthLimitReached());
   }
 
   const cwd = input.cwd ?? ctx.cwd;
@@ -2496,7 +2577,7 @@ export async function dispatch(
   // A name that was not given is no longer an error at all -- it resolves to the generalist
   // child, which is the default this front shares with the background path.
   if (isMalformedAgentName(input.agent)) {
-    return withReadOnlyTier(missingAgentResult({ cwd, agentScope }), readOnlyTier);
+    return finish(missingAgentResult({ cwd, agentScope }));
   }
 
   // One owner gates the rule for both fronts (ADR-0025 decision 7, issue #88 decision 9).
@@ -2510,16 +2591,13 @@ export async function dispatch(
   // concurrent ptc_subagent calls would share a token and the second would refuse spuriously.
   const slots = deps.slots ?? FALLBACK_DISPATCH_SLOTS;
   if (!slots.tryAcquire()) {
-    return withReadOnlyTier(dispatchConcurrencyLimitReached(), readOnlyTier);
+    return finish(dispatchConcurrencyLimitReached());
   }
 
   const resolution = resolveDispatchAgent(input, cwd, agentScope);
   if (resolution.kind === "unknown") {
     slots.release();
-    return withReadOnlyTier(
-      unknownAgentResult(resolution.name, agentScope, cwd, Date.now() - start),
-      readOnlyTier,
-    );
+    return finish(unknownAgentResult(resolution.name, agentScope, cwd, Date.now() - start));
   }
   const agent = resolution.agent;
 
@@ -2530,7 +2608,7 @@ export async function dispatch(
   const fullPrompt = appendDepthHint(agent.systemPrompt, childDepth, ctx.maxDispatchDepth, {
     reportContract,
     readOnly: input.readOnly,
-    why: input.why,
+    why: resolvedWhy.why,
   });
 
   // Between the acquire above and the Promise whose `finalize` is the one release, there is an
@@ -2622,20 +2700,18 @@ export async function dispatch(
         : { reportChannel: "opted-out" };
       // ADR-0041 §"The tier that took effect is reported", through the same helper every
       // refusal below uses — one helper, so "does a result state the tier" is a single question
-      // with a single answer rather than two spellings that can drift apart.
-      const out: DispatchResult = withReadOnlyTier(
-        {
-          text: finalText,
-          status,
-          started,
-          agentName: agent.name,
-          durationMs: Date.now() - start,
-          exitCode,
-          // Total field (ADR-0032): stated on every outcome, including a rejected one.
-          reportChannel: extraction.reportChannel,
-        },
-        readOnlyTier,
-      );
+      // with a single answer rather than two spellings that can drift apart. ADR-0043's
+      // `whySuppressed` rides the same wrapper, for the same reason.
+      const out: DispatchResult = finish({
+        text: finalText,
+        status,
+        started,
+        agentName: agent.name,
+        durationMs: Date.now() - start,
+        exitCode,
+        // Total field (ADR-0032): stated on every outcome, including a rejected one.
+        reportChannel: extraction.reportChannel,
+      });
       // `usage` is stamped HERE, from the host's own counter, rather than taken from the child's
       // JSON — see ChildReportPayload. A child that reported no usage block yields zeros rather
       // than a missing field: the report's shape is total, and "this child cost nothing" and

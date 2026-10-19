@@ -45,6 +45,7 @@ import type { DispatchHandle } from "../runtime/task-registry.ts";
 import type { ULID } from "../runtime/task-storage.ts";
 import { renderChildReportText } from "./render.ts";
 import { renderReadOnlyTierText } from "./read-only-tier-text.ts";
+import { renderWhySuppressedText } from "./why-suppressed-text.ts";
 
 /** Anything this module returns is one of the two dispatch shapes. */
 export type SubagentOutcome = DispatchResult | DispatchHandle;
@@ -240,6 +241,12 @@ export const SUBAGENT_OUTPUT_SCHEMA: SubagentOutputSchema = Type.Object({
         'The read-only tier the dispatch resolved to: "strict" or "lenient" (ADR-0041). Absent when no tier was asked for, so an absent key means "no tier" rather than "tier unknown".',
     }),
   ),
+  why_suppressed: Type.Optional(
+    Type.Boolean({
+      description:
+        "`true` when you passed a `why` and this session's `whyEnabled` switch was off, so the child's prompt carried no <pi-ptc-why> block (ADR-0043). ABSENT means no `why` was passed — that is the distinction the key exists to make. The child was never told your reason; it did not ignore one. A background call returns a handle and does not carry this key; read it from `ptc_task_output` instead.",
+    }),
+  ),
   report: Type.Optional(
     Type.Object({
       summary: Type.String({
@@ -410,6 +417,11 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
       // the same value-level absence every other optional key on this surface uses.
       const tierField =
         outcome.readOnlyTier === undefined ? {} : { read_only_tier: outcome.readOnlyTier };
+      // ADR-0043, same value-level absence as the tier field above: a dispatch whose `why` was
+      // never suppressed emits NO key, so a script reading this surface can tell "you passed a why
+      // and it was dropped" from "you passed no why" — the one distinction the field exists for.
+      const suppressedField =
+        outcome.whySuppressed === undefined ? {} : { why_suppressed: outcome.whySuppressed };
       // Issue #199: the host's counter on its own key, sourced from the `DispatchResult`
       // accumulator rather than from `report.usage` -- that is what makes it present on a child
       // that delivered NO report. The four display fields are the ones the text render prints, so
@@ -433,6 +445,7 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
               status: details.status,
               report_channel: outcome.reportChannel,
               ...tierField,
+              ...suppressedField,
               ...usageField,
             }
           : report === undefined
@@ -441,6 +454,7 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
                 exit_code: details.exitCode,
                 report_channel: outcome.reportChannel,
                 ...tierField,
+                ...suppressedField,
                 ...usageField,
               }
             : {
@@ -449,6 +463,7 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
                 report_channel: outcome.reportChannel,
                 report,
                 ...tierField,
+                ...suppressedField,
                 ...usageField,
               };
       // ADR-0032 §Rendering: the report has to be IN the text, not only in `structuredContent`. That
@@ -465,7 +480,12 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
       // might attribute to the child -- and it is the only surface that reaches the model at all,
       // because `structuredContent` has no reader for a `direct` tool.
       const tierText = renderReadOnlyTierText(outcome.readOnlyTier);
-      const text = [tierText, reportBlock, outcome.text]
+      // ADR-0043 on the same surface and for the same reason: `structuredContent` has no reader
+      // for a `direct` tool, so a model that called `ptc_subagent` learns about a suppressed `why`
+      // from this text or not at all. It sits beside the tier rather than after the report,
+      // because it is a fact about what the child was TOLD — the report describes what it did.
+      const suppressedText = renderWhySuppressedText(outcome.whySuppressed);
+      const text = [tierText, suppressedText, reportBlock, outcome.text]
         .filter((part) => part.length > 0)
         .join("\n\n");
       return {

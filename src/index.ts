@@ -58,6 +58,7 @@ import {
   readDefaultModeConfig,
   readLegacySurfaceKey,
   readOptInBindingsConfig,
+  readWhyEnabledConfig,
   resolveBaseOnStart,
 } from "./mode/ptc-mode.ts";
 import type {
@@ -68,6 +69,7 @@ import type {
   ModeHideStrategy,
   OptInBindingsConfig,
   PersistedModeState,
+  WhyEnabledConfig,
 } from "./mode/ptc-mode.ts";
 import { buildPtcSkillsSection, skillsSectionDropped } from "./mode/skills-section.ts";
 import { createPtcSubagentTool } from "./tools/subagent.ts";
@@ -93,6 +95,7 @@ export {
   readDefaultModeConfig,
   readLegacySurfaceKey,
   readOptInBindingsConfig,
+  readWhyEnabledConfig,
   resolveBaseOnStart,
   resolveCodemodeActivation,
   resolveCodemodeSwitch,
@@ -289,6 +292,22 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
   const getOptInBindings = (): readonly string[] => optInBindings;
 
   /**
+   * ADR-0043: whether a dispatched child may be handed the caller's `why`, read ONCE here for the
+   * same reason `optInBindings` is — a program must not be able to observe a dispatch surface
+   * different from the one the prompt that described it promised.
+   *
+   * The failure direction is the opposite of `optInBindings`, and that is the point: a broken value
+   * leaves the block **ON** (see {@link readWhyEnabledConfig}), because a default-on switch whose
+   * parse failure silently removes a feature would put the symptom on a child's prompt, nowhere
+   * near the file that caused it. The `session_start` notice below is what makes it a loud failure.
+   *
+   * Read separately from `optInConfig` even though both come from the same file: one read owns one
+   * key, and a reader that returned the whole parsed object would let one malformed key decide
+   * another's value.
+   */
+  const whyConfig: WhyEnabledConfig = readWhyEnabledConfig(getAgentDir());
+
+  /**
    * Depth baseline for PTC runs this pi process starts (ADR-0016 Recursive section).
    * Inside a pi process spawned by `pi.dispatch`, the env carries `PI_PTC_DEPTH`; a
    * normal pi session has none, and the parent turn's runs stay at depth 0.
@@ -323,7 +342,10 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
   // a session's counter shadows -- and that shadowing is the decision, not an accident.
   const background: BackgroundTaskRuntime =
     options.backgroundRuntime ??
-    createBackgroundTaskRuntime({ concurrency: resolveConfig({}).dispatchConcurrency });
+    createBackgroundTaskRuntime({
+      concurrency: resolveConfig({}).dispatchConcurrency,
+      whyEnabled: whyConfig.whyEnabled,
+    });
 
   /** R2: whether an agent turn is in flight. `turn_start` sets it; `agent_settled` clears it. */
   let turnActive = false;
@@ -778,6 +800,23 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     const config = readDefaultModeConfig(getAgentDir());
     if (config.error !== undefined) {
       ctx.ui.notify(`pi-ptc-subagents: ${config.error}`, "warning");
+    }
+    /*
+     * ADR-0043: the same notice for the `why` switch, and the same reason it cannot be silent. A
+     * user who wrote `"whyEnabled": "false"` and still sees the block has no other way to learn
+     * that the key was the problem — and the symptom they see is on a CHILD's prompt, which is the
+     * least obvious place to go looking for a typo in their own config.
+     *
+     * The message states what actually happened (still on) rather than only what was wrong, because
+     * "invalid" alone leaves the user guessing whether the feature was disabled or enabled. Read
+     * from the value captured at extension load, for the same reason as `optInConfig` below.
+     */
+    if (whyConfig.error !== undefined) {
+      ctx.ui.notify(
+        `pi-ptc-subagents: ${whyConfig.error}. The dispatch \`why\` block stays ON, so a ` +
+          `mistyped key cannot switch the feature off by accident.`,
+        "warning",
+      );
     }
     /*
      * #73: an `optInBindings` list that does not parse grants nothing, which is safe but silent —

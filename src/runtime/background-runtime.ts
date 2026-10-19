@@ -179,6 +179,16 @@ export interface BackgroundRuntimeOptions {
   createInitialStorage?: () => TaskStorage;
   createOutputStorage?: (sessionDir: string | undefined) => OutputStorage;
   concurrency?: number;
+  /**
+   * ADR-0043: whether a dispatched child may be handed the caller's `why`. Defaults to ON.
+   *
+   * It arrives HERE rather than at each `dispatch()` call site because `dispatchDeps` is already the
+   * one object every front reads its session-level facts from — adding a second path for this one
+   * switch would be the "two implementations of a rule" shape this package has been bitten by
+   * before. Carried, not consulted: the value is read once at extension load and never re-read, so
+   * a program cannot see the switch change under it mid-run.
+   */
+  whyEnabled?: boolean;
   /** Child lifecycle factory; defaults to the real `node:child_process` adapter. */
   createLifecycle?: () => ChildProcessLifecycle;
   /**
@@ -535,6 +545,7 @@ class DefaultBackgroundTaskRuntime implements BackgroundTaskRuntime {
       outputStorage: this.outputStorage,
       clock: this.clock,
       logger: this.#logger,
+      ...(options.whyEnabled === undefined ? {} : { whyEnabled: options.whyEnabled }),
     };
     this.registry.onTransition(this.#handleTransition);
   }

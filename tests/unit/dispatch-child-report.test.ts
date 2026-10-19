@@ -681,6 +681,112 @@ describe("dispatch() foreground carries the child report", () => {
 });
 
 // ---------------------------------------------------------------------------
+//  ADR-0043 — the switch. Same foreground seam, so the two describes share one harness
+// ---------------------------------------------------------------------------
+
+describe("dispatch() foreground under the whyEnabled switch (ADR-0043)", () => {
+  /**
+   * The one assertion that decides the feature: with the switch off, the child's prompt must be
+   * what an ABSENT `why` produces. Byte equality is the claim — "no block" could also be satisfied
+   * by an empty block, which ADR-0042 rejected because it reads as redaction.
+   */
+  test("switch off: the prompt is the one a blank why produces, and the caller is told", async () => {
+    await withAgent(async (dir) => {
+      childTranscript.lines = [...COMPLIANT_TRANSCRIPT];
+      childArgv.calls.length = 0;
+      childArgv.prompts.length = 0;
+
+      const suppressed = await dispatch(
+        {
+          agent: "reporter",
+          task: "check the gates",
+          why: "we are preparing a release",
+          agentScope: "project",
+        },
+        { callId: 5, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+        { slots: new DispatchSlotCounter(4), whyEnabled: false },
+      );
+      const suppressedPrompt = childArgv.prompts.at(-1);
+      if (suppressedPrompt === undefined) throw new Error("no prompt was recorded");
+      expect(suppressedPrompt).not.toContain("<pi-ptc-why>");
+      expect(suppressedPrompt).not.toContain("we are preparing a release");
+      expect(asResult(suppressed).whySuppressed).toBe(true);
+
+      // The comparison the claim rests on: switch-off and blank-value must not differ anywhere.
+      childArgv.prompts.length = 0;
+      const blank = await dispatch(
+        { agent: "reporter", task: "check the gates", why: "   ", agentScope: "project" },
+        { callId: 6, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+        { slots: new DispatchSlotCounter(4), whyEnabled: false },
+      );
+      const blankPrompt = childArgv.prompts.at(-1);
+      if (blankPrompt === undefined) throw new Error("no prompt was recorded");
+      expect(suppressedPrompt).toEqual(blankPrompt);
+      // ...while the RECORD differs, because one of them withheld something and the other did not.
+      expect(asResult(blank).whySuppressed).toBeUndefined();
+    });
+  });
+
+  test("switch on, stated explicitly: the block is delivered and nothing is recorded", async () => {
+    // The absent case is the default; this pins that an explicit `true` is not merely "not false",
+    // so a reader turning the switch back on sees the field CLEAR rather than the prompt changing
+    // alone.
+    await withAgent(async (dir) => {
+      childTranscript.lines = [...COMPLIANT_TRANSCRIPT];
+      childArgv.prompts.length = 0;
+      const result = await dispatch(
+        {
+          agent: "reporter",
+          task: "check the gates",
+          why: "we are preparing a release",
+          agentScope: "project",
+        },
+        { callId: 7, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+        { slots: new DispatchSlotCounter(4), whyEnabled: true },
+      );
+      const prompt = childArgv.prompts.at(-1);
+      if (prompt === undefined) throw new Error("no prompt was recorded");
+      expect(prompt).toContain("<pi-ptc-why>");
+      expect(asResult(result).whySuppressed).toBeUndefined();
+    });
+  });
+
+  test("switch off with no why at all records nothing", async () => {
+    // The distinction the field exists for: a caller who passed nothing must be distinguishable
+    // from one whose value was dropped. Without this, a program polling for `whySuppressed` would
+    // report a suppression for every dispatch in a session that simply never used the parameter.
+    await withAgent(async (dir) => {
+      childTranscript.lines = [...COMPLIANT_TRANSCRIPT];
+      childArgv.prompts.length = 0;
+      const result = await dispatch(
+        { agent: "reporter", task: "check the gates", agentScope: "project" },
+        { callId: 8, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+        { slots: new DispatchSlotCounter(4), whyEnabled: false },
+      );
+      const prompt = childArgv.prompts.at(-1);
+      if (prompt === undefined) throw new Error("no prompt was recorded");
+      expect(prompt).not.toContain("<pi-ptc-why>");
+      expect(asResult(result).whySuppressed).toBeUndefined();
+    });
+  });
+
+  test("a REFUSAL still states the suppression, because it consumed the why too", async () => {
+    // The depth gate refuses before any child exists, so the caller's reason reached nobody. A
+    // stamp only on the success path would make the two fronts disagree on a fact both know.
+    const result = await dispatch(
+      {
+        task: "check the gates",
+        why: "we are preparing a release",
+      },
+      { callId: 9, cwd: process.cwd(), depth: 3, maxDispatchDepth: 3 },
+      { slots: new DispatchSlotCounter(4), whyEnabled: false },
+    );
+    expect(asResult(result).status).toBe("rejected");
+    expect(asResult(result).whySuppressed).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 //  Seam 3 — background parity
 // ---------------------------------------------------------------------------
 

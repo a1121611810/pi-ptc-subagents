@@ -426,6 +426,61 @@ describe("dispatch background spawn", () => {
     });
   });
 
+  test("the background record carries the suppression the handle cannot (ADR-0043)", async () => {
+    /*
+     * Foreground/background parity, on the one fact where the two fronts have different shapes. A
+     * background dispatch returns a `DispatchHandle`, which has no result to carry
+     * `whySuppressed` — so the TaskRecord is the only place a background caller can learn its
+     * `why` was dropped, and it is read back by `ptc_task_output`.
+     *
+     * Counterfactual: drop the `whySuppressed` spread from the spawn record and this is the single
+     * test that turns red; the prompt assertion here would still pass, because the block really is
+     * suppressed. That is the whole reason the record is asserted separately.
+     */
+    await withAgent(async (dir) => {
+      const h = createHarness();
+      const result = await dispatch(
+        {
+          agent: AGENT,
+          task: "investigate",
+          why: "we are preparing a release",
+          background: true,
+          agentScope: "project",
+        },
+        { callId: 12, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+        { ...h.deps, whyEnabled: false },
+      );
+      const handle = asHandle(result);
+      expect(handle.status).toBe("running");
+      const opts = h.lifecycle.getRecordedOpts(h.lifecycle.handleAt(0));
+      const prompt = await readFile(opts.promptFile!, "utf8");
+      expect(prompt).not.toContain("<pi-ptc-why>");
+      const record = await h.storage.loadTask(handle.taskId);
+      if (record === null) throw new Error("the background record was not persisted");
+      expect(record.whySuppressed).toBe(true);
+      // The value itself must not be anywhere on the record — ADR-0042 declined to persist it and
+      // ADR-0043 amends only the EVENT, not the content.
+      expect(JSON.stringify(record)).not.toContain("we are preparing a release");
+    });
+  });
+
+  test("a background dispatch with no why persists no suppression key at all (ADR-0043)", async () => {
+    // The absence is a claim. A record that always carried the key would make "you passed nothing"
+    // and "your value was dropped" the same event, and a poller could not tell them apart.
+    await withAgent(async (dir) => {
+      const h = createHarness();
+      const result = await dispatch(
+        { agent: AGENT, task: "investigate", background: true, agentScope: "project" },
+        { callId: 13, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+        { ...h.deps, whyEnabled: false },
+      );
+      const record = await h.storage.loadTask(asHandle(result).taskId);
+      if (record === null) throw new Error("the background record was not persisted");
+      expect(record.whySuppressed).toBeUndefined();
+      expect(Object.hasOwn(record, "whySuppressed")).toBe(false);
+    });
+  });
+
   test("the record carries the tier that took effect, for a background child too (ADR-0041)", async () => {
     /*
      * The background half of "The tier that took effect is reported" (user story 17: background

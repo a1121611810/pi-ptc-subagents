@@ -45,6 +45,7 @@ import { applyAdr0015Truncation, type OutputStorage } from "../runtime/output-st
 import { OUTPUT_PREVIEW_MAX_BYTES, type TaskRegistry } from "../runtime/task-registry.ts";
 import type { TaskRecord, TaskStatus, ULID } from "../runtime/task-storage.ts";
 import { renderReadOnlyTierText } from "./read-only-tier-text.ts";
+import { renderWhySuppressedText } from "./why-suppressed-text.ts";
 import { createTaskPanelRenderers } from "./task-panel-render.ts";
 import { sanitizeText } from "./text.ts";
 
@@ -312,6 +313,12 @@ export interface PtcTaskOutputDetails {
    * foreground `DispatchResult` makes when it carries no `readOnlyTier`.
    */
   readOnlyTier?: ReadOnlyTier;
+  /**
+   * ADR-0043: `true` when the caller passed a `why` and this session's switch dropped it. Mirrors
+   * the foreground `DispatchResult` field, and makes the same claim when absent: no `why` was
+   * passed, so nothing was withheld.
+   */
+  whySuppressed?: true;
 }
 
 // ---------------------------------------------------------------------------
@@ -493,6 +500,12 @@ const OUTPUT_OUTPUT_SCHEMA = Type.Object({
         "The read-only tier the dispatch resolved to: `strict` or `lenient` (ADR-0041). Absent when the dispatch asked for no tier. Present from spawn onwards, including for a task that later failed — a failed read-only child was still dispatched read-only.",
     }),
   ),
+  why_suppressed: Type.Optional(
+    Type.Boolean({
+      description:
+        "`true` when you passed a `why` and this session's `whyEnabled` switch was off, so the child's prompt carried no <pi-ptc-why> block (ADR-0043). ABSENT means no `why` was passed — that is the distinction the key exists to make. The child was never told your reason; it did not ignore one. The dropped value is not stored.",
+    }),
+  ),
   report: Type.Optional(
     Type.Object({
       summary: Type.String({ description: "The child's own one-line summary." }),
@@ -610,6 +623,7 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
         ...(record.report === undefined ? {} : { report: record.report }),
         ...(record.reportChannel === undefined ? {} : { reportChannel: record.reportChannel }),
         ...(record.readOnlyTier === undefined ? {} : { readOnlyTier: record.readOnlyTier }),
+        ...(record.whySuppressed === undefined ? {} : { whySuppressed: record.whySuppressed }),
       };
       // ADR-0032 rendering: the report reads first, the child's prose after — conclusion first,
       // reasoning second. A task with a report always has output too (a `succeeded` child produced
@@ -632,6 +646,13 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
       // about the tier, which is the exact thing the field was added to prevent.
       const tierText = renderReadOnlyTierText(record.readOnlyTier);
       const textWithTier = tierText.length === 0 ? text : `${tierText}\n${text}`;
+      // ADR-0043 on the same surface, for the same reason the tier line above needed one: this
+      // tool is `direct`, so a parent PTC program polling a settled background child reads this
+      // text and nothing else. Without the line, a suppressed `why` would be visible on the
+      // record and on the structured projection but silent where a program actually looks.
+      const suppressedText = renderWhySuppressedText(record.whySuppressed);
+      const textWithSuppression =
+        suppressedText.length === 0 ? textWithTier : `${suppressedText}\n${textWithTier}`;
       // Same computed values, projected onto the declared schema. `status` is free here:
       // `record` is already loaded for the existence check above.
       const structuredContent: Static<typeof OUTPUT_OUTPUT_SCHEMA> = {
@@ -644,6 +665,7 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
         ...(truncation.fullPath === undefined ? {} : { output_full_path: truncation.fullPath }),
         ...(record.reportChannel === undefined ? {} : { report_channel: record.reportChannel }),
         ...(record.readOnlyTier === undefined ? {} : { read_only_tier: record.readOnlyTier }),
+        ...(record.whySuppressed === undefined ? {} : { why_suppressed: record.whySuppressed }),
         ...(record.report === undefined ? {} : { report: record.report }),
         // Issue #199: the host's counter, on the projection as well as in the text (ADR-0028:
         // shaped to match what the model was shown). Same four fields, same numbers, and present
@@ -651,7 +673,7 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
         // record carry no key at all rather than a zeroed one.
         ...(usage === undefined ? {} : { usage }),
       };
-      return { content: [{ type: "text", text: textWithTier }], details, structuredContent };
+      return { content: [{ type: "text", text: textWithSuppression }], details, structuredContent };
     },
 
     ...createTaskPanelRenderers("task-output"),

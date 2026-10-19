@@ -397,6 +397,77 @@ describe("ptc_task_output", () => {
     expect(result.details.readOnlyTier).toBeUndefined();
   });
 
+  test("hands back a suppressed why, on all three surfaces (ADR-0043)", async () => {
+    /*
+     * The background front's only route to this fact. A background dispatch returned a handle with
+     * nowhere to put it, so the TaskRecord carries it and THIS tool is where a parent program reads
+     * it back — which is why the text line is not optional here, the way a purely visual row would
+     * be.
+     *
+     * COUNTERFACTUAL: drop `renderWhySuppressedText` from the returned text and this reds on the
+     * first assertion while the two projections keep passing; drop either projection and only that
+     * assertion reds. All three are asserted separately so none can be the only carrier.
+     */
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_2, { whySuppressed: true });
+    await h.outputs.writeOutput(TASK_2, "found it");
+    const tool = createPtcTaskOutputTool(h.registry, h.outputs);
+
+    const result = await tool.execute(
+      "call-1",
+      { taskId: TASK_2 },
+      undefined,
+      undefined,
+      undefined as never,
+    );
+
+    const view = result as unknown as {
+      content?: { text?: string }[];
+      structuredContent?: { why_suppressed?: boolean };
+    };
+    const text = view.content?.[0]?.text ?? "";
+    expect(text, "the model reads this text, so the suppression must be in it").toContain(
+      "why suppressed",
+    );
+    expect(
+      text,
+      "and it must name the switch, so a reader can tell a chosen configuration from a defect",
+    ).toContain("whyEnabled");
+    expect(
+      text,
+      "and above the child's own output, which describes what it did rather than what it was told",
+    ).toContain("never told your reason");
+    expect(result.details.whySuppressed, "details carries the record's camelCase spelling").toBe(
+      true,
+    );
+    expect(view.structuredContent?.why_suppressed, "and the projection its snake_case").toBe(true);
+  });
+
+  test("says nothing about a suppression when the record carries none (ADR-0043)", async () => {
+    // The absence half, and it is a claim: "no why was passed" is not "a why was dropped". Without
+    // this, every poll of an ordinary task would print a suppression line nobody triggered.
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_2);
+    await h.outputs.writeOutput(TASK_2, "plain child");
+    const tool = createPtcTaskOutputTool(h.registry, h.outputs);
+
+    const result = await tool.execute(
+      "call-1",
+      { taskId: TASK_2 },
+      undefined,
+      undefined,
+      undefined as never,
+    );
+
+    const view = result as unknown as {
+      content?: { text?: string }[];
+      structuredContent?: { why_suppressed?: boolean };
+    };
+    expect(view.content?.[0]?.text ?? "").not.toContain("why suppressed");
+    expect(result.details.whySuppressed).toBeUndefined();
+    expect(view.structuredContent).not.toHaveProperty("why_suppressed");
+  });
+
   test("reads the record through registry.get, not a MAX_SAFE_INTEGER query scan (§3 O(1) read)", async () => {
     const h = createHarness(1000);
     await spawnTask(h, TASK_1);

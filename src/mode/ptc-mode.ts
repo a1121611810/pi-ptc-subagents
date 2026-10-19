@@ -168,6 +168,77 @@ export function readDefaultModeConfig(agentDir: string): DefaultModeConfig {
   return { defaultMode: value, source: "file" };
 }
 
+/** Result of reading the `why` switch, with enough detail to warn about a broken file. */
+export interface WhyEnabledConfig {
+  whyEnabled: boolean;
+  source: "file" | "default" | "invalid";
+  error?: string;
+}
+
+/**
+ * Read `whyEnabled` from the agent-dir config file — ADR-0043's switch for the dispatch caller's
+ * reason.
+ *
+ * The three outcomes are borrowed from {@link readDefaultModeConfig} rather than invented, because
+ * this package already decided what a broken boolean in this file means and a second answer for the
+ * same file would be a second failure vocabulary:
+ *
+ * - Absent file, absent key → **on**. This package is default-on (CONTEXT.md), and ADR-0042's
+ *   measurement is why the block exists at all.
+ * - A non-boolean value, or a file that is not a JSON object, or unparseable JSON → reported as
+ *   `invalid` **and still resolved to on**.
+ *
+ * That last line is the one worth stating plainly: a broken value must never be able to take the
+ * feature away. A switch whose parse failure silently removes a block the user never asked to
+ * remove is worse than one that ignores the typo and says so — the failure here is LOUD (a
+ * `session_start` warning naming the path and the key) and the behaviour is UNCHANGED.
+ *
+ * **A file too broken to parse is not this function's to report**, and an earlier draft got that
+ * wrong in a way `tests/extension.test.ts` caught: this reader raised its own "not valid JSON" and
+ * `readDefaultModeConfig` raised the identical sentence for the same file, so one typo produced
+ * two notices. Two identical warnings train a user to ignore warnings, which defeats the loudness
+ * the previous paragraph is buying. The file's parse belongs to the reader that owns
+ * `defaultMode`; this one reports only what is wrong with the `whyEnabled` KEY, exactly as
+ * `readOptInBindingsConfig` draws the same boundary for `optInBindings`.
+ *
+ * What this key does NOT do: it stays off the model-facing schema either way. The parameter keeps
+ * its place in `DISPATCH_PARAMETERS` so a running program is never rejected for passing an argument
+ * whose value this switch decides to drop.
+ */
+export function readWhyEnabledConfig(agentDir: string): WhyEnabledConfig {
+  const path = join(agentDir, PTC_MODE_CONFIG_FILE);
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch {
+    return { whyEnabled: true, source: "default" };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    // Silent by design: `readDefaultModeConfig` already reported this file's parse failure, and a
+    // second copy of the same sentence is noise rather than information.
+    return { whyEnabled: true, source: "default" };
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    // Same boundary, same reason: the file being the wrong SHAPE is `defaultMode`'s to report.
+    return { whyEnabled: true, source: "default" };
+  }
+  const value = (parsed as { whyEnabled?: unknown }).whyEnabled;
+  if (value === undefined) {
+    return { whyEnabled: true, source: "default" };
+  }
+  if (typeof value !== "boolean") {
+    return {
+      whyEnabled: true,
+      source: "invalid",
+      error: `${path}: "whyEnabled" must be a boolean, received ${typeof value}`,
+    };
+  }
+  return { whyEnabled: value, source: "file" };
+}
+
 /** Result of reading the opt-in binding config, with enough detail to warn about a broken file. */
 export interface OptInBindingsConfig {
   optInBindings: readonly BuiltinBindingName[];
