@@ -239,7 +239,8 @@ preview, the full-output pointer or the empty-output placeholder — and the `ta
 appends one to each `failed` / `lost` row whose record carries an `errorMessage`. Both reuse
 the panel's existing `MAX_ERROR_CHARS` bound (120, first non-blank line — ADR-0022 §11), so a
 failure reason never grows a row past one line; neither annotation is counted against the panel's
-row caps.
+row caps. A settled failure's empty-output placeholder also reads `(no output)` instead of
+`(no output yet)`; a page with no recorded reason keeps the `yet`.
 
 #### The child report
 

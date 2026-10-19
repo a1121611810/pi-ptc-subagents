@@ -69,7 +69,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`session_ended_while_running` / `lost_on_session_restart`) and gets the row too; a
   `canceled` task carries no reason and does not. Both rows reuse the panel's existing
   `MAX_ERROR_CHARS` bound (120, first non-blank line), so no new cap or number is added, and
-  neither annotation counts against the panel's row caps — see ADR-0022 §11.
+  neither annotation counts against the panel's row caps — see ADR-0022 §11. A settled
+  failure's empty-output placeholder also stops claiming `(no output yet)`: with a reason on the
+  record it reads `(no output)`, while a page with no recorded reason keeps the `yet` (this
+  payload carries no status to tell a live task from an unlabelled close).
 
 ### Fixed
 

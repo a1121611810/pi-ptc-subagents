@@ -373,7 +373,10 @@ row uses — so the table above still holds five numbers and nothing new needs r
 rows are annotations, not content: the list annotation is not a task row and is never counted
 against `MAX_TASK_PANEL_ROWS`, and the output annotation does not consume
 `MAX_OUTPUT_PREVIEW_LINES` (the preview keeps its six lines). A `canceled` row prints no reason
-because the record carries none.
+because the record carries none. A page whose record carries a reason is settled, so the
+`task-output` empty-output placeholder reads `(no output)` rather than `(no output yet)`; a page
+with no recorded reason keeps the `yet`, because this details payload carries no status to tell a
+live task from an unlabelled terminal close.
 
 `AGE_TICK_MS` in the same module is a redraw cadence, not a bound — nothing is withheld when it
 elapses, the live age simply ticks — so it is deliberately left out of the table above rather than

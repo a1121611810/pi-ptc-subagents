@@ -307,9 +307,10 @@ describe("task-output failure reason (issue #70)", () => {
     expect(out.indexOf("error:")).toBeLessThan(out.indexOf("hello world"));
   });
 
-  test("renders it before the empty-output placeholder too", () => {
+  test("renders it before the settled empty-output placeholder too", () => {
     // The zero-byte failed page is exactly issue #70's fixture: there is no preview to explain,
-    // so the reason must read first and the placeholder second.
+    // so the reason must read first and the placeholder second. The placeholder drops "yet": a
+    // record with a failure reason is settled, and the tool's text already says "(no output; …)".
     const out = renderResult("task-output", {
       taskId: TASK_ID,
       output: "",
@@ -319,8 +320,22 @@ describe("task-output failure reason (issue #70)", () => {
     });
 
     expect(out).toContain("[error]error: ");
+    expect(out).toContain("(no output)");
+    expect(out).not.toContain("yet");
+    expect(out.indexOf("error:")).toBeLessThan(out.indexOf("(no output)"));
+  });
+
+  test("keeps the in-flight placeholder when no reason was recorded", () => {
+    // No errorMessage, no status in this details payload: the panel cannot tell a live task from
+    // an unlabelled terminal close, so the pre-existing "yet" wording stays the honest one.
+    const out = renderResult("task-output", {
+      taskId: TASK_ID,
+      output: "",
+      outputBytes: 0,
+      outputTruncated: false,
+    });
+
     expect(out).toContain("(no output yet)");
-    expect(out.indexOf("error:")).toBeLessThan(out.indexOf("(no output yet)"));
   });
 
   test("caps the reason at MAX_ERROR_CHARS (120) and keeps only its first line", () => {

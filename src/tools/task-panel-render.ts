@@ -416,8 +416,15 @@ function renderTaskOutput(details: unknown, ctx: RenderContext): TaskPanelRow {
       ...(meta === undefined ? {} : { right: meta }),
     });
   } else {
+    // A record that carries a failure reason is SETTLED: it will never write again, so the
+    // placeholder must not claim "yet" — the tool's own text already distinguishes terminal from
+    // in-flight ("(no output; task … is failed)" against "(no output yet; … is running)"), and
+    // the panel is showing the same result, so the two surfaces must agree. A page with no
+    // reason at all keeps "yet": without a status in this details payload a live task and an
+    // unlabelled terminal close are indistinguishable here.
+    const placeholder = reason === undefined ? "(no output yet)" : "(no output)";
     items.push({
-      left: `${TREE_ROOT_CONT}${ctx.theme.fg("muted", "(no output yet)")}`,
+      left: `${TREE_ROOT_CONT}${ctx.theme.fg("muted", placeholder)}`,
       ...(meta === undefined ? {} : { right: meta }),
     });
   }
