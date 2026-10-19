@@ -35,6 +35,12 @@ PTC  Verify inserted temp image file integrity
 code line as well, which turned the heading into a paragraph; the code now appears in the expanded
 view alone.
 
+**Amended 2026-10-19 (`ptc_subagent`).** The subagent front is the exception this rule needed: it
+registered no `renderCall`, so pi fell back to a raw argument dump (`ptc_subagent task="…\n…"`). It
+now renders as a heading — agent, state flags, and a pinned `model` when the caller set one — plus
+one task preview line and `… 还有 N 行`; `ctrl+e` adds the `label` / `why` rows (flattened to their
+first line) and the task continuation lines. The row still carries no serialised payload.
+
 `renderResult` collapsed is one line: the completion value as a hint on the left (`→ …`, or
 `done` when the program returned nothing, or `failed: <reason>` in the error colour), and the
 run's countable facts pinned to the right edge — output lines, workflow phases, warnings, duration.
@@ -144,16 +150,16 @@ not the README (whose "each block labelled and capped" carries no number), not a
 asked for one of two closers: a table of values, or an explicit statement that the values have no
 independent source. This section is the first.
 
-| constant                    | value | what it bounds                                                                  | block                                       |
-| --------------------------- | ----- | ------------------------------------------------------------------------------- | ------------------------------------------- |
-| `MAX_RESULT_HINT_CHARS`     | 60    | the `→ …` completion-value hint on the summary row, and the inline-vs-shape cut | none — the summary row itself               |
-| `MAX_ERROR_CHARS`           | 120   | the failure text's first line on the collapsed `failed: …` row                  | none — the failure row                      |
-| `MAX_CODE_LINE_CHARS`       | 120   | one line of code, and the call row's no-description fallback                    | `code`                                      |
-| `MAX_CODE_LINES_EXPANDED`   | 3     | how many code lines the block shows                                             | `code`                                      |
-| `MAX_LOG_LINES_EXPANDED`    | 12    | how many lines a block shows                                                    | `log`, `out`, and the expanded failure text |
-| `MAX_PHASES_EXPANDED`       | 8     | how many phases the roll-up row carries                                         | `phases`                                    |
-| `MAX_WARNINGS_EXPANDED`     | 4     | how many plan-drift warnings are shown                                          | `warn`                                      |
-| `MAX_SUBCALL_PREVIEW_CHARS` | 40    | one argument preview in a sub-call row                                          | none — the sub-call tree (ADR-0021)         |
+| constant                    | value | what it bounds                                                                  | block                                                                             |
+| --------------------------- | ----- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `MAX_RESULT_HINT_CHARS`     | 60    | the `→ …` completion-value hint on the summary row, and the inline-vs-shape cut | none — the summary row itself                                                     |
+| `MAX_ERROR_CHARS`           | 120   | the failure text's first line on the collapsed `failed: …` row                  | none — the failure row                                                            |
+| `MAX_CODE_LINE_CHARS`       | 120   | one line of code, and the call row's no-description fallback                    | `code`                                                                            |
+| `MAX_CODE_LINES_EXPANDED`   | 3     | how many code lines the block shows                                             | `code`                                                                            |
+| `MAX_LOG_LINES_EXPANDED`    | 12    | how many lines a block shows                                                    | `log`, `out`, the expanded failure text, and the `ptc_subagent` task continuation |
+| `MAX_PHASES_EXPANDED`       | 8     | how many phases the roll-up row carries                                         | `phases`                                                                          |
+| `MAX_WARNINGS_EXPANDED`     | 4     | how many plan-drift warnings are shown                                          | `warn`                                                                            |
+| `MAX_SUBCALL_PREVIEW_CHARS` | 40    | one argument preview in a sub-call row                                          | none — the sub-call tree (ADR-0021)                                               |
 
 **These eight numbers were chosen for TUI readability; they have no independent source.** They
 were not derived from any specification, from third-party documentation, or from pi's defaults:
@@ -171,15 +177,15 @@ eight_", never "this repository has no other unrecorded caps".
 
 **The failure block is the one bound that is not a `MAX_*`.** `MAX_ERROR_CHARS` (120) is not
 that bound. It reaches exactly one line: the collapsed `failed: …` row,
-through `firstLine()` (`render.ts:152`) ← `errorText()` (`render.ts:945`) ← `render.ts:1102` — and,
+through `firstLine()` (`render.ts:152`) ← `errorText()` (`render.ts:1049`) ← `render.ts:1206` — and,
 expanded, only as the fallback source for a result that carries no text block at all
-(`render.ts:1196`). Expanded, the failure block is bounded twice, and neither bound is a width
-constant: the line count is cut at `MAX_LOG_LINES_EXPANDED` (12, `render.ts:1198`), and every line
+(`render.ts:1300`). Expanded, the failure block is bounded twice, and neither bound is a width
+constant: the line count is cut at `MAX_LOG_LINES_EXPANDED` (12, `render.ts:1302`), and every line
 that survives is cut to the viewport by `alignRow` (`render.ts:136`).
 
 The absent per-line cap is intentional: the renderer says the failure text is "the reason the
 reader expanded the row at all" and gives it the full width under the summary instead of a cap of
-its own (`render.ts:1193-1182`). §3's "expanded is never unbounded" therefore holds for this block
+its own (`render.ts:1297-1305`). §3's "expanded is never unbounded" therefore holds for this block
 as **lines + viewport**, not as a `MAX_*` constant — it is bounded, just not by the kind of bound
 the other seven rows in the table carry, and a reader auditing that table should not go looking for
 a width constant here. Writing the deviation down is the point: every other block's bound is a

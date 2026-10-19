@@ -169,6 +169,12 @@ per row, with the withheld amount stated in-band. A scalar is one line (`→ 47`
 bounds ([ADR-0012](./docs/adr/0012-model-facing-result-text.md)): a compact value under 100
 characters stays on one line, every line caps at 200. Nothing is ever printed as escaped JSON.
 
+The `ptc_subagent` call row follows the same rule: it reads as a heading — agent, state flags, and
+a pinned model when the caller set one — plus one task preview line and a withheld count, and
+`ctrl+e` expands the `label` / `why` rows and the task block (the first task line plus up to
+`MAX_LOG_LINES_EXPANDED` continuation lines). A dispatch's long prose is never dumped as its
+JSON-escaped argument string.
+
 ## Images
 
 An image read _inside_ a program — `await tools.read({ path: "shot.png" })` — is attached to

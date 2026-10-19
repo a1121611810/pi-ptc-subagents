@@ -938,6 +938,110 @@ export interface PtcRenderOptions {
   state?: ShimmerState;
 }
 
+/** Structural subset of `DISPATCH_PARAMETERS` the `ptc_subagent` call row reads. */
+export interface SubagentCallArgs {
+  agent?: string;
+  task?: string;
+  why?: string;
+  label?: string;
+  model?: string;
+  agentScope?: "user" | "project" | "both";
+  readOnly?: "strict" | "lenient";
+  background?: boolean;
+}
+
+/**
+ * The `ptc_subagent` call row: a heading, then the task preview (collapsed) or the task block
+ * (expanded with ctrl+e).
+ *
+ * The tool used to have no renderer at all, so pi fell back to its raw argument dump —
+ * `ptc_subagent task="…\\n\\n…"` — one enormous line of JSON-escaped text (2026-10-19
+ * field report). A dispatch's task is deliberately long prose; printing all of it in the call row
+ * makes every row of the transcript five lines taller and tells a reader nothing the first line
+ * does not.
+ *
+ * Collapsed: `└─ subagent → (generalist)` with the state flags right-aligned (foreground /
+ * background, the read-only tier, and a pinned `model` / `agentScope` when the caller passed
+ * one — the model is the field that explains the 2026-10-19 provider mismatch), one task line and
+ * `… 还有 N 行（ctrl+e 展开）`. Expanded: `label` / `why` children and the task block. The task
+ * row carries the first line; the continuation shows at most {@link MAX_LOG_LINES_EXPANDED} more,
+ * the same expanded-block line budget the out/log blocks use, so a long task cannot make an
+ * expanded row unbounded and no new cap has to be registered.
+ *
+ * `label` and `why` are flattened to their first non-empty line through {@link firstLine} — a
+ * row is one line by construction, and a multi-line value pasted into one `RowLine` would put raw
+ * newlines into the grid that `alignRow` does not split on.
+ */
+export function renderSubagentToolCall(
+  args: SubagentCallArgs,
+  theme: Theme,
+  options: PtcRenderOptions & { expanded?: boolean } = {},
+): PtcRow {
+  const task = typeof args.task === "string" ? sanitizeText(args.task) : "";
+  const taskLines = task
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const who =
+    typeof args.agent === "string" && args.agent.trim().length > 0
+      ? args.agent.trim()
+      : "(generalist)";
+  const flags = [args.background === true ? "background" : "foreground"];
+  if (args.readOnly !== undefined) flags.push("read-only:" + args.readOnly);
+  if (typeof args.model === "string" && args.model.trim().length > 0) {
+    flags.push("model=" + args.model.trim());
+  }
+  if (args.agentScope !== undefined) flags.push("scope=" + args.agentScope);
+  const title = `${TREE_ROOT}${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("accent", "→ " + who)}`;
+  const items: RowLine[] = [{ left: title, right: theme.fg("dim", flags.join(" · ")) }];
+  if (options.expanded !== true) {
+    const first = taskLines[0];
+    if (first !== undefined) {
+      items.push({ left: `${TREE_ROOT_CONT}${theme.fg("dim", "│ " + first)}` });
+      const withheld = taskLines.length - 1;
+      if (withheld > 0) {
+        items.push({
+          left: `${TREE_ROOT_CONT}${theme.fg("dim", "  … 还有 " + withheld + " 行（ctrl+e 展开）")}`,
+        });
+      }
+    }
+  } else {
+    const column = (label: string): string => theme.fg("dim", label.padEnd(LABEL_WIDTH));
+    const meta: Array<[string, string]> = [];
+    if (typeof args.label === "string") {
+      const label = firstLine(sanitizeText(args.label));
+      if (label.length > 0) meta.push(["label", label]);
+    }
+    if (typeof args.why === "string") {
+      const why = firstLine(sanitizeText(args.why));
+      if (why.length > 0) meta.push(["why", why]);
+    }
+    for (const [label, value] of meta) {
+      items.push({ left: `${TREE_INDENT}${TREE_FIRST}${column(label)}${value}` });
+    }
+    const first = taskLines[0] ?? "(empty)";
+    items.push({
+      left: `${TREE_INDENT}${TREE_LAST}${column("task")}${first}${taskLines.length > 1 ? " (" + String(taskLines.length) + " 行)" : ""}`,
+    });
+    const shown = taskLines.slice(1, 1 + MAX_LOG_LINES_EXPANDED);
+    const continuation = TREE_INDENT + TREE_CONT_LAST;
+    for (const line of shown) items.push({ left: `${continuation}${theme.fg("dim", line)}` });
+    const withheld = taskLines.length - 1 - shown.length;
+    if (withheld > 0) {
+      items.push({
+        left: `${continuation}${theme.fg("dim", "… +" + String(withheld) + " 行（ctrl+e 收起）")}`,
+      });
+    }
+  }
+  return withShimmer(new PtcRow(items), {
+    intervalMs: DEFAULT_SHIMMER_INTERVAL_MS,
+    isPartial: options.isPartial ?? false,
+    theme,
+    requestInvalidate: options.requestInvalidate ?? noop,
+    state: options.state ?? {},
+  });
+}
+
 /** No-op invalidate for tests and direct library callers that never read the rendered output. */
 function noop(): void {}
 

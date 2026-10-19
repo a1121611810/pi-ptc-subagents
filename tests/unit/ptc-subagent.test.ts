@@ -9,7 +9,8 @@
  */
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
+import type { Theme } from "@earendil-works/pi-coding-agent";
 import { MockChildProcessLifecycle } from "../../src/runtime/child-process-lifecycle.ts";
 import type {
   ChildExitValue,
@@ -198,6 +199,14 @@ const baseOptions = (dir: string, deps: DispatchDeps) => ({
   maxDispatchDepth: DEFAULT_CONFIG.maxDispatchDepth,
   getDispatchDeps: () => deps,
 });
+
+/** Minimal theme for the renderCall wiring test: the row needs `fg` and `bold` only when settled. */
+function plainTheme(): Theme {
+  return {
+    fg: (_slot: string, text: string) => text,
+    bold: (text: string) => text,
+  } as unknown as Theme;
+}
 
 /**
  * The tool result as the codemode-facing tests read it. `run` is generic over the tool's own return
@@ -477,6 +486,56 @@ describe("ptc_subagent", () => {
     expect(declared, "and the retired name is gone — ADR-0043 ships no alias").not.toContain(
       "goal",
     );
+  });
+
+  test("the tool registers a renderCall, and it consumes the render context", () => {
+    // The renderer has its own tests; this one pins the WIRING. Without it, deleting the
+    // renderCall property left every unit test green (measured) and only pi's raw-argument
+    // fallback changed — the same silent-degradation shape the renderer exists to remove.
+    const tool = createPtcSubagentTool(baseOptions(".", {}));
+    const renderCall = tool.renderCall;
+    expect(typeof renderCall).toBe("function");
+    if (typeof renderCall !== "function") {
+      throw new Error("ptc_subagent registered no renderCall");
+    }
+    const theme = plainTheme();
+    const context = {
+      args: {},
+      toolCallId: "call-visual-1",
+      invalidate: vi.fn(),
+      lastComponent: undefined,
+      state: {},
+      cwd: ".",
+      executionStarted: false,
+      argsComplete: true,
+      isPartial: false,
+      expanded: false,
+      showImages: false,
+      isError: false,
+      durationMs: undefined,
+    };
+    const args = { task: "do the thing\nsecond line", readOnly: "lenient" as const };
+    const collapsed = renderCall(args, theme, context).render(80).join("\n");
+    expect(collapsed).toContain("└─ subagent → (generalist)");
+    expect(collapsed).toContain("foreground · read-only:lenient");
+    expect(collapsed).toContain("│ do the thing");
+    expect(collapsed).toContain("… 还有 1 行");
+    // context.expanded is consumed: label/why rows appear only in the expanded render.
+    const expanded = renderCall({ ...args, why: "because" }, theme, { ...context, expanded: true })
+      .render(80)
+      .join("\n");
+    expect(expanded).toContain("why");
+    // context.isPartial drives the shimmer cadence through context.invalidate — the same
+    // 150ms lifecycle the run_code call row owns (ADR-0020).
+    vi.useFakeTimers();
+    try {
+      const invalidate = vi.fn();
+      renderCall(args, theme, { ...context, isPartial: true, invalidate, state: {} });
+      vi.advanceTimersByTime(450);
+      expect(invalidate).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

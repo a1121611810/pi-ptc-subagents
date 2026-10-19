@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The `ptc_subagent` call row shows the dispatch, not its argument dump.** The tool had no
+  renderer, so pi fell back to its raw argument serialisation — one enormous
+  `ptc_subagent task="…\\n\\n…"` line of JSON-escaped prose (2026-10-19 field report). It now
+  registers a `renderCall`: collapsed it reads as a heading (agent, foreground/background and
+  read-only flags, and a pinned `model` when one was passed) with one task preview line and
+  `… 还有 N 行`; `ctrl+e` expands `label` / `why` rows and the task block — the first task line
+  plus up to the existing `MAX_LOG_LINES_EXPANDED` continuation lines, so no new cap is
+  introduced. Follows ADR-0013's "no escaped JSON in the call row" rule.
 - **`whyEnabled`, a default-on switch for the dispatch `why` block.** `~/.pi/agent/ptc.json` takes a
   boolean `whyEnabled`; when it is `false`, a `why` passed to `pi.dispatch` / `ptc_subagent` is
   dropped instead of delivered, and both the foreground result and the background record say that a

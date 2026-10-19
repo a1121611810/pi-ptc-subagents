@@ -43,7 +43,7 @@ import {
 } from "../runtime/dispatch.ts";
 import type { DispatchHandle } from "../runtime/task-registry.ts";
 import type { ULID } from "../runtime/task-storage.ts";
-import { renderChildReportText } from "./render.ts";
+import { renderChildReportText, renderSubagentToolCall, type SubagentCallArgs } from "./render.ts";
 import { renderReadOnlyTierText } from "./read-only-tier-text.ts";
 import { renderWhySuppressedText } from "./why-suppressed-text.ts";
 
@@ -493,6 +493,14 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
         details,
         structuredContent: structured,
       };
+    },
+    renderCall(args, theme, context) {
+      return renderSubagentToolCall(args as SubagentCallArgs, theme, {
+        ...(context?.invalidate === undefined ? {} : { requestInvalidate: context.invalidate }),
+        ...(context?.isPartial === undefined ? {} : { isPartial: context.isPartial }),
+        ...(context?.state === undefined ? {} : { state: context.state }),
+        ...(context?.expanded === true ? { expanded: true } : {}),
+      });
     },
   });
 }

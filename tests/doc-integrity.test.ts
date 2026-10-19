@@ -1384,15 +1384,19 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
    * 记录任何一条的容差都大。一个会在别人的版本更新时变红的门，教出来的是忽略红。
    */
   const PIN_TOKENS: Readonly<Record<string, string>> = {
-    "docs/adr/0013-ptc-row-compact-summary.md:140 -> src/tools/render.ts:89":
+    // 2026-10-19（ptc_subagent renderCall）：render.ts 在 errorText 前插入 89 行；同一轮该
+    // 函数内再 +15（N1 model/scope flags、N3 注释、N4 firstLine 压平），五条 render.ts 锚点
+    // 合计 +104（945→1049、1102→1206、1196→1300、1198→1302、1193→1297）。ADR-0013 正文新增
+    // 6 行 amendment，文档侧引用 +6。两侧均逐条按内容核对（内容未变），正文引用已同步。
+    "docs/adr/0013-ptc-row-compact-summary.md:146 -> src/tools/render.ts:89":
       "MAX_CODE_LINES_EXPANDED = 3",
-    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:152": "function firstLine(",
-    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:945": "function errorText(",
-    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:1102": "errorText(result)",
-    "docs/adr/0013-ptc-row-compact-summary.md:176 -> render.ts:1196": "errorText(result)",
-    "docs/adr/0013-ptc-row-compact-summary.md:177 -> render.ts:1198": "MAX_LOG_LINES_EXPANDED",
-    "docs/adr/0013-ptc-row-compact-summary.md:178 -> render.ts:136": "function alignRow(",
-    "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:1193":
+    "docs/adr/0013-ptc-row-compact-summary.md:180 -> render.ts:152": "function firstLine(",
+    "docs/adr/0013-ptc-row-compact-summary.md:180 -> render.ts:1049": "function errorText(",
+    "docs/adr/0013-ptc-row-compact-summary.md:180 -> render.ts:1206": "errorText(result)",
+    "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:1300": "errorText(result)",
+    "docs/adr/0013-ptc-row-compact-summary.md:183 -> render.ts:1302": "MAX_LOG_LINES_EXPANDED",
+    "docs/adr/0013-ptc-row-compact-summary.md:184 -> render.ts:136": "function alignRow(",
+    "docs/adr/0013-ptc-row-compact-summary.md:188 -> render.ts:1297":
       "The failure text is the reason",
     "docs/adr/0016-ptc-dispatch-binding.md:41 -> src/runtime/dispatcher.ts:438":
       "new DispatchSlotCounter(",
@@ -1462,18 +1466,23 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     //   177 → 1155→1198（`MAX_LOG_LINES_EXPANDED`）
     //   178 → 130→136（`function alignRow(`）
     //   182 → 1150→1193（"The failure text is the reason"，区间 1193-1182）
+    // 2026-10-19 第十七次复核（ptc_subagent renderCall）：render.ts 在 errorText 前插入 89 行，
+    //   同一轮该函数内再 +15（N1/N3/N4），五条 render.ts 锚点合计 +104（945→1049、1102→1206、
+    //   1196→1300、1198→1302、1193→1297），逐条按内容核对；正文区间 1193-1182 → 1297-1305。
+    //   同一轮 ADR-0013 正文新增 6 行 amendment 段，文档侧引用整体 +6（140→146、174→180、
+    //   176→182、177→183、178→184、182→188）；数组两侧同步，仍按内容核对。
     //   0032:20 → subagent.ts 209→217（`export const SUBAGENT_OUTPUT_SCHEMA`）
     //   0032:55 → subagent.ts 428→474（settled 路径的 `structuredContent: structured,`）
     // 顺带改正一处**既有**、本门不钉的散文漂移：ADR-0032 同一引用里的 `ptc-task.ts:471, 630`
     // 早已不是 outputSchema 行，本次与 233 一起写成 `233, 569, 766`（三条声明的实际行）。
-    "docs/adr/0013-ptc-row-compact-summary.md:140 -> src/tools/render.ts:89",
-    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:152",
-    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:945",
-    "docs/adr/0013-ptc-row-compact-summary.md:174 -> render.ts:1102",
-    "docs/adr/0013-ptc-row-compact-summary.md:176 -> render.ts:1196",
-    "docs/adr/0013-ptc-row-compact-summary.md:177 -> render.ts:1198",
-    "docs/adr/0013-ptc-row-compact-summary.md:178 -> render.ts:136",
-    "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:1193",
+    "docs/adr/0013-ptc-row-compact-summary.md:146 -> src/tools/render.ts:89",
+    "docs/adr/0013-ptc-row-compact-summary.md:180 -> render.ts:152",
+    "docs/adr/0013-ptc-row-compact-summary.md:180 -> render.ts:1049",
+    "docs/adr/0013-ptc-row-compact-summary.md:180 -> render.ts:1206",
+    "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:1300",
+    "docs/adr/0013-ptc-row-compact-summary.md:183 -> render.ts:1302",
+    "docs/adr/0013-ptc-row-compact-summary.md:184 -> render.ts:136",
+    "docs/adr/0013-ptc-row-compact-summary.md:188 -> render.ts:1297",
     // Hand-confirmed line by line, 2026-09-30 (review round 5). The extractor resolves this
     // one only because the path is qualified: bare `dispatcher.ts` is ambiguous in this repo, and
     // the rule is to refuse rather than guess. Line 438 is

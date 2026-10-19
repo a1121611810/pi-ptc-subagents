@@ -18,6 +18,7 @@ import {
   firstMeaningfulCodeLine,
   isExpandableContainer,
   renderPtcToolCall,
+  renderSubagentToolCall,
   renderPtcToolResultCollapsed,
   renderPtcToolResultExpanded,
   renderValueTree,
@@ -410,6 +411,128 @@ describe("renderPtcToolCall", () => {
     }
     expect(setIntervalSpy).toHaveBeenCalledTimes(1);
     setIntervalSpy.mockRestore();
+  });
+});
+
+describe("renderSubagentToolCall (ptc_subagent)", () => {
+  test("collapsed: heading + state flags + one task line + withheld count", () => {
+    const theme = makeTheme();
+    const task = "第一行任务：做一次只读 review\n\n第二行：审查范围\n第三行\n第四行";
+    const out = visible(renderSubagentToolCall({ task, readOnly: "lenient" }, theme));
+
+    expect(out).toContain("└─ *subagent* → (generalist)");
+    expect(out).toContain("foreground · read-only:lenient");
+    expect(out).toContain("│ 第一行任务：做一次只读 review");
+    // 4 non-empty lines, one shown → 3 withheld.
+    expect(out).toContain("… 还有 3 行（ctrl+e 展开）");
+    expect(out).not.toContain(ESCAPED_NEWLINE);
+  });
+
+  test("collapsed with a single-line task has no withheld row", () => {
+    const out = visible(renderSubagentToolCall({ task: "one line" }, makeTheme()));
+    expect(out.split("\n")).toHaveLength(2);
+    expect(out).not.toContain("还有");
+  });
+
+  test("named agent, background dispatch and strict tier are stated", () => {
+    const out = visible(
+      renderSubagentToolCall(
+        { agent: "researcher", task: "x", background: true, readOnly: "strict" },
+        makeTheme(),
+      ),
+    );
+    expect(out).toContain("→ researcher");
+    expect(out).toContain("background · read-only:strict");
+  });
+
+  test("a pinned model and agent scope are stated (the 2026-10-19 diagnosis fields)", () => {
+    const out = visible(
+      renderSubagentToolCall(
+        { task: "x", model: "deepseek/deepseek-flash", agentScope: "project" },
+        makeTheme(),
+      ),
+    );
+    expect(out).toContain("model=deepseek/deepseek-flash");
+    expect(out).toContain("scope=project");
+  });
+
+  test("expanded: label/why children and the task block", () => {
+    const theme = makeTheme();
+    const task = "第一行任务\n\n第二行\n第三行\n第四行";
+    const out = visible(
+      renderSubagentToolCall(
+        { task, label: "review-fix-loop", why: "need an independent check" },
+        theme,
+        { expanded: true },
+      ),
+    );
+    expect(out).toContain("└─ *subagent* → (generalist)");
+    expect(out).toContain("   ├─ label   review-fix-loop");
+    expect(out).toContain("   ├─ why     need an independent check");
+    expect(out).toContain("   └─ task    第一行任务 (4 行)");
+    expect(out).toContain("第二行");
+    expect(out).toContain("第四行");
+    // Four non-empty lines: first in the task row, three as continuation → nothing withheld.
+    expect(out).not.toContain("ctrl+e 收起");
+  });
+
+  test("a multi-line label/why is flattened to its first line", () => {
+    // sanitizeText keeps newlines; pasting a multi-line value into one RowLine puts a raw newline
+    // into the grid that alignRow does not split on. firstLine() is the existing flattening rule.
+    const out = visible(
+      renderSubagentToolCall(
+        { task: "t", label: "label one\nlabel two", why: "why one\nwhy two" },
+        makeTheme(),
+        { expanded: true },
+      ),
+    );
+    expect(out).toContain("├─ label   label one");
+    expect(out).toContain("├─ why     why one");
+    expect(out).not.toContain("label two");
+    expect(out).not.toContain("why two");
+    expect(out.split("\n")).toHaveLength(4);
+  });
+
+  test("expanded with no label/why keeps the task as the only child", () => {
+    const out = visible(
+      renderSubagentToolCall({ task: "one line" }, makeTheme(), { expanded: true }),
+    );
+    expect(out).toContain("   └─ task    one line");
+    expect(out).not.toContain("├─");
+  });
+
+  test("expanded task block is capped at the expanded line budget and says what it withheld", () => {
+    const task = Array.from({ length: 20 }, (_unused, index) => "line " + String(index + 1)).join(
+      "\n",
+    );
+    const out = visible(renderSubagentToolCall({ task }, makeTheme(), { expanded: true }));
+    expect(out).toContain("line 1");
+    // First line in the task row, 12 continuation lines (MAX_LOG_LINES_EXPANDED), 7 withheld.
+    expect(out).toContain("line 13");
+    expect(out).not.toContain("line 14");
+    expect(out).toContain("… +7 行（ctrl+e 收起）");
+  });
+
+  test("never prints the raw argument dump (ADR-0013: no escaped JSON)", () => {
+    const out = visible(renderSubagentToolCall({ task: "a\nb" }, makeTheme()));
+    expect(out).not.toContain("task=");
+    expect(out).not.toContain('"');
+    expect(out).not.toContain(ESCAPED_NEWLINE);
+  });
+
+  test("truncates each row to the viewport instead of wrapping", () => {
+    const theme = makeTheme();
+    const out = lines(
+      renderSubagentToolCall(
+        { task: "x".repeat(200) + "\nsecond", label: "y".repeat(200) },
+        theme,
+        { expanded: true },
+      ),
+      40,
+    );
+    expect(out).toHaveLength(4);
+    for (const line of out) expect(visibleWidth(line)).toBeLessThanOrEqual(40);
+    expect(out.some((line) => line.includes("…"))).toBe(true);
   });
 });
 
