@@ -34,7 +34,9 @@ import {
   isMalformedAgentName,
   missingAgentResult,
   resolveReadOnlyTier,
+  resolveWhy,
   withReadOnlyTier,
+  withWhySuppressed,
   type DispatchDeps,
   type DispatchInput,
 } from "./dispatch.ts";
@@ -301,6 +303,21 @@ function readOnlyTierOf(
   return resolveReadOnlyTier(raw?.readOnly as Parameters<typeof resolveReadOnlyTier>[0]);
 }
 
+/**
+ * ADR-0043: whether the caller's `why` was dropped, read off the RAW arguments for the same reason
+ * {@link readOnlyTierOf} reads the tier off them — these two refusals live INSIDE the validation
+ * `catch`, where the validated value is not in hand.
+ *
+ * The rule is NOT restated here. {@link resolveWhy} owns it, and it is the same rule `dispatch()`
+ * applies a few lines later on the validated arguments: a blank `why` is never a suppression, and
+ * only a switch that is explicitly `false` suppresses. Two spellings of that would let the binding
+ * front and `dispatch()` disagree about what the field on a refusal means, which is the one thing
+ * a caller reading it cannot check for itself.
+ */
+function whySuppressedOf(raw: Record<string, unknown> | undefined, enabled: boolean): boolean {
+  return resolveWhy(raw?.why as DispatchInput["why"], enabled).suppressed;
+}
+
 export interface CreateBuiltinBindingsOptions {
   /** Per-run working directory: the F4 `RunConfig.cwd`, used to build every tool. */
   cwd: string;
@@ -499,41 +516,54 @@ export function createBuiltinBindings(options: CreateBuiltinBindingsOptions): Bi
               : undefined;
           const rawAgent = raw?.agent;
           const rawScope = raw?.agentScope;
+          // ADR-0043: one suppression decision for BOTH refusals below, read from the same raw
+          // arguments and through the same `resolveWhy` `dispatch()` uses. Neither refusal reached
+          // a child, so both consumed the caller's `why`, and both therefore have to state that --
+          // otherwise a program that passed a `why` and got refused here cannot tell "my reason was
+          // dropped" from "I passed no reason", which is the whole distinction the field exists
+          // for. `withReadOnlyTier` was already on both branches; this is the missing half.
+          const suppressed = whySuppressedOf(raw, context.dispatchDeps?.whyEnabled !== false);
           // Only the GIVEN-but-unusable case lands here (issue #185). An omitted agent validates
           // cleanly now and reaches `dispatchBinding`, which resolves the generalist child -- so
           // adding a "no agent given" branch here would be a second, divergent answer to a
           // question the dispatcher already owns.
           if (isMalformedAgentName(rawAgent)) {
-            return withReadOnlyTier(
-              missingAgentResult({
-                cwd: options.cwd,
-                agentScope:
-                  rawScope === "user" || rawScope === "project" || rawScope === "both"
-                    ? rawScope
-                    : "user",
-              }),
-              readOnlyTierOf(raw),
+            return withWhySuppressed(
+              withReadOnlyTier(
+                missingAgentResult({
+                  cwd: options.cwd,
+                  agentScope:
+                    rawScope === "user" || rawScope === "project" || rawScope === "both"
+                      ? rawScope
+                      : "user",
+                }),
+                readOnlyTierOf(raw),
+              ),
+              suppressed,
             );
           }
-          return withReadOnlyTier(
-            {
-              text: "",
-              status: "rejected",
-              started: false,
-              // The name the caller gave, or `""` when this refusal is about some OTHER field.
-              // `rawAgent` is `unknown` here and `agentName` is typed `string`: returning the raw
-              // value put `undefined` into a string field on the now-reachable path where a
-              // different field fails validation and no agent was named (issue #185 made that path
-              // reachable by removing the early missing-agent guard).
-              agentName: typeof rawAgent === "string" ? rawAgent : "",
-              durationMs: 0,
-              exitCode: 1,
-              // ADR-0032: the total channel field, for the same reason every other refusal has
-              // it — this shape never carries a report, and a program must not have to infer that.
-              reportChannel: "none",
-              errorMessage: error instanceof Error ? error.message : String(error),
-            },
-            readOnlyTierOf(raw),
+          return withWhySuppressed(
+            withReadOnlyTier(
+              {
+                text: "",
+                status: "rejected",
+                started: false,
+                // The name the caller gave, or `""` when this refusal is about some OTHER field.
+                // `rawAgent` is `unknown` here and `agentName` is typed `string`: returning the raw
+                // value put `undefined` into a string field on the now-reachable path where a
+                // different field fails validation and no agent was named (issue #185 made that path
+                // reachable by removing the early missing-agent guard).
+                agentName: typeof rawAgent === "string" ? rawAgent : "",
+                durationMs: 0,
+                exitCode: 1,
+                // ADR-0032: the total channel field, for the same reason every other refusal has
+                // it — this shape never carries a report, and a program must not have to infer that.
+                reportChannel: "none",
+                errorMessage: error instanceof Error ? error.message : String(error),
+              },
+              readOnlyTierOf(raw),
+            ),
+            suppressed,
           );
         }
         return dispatchBinding(

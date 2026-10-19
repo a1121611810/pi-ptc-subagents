@@ -186,6 +186,15 @@ and reaches `read` / `bash` / `edit` / `write` / `grep` / `find` / `ls` through
 …) stay directly callable. Turn it off for one session with `/ptc off` (also `/ptc on`, `/ptc`
 for status), permanently with `{ "defaultMode": false }` in `~/.pi/agent/ptc.json`.
 
+A dispatch may also carry the caller's **reason** for the slice: an optional `why` on
+`pi.dispatch` / `ptc_subagent`, which reaches the child as its own `<pi-ptc-why>` block after the
+host's policy block, and never widens the task. It is on by default. Turn it off for one session
+with `/ptc why off` (`/ptc why` reports the current value and whether it came from the session or
+the file), or permanently with `{ "whyEnabled": false }` in `~/.pi/agent/ptc.json`. A value that is
+not a boolean leaves the block **on** and says so at startup — a default-on switch that could turn
+itself off on a typo is the wrong direction. A `why` that was dropped is reported on the dispatch
+result (`whySuppressed`), never silently ([ADR-0043](./docs/adr/0043-a-why-switch-and-a-name.md)).
+
 Which model-facing tools this package registers is **detected, not configured** — there is no
 setting for it ([ADR-0034](./docs/adr/0034-surface-is-detected-not-set.md)). The short version:
 a pi whose `codemode` is loaded _and_ callable by the model gets the `subagents` surface

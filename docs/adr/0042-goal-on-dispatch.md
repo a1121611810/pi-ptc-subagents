@@ -29,7 +29,9 @@ dispatch slice, in the caller's words.
 - An absent or blank goal emits no block. An empty block reads as "there was content and it was
   withheld".
 - Not persisted on the `TaskRecord`: unlike `usage`, this is a caller-held fact, not a host-measured
-  one.
+  one. **Amended 2026-10-19 by ADR-0043:** the _value_ still is not persisted, but the _event_ is —
+  a `whySuppressed: true` marks that a reason was passed and the switch dropped it. That reason is
+  the host's own observation, which is the category this bullet was distinguishing.
 - **Orthogonal to `childReport`.** That switch is the output contract; this is input context.
   Coupling them would make one switch mean two things, and the failure would be silent.
 

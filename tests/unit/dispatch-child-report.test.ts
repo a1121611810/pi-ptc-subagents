@@ -784,6 +784,44 @@ describe("dispatch() foreground under the whyEnabled switch (ADR-0043)", () => {
     expect(asResult(result).status).toBe("rejected");
     expect(asResult(result).whySuppressed).toBe(true);
   });
+
+  test("the readOnly refusal stamps it too, and is still refused (ADR-0043)", async () => {
+    /*
+     * The refusal above is the depth gate, which runs AFTER the resolutions. This one is the
+     * `isUsableReadOnlyRequest` guard at the top of `dispatch()`, and it ran BEFORE them — so
+     * `finish` was not in scope at the return and the stamp was missing from the one refusal a
+     * caller can reach with a plain wrong-typed field. Moving the resolutions above the guard to
+     * fix that also moved `resolveReadOnlyTier`, so this row carries both halves: the guard still
+     * refuses, and it now says the reason was dropped.
+     *
+     * COUNTERFACTUAL: move `const resolvedWhy = resolveWhy(...)` back below the guard, leaving
+     * `return invalidReadOnlyRequestResult(input.readOnly)` unwrapped, and `whySuppressed` comes
+     * back undefined on the first assertion. Nothing else in the suite notices.
+     */
+    const refused = asResult(
+      await dispatch(
+        { task: "check the gates", why: "we are preparing a release", readOnly: 1 } as never,
+        { callId: 20, cwd: process.cwd(), depth: 0, maxDispatchDepth: 3 },
+        { slots: new DispatchSlotCounter(4), whyEnabled: false },
+      ),
+    );
+    expect(refused.started).toBe(false);
+    expect(refused.errorMessage ?? "").toContain("readOnly");
+    expect(refused.whySuppressed, "the refusal consumed the why, so it must say so").toBe(true);
+
+    // The absence half: same refusal, no `why`, so nothing was withheld and no key appears.
+    const withoutWhy = asResult(
+      await dispatch(
+        { task: "check the gates", readOnly: 1 } as never,
+        { callId: 21, cwd: process.cwd(), depth: 0, maxDispatchDepth: 3 },
+        { slots: new DispatchSlotCounter(4), whyEnabled: false },
+      ),
+    );
+    expect(
+      Object.hasOwn(withoutWhy, "whySuppressed"),
+      "no why passed, so nothing was withheld",
+    ).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

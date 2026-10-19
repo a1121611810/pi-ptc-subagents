@@ -464,6 +464,19 @@ describe("ptc_subagent", () => {
     expect(declared, "and it is not empty").toContain("agent");
     expect(declared).toContain("task");
     expect(declared).toContain("background");
+    // Everything above compares the schema to itself, so it cannot fail on a RENAME -- and the
+    // rename is the breaking change this branch exists to make. COUNTERFACTUAL: put the key back
+    // to `goal` in the three places it lives (`bindings.ts`'s schema key, `DispatchInput`'s field,
+    // and the two reads of it). Measured with these two lines removed: seven OTHER tests go red,
+    // because the `<pi-ptc-why>` block stops being built and `why_suppressed` stops being stamped
+    // -- but every one of them breaks on the missing BEHAVIOUR, and not one compares the schema to
+    // the NAME. This test, whose entire subject is the schema's contract, stays green on a schema
+    // that renamed the key back. That is the gap: a broken rename looked like a broken feature
+    // everywhere it was observed, and like nothing at all here.
+    expect(declared, "the caller-held reason is named `why` since ADR-0043").toContain("why");
+    expect(declared, "and the retired name is gone — ADR-0043 ships no alias").not.toContain(
+      "goal",
+    );
   });
 });
 

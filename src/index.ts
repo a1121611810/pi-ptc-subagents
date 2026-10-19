@@ -293,8 +293,19 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
 
   /**
    * ADR-0043: whether a dispatched child may be handed the caller's `why`, read ONCE here for the
-   * same reason `optInBindings` is — a program must not be able to observe a dispatch surface
-   * different from the one the prompt that described it promised.
+   * same reason `optInBindings` is — this FILE is read once. It is not a promise that the value can
+   * never change during a session, because it does: `/ptc why` overwrites
+   * `background.dispatchDeps.whyEnabled` mid-session (see `applyWhy`), by design, and that is a
+   * different object from this one. What holds is narrower and is the reason it stays a load-time
+   * read: every mid-run change is an EXPLICIT, RECORDED user action — `/ptc why` writes a session
+   * entry through `pi.appendEntry` — so a program whose first dispatch saw one value and whose
+   * third saw another has a session entry naming the moment it changed, rather than a switch that
+   * drifted on its own between two reads of a file.
+   *
+   * The per-call-read concern is the part that survives unchanged, and it is why
+   * {@link DispatchDeps.whyEnabled} is carried rather than consulted per dispatch: a value read
+   * fresh on every call would let the third dispatch of a run disagree with the first for reasons
+   * no reader of the transcript could reconstruct.
    *
    * The failure direction is the opposite of `optInBindings`, and that is the point: a broken value
    * leaves the block **ON** (see {@link readWhyEnabledConfig}), because a default-on switch whose
@@ -807,14 +818,24 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
      * that the key was the problem — and the symptom they see is on a CHILD's prompt, which is the
      * least obvious place to go looking for a typo in their own config.
      *
-     * The message states what actually happened (still on) rather than only what was wrong, because
-     * "invalid" alone leaves the user guessing whether the feature was disabled or enabled. Read
-     * from the value captured at extension load, for the same reason as `optInConfig` below.
+     * The message says what the KEY did, not what the session ended up with. It used to claim the
+     * block "stays ON", which is false at exactly the moment it fires: `applyPersistedWhy` runs
+     * further down this same handler and writes a persisted `/ptc why off` over
+     * `background.dispatchDeps.whyEnabled`, so with `ptc.json` = `{"whyEnabled": "false"}` and an
+     * off record in the session, this session has it OFF while the notice insists otherwise. The
+     * notice exists to be the path from a symptom to its cause, and naming a state the session is
+     * not in sends the user looking in the wrong place. "This key was ignored, and `/ptc why` is
+     * what decides" is the claim that is true either way — and `/ptc why` with no argument reports
+     * which value is actually in force and where it came from, so the notice points at the one
+     * command that answers the question it raises.
+     *
+     * Read from the value captured at extension load, for the same reason as `optInConfig` below.
      */
     if (whyConfig.error !== undefined) {
       ctx.ui.notify(
-        `pi-ptc-subagents: ${whyConfig.error}. The dispatch \`why\` block stays ON, so a ` +
-          `mistyped key cannot switch the feature off by accident.`,
+        `pi-ptc-subagents: ${whyConfig.error}. That key was ignored rather than acted on, so it ` +
+          `cannot have switched the dispatch \`why\` block off — \`/ptc why\` is what decides that, ` +
+          `and \`/ptc why\` on its own reports the value in force and where it came from.`,
         "warning",
       );
     }

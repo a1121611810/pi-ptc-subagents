@@ -185,8 +185,14 @@ export interface BackgroundRuntimeOptions {
    * It arrives HERE rather than at each `dispatch()` call site because `dispatchDeps` is already the
    * one object every front reads its session-level facts from — adding a second path for this one
    * switch would be the "two implementations of a rule" shape this package has been bitten by
-   * before. Carried, not consulted: the value is read once at extension load and never re-read, so
-   * a program cannot see the switch change under it mid-run.
+   * before. Carried, not consulted PER DISPATCH: `dispatch()` reads it once per call rather than
+   * re-reading the config file, so a program cannot see the FILE change under it mid-run.
+   *
+   * The value itself DOES change mid-session when the user runs `/ptc why`, which writes this same
+   * `dispatchDeps` object — so this is a statement about where the switch is read from, not a
+   * promise that it is constant. What a program can rely on is that the change was recorded: the
+   * toggle appends a session entry, so a dispatch that answered differently from its predecessor
+   * has a transcript entry naming the user's action.
    */
   whyEnabled?: boolean;
   /** Child lifecycle factory; defaults to the real `node:child_process` adapter. */

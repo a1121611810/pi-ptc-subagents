@@ -15,6 +15,12 @@
  *      the other's off-switch is the exact confusion that costs a user a session of debugging.
  *   3. **Nothing reaches the disk.** Compared byte for byte, because the file this package must not
  *      write is the one whose sibling keys it does read.
+ *   4. **A key that cannot be read is LOUD.** Not scope and separation like the three above, and
+ *      pinned here for the same reason `readWhyEnabledConfig`'s own suite cannot pin it: that
+ *      suite asserts the reader PRODUCES an error, and nothing there or in `tests/extension.test.ts`
+ *      asserts the error ever reaches the user. ADR-0043's "the failure is LOUD and the behaviour
+ *      is UNCHANGED" is two promises, and the first one is an interface with no owner until a test
+ *      drives `session_start` over a real `ptc.json` and reads `ctx.ui.notify`.
  *
  * The bare query is asserted for its SOURCE as well as its value. After `/ptc why off` the file
  * still says what it always said, so a report that named only the value would send the user to
@@ -401,7 +407,7 @@ describe("PTC mode and the `why` switch are different switches", () => {
 });
 
 describe("a malformed session record falls back to the shipped default, not to off", () => {
-  test('"whyEnabled": "false" as a string leaves the block ON', async () => {
+  test('a session record whose "enabled" is the string "false" leaves the block ON', async () => {
     /*
      * The string-typed boolean is the classic way a hand-written or forward-written record goes
      * wrong, and it is the same mistake `readWhyEnabledConfig` is pinned against for the config
@@ -449,6 +455,49 @@ describe("a malformed session record falls back to the shipped default, not to o
         expect(said).toContain("ptc.json");
       },
     );
+  });
+});
+
+describe("a config key that is not a boolean fails LOUD and changes nothing", () => {
+  test('a `ptc.json` saying `"whyEnabled": "false"` warns the user instead of going quiet', async () => {
+    /*
+     * COUNTERFACTUAL: delete the `if (whyConfig.error !== undefined) { … }` notify block from
+     * `session_start` and this goes red with nothing else in the suite taking its place. The block
+     * stays on, the file stays wrong, and the user's only symptom is a `<pi-ptc-why>` block on a
+     * child's prompt that no setting of theirs appears to turn off. `readWhyEnabledConfig` is
+     * pinned to PRODUCE the error and `readOptInBindingsConfig` has the same shape, so both halves
+     * of ADR-0043's "the failure is LOUD and the behaviour is UNCHANGED" can each be deleted while
+     * their own owner stays green: this is the only assertion that the error is ever shown.
+     *
+     * The string is the case that matters and not a number because `"false"` is the value a human
+     * reads as OFF — it is what a hand-written file contains, and it is the one that makes silence
+     * look like the feature ignoring them rather than like a typo.
+     */
+    await withSession({ ptc: { whyEnabled: "false" } }, async (stub) => {
+      // Selected by content rather than by index: `session_start` raises notices of its own, so
+      // "the last one" would be a positional claim about an unrelated warning.
+      const said = stub.notifications.find((notice) => notice.message.includes("whyEnabled"));
+      expect(said, "the notice reaches ctx.ui.notify at all").toBeDefined();
+      expect(said?.type, "a key that cannot be honoured is a warning, not a note").toBe("warning");
+      expect(said?.message, "it names the key, which is the thing the user has to edit").toContain(
+        '"whyEnabled"',
+      );
+      expect(
+        said?.message,
+        "and says what the key has to be, rather than only that something was wrong",
+      ).toContain("must be a boolean");
+      expect(said?.message, "and what the parser actually read").toContain("string");
+
+      // The UNCHANGED half of the same promise, observed rather than assumed: the notice must not
+      // double as the switch. The bare query reads the config value, so this is a real read of
+      // what `session_start` decided, not a restatement of the fixture.
+      await runPtc(stub, "why");
+      const answered = stub.notifications.at(-1)?.message ?? "";
+      expect(answered, "so the block is still ON").toContain("ON");
+      expect(answered, "and the file, not a session, is still what is in charge").toContain(
+        "ptc.json",
+      );
+    });
   });
 });
 

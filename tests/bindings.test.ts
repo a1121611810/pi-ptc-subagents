@@ -532,6 +532,91 @@ test(
   options,
 );
 
+test(
+  "a refusal on the binding front states a suppressed why, and stays silent without one",
+  async () => {
+    /*
+     * The same two refusals as the tier row above, for ADR-0043's field, and for the same reason:
+     * they are the only `DispatchResult`s in the package that never pass through `dispatch()`'s
+     * refusal factories, so a fact stamped by `withWhySuppressed` inside `dispatch()` simply does
+     * not reach a caller who arrived through the binding. Without this row the contract "every
+     * result a caller can observe states a suppression" holds on one front and not the other, and
+     * the divergence is invisible — a refused call returns a result, so nothing looks wrong.
+     *
+     * `agent: ""` rather than the `"  "` the tier row uses: `"  "` satisfies the schema's
+     * `minLength: 1`, so it is refused further down rather than in this `catch`, and a row aimed
+     * at THIS branch has to name a value that fails validation outright.
+     *
+     * COUNTERFACTUAL, measured: drop the `withWhySuppressed(..., suppressed)` wrapper from both
+     * refusal literals in `src/runtime/bindings.ts` and this row goes red on the `whySuppressed`
+     * assertion while the tier row above stays green — which is the point: the two fields went to
+     * different places, and one of them was left behind.
+     */
+    const dir = await makeTempDir();
+    try {
+      await mkdir(join(dir, ".pi", "agents"), { recursive: true });
+      await writeFile(
+        join(dir, ".pi", "agents", "probe.md"),
+        "---\nname: probe\n---\nYou probe.\n",
+      );
+      const bindings = createBuiltinBindings({
+        cwd: dir,
+        names: ["read"],
+        includeDispatch: true,
+      });
+      const binding = bindings.get(DISPATCH_BINDING_NAME);
+      if (binding === undefined) throw new Error("pi.dispatch binding is missing");
+      const call = { callId: 0, dispatchDeps: { whyEnabled: false } } as never;
+
+      for (const [label, args] of [
+        ["a malformed agent name", { agent: "", task: "t", agentScope: "project" }],
+        ["a raw schema failure", { agent: "probe", task: "t", agentScope: "everywhere" }],
+      ] as const) {
+        const viaBinding = (await binding.execute(
+          { ...args, why: "we are preparing a release" },
+          call,
+        )) as { status: string; whySuppressed?: true };
+        expect(viaBinding.status, `${label} is refused`).toBe("rejected");
+        expect(
+          viaBinding.whySuppressed,
+          `${label}: the binding front must state that the caller's why was dropped, exactly as ` +
+            `dispatch() does for the same input`,
+        ).toBe(true);
+
+        const viaDispatch = (await dispatch(
+          { agent: args.agent as string, task: "t", why: "we are preparing a release" } as never,
+          { callId: 0, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          { slots: new DispatchSlotCounter(8), whyEnabled: false },
+        )) as { status: string; whySuppressed?: true };
+        expect(viaDispatch.whySuppressed, `${label}: and the two fronts must agree`).toBe(
+          viaBinding.whySuppressed,
+        );
+      }
+
+      // The absence half, in both directions. Without a `why` there is nothing withheld; and with
+      // the switch on there is no withholding either. Stamping unconditionally would pass the rows
+      // above and destroy the one distinction the field exists for.
+      const withoutWhy = (await binding.execute({ agent: "", task: "t" }, call)) as {
+        whySuppressed?: true;
+      };
+      expect("whySuppressed" in withoutWhy, "no why passed, so no suppression is claimed").toBe(
+        false,
+      );
+      const switchOn = (await binding.execute({ agent: "", task: "t", why: "release prep" }, {
+        callId: 0,
+        dispatchDeps: { whyEnabled: true },
+      } as never)) as { whySuppressed?: true };
+      expect(
+        "whySuppressed" in switchOn,
+        "the switch is on, so the why was not withheld by it",
+      ).toBe(false);
+    } finally {
+      await removeTempDir(dir);
+    }
+  },
+  options,
+);
+
 // ---------------------------------------------------------------------------
 // The THROW channel of the binding failure cap.
 //

@@ -173,11 +173,16 @@ export interface DispatchDeps {
    * package's default and the state ADR-0042's measurement was taken in — so every existing
    * zero-argument call site keeps the behaviour it had before the switch existed.
    *
-   * This is read ONCE, at extension load, and carried here rather than consulted per call for the
-   * reason #73 already records for `optInBindings`: a program must not be able to observe a
-   * dispatch surface different from the one the prompt that described it promised. A switch read
-   * per call would let the third dispatch of a run see a different answer from the first, with
-   * nothing in the transcript recording that it changed.
+   * The FILE is read ONCE, at extension load, and carried here rather than consulted per call for
+   * the reason #73 already records for `optInBindings`: a switch read per call would let the third
+   * dispatch of a run see a different answer from the first, with nothing in the transcript
+   * recording that it changed.
+   *
+   * "Read once" is about this file, not about the value being frozen for the session — `/ptc why`
+   * overwrites this exact field mid-session by design (spec D8, ADR-0043), and the `whyConfig`
+   * JSDoc in `index.ts` carries that half. What keeps the two together is that the write is
+   * recorded: `/ptc why` appends a session entry, so a program that saw the value change knows
+   * from the transcript that a user changed it rather than finding it had moved underneath a run.
    */
   whyEnabled?: boolean;
 }
@@ -435,12 +440,17 @@ export function withReadOnlyTier(
  * The value is handed on already trimmed because {@link whyBlock} trims it anyway, and trimming
  * here is what lets "was there actually anything to send" be a question about content rather than
  * about whitespace.
+ *
+ * It takes the VALUE rather than the whole {@link DispatchInput}, and that is what lets
+ * `bindings.ts` ask the same question about the RAW arguments its two pre-`dispatch()` refusals
+ * are holding: reading `input.why` off a fabricated input would be the second spelling of the rule
+ * this function exists to keep in one place.
  */
-function resolveWhy(
-  input: DispatchInput,
+export function resolveWhy(
+  why: DispatchInput["why"],
   enabled: boolean,
 ): { why: string | undefined; suppressed: boolean } {
-  const trimmed = input.why?.trim() ?? "";
+  const trimmed = why?.trim() ?? "";
   if (trimmed.length === 0) return { why: undefined, suppressed: false };
   if (!enabled) return { why: undefined, suppressed: true };
   return { why: trimmed, suppressed: false };
@@ -2175,7 +2185,7 @@ async function dispatchBackground(
   // above every gate on the foreground front. A refusal still consumed the caller's `why` — it was
   // never delivered to any child — so a caller comparing a refusal against a fulfilled dispatch
   // should not have to know which shape it got to learn that.
-  const resolvedWhy = resolveWhy(input, deps.whyEnabled !== false);
+  const resolvedWhy = resolveWhy(input.why, deps.whyEnabled !== false);
   const finish = (result: DispatchResult): DispatchResult =>
     withWhySuppressed(withReadOnlyTier(result, readOnlyTier), resolvedWhy.suppressed);
 
@@ -2533,6 +2543,26 @@ export async function dispatch(
   ctx: DispatchContext,
   deps: DispatchDeps = {},
 ): Promise<DispatchResult | DispatchHandle> {
+  // ADR-0043: the `why` decision, resolved ONCE and ABOVE every gate — the `readOnly` guard below
+  // included. It used to be resolved below that guard, so the guard's refusal (the FIRST refusal a
+  // call can hit) returned before the value was in scope and came back with no `whySuppressed`,
+  // while the depth, concurrency and agent refusals beside it all carried one. A program polling
+  // that field could not tell "my reason was dropped" from "I passed no reason" on precisely the
+  // call it had just been told was malformed. The refusal never reached a child either, so it
+  // consumed the reason exactly as every other refusal does.
+  const resolvedWhy = resolveWhy(input.why, deps.whyEnabled !== false);
+  // The one resolution of the request in this function, so the value reported on every result
+  // below cannot disagree with the value the argv and the prompt were built from. Moved up beside
+  // `resolvedWhy` for the same reason, and it is safe there: `resolveReadOnlyTier` is total, so a
+  // wrong-typed value resolves to no tier and the guard below still refuses it — which is why the
+  // guard remains the FIRST refusal a call can hit.
+  const readOnlyTier = resolveReadOnlyTier(input.readOnly);
+  // `finish` is the one wrapper both facts go through, which is what keeps the two fronts from
+  // drifting apart on this — the failure this package has already paid for once, on the report
+  // channel.
+  const finish = (result: DispatchResult): DispatchResult =>
+    withWhySuppressed(withReadOnlyTier(result, readOnlyTier), resolvedWhy.suppressed);
+
   // ADR-0041 §Constraint compliance, FIRST — above the background branch so both fronts get it,
   // and above every gate so nothing is minted, spawned or reserved for a request that is not
   // one. On both PRODUCTION fronts this is defence in depth: the schema is a string enum, so pi's
@@ -2542,19 +2572,10 @@ export async function dispatch(
   // wrong-typed value would otherwise be read as no tier at all, i.e. a full-capability child
   // for a caller who asked for a read-only one. Refused, never coerced.
   if (!isUsableReadOnlyRequest(input.readOnly)) {
-    return invalidReadOnlyRequestResult(input.readOnly);
+    // Routed through `finish`, like every other refusal: this one consumed the caller's `why`
+    // exactly as a depth or concurrency refusal does, because no child was reached to hear it.
+    return finish(invalidReadOnlyRequestResult(input.readOnly));
   }
-  // The one resolution of the request in this function, so the value reported on every result
-  // below cannot disagree with the value the argv and the prompt were built from.
-  const readOnlyTier = resolveReadOnlyTier(input.readOnly);
-  // ADR-0043: the `why` decision, resolved once above every gate for the same reason, so a
-  // refusal that never reached a child still states that the caller's reason was dropped rather
-  // than delivered. `finish` is the one wrapper both facts go through, which is what keeps the two
-  // fronts from drifting apart on this — the failure this package has already paid for once, on
-  // the report channel.
-  const resolvedWhy = resolveWhy(input, deps.whyEnabled !== false);
-  const finish = (result: DispatchResult): DispatchResult =>
-    withWhySuppressed(withReadOnlyTier(result, readOnlyTier), resolvedWhy.suppressed);
 
   // ADR-0022 §1: the background opt switches the binding's tail. Pre-spawn refusals reuse
   // the foreground shapes, so the union stays even for a statically-background call.
