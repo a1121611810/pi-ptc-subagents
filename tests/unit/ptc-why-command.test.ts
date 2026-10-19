@@ -508,10 +508,15 @@ describe("a config key that is not a boolean fails LOUD and changes nothing", ()
      * OFF — and that is when the notice matters most, because the user's symptom and the notice's
      * claim would point in opposite directions.
      *
+     * TWO `session_start` firings, and the LAST one is the one this test is about: the stub raises
+     * one with no entries when it is built, and `withSession` raises the resumed one. Both carry
+     * the same warning text, so `.find()` would answer with the pre-resume firing — the right
+     * string from the wrong moment. Taking the last is what makes the selection match the name.
+     *
      * COUNTERFACTUAL: restore the wording "the block stays ON" and this goes red on the
-     * session-state assertion, because the bare query then reports OFF (the session record wins)
-     * and the notice says ON. Without a persisted record the old wording passes every assertion,
-     * which is why the fixture carries one.
+     * `not.toContain("stays ON")` assertion, because the resumed notice would then assert ON while
+     * the live query below reports OFF. The persisted record is what makes that contradiction
+     * observable; without it the two would agree and the row would prove nothing about the state.
      */
     await withSession(
       {
@@ -519,8 +524,13 @@ describe("a config key that is not a boolean fails LOUD and changes nothing", ()
         resumeFrom: [{ type: "custom", customType: PTC_WHY_ENTRY_TYPE, data: { enabled: false } }],
       },
       async (stub) => {
-        const said = stub.notifications.find((notice) => notice.message.includes("whyEnabled"));
-        expect(said, "the malformed key is still reported").toBeDefined();
+        const warned = stub.notifications.filter((notice) => notice.message.includes("whyEnabled"));
+        expect(
+          warned.length,
+          "both firings report the malformed key — this row is about the resumed one",
+        ).toBe(2);
+        const said = warned.at(-1);
+        expect(said, "the malformed key is reported on the resumed session").toBeDefined();
         // What the notice may claim: the key was ignored, and `/ptc why` decides. What it may NOT
         // claim: that the block is on.
         expect(said?.message, "it says the key cannot have switched the block off").toContain(

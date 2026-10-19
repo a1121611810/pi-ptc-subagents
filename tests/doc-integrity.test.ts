@@ -1469,6 +1469,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // ADR-0043 那一段，whyBlock 的注记加了「块正文保留 goal 是刻意的」那一段，两处都在全部
     // 锚点之前，所以四条恰好等量。**等量不等于可以算**：算术平移只在本轮成立，下一轮锚点
     // 分布在两个函数的两侧时就不成立。四条都按内容逐条核对后改正。
+    // 上面这组是**当时值**，后续两轮又移动过；当前值以数组为准，最终一轮见下方第十五次复核。
     "docs/adr/0026-surface-default-is-detected.md:258 -> dispatch.ts:2277",
     // 2026-10-10 第七次复核：四条全部因本轮删除 surfaceMode 而位移，逐条核对内容后改正。
     //  29  → 628→1160 = `export function detectedSurfaceMode(`
@@ -1569,6 +1570,10 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     //     在 notifyCodemodeDrift 里（587）；ADR-0029 引的是 decision-4 那个 warning，取 1013。
     //   subagent.ts:474→494：474 那处也有两个 `structuredContent: structured,`，另一处在后台
     //     handle 分支（406）；ADR-0032 引的是 settled 路径，取 494。
+    // 2026-10-19 第十五次复核（#219-#222 · review round 2）：`resolveWhy` 的总域化注记又给
+    // dispatch.ts 加了 10 行，四条锚点整体 +10（2267→2277、1895→1905、1918→1928、1765→1775）。
+    // 此次仍是等量位移，仍然逐条按内容核对。**上面第十二、十三次记的数字是当时值，不是现值**
+    // ——这份清单的分工是：数组是现值，注释是移动史；读现值只看数组。
     "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1905",
     "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:218",
     "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1928",
