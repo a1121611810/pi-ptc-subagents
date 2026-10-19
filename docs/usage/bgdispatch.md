@@ -155,8 +155,9 @@ assistant turns (last turn wins) and states it on every surface that carries the
 `provider` / `model` on a foreground `DispatchResult`, the same optional pair on the background
 `TaskRecord`, as a `model: provider/id` line on this page's `ptc_task_output` text and on a
 successful `ptc_subagent` result, and as a `model=` fact in a rejected `ptc_subagent` call's
-diagnostic. Either half may be absent when the transcript carried only the other; both absent means
-no assistant turn was observed, never "unknown model".
+diagnostic. Either half may be absent when the transcript named only the other; both absent means
+no observed assistant turn named the pair — no turn, a supported pi that does not report it, or an
+old record — never "unknown model".
 
 On a refusal — depth cap, concurrency cap, unknown agent, or a spawn that never came up — the call
 resolves with a `DispatchResult` instead: `{ status: "rejected", started: false, errorMessage: … }`.

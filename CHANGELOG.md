@@ -16,10 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   observed by the host from the child's own assistant turns (last turn wins), not taken from the
   request — and the model-facing surfaces state the same fact as a `model: provider/id` line on
   `ptc_subagent` and `ptc_task_output` and as a `model=` fact in a refusal. A transcript that
-  carries only a model id reports the id alone; the absence of both means no assistant turn was
-  ever observed, not "the model is unknown". A background record gains the pair at the same
-  terminal close that writes `usage`, so a failed or canceled child that ran a model still states
-  it. Additive and backward compatible: old records and old result shapes keep working. See
+  carries only a model id reports the id alone; the absence of both means no observed assistant turn
+  named the pair — no turn, a supported pi that does not report it, or an old record — not "the
+  model is unknown". A background record gains the pair at the same terminal close that writes
+  `usage`, so a failed or canceled close that named a model still states it. Additive and backward compatible: old records and old result shapes keep working. See
   ADR-0044, ADR-0016 §"The child's model", and ADR-0022 §3 as amended.
 
 ### Changed

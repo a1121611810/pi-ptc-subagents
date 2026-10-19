@@ -510,10 +510,13 @@ export interface DispatchResult {
    * The provider that actually served the child, observed off its assistant `message_end`
    * events (the last turn wins).
    *
-   * ABSENT is a claim: no assistant turn ever reached the host, so there was nothing to
-   * observe -- not "the model is unknown to us while the child ran". A dispatch that names no
-   * model runs on pi's configured default, and before this field the caller had no way to
-   * learn which default that was; a wrong-model incident was invisible on the one surface
+   * ABSENT means no assistant turn NAMED a provider -- it is not the claim "the model is
+   * unknown while the child ran". Either there was no assistant turn to observe, or the pi
+   * that ran the child does not report the pair on assistant messages (the wire field arrives
+   * with pi 1.0.0; the declared floor is 0.86.0), or the turns that were observed named no
+   * provider. PRESENT is the host having read the value off the wire; a dispatch that names
+   * no model runs on pi's configured default, and before this field the caller had no way to
+   * learn which default that was -- a wrong-model incident was invisible on the one surface
    * that had room to state it.
    */
   provider?: string;
@@ -2461,10 +2464,10 @@ async function dispatchBackground(
     void (async (): Promise<void> => {
       let output = "";
       let childError: string | undefined;
-      // P1: the model the child actually ran, observed off its assistant turns -- the
-      // background counterpart of the foreground `finalize` stamp below. A dispatch that
-      // named no model runs on pi's configured default, and a background caller otherwise
-      // has no surface that could ever name it.
+      // ADR-0044 Decision 2: the model the child actually ran, observed off its assistant
+      // turns -- the background counterpart of the foreground `finalize` stamp below. A
+      // dispatch that named no model runs on pi's configured default, and a background caller
+      // otherwise has no surface that could ever name it.
       let childModel: ObservedChildModel | undefined;
       // ADR-0032: the same scan the foreground loop runs, so the two fronts cannot disagree
       // about whether a transcript carried a child report — over EITHER channel.
@@ -2564,10 +2567,11 @@ async function dispatchBackground(
             // here means the child never emitted a usage block, and leaves the field absent
             // rather than writing a zeroed one.
             usage,
-            // P1: the observed provider/model ride the close command so the registry can put
-            // them on the record. Applied on every close outcome, like `usage` -- a failed or
-            // canceled child still ran a model, and that is exactly the incident shape this
-            // field exists to make visible. Absent means no assistant turn was ever observed.
+            // ADR-0044 Decision 2: the observed provider/model ride the close command so the
+            // registry can put them on the record. Applied on every close outcome, like
+            // `usage` -- a failed or canceled child still ran a model, and that is exactly the
+            // incident shape this field exists to make visible. Absent means no assistant turn
+            // NAMED one (no turn was observed, or the pi does not report the pair).
             provider: childModel?.provider,
             model: childModel?.model,
             // The report's four-field `usage` view is derived from that SAME accumulator
@@ -2811,11 +2815,11 @@ export async function dispatch(
     const scan: ChildReportScan = newChildReportScan();
     let exitCode = -1;
     let stderrText = "";
-    // P0: the child's own failure report. The background pump has always folded this; the
-    // foreground front used to drop it, which is how a quota-exhausted child's "429 ..." became
-    // the generic "dispatch produced no final text" for a whole incident.
+    // issue #70: the child's own failure report. The background pump has always folded this;
+    // the foreground front used to drop it, which is how a quota-exhausted child's "429 ..."
+    // became the generic "dispatch produced no final text" for a whole incident.
     let childError: string | undefined;
-    // P1: the model the child actually ran, observed off its assistant turns.
+    // ADR-0044 Decision 2: the model the child actually ran, observed off its assistant turns.
     let childModel: ObservedChildModel | undefined;
     let resolved = false;
     let cancelKillEscalation: (() => void) | undefined;
@@ -2903,8 +2907,9 @@ export async function dispatch(
         };
       }
       if (usage) out.usage = usage;
-      // P1: only when an assistant turn was actually observed. Absent states "nothing to
-      // observe", not "we do not know" -- a refusal that never spawned has no turns at all.
+      // ADR-0044 Decision 2: stamped only for a value the wire named. ABSENT means no assistant
+      // turn NAMED a provider/model -- an older pi may report neither, and a refusal that never
+      // spawned has no turns at all -- not "we do not know what the child ran".
       if (childModel?.provider !== undefined) out.provider = childModel.provider;
       if (childModel?.model !== undefined) out.model = childModel.model;
       if (stderrText.length > 0) out.stderr = stderrText;
@@ -3014,8 +3019,8 @@ export async function dispatch(
           // stderr() is called exactly once per close. On pi 1.2.0 a truncated print-mode
           // run lands here with a labelled errorMessage instead of the anonymous reject.
           stderr: stderrText,
-          // P0: the child's self-reported failure is the one diagnostic that describes an
-          // exit-0 silent child (the rate-limit / model-error shape).
+          // issue #70: the child's self-reported failure is the one diagnostic that describes
+          // an exit-0 silent child (the rate-limit / model-error shape).
           childError,
         });
         finalize(status, errorMessage);

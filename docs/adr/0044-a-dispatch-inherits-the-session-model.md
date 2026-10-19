@@ -77,8 +77,8 @@ field), is stated on every surface that already carries the child's facts:
 
 - `DispatchResult.provider?` / `DispatchResult.model?` — the foreground result.
 - `TaskRecord.provider?` / `TaskRecord.model?` — the background record, written at the same
-  terminal close that writes `usage`, so a failed or canceled child that did run a model still
-  states it.
+  terminal close that writes `usage`, so a failed or canceled close still states the pair when a
+  turn named it.
 - a `model: provider/id` line on the `ptc_subagent` result text, after the child-report block and
   before the child's prose, and on `ptc_task_output`, after the report/usage block and before the
   prose. Neither line enters the child-report XML: this is a host measurement, not a child claim.
@@ -87,10 +87,13 @@ field), is stated on every surface that already carries the child's facts:
 
 The rendering is `provider/id` when both were observed and `id` alone when only the model was. A
 half-observation is still an observation; dropping it because the pair is incomplete would lose
-the only fact available. The absence of both fields is a claim, not a gap: **no assistant turn was
-ever observed**, not "the child ran on an unknown model". A dispatch that never started, and a
-close that resolved before a turn landed, are the cases that produce it; a record written before
-the fields existed also carries neither.
+the only fact available. The absence of both fields is a claim about the **transcript**, not about
+the child: **no observed assistant turn named a provider or a model**. Three cases produce it — no
+assistant turn ever reached the host (a dispatch that never started, or a close that resolved
+before a turn landed); a pi within the declared support range whose assistant turns do not carry
+the pair, which the structural read deliberately tolerates; and a record written before the fields
+existed. It never means the child "ran on an unknown model": the child may well have run a model
+the host was not given a name for.
 
 Why report a model the caller chose, or can now infer: resolution can land one tier below the call
 site (the definition's or the session's), and in the background case the caller is not present when
@@ -116,9 +119,11 @@ now returns that child-reported error **verbatim** as the result's `errorMessage
 5. otherwise — the existing truncation inference, absent when stderr says nothing.
 
 The order mirrors the background registry on purpose: one transcript must not resolve one way on
-the foreground front and another way on the background front. Only the new branch logs a warning
-(`foreground dispatch failed: <child error>`); the abort, depth, concurrency and spawn refusals
-stay as quiet as they were.
+the foreground front and another way on the background front. Only a rejected close that carries a
+child-reported error logs a warning (`foreground dispatch failed: <child error>`); a pure abort
+with no child error, and the depth, concurrency and spawn refusals, stay as quiet as they were. A
+cancel that raced a child-reported error still warns, because the warning states the child's
+diagnosis rather than a reaction to the cancellation.
 
 **No stderr promise.** ADR-0016 §Decision 3's "stderr and errorMessage populated" was never
 guaranteed and is now stated correctly: `stderr` is best-effort, while `errorMessage` is the
@@ -149,8 +154,8 @@ that fits is unchanged.
   `TaskRecord` is 28 fields today (the last two are the optional pair), persisted as before.
 - The nested-dispatch chain stays coherent: a grandchild inherits the child's session model — the
   model the child itself runs — not the originating session's.
-- One more model-facing line per surfaced dispatch and per background output page, absent when
-  nothing was observed.
+- One more model-facing line per surfaced dispatch and per background output page, absent when no
+  observed assistant turn named a provider or model.
 
 ## Rejected
 

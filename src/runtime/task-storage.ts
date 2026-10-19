@@ -184,10 +184,12 @@ export interface TaskRecord {
    * close can produce -- a failed or canceled child still ran a model, and that is the fact the
    * model-observability fix exists to state.
    *
-   * Absent means no assistant turn was ever observed (the child never got a model turn, or the
-   * close resolved before one landed), which is a different claim from "ran on an unknown
-   * provider". A background dispatch that names no model runs on pi's configured default;
-   * `ptc_task_output` projects this pair back so a caller can finally see which default that was.
+   * ABSENT means no assistant turn NAMED a provider -- not "the child ran on an unknown
+   * provider". It covers a child with no observed assistant turn, a supported older pi that
+   * does not report the pair on assistant messages (the wire field arrives with pi 1.0.0; the
+   * declared floor is 0.86.0), and a record written before these fields existed. A background
+   * dispatch that names no model runs on pi's configured default; `ptc_task_output` projects
+   * this pair back so a caller can finally see which default that was.
    */
   provider?: string;
   /**

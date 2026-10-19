@@ -88,12 +88,51 @@ function isUsableComponent(value: unknown): value is string {
  * constant lives in that no-import module too. Vocabulary the tools share with no dependency
  * underneath is what keeps that graph edge from coming back.
  */
+/**
+ * Cap on the rendered observation, in characters (the same budget the input validator gives one
+ * component). A model id is short; anything longer is not usable as a model name and must not
+ * become an unbounded line on a model-facing surface.
+ */
+export const OBSERVED_MODEL_MAX_CHARS = 200;
+
+/**
+ * ANSI escape sequences (CSI and OSC forms) plus every remaining C0/C1 control character.
+ *
+ * The pair this module formats arrives from the CHILD's stdout: it is untrusted wire data being
+ * interpolated into model-facing text, on surfaces whose neighbouring fields already go through
+ * `sanitizeText`. An escape sequence there can move the cursor or clear the screen, and a newline
+ * can forge a second line in a block whose shape the reader trusts. Stripping is therefore part of
+ * this module's contract, not a presentation preference.
+ *
+ * It is implemented here rather than by importing `tools/text.ts`: this module has no imports at
+ * all on purpose (see its header), and runtime code may not reach up into the tools layer.
+ */
+// Built from char codes rather than a literal: a regex literal containing control characters is
+// rejected by the repo linter, and there is no character class that spells ESC/BEL without one.
+const ESC = String.fromCharCode(27);
+const BEL = String.fromCharCode(7);
+const ANSI_ESCAPE = new RegExp(
+  ESC + "(?:\\[[0-?]*[ -/]*[@-~]|\\][^" + BEL + "]*(?:" + BEL + "|" + ESC + "\\\\)?)",
+  "g",
+);
+const CONTROL_CHARS = /[\p{Cc}\p{Cf}]/gu;
+
+function sanitizeObservedComponent(value: string): string {
+  return value.replace(ANSI_ESCAPE, "").replace(CONTROL_CHARS, "").trim();
+}
+
 export function formatObservedModel(
   provider: string | undefined,
   model: string | undefined,
 ): string | undefined {
-  const id = model?.trim();
-  if (id === undefined || id.length === 0) return undefined;
-  const prefix = provider?.trim();
-  return prefix === undefined || prefix.length === 0 ? id : prefix + "/" + id;
+  const id = model === undefined ? "" : sanitizeObservedComponent(model);
+  if (id.length === 0) return undefined;
+  const prefix = provider === undefined ? "" : sanitizeObservedComponent(provider);
+  const rendered = prefix.length === 0 ? id : prefix + "/" + id;
+  // Head-kept: a provider/model name is recognisable at its start, and a tail cut on wire data can
+  // only make it less identifiable. The cap applies to the VALUE the surfaces render, so their
+  // `model: ` lines stay one bounded line.
+  return rendered.length <= OBSERVED_MODEL_MAX_CHARS
+    ? rendered
+    : rendered.slice(0, OBSERVED_MODEL_MAX_CHARS);
 }

@@ -358,7 +358,7 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
     name: SUBAGENT_TOOL_NAME,
     label: "PTC Subagent",
     description: [
-      "Start a fresh pi agent as a child process: it gets its own context, its own model and its own tools, and it cannot see or change this session except through what it returns. Use it for work that would otherwise flood this context: a survey, a second opinion, or a task that can run while you do something else.",
+      "Start a fresh pi agent as a child process: it gets its own context and tools, and it cannot see or change this session except through what it returns. Omit `model` and the child inherits this session's current model; pass `model`, or let its agent definition pin one, to override that. Use it for work that would otherwise flood this context: a survey, a second opinion, or a task that can run while you do something else.",
       // T4 (#181): the model cannot learn where agent definitions come from by reading a tool
       // list, so it goes looking -- and in the session that motivated this it spent twenty-plus
       // tool calls inspecting the install and guessing at argument values. The two directories

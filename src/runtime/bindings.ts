@@ -265,7 +265,18 @@ export const DISPATCH_PARAMETERS: DispatchParameters = Type.Object({
         'Which agent directories to search: "user" (~/.pi/agent/agents, the default), "project" (<cwd>/.pi/agents), or "both". Defaults to "user", which cannot see project agents.',
     }),
   ),
-  model: Type.Optional(Type.String()),
+  // ADR-0044 Decision 1: the description is the only place a model can learn the inheritance
+  // default. The parameter used to be silent, so "omit it" and "override it" were
+  // indistinguishable on the tool surface and the ambient-model behaviour could only be
+  // discovered by trial. The wording states both halves: omission inherits, an explicit value
+  // overrides (and a named agent may pin a model of its own).
+  model: Type.Optional(
+    Type.String({
+      description:
+        "Omit to inherit the caller session's current model; pass a model id (or let the agent " +
+        "definition pin one) to override.",
+    }),
+  ),
   thinkingLevel: Type.Optional(Type.String()),
   background: Type.Optional(Type.Boolean()),
   label: Type.Optional(Type.String()),

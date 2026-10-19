@@ -137,7 +137,8 @@ exposes no session model) falls back to pi's default exactly as before.
 The result says which model the child actually ran: `provider` / `model` on a foreground
 `DispatchResult`, the same optional pair on a background task record (which `ptc_task_output`
 renders as a line), and a `model: provider/id` line in `ptc_subagent`'s text. Absence means no
-assistant turn was observed — never "unknown model". When the child reported its own failure, a
+observed assistant turn named the pair — no turn, a supported pi that does not report it, or an
+old record — never "unknown model". When the child reported its own failure, a
 rejected dispatch now states that error verbatim as `errorMessage` instead of the generic
 `dispatch produced no final text`, so the foreground failure path matches the background one. Full
 guide: [`docs/usage/bgdispatch.md`](./docs/usage/bgdispatch.md#which-model-the-child-runs).

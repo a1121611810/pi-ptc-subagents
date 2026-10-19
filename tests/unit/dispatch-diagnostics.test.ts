@@ -6,7 +6,10 @@
  * `message_end` events a live pi 1.3.0 emitted when a minimax Token Plan quota was exhausted
  * (docs/testing-constraints.md #2: fixtures come from real samples). The exact 429 text below is
  * transcribed from the capture rather than read back from the implementation (constraint #4), and
- * the fixture-integrity test holds the two against each other.
+ * the fixture-integrity test holds the two against each other. The behaviour under test is
+ * specified by ADR-0044 Decision 2 (the observed model is reported on every surface) and
+ * Decision 3 (a rejected child states its own failure) in
+ * docs/adr/0044-a-dispatch-inherits-the-session-model.md.
  *
  * What the incident was: pi writes `stopReason: "error"` + `errorMessage` onto the assistant
  * event, retries four times, then exits 0 with no text. The background pump has always forwarded
@@ -53,7 +56,12 @@ import { makeTempDir, removeTempDir, waitFor } from "../helpers/ptc.ts";
 //  The real capture
 // ---------------------------------------------------------------------------
 
-/** The fixture, transcribed from /tmp/pi-probe-20261019-143441/run-A-stdout.jsonl lines 14/23/32/41. */
+/**
+ * The live capture as a fixture: four assistant `message_end` error turns pi 1.3.0 emitted when a
+ * minimax Token Plan quota was exhausted (tests/fixtures/pi-1.3.0-429-token-plan.jsonl). The
+ * events are transcribed verbatim, request ids included; the integrity test below holds the
+ * fixture against the literal 429 text.
+ */
 const FIXTURE_EVENTS: ParsedAgentEvent[] = loadFixtureEvents();
 
 /**
@@ -834,5 +842,127 @@ describe("the background record and ptc_task_output carry the observed model", (
     const text = result.content.map((part) => part.text).join("\n");
     expect(text).not.toContain("model:");
     expect(text).toContain("PONG");
+  });
+});
+describe("the observed-model text is sanitized on every model-facing surface", () => {
+  /**
+   * The child's wire is untrusted input: provider/model are strings it wrote, rendered into text
+   * a model reads. ADR-0044 Decision 2 promises ONE bounded model line, not whatever bytes the
+   * child sent — an ANSI escape or a newline inside the pair would otherwise reach the model as
+   * formatting instructions or as forged extra lines.
+   */
+  const INJECTED_PROVIDER = "\x1b[31mP\x1b[0m";
+  const INJECTED_MODEL = "M\nX".repeat(3_000);
+  const MODEL_VALUE_MAX = 200;
+
+  /** The value half of every rendered `model: ` line. */
+  function modelValues(text: string): string[] {
+    return text
+      .split("\n")
+      .filter((line) => line.startsWith("model: "))
+      .map((line) => line.slice("model: ".length));
+  }
+
+  test("ptc_subagent renders one bounded, ANSI-free model line", async () => {
+    const dir = await makeTempDir();
+    try {
+      const harness = createHarness();
+      const tool = createPtcSubagentTool({
+        cwd: dir,
+        depth: 0,
+        maxDispatchDepth: DEFAULT_CONFIG.maxDispatchDepth,
+        getDispatchDeps: () => harness.deps,
+      });
+      const execution = tool.execute(
+        "call-sanitize-model",
+        { task: "reply with PONG" },
+        undefined,
+        undefined,
+        undefined as never,
+      );
+      await driveChild(
+        harness.lifecycle,
+        [assistantTextWithModel("PONG", INJECTED_PROVIDER, INJECTED_MODEL)],
+        0,
+      );
+      const result = (await execution) as { content: { type: string; text: string }[] };
+      const text = result.content.map((part) => part.text).join("\n");
+      const values = modelValues(text);
+      expect(values, "exactly one model line").toHaveLength(1);
+      expect(text, "no ESC sequence anywhere in the model-facing text").not.toContain("\x1b");
+      expect(text.split("\n"), "the injected newline forged no line").not.toContain("X");
+      expect(values[0]?.length ?? 0).toBeLessThanOrEqual(MODEL_VALUE_MAX);
+    } finally {
+      await removeTempDir(dir);
+    }
+  });
+
+  test("ptc_task_output renders one bounded, ANSI-free model line", async () => {
+    const { record, harness } = await runBackground([
+      assistantTextWithModel("PONG", INJECTED_PROVIDER, INJECTED_MODEL),
+    ]);
+    const tool = createPtcTaskOutputTool(harness.registry, harness.outputs);
+    const result = (await tool.execute(
+      "call-output-sanitize",
+      { taskId: record.id },
+      undefined,
+      undefined,
+      undefined as never,
+    )) as { content: { type: string; text: string }[] };
+    const text = result.content.map((part) => part.text).join("\n");
+    const values = modelValues(text);
+    expect(values, "exactly one model line").toHaveLength(1);
+    expect(text).not.toContain("\x1b");
+    expect(text.split("\n")).not.toContain("X");
+    expect(values[0]?.length ?? 0).toBeLessThanOrEqual(MODEL_VALUE_MAX);
+  });
+
+  test("the refusal diagnostic's model= fact is sanitized too", () => {
+    const text = describeSettledFailure(
+      rejectedOutcome({ errorMessage: "boom", provider: INJECTED_PROVIDER, model: INJECTED_MODEL }),
+    );
+    expect(text).not.toContain("\x1b");
+    // One line: the injected newline must not split the diagnostic into facts the caller reads
+    // as separate evidence.
+    expect(text).not.toContain("\n");
+    const at = text.indexOf("model=");
+    expect(at).toBeGreaterThanOrEqual(0);
+    const value = text.slice(at + "model=".length, -1); // model= is the last fact; facts end at ")"
+    expect(value.length).toBeLessThanOrEqual(MODEL_VALUE_MAX);
+  });
+});
+
+describe("a canceled close still records the observed model", () => {
+  test("canceling after an assistant turn keeps provider/model on the TaskRecord", async () => {
+    // ADR-0044 Decision 2: the pair is written at the same terminal close that writes usage,
+    // "so a failed or canceled child that did run a model still states it". Cancel is the
+    // background outcome a caller can least explain without knowing which model ran.
+    const dir = await makeTempDir();
+    try {
+      const harness = createBackgroundHarness();
+      const outcome = await dispatch(
+        { task: "probe the child", background: true },
+        foregroundContext(dir),
+        harness.deps,
+      );
+      if (!("taskId" in outcome)) throw new Error("the background fixture was refused");
+      await waitFor(() => harness.lifecycle.spawned.length > 0);
+      const child = harness.lifecycle.handleAt(0);
+      harness.lifecycle.pushEvent(
+        child,
+        assistantTextWithModel("PONG", "deepseek", "deepseek-flash"),
+      );
+      await harness.registry.transition(
+        { kind: "transition", taskId: outcome.taskId, to: "stopping" },
+        { clock: () => 1000, callerId: "caller-cancel" },
+      );
+      harness.lifecycle.resolveExit(child, 0, null);
+      const record = await waitForTerminal(harness.storage, outcome.taskId);
+      expect(record.status).toBe("canceled");
+      expect(record.provider).toBe("deepseek");
+      expect(record.model).toBe("deepseek-flash");
+    } finally {
+      await removeTempDir(dir);
+    }
   });
 });

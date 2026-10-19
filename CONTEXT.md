@@ -400,8 +400,9 @@ Fields: `text` (final assistant text), `status` (`fulfilled` /
 `rejected`), `agentName`, `durationMs`, `exitCode`, `usage?` (input/output/
 cacheRead/cacheWrite/cost/turns; absent when the child reported no usage
 block), `provider?` / `model?` (the provider/model the child actually ran,
-observed by the host from its assistant turns; absent means no assistant turn
-was observed, not "unknown"), `stderr?` (best-effort, never promised),
+observed by the host from its assistant turns; absent means no observed
+assistant turn named the pair — no turn, a supported pi that does not report
+it, or an old record — not "unknown"), `stderr?` (best-effort, never promised),
 `errorMessage?` (the structured failure channel — the child's own reported
 error, verbatim, when there is one; otherwise the exit-code / truncation
 diagnosis, or absent when there is none). Shape matches `Promise.allSettled`
@@ -749,8 +750,8 @@ lifecycle of one background child. 28 fields today: ADR-0022 §3's code block li
 22 of them — its 19 originals (the block's "21 fields" heading is the authoring
 miscount it always was), the 2026-10-16 top-level `usage`, and the ADR-0044
 observed-model pair (`provider`, `model`, written at the same terminal close as
-`usage`: the model the child actually ran, absent when no assistant turn was
-observed) — and the rest are the two optional owner-identity fields (`ownerPid`,
+`usage`: the model the child actually ran, absent when no observed assistant
+turn named it) — and the rest are the two optional owner-identity fields (`ownerPid`,
 `ownerBootMs`, ADR-0023) stamped at spawn, the two optional _child report_
 fields (`report`, `reportChannel`, ADR-0032) written only when the record
 reaches `succeeded` — so a still-running or failed task carries neither, because

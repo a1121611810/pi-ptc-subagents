@@ -1,22 +1,28 @@
 /**
  * ADR-0044 (task-7): the dispatch child inherits the caller session's current model.
  *
- * SPECIFICATION tests (docs/testing-constraints.md #4/#6). The expected values have three
- * independent sources, none of them the implementation:
- *   - the precedence itself is stated in .scratch/fix/CONTRACT.md, "P2 — 会话模型继承":
- *     `input.model > agent markdown model > 会话模型 > pi 默认`;
- *   - the spelling `--model deepseek/deepseek-flash` is the CONTRACT's own sample and pi's
- *     documented `provider/id` resolver convention;
- *   - the two non-deepseek samples used where a second value matters are real captured model
- *     pairs (see tests/fixtures/pi-1.3.0-429-token-plan.jsonl).
+ * SPECIFICATION tests (docs/testing-constraints.md #4/#6). Every expected value points at an
+ * in-repo source, never at the implementation:
+ *   - the precedence is ADR-0044 Decision 1 (docs/adr/0044-a-dispatch-inherits-the-session-model.md):
+ *     the call-site `model` > the agent definition's frontmatter `model:` > the caller session's
+ *     current model > pi's configured default (no flag at all);
+ *   - the `--model deepseek/deepseek-flash` spelling is Decision 1's `provider/id` form — the
+ *     spelling pi's resolver and the two other model tiers already use;
+ *   - the real captured pair minimax-cn-512k / MiniMax-M3.1-Flash-Preview is not hand-invented:
+ *     it is the provider/model the live 429 capture carried
+ *     (tests/fixtures/pi-1.3.0-429-token-plan.jsonl, driven by dispatch-diagnostics.test.ts; see
+ *     Decision 2 for why an observed model is reported at all).
  *
- * The two call sites are pinned separately on purpose. `buildArgv`'s fourth parameter is
- * optional, so "foreground passes the session model" and "background passes the session model"
- * are two independent wirings that a single unit test of `buildArgv` cannot see — dropping one
- * would leave the other green.
+ * The call sites are pinned separately on purpose. `buildArgv`'s fourth parameter is optional, so
+ * "the dispatcher's foreground branch passes the session model", "the background branch passes
+ * it", and "each programming tool reads `ctx.model` and hands it to the dispatcher" are three
+ * independent wirings that one unit test of `buildArgv` cannot see — dropping one would leave the
+ * others green.
  */
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import { createBuiltinBindings } from "../../src/runtime/bindings.ts";
 import {
@@ -39,7 +45,9 @@ import { DEFAULT_CONFIG } from "../../src/runtime/limits.ts";
 import type { SessionModel } from "../../src/runtime/session-model.ts";
 import { createTaskRegistry } from "../../src/runtime/task-registry.ts";
 import { InMemoryTaskStorage, type TaskRecord, type ULID } from "../../src/runtime/task-storage.ts";
+import { createPtcRunCodeTool } from "../../src/tools/run-code.ts";
 import { createPtcSubagentTool } from "../../src/tools/subagent.ts";
+import { createPtcWorkflowTool } from "../../src/tools/workflow.ts";
 import {
   installRecordingPi,
   makeTempDir,
@@ -368,4 +376,112 @@ describe("runPtcProgram threads sessionModel to the pi.dispatch binding", () => 
       expect(modelFlag(spawns[0] ?? [])).toBeUndefined();
     });
   }, 60_000);
+});
+describe("the two programming tools read ctx.model and forward it to the dispatcher", () => {
+  /** Run one tool call against the recording `pi` on PATH; return the argv every child got. */
+  async function spawnsThroughTool(
+    execute: () => Promise<unknown>,
+  ): Promise<readonly (readonly string[])[]> {
+    const pi = await installRecordingPi();
+    try {
+      await execute();
+      return await pi.settle();
+    } finally {
+      await pi.restore();
+    }
+  }
+
+  /**
+   * `ptc_run_code`'s execute reads `ctx.model` (run-code.ts's `readContextModel(ctx)`) and threads
+   * it into `runPtcProgram`. Delete that read and the child spawns without `--model` while every
+   * other test in this file stays green — the tool takes its own wiring path to the same
+   * dispatcher, so the dispatcher's two call sites cannot see it.
+   */
+  test("ptc_run_code inherits the session model into the dispatched child's argv", async () => {
+    await withAgentDir(async (dir) => {
+      const tool = createPtcRunCodeTool();
+      const spawns = await spawnsThroughTool(async () => {
+        await tool.execute(
+          "call-run-code-inherit",
+          {
+            description: "one dispatch",
+            code:
+              "return await tools['pi.dispatch']({ agent: '" +
+              AGENT +
+              "', agentScope: 'project', task: 'reply with PONG' });",
+          },
+          undefined,
+          undefined,
+          toolContext(dir, DS_FLASH),
+        );
+      });
+      expect(spawns, "the program's dispatch reached a child").toHaveLength(1);
+      expect(modelFlag(spawns[0] ?? [])).toBe(DS_FLASH_ARG);
+    });
+  }, 60_000);
+
+  test("ptc_workflow inherits the session model into the dispatched child's argv", async () => {
+    await withAgentDir(async (dir) => {
+      const tool = createPtcWorkflowTool();
+      const spawns = await spawnsThroughTool(async () => {
+        await tool.execute(
+          "call-workflow-inherit",
+          {
+            meta: { name: "inherit-model", description: "one dispatch" },
+            script:
+              "return await tools['pi.dispatch']({ agent: '" +
+              AGENT +
+              "', agentScope: 'project', task: 'reply with PONG' });",
+          },
+          undefined,
+          undefined,
+          toolContext(dir, DS_FLASH),
+        );
+      });
+      expect(spawns, "the workflow's dispatch reached a child").toHaveLength(1);
+      expect(modelFlag(spawns[0] ?? [])).toBe(DS_FLASH_ARG);
+    });
+  }, 60_000);
+});
+
+describe("the sources these new suites cite are committed and in-repo", () => {
+  /**
+   * Review R1 (oracle headers): a suite header is part of its evidence chain, so a citation into
+   * a gitignored scratch file (`.scratch/`) or an ephemeral `/tmp` capture is not a source a
+   * later reader can verify — the file is gone or never committed. ADR-0044 and the committed
+   * fixture are. The scan is HEADER-only: later in this file `/tmp/p.md` is a buildArgv argument,
+   * not a provenance claim.
+   */
+  const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
+  const NEW_SUITE_FILES = [
+    "session-model.test.ts",
+    "dispatch-model-inheritance.test.ts",
+    "dispatch-diagnostics.test.ts",
+  ] as const;
+  const CITED_IN_REPO_SOURCES = [
+    "docs/adr/0044-a-dispatch-inherits-the-session-model.md",
+    "tests/fixtures/pi-1.3.0-429-token-plan.jsonl",
+  ] as const;
+
+  /** The leading TSDoc block: everything before the first `import`. */
+  function headerOf(fileName: string): string {
+    const text = readFileSync(join(REPO_ROOT, "tests/unit", fileName), "utf8");
+    const firstImport = text.indexOf("\nimport ");
+    return firstImport === -1 ? text : text.slice(0, firstImport);
+  }
+
+  test("no new suite header cites a scratch or temp path, and every cited source exists", () => {
+    for (const fileName of NEW_SUITE_FILES) {
+      const header = headerOf(fileName);
+      expect(header, fileName + " must not cite the gitignored .scratch/ dir").not.toContain(
+        ".scratch/",
+      );
+      expect(header, fileName + " must not cite an ephemeral /tmp path").not.toContain("/tmp/");
+    }
+    for (const source of CITED_IN_REPO_SOURCES) {
+      expect(existsSync(join(REPO_ROOT, source)), source + " is a committed in-repo source").toBe(
+        true,
+      );
+    }
+  });
 });
