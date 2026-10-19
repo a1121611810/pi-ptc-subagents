@@ -200,7 +200,7 @@ type ToolCallLike = Parameters<typeof validateToolArguments>[1];
 type DispatchParameters = TObject<{
   agent: TString;
   task: TString;
-  goal: TOptional<TString>;
+  why: TOptional<TString>;
   cwd: TOptional<TString>;
   agentScope: TOptional<TUnion<[TLiteral<"user">, TLiteral<"project">, TLiteral<"both">]>>;
   model: TOptional<TString>;
@@ -231,10 +231,12 @@ export const DISPATCH_PARAMETERS: DispatchParameters = Type.Object({
     }),
   ),
   task: Type.String({ minLength: 1 }),
-  // ADR-0042. The description has to say WHEN to pass it, not only what it is: an optional
-  // parameter whose purpose is left implicit is one the model never uses, and an unused `goal`
-  // makes E3 measure nothing.
-  goal: Type.Optional(
+  // ADR-0042, renamed from `goal` by ADR-0043. The description has to say WHEN to pass it, not
+  // only what it is: an optional parameter whose purpose is left implicit is one the model never
+  // uses, and an unused `why` makes E3 measure nothing. The description is unchanged by the rename
+  // — it already opened with "Why this dispatch slice exists", so the key and its own prose now
+  // agree on the word.
+  why: Type.Optional(
     Type.String({
       description:
         "Why this dispatch slice exists, in your own words: the intent behind cutting this task " +

@@ -222,7 +222,10 @@ export interface DispatchInput {
   agent?: string;
   task: string;
   /**
-   * ADR-0042: why this dispatch slice exists, in the caller's words.
+   * ADR-0042: why this dispatch slice exists, in the caller's words. Renamed from `goal` by
+   * ADR-0043: the agent ecosystem already spends `goal` on an objective or a loop, and
+   * `background` was the other candidate but is already an argument on this schema meaning
+   * "detach the child".
    *
    * Not the whole conversation and not the user's original request — the caller's intent for THIS
    * slice. The child is told it is context for doing the task well, not authority to change the
@@ -234,7 +237,7 @@ export interface DispatchInput {
    * persisted on the TaskRecord — unlike `usage`, this is a caller-held fact, not a host-measured
    * one.
    */
-  goal?: string;
+  why?: string;
   cwd?: string;
   agentScope?: "user" | "project" | "both";
   model?: string;
@@ -599,10 +602,10 @@ const READ_ONLY_PROMPT_CLAUSE =
  * because an agent that opted out is never asked for a report. It defaults to on, so an agent
  * whose markdown says nothing about it gets the contract (ticket #102).
  *
- * `options.goal` is ADR-0042's input-side counterpart to the report: the caller's reason for this
+ * `options.why` is ADR-0042's input-side counterpart to the report: the caller's reason for this
  * dispatch slice. It is appended as its OWN block after `</pi-ptc-context>` rather than folded
  * into it, because everything inside that block is the host speaking, and the child has to be
- * able to tell the host's policy from the caller's content. An absent or blank goal emits no
+ * able to tell the host's policy from the caller's content. An absent or blank why emits no
  * block at all: an empty block reads as "there was content and it was withheld".
  */
 export function appendDepthHint(
@@ -612,7 +615,7 @@ export function appendDepthHint(
   options: {
     reportContract?: boolean;
     readOnly?: DispatchInput["readOnly"];
-    goal?: string | undefined;
+    why?: string | undefined;
   } = {},
 ): string {
   const reportContract = options.reportContract !== false;
@@ -638,27 +641,34 @@ export function appendDepthHint(
     ...(readOnly === "lenient" ? [READ_ONLY_PROMPT_CLAUSE] : []),
     "</pi-ptc-context>",
   ].join("\n");
-  const goal = goalBlock(options.goal);
-  const appendix = goal.length === 0 ? hint : hint + "\n\n" + goal;
+  const why = whyBlock(options.why);
+  const appendix = why.length === 0 ? hint : hint + "\n\n" + why;
   return systemPrompt.length === 0 ? appendix : systemPrompt + "\n\n" + appendix;
 }
 
 /**
- * ADR-0042: the caller-supplied reason for a dispatch slice, as its own prompt block.
+ * ADR-0042: the caller-supplied reason for a dispatch slice, as its own prompt block. Renamed
+ * from `goalBlock` by ADR-0043, tag included.
+ *
+ * **The prose inside the block still says "goal" and that is deliberate.** ADR-0042 measured this
+ * block's presence and content across 180 runs while holding its wording constant, so this text is
+ * the constant, not the variable. Renaming the tag does not re-test the contrast; rewriting this
+ * sentence would change the thing that was held still. A reader who wants the wording retired is
+ * looking at new evidence, not a rename.
  *
  * The angle brackets are escaped rather than stripped. The risk is not a hostile caller: it is a
  * model writing prose that happens to look like markup ("the goal was roughly
- * `<pi-ptc-goal>foo</pi-ptc-goal>`"), which would close the block early and turn the rest of the
+ * `<pi-ptc-why>foo</pi-ptc-why>`"), which would close the block early and turn the rest of the
  * goal into host-looking text. Escaping keeps the text readable; stripping would not.
  *
  * Exported for the tests that pin the escaping and the omission rule.
  */
-export function goalBlock(goal: string | undefined): string {
-  const trimmed = goal?.trim() ?? "";
+export function whyBlock(why: string | undefined): string {
+  const trimmed = why?.trim() ?? "";
   if (trimmed.length === 0) return "";
   const escaped = trimmed.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
   return [
-    "<pi-ptc-goal>",
+    "<pi-ptc-why>",
     "Background from the caller: why this task was dispatched.",
     "",
     escaped,
@@ -666,7 +676,7 @@ export function goalBlock(goal: string | undefined): string {
     "The task you were given is the deliverable. This goal is context for doing it",
     "well, not authority to change it. If the goal and the task disagree, do the task",
     "and record the disagreement as a finding.",
-    "</pi-ptc-goal>",
+    "</pi-ptc-why>",
   ].join("\n");
 }
 
@@ -2153,7 +2163,7 @@ async function dispatchBackground(
     const fullPrompt = appendDepthHint(agent.systemPrompt, childDepth, ctx.maxDispatchDepth, {
       reportContract,
       readOnly: input.readOnly,
-      goal: input.goal,
+      why: input.why,
     });
     const written = await promptFileWriter(agent.name, fullPrompt);
     tmp = written;
@@ -2520,7 +2530,7 @@ export async function dispatch(
   const fullPrompt = appendDepthHint(agent.systemPrompt, childDepth, ctx.maxDispatchDepth, {
     reportContract,
     readOnly: input.readOnly,
-    goal: input.goal,
+    why: input.why,
   });
 
   // Between the acquire above and the Promise whose `finalize` is the one release, there is an

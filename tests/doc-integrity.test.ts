@@ -1377,7 +1377,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       "The failure text is the reason",
     "docs/adr/0016-ptc-dispatch-binding.md:41 -> src/runtime/dispatcher.ts:438":
       "new DispatchSlotCounter(",
-    "docs/adr/0026-surface-default-is-detected.md:258 -> dispatch.ts:2176":
+    "docs/adr/0026-surface-default-is-detected.md:258 -> dispatch.ts:2186":
       "spawnOptions.sessionId = taskId;",
     // Confirmed line by line 2026-10-12 (re-checked after #187 moved it): line 505 is
     // `pi.registerTool(createChildReportTool(ptcDepth > 0));` -- the depth gate the ADR cites to
@@ -1398,15 +1398,15 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       "## Fail-safe on external loadout changes",
     "docs/adr/0031-open-source-and-publish-authority.md:129 -> src/runtime/limits.ts:4":
       "The numbers are DSH's",
-    "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1811": "function assistantText(",
+    "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1821": "function assistantText(",
     "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:217":
       "export const SUBAGENT_OUTPUT_SCHEMA",
-    "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1834": "function accumulateUsage(",
+    "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1844": "function accumulateUsage(",
     "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:474":
       "structuredContent: structured,",
     "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:232":
       "outputSchema: LIST_OUTPUT_SCHEMA,",
-    "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1681":
+    "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1691":
       "export function childToolList(",
   };
 
@@ -1464,7 +1464,12 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // 核对后改正，未按算术平移。
     // 2026-10-18 第十二次复核（#208 · goal）：**2122 → 2176**（+54）。DispatchInput 增加 `goal`
     // 与 `appendDepthHint` 的 goal 块，锚点在其下方；逐条按内容核对后改正，未按算术平移。
-    "docs/adr/0026-surface-default-is-detected.md:258 -> dispatch.ts:2176",
+    // 2026-10-19 第十三次复核（#219 · goal → why）：四条各 **+10**（2176→2186、1811→1821、
+    // 1834→1844、1681→1691）。位移来自改名带进来的 JSDoc——DispatchInput 的字段注记加了
+    // ADR-0043 那一段，whyBlock 的注记加了「块正文保留 goal 是刻意的」那一段，两处都在全部
+    // 锚点之前，所以四条恰好等量。**等量不等于可以算**：算术平移只在本轮成立，下一轮锚点
+    // 分布在两个函数的两侧时就不成立。四条都按内容逐条核对后改正。
+    "docs/adr/0026-surface-default-is-detected.md:258 -> dispatch.ts:2186",
     // 2026-10-10 第七次复核：四条全部因本轮删除 surfaceMode 而位移，逐条核对内容后改正。
     //  29  → 628→1160 = `export function detectedSurfaceMode(`
     //  32  → 962→856  = decision-4 的 `if (surface.surfaceMode === "subagents" && !pi.getActiveTools()…`
@@ -1555,12 +1560,12 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     //   11 → 1758→1811 = `function assistantText(`（childAssistantError 下方）
     //   33 → 1781→1834 = `function accumulateUsage(`
     //  130 → 1628→1681 = `export function childToolList(`
-    "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1811",
+    "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1821",
     "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:217",
-    "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1834",
+    "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1844",
     "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:474",
     "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:232",
-    "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1681",
+    "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1691",
     // 新增 1 条（2026-10-12，ADR-0039）：目标行已逐条核对。
     "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:115 -> src/index.ts:534",
   ];

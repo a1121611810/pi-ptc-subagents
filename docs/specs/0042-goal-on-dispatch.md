@@ -3,6 +3,15 @@
 Map: [#208](https://github.com/a1121611810/pi-ptc-subagents/issues/208)
 Status: **draft** — decisions frozen from the map; items marked `TBD` need a human call before implementation.
 
+> **The parameter this spec calls `goal` is now `why` (ADR-0043).** The name below is left as
+> written, and so is this file's name. This document records the experiment that decided the
+> feature: its arms were called G0 / G1 / G2 and its trigger was the cut-**goal** rule while the
+> argument was named `goal`, and renaming them would make the record describe an experiment nobody
+> ran. Read `why` wherever it describes current behaviour, and `goal` wherever it names a thing
+> from the E3 run. The child's block text is also unchanged and still says "This goal is context" —
+> that sentence was held constant across the 180 runs, so retiring the word from it is new evidence,
+> not a rename.
+
 ## Problem Statement
 
 A dispatched child is a fresh pi subprocess. The only **task content** it receives from the parent is `task`; the rest of what it is told is policy (depth budget, read-only tier, report contract) rather than why the work exists.

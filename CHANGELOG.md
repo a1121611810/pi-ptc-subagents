@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **BREAKING — a dispatch's `goal` is now `why`.** `pi.dispatch` and `ptc_subagent` took an
+  optional `goal` since 3.4.0; that argument is now `why`, and the child's block is now
+  `<pi-ptc-why>` instead of `<pi-ptc-goal>`. A PTC program that passes `goal` must pass `why`.
+  The block's **wording is unchanged** — it still reads "This goal is context for doing it well" —
+  because that sentence was held constant across ADR-0042's 180 runs and renaming the tag does not
+  re-test the contrast; rewriting the sentence would change what was held still. See ADR-0043.
+  The rename is not cosmetic: in the agent ecosystem `goal` names an objective or a loop, a thing
+  worked toward over time, which is not what this argument holds — the reason one slice was cut out.
+  `background` was the other candidate and was unavailable, because the dispatch schema already
+  carries a `background` argument meaning "detach the child". No compatibility alias is kept: the
+  only consumer is a model reading the live schema each session, and a second name for one value
+  would cost exactly the comprehension this change buys back.
+
 ## [3.4.0] - 2026-10-19
 
 ### Added

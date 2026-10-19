@@ -652,9 +652,9 @@ describe("dispatch() foreground carries the child report", () => {
     });
   });
 
-  test("the goal reaches the foreground child's prompt (ADR-0042)", async () => {
+  test("the why reaches the foreground child's prompt (ADR-0042)", async () => {
     // The foreground half of the two-call-site rule. Both paths call `appendDepthHint` and both
-    // must pass `goal`; a one-sided wiring spawns children that look configured and silently
+    // must pass `why`; a one-sided wiring spawns children that look configured and silently
     // lack the caller's reason, which no assertion on the report would notice.
     await withAgent(async (dir) => {
       childTranscript.lines = [...COMPLIANT_TRANSCRIPT];
@@ -665,7 +665,7 @@ describe("dispatch() foreground carries the child report", () => {
         {
           agent: "reporter",
           task: "check the gates",
-          goal: "we are preparing a release",
+          why: "we are preparing a release",
           agentScope: "project",
         },
         { callId: 4, cwd: dir, depth: 0, maxDispatchDepth: 3 },
@@ -674,7 +674,7 @@ describe("dispatch() foreground carries the child report", () => {
 
       const prompt = childArgv.prompts.at(-1);
       if (prompt === undefined) throw new Error("no foreground child prompt was recorded");
-      expect(prompt).toContain("<pi-ptc-goal>");
+      expect(prompt).toContain("<pi-ptc-why>");
       expect(prompt).toContain("we are preparing a release");
     });
   });

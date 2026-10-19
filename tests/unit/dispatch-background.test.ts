@@ -395,14 +395,14 @@ describe("dispatch background spawn", () => {
     });
   });
 
-  test("the goal reaches the background child's prompt (ADR-0042)", async () => {
+  test("the why reaches the background child's prompt (ADR-0042)", async () => {
     /*
      * The background half of the two-call-site rule. `appendDepthHint` is called once on each
      * path, and the foreground and background prompts are materialised separately — the argv
      * builder they share cannot see this. Wiring only one side leaves a child that looks
      * correctly configured and silently lacks the caller's reason.
      *
-     * Counterfactual: drop `goal: input.goal` from the background call site and this is the
+     * Counterfactual: drop `why: input.why` from the background call site and this is the
      * single test that turns red.
      */
     await withAgent(async (dir) => {
@@ -411,7 +411,7 @@ describe("dispatch background spawn", () => {
         {
           agent: AGENT,
           task: "investigate",
-          goal: "we are preparing a release",
+          why: "we are preparing a release",
           background: true,
           agentScope: "project",
         },
@@ -421,7 +421,7 @@ describe("dispatch background spawn", () => {
       expect(asHandle(result).status).toBe("running");
       const opts = h.lifecycle.getRecordedOpts(h.lifecycle.handleAt(0));
       const prompt = await readFile(opts.promptFile!, "utf8");
-      expect(prompt).toContain("<pi-ptc-goal>");
+      expect(prompt).toContain("<pi-ptc-why>");
       expect(prompt).toContain("we are preparing a release");
     });
   });
