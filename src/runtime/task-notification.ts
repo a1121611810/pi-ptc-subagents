@@ -21,7 +21,7 @@
  *
  * ### Byte budget: one constant, cited from the ADR
  *
- * ADR-0022 §7 (`docs/adr/0022-background-dispatch.md:190`) names the byte budget
+ * ADR-0022 (`docs/adr/0022-background-dispatch.md §7`) names the byte budget
  * `DEFAULT_MAX_BATCH_BYTES = 100 * 1024` (100 KiB) and the split-along-event-boundaries
  * rule. That export from `notification-pipeline.ts` is the only declaration of the
  * number; {@link splitTaskNotificationBatches} consumes it and never re-declares it, so the
@@ -43,6 +43,24 @@
  * head-truncated to {@link MAX_NOTIFICATION_ERROR_CHARS} so a single failure cannot crowd the
  * §7 batch budget; the splitter renders through this same function, so the two agree by
  * construction.
+ *
+ * ### Amendment 2: `<report-channel>` (ADR-0022 §7, 2026-10-19, ADR-0032)
+ *
+ * ADR-0032 makes the report channel a total fact about a completed background child: the pump
+ * knows which channel the child's report came over — `tool` (the report tool's
+ * `structuredContent`), `prompt-json` (the fenced block in its last message), `none` (the
+ * contract was on and the child did not comply), or `opted-out` (the agent is not under the
+ * contract at all). Before this amendment the completion push omitted it, so a parent that saw
+ * `succeeded` had to poll `ptc_task_output` to learn whether the child had complied at all —
+ * the distinction ADR-0032 exists to keep visible was reachable only on the second surface.
+ *
+ * The child element now carries `<report-channel>` between `<error-message>` (when present) and
+ * `<output-ref>`, **only when the record has a channel**. The registry writes `reportChannel`
+ * on the `succeeded` close alone, so a `running` / `failed` / `canceled` / `lost` record omits
+ * the element entirely: absence means "no channel was declared", which is why it is not folded
+ * into `status`. The value domain is fixed, but it goes through the same `escapeXml` as every
+ * other text field — a renderer that special-cased it would be the one place a fixed domain
+ * silently stopped being enforced.
  *
  * ### Delivery policy lives in one place
  *
@@ -138,8 +156,8 @@ export function renderTaskNotifications(
  * assumes the ADR's 26-char ULID `batch-id` and a 13-digit ms epoch. A caller that renders
  * with a longer `batch-id` loosens that bound slightly; the ULID is the spec shape.
  *
- * The budget defaults to {@link DEFAULT_MAX_BATCH_BYTES} (ADR-0022 §7,
- * `docs/adr/0022-background-dispatch.md:190`); this function never re-declares the number.
+ * The budget defaults to {@link DEFAULT_MAX_BATCH_BYTES}
+ * (`docs/adr/0022-background-dispatch.md §7`); this function never re-declares the number.
  */
 export function splitTaskNotificationBatches(
   items: readonly TaskNotificationItem[],
@@ -204,11 +222,11 @@ function truncateNotificationError(errorMessage: string): string {
 
 /**
  * Render one `<bg-task-notification>` child block: the ADR-0022 §7 attribute set and children
- * plus the 2026-10-19 amendment's `<error-message>` (see the module note). Attribute order is
- * the ADR's order; `<output-bytes>` is always present, `<error-message>` only when the joined
- * record carries one (`failed` / `lost` in practice), `<output-ref>` only once the record has
- * a ref, and `<output-preview>` only when the byte count proves the payload is at or below
- * {@link OUTPUT_PREVIEW_MAX_BYTES}.
+ * plus the two 2026-10-19 amendments' children (see the module note). Attribute order is the
+ * ADR's order; `<output-bytes>` is always present, then the optional `<error-message>`
+ * (`failed` / `lost` in practice) and `<report-channel>` (`succeeded` alone) in the amendment
+ * order, `<output-ref>` only once the record has a ref, and `<output-preview>` only when the
+ * byte count proves the payload is at or below {@link OUTPUT_PREVIEW_MAX_BYTES}.
  */
 function renderTaskNotificationChild(item: TaskNotificationItem): string {
   const { event, record } = item;
@@ -236,6 +254,13 @@ function renderTaskNotificationChild(item: TaskNotificationItem): string {
     lines.push(
       `    <error-message>${escapeXml(truncateNotificationError(record.errorMessage))}</error-message>`,
     );
+  }
+  // Amendment 2 (module note): ADR-0032's channel rides the completion push so a parent that
+  // sees `succeeded` learns HOW the child reported without polling ptc_task_output. The registry
+  // writes reportChannel only on the succeeded close, so running / failed / canceled / lost
+  // records omit the element rather than claiming any channel.
+  if (record.reportChannel !== undefined) {
+    lines.push(`    <report-channel>${escapeXml(record.reportChannel)}</report-channel>`);
   }
   if (record.outputRef !== undefined) {
     lines.push(`    <output-ref>${escapeXml(record.outputRef)}</output-ref>`);

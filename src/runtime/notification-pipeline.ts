@@ -53,8 +53,8 @@ import type { Subscription, TaskEvent, TaskStorage, ULID } from "./task-storage.
 export const ZERO_CURSOR: ULID = "00000000000000000000" as ULID;
 
 /**
- * Default per-batch payload budget, in bytes, for the ADR-0022 §7 split along event
- * boundaries (`docs/adr/0022-background-dispatch.md:190`):
+ * Default per-batch payload budget, in bytes, for the ADR-0022 split along event
+ * boundaries (`docs/adr/0022-background-dispatch.md §7`):
  * `DEFAULT_MAX_BATCH_BYTES = 100 * 1024` (100 KiB). This is the single declaration of the
  * number; the renderer's `splitTaskNotificationBatches` consumes it, and a caller with a
  * token-budget-derived ceiling may override it at that call site.

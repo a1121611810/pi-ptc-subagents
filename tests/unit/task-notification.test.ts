@@ -227,6 +227,31 @@ const EXPECTED_FAILED_NO_REF = `<bg-task-notifications batch-id="01JBZ0000000000
   </bg-task-notification>
 </bg-task-notifications>`;
 
+/**
+ * Provenance: ADR-0022 §7 as amended a second time on 2026-10-19 — ADR-0032's report channel
+ * rides the completion push, between `<output-bytes>` and `<output-ref>`. Same succeeded record
+ * as {@link EXPECTED_SUCCEEDED} (the registry writes `reportChannel` only on the `succeeded`
+ * close, so this pair is the real shape), channel `tool`: the child declared its report over
+ * the report tool's `structuredContent`.
+ */
+const EXPECTED_SUCCEEDED_WITH_CHANNEL = `<bg-task-notifications batch-id="01JBZ00000000000000000000B" delivered-at-ms="1700000002000">
+  <bg-task-notification
+    id="task:01JBZ00000000000000000000A:->succeeded"
+    task-id="01JBZ00000000000000000000A"
+    subscription-id="01JBZ00000000000000000010S"
+    status="succeeded"
+    label="research X"
+    agent-name="researcher"
+    depth="0"
+    duration-ms="5432"
+    transition-at-ms="1700000005000">
+    <output-bytes>11</output-bytes>
+    <report-channel>tool</report-channel>
+    <output-ref>tasks/01JBZ00000000000000000000A/output.log</output-ref>
+    <output-preview>partial out</output-preview>
+  </bg-task-notification>
+</bg-task-notifications>`;
+
 // --- renderTaskNotifications (ADR-0022 §7) ---------------------------------------------------
 
 describe("renderTaskNotifications (ADR-0022 §7)", () => {
@@ -467,6 +492,137 @@ describe("<error-message> amendment (ADR-0022 §7, 2026-10-19)", () => {
     const errorAt = rendered.indexOf("<error-message>");
     expect(errorAt).toBeGreaterThan(rendered.indexOf("<output-bytes>"));
     expect(rendered.indexOf("<output-preview>")).toBeGreaterThan(errorAt);
+  });
+});
+
+// --- <report-channel> amendment 2 (ADR-0022 §7, 2026-10-19, ADR-0032) -----------------------
+
+/**
+ * The four ADR-0032 channels, literal from `ChildReportChannel` in `src/runtime/child-report.ts`.
+ * The expected values are the spec's value domain, not a capture from the renderer.
+ */
+const REPORT_CHANNELS = ["tool", "prompt-json", "none", "opted-out"] as const;
+
+/**
+ * A succeeded record carrying one channel. `reportChannel` is written by the registry ONLY on
+ * the `succeeded` close (`#resolveExit`'s `to === "succeeded"` branch), so a `running` /
+ * `failed` / `canceled` / `lost` record never reaches this renderer with one.
+ */
+function succeededWithChannel(channel: (typeof REPORT_CHANNELS)[number]): TaskNotificationItem {
+  return makeItem(
+    {
+      status: "succeeded",
+      durationMs: 5432,
+      transitionAt: 1_700_000_005_000,
+      outputRef: "tasks/01JBZ00000000000000000000A/output.log",
+      outputBytes: 11,
+      outputPreview: "partial out",
+      reportChannel: channel,
+    },
+    {
+      type: `task:${TASK_ID}:->succeeded`,
+      status: "succeeded",
+      transitionAtMs: 1_700_000_005_000,
+      outputBytes: 11,
+      outputPreview: "partial out",
+    },
+  );
+}
+
+describe("<report-channel> amendment 2 (ADR-0022 §7, 2026-10-19)", () => {
+  test("renders each of the four ADR-0032 channels, between <output-bytes> and <output-ref>", () => {
+    for (const channel of REPORT_CHANNELS) {
+      const rendered = renderTaskNotifications([succeededWithChannel(channel)], OPTS);
+
+      expect(rendered).toContain(`<report-channel>${channel}</report-channel>`);
+      // Position: the channel is a fact about the close, so it rides in the same slot the
+      // amendment gives the other post-bytes metadata — before the log reference.
+      expect(rendered.indexOf("<report-channel>")).toBeGreaterThan(
+        rendered.indexOf("<output-bytes>"),
+      );
+      expect(rendered.indexOf("<report-channel>")).toBeLessThan(rendered.indexOf("<output-ref>"));
+    }
+  });
+
+  test("renders the full amended golden literal for a succeeded channel-bearing record", () => {
+    expect(renderTaskNotifications([succeededWithChannel("tool")], OPTS)).toBe(
+      EXPECTED_SUCCEEDED_WITH_CHANNEL,
+    );
+  });
+
+  test("omits <report-channel> when the record carries no channel", () => {
+    // running has no close yet, and a failed close writes no channel (ADR-0032: a child that
+    // did not finish has not reported). Both keep their pre-amendment golden literals intact.
+    const running = renderTaskNotifications([makeItem()], OPTS);
+    expect(running).toBe(EXPECTED_RUNNING);
+    expect(running).not.toContain("<report-channel>");
+
+    const failedWithError = renderTaskNotifications(
+      [
+        makeItem(
+          {
+            status: "failed",
+            exitCode: 1,
+            durationMs: 3000,
+            transitionAt: 1_700_000_004_000,
+            outputRef: "tasks/01JBZ00000000000000000000A/output.log",
+            outputBytes: 0,
+            errorMessage: FAILED_ERROR_RAW,
+          },
+          {
+            type: `task:${TASK_ID}:->failed`,
+            status: "failed",
+            transitionAtMs: 1_700_000_004_000,
+            outputBytes: 0,
+          },
+        ),
+      ],
+      OPTS,
+    );
+    expect(failedWithError).toBe(EXPECTED_FAILED_WITH_ERROR);
+    expect(failedWithError).not.toContain("<report-channel>");
+  });
+
+  test("orders <error-message> before <report-channel> when a synthetic record carries both", () => {
+    // The registry cannot produce this pair: reportChannel is written only on `succeeded`,
+    // errorMessage only on `failed` / `lost`. The record is deliberately synthetic, and it pins
+    // the amendment's stated order for a renderer that is policy-free about status and would
+    // otherwise emit both children in whatever order their branches happen to sit.
+    const item = makeItem(
+      {
+        status: "failed",
+        errorMessage: "session ended while running",
+        reportChannel: "none",
+        outputRef: "tasks/01JBZ00000000000000000000A/output.log",
+      },
+      { type: `task:${TASK_ID}:->failed`, status: "failed" },
+    );
+
+    const rendered = renderTaskNotifications([item], OPTS);
+    const bytesAt = rendered.indexOf("<output-bytes>");
+    const errorAt = rendered.indexOf("<error-message>");
+    const channelAt = rendered.indexOf("<report-channel>");
+    const refAt = rendered.indexOf("<output-ref>");
+    expect(errorAt).toBeGreaterThan(bytesAt);
+    expect(channelAt).toBeGreaterThan(errorAt);
+    expect(refAt).toBeGreaterThan(channelAt);
+  });
+
+  test("renders <error-message> for a lost record — lost is a deliverable status (§2/§8)", () => {
+    const item = makeItem(
+      { status: "lost", errorMessage: "session_ended_while_running" },
+      { type: `task:${TASK_ID}:->lost`, status: "lost" },
+    );
+
+    const rendered = renderTaskNotifications([item], OPTS);
+
+    // ADR-0022 §8 keeps the three lost reasons distinct in `errorMessage`, and a lost task is a
+    // deliverable completion (the model must learn the task died), so the reason rides the same
+    // element a failed close uses.
+    expect(shouldDeliverTaskNotification(item.record)).toBe(true);
+    expect(rendered).toContain("<error-message>session_ended_while_running</error-message>");
+    // A lost record never reached a close, so no report channel was ever declared.
+    expect(rendered).not.toContain("<report-channel>");
   });
 });
 
