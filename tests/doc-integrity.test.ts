@@ -1391,12 +1391,12 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     "docs/adr/0013-ptc-row-compact-summary.md:146 -> src/tools/render.ts:90":
       "MAX_CODE_LINES_EXPANDED = 3",
     "docs/adr/0013-ptc-row-compact-summary.md:180 -> render.ts:153": "function firstLine(",
-    "docs/adr/0013-ptc-row-compact-summary.md:180 -> render.ts:1078": "function errorText(",
-    "docs/adr/0013-ptc-row-compact-summary.md:180 -> render.ts:1235": "errorText(result)",
-    "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:1329": "errorText(result)",
-    "docs/adr/0013-ptc-row-compact-summary.md:183 -> render.ts:1331": "MAX_LOG_LINES_EXPANDED",
+    "docs/adr/0013-ptc-row-compact-summary.md:180 -> render.ts:1075": "function errorText(",
+    "docs/adr/0013-ptc-row-compact-summary.md:180 -> render.ts:1232": "errorText(result)",
+    "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:1326": "errorText(result)",
+    "docs/adr/0013-ptc-row-compact-summary.md:183 -> render.ts:1328": "MAX_LOG_LINES_EXPANDED",
     "docs/adr/0013-ptc-row-compact-summary.md:184 -> render.ts:137": "function alignRow(",
-    "docs/adr/0013-ptc-row-compact-summary.md:188 -> render.ts:1326":
+    "docs/adr/0013-ptc-row-compact-summary.md:188 -> render.ts:1323":
       "The failure text is the reason",
     "docs/adr/0016-ptc-dispatch-binding.md:43 -> src/runtime/dispatcher.ts:447":
       "new DispatchSlotCounter(",
@@ -1480,6 +1480,9 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // subagent/render 的请求行改动把 12 条锚点再次后移（render.ts +29/+28、index.ts +17/+19、
     // subagent.ts +12），逐条按内容重钉；另 ADR-0029 的两条 index.ts 1034→1051（decision-4
     // warning 的实际行）。PIN_TOKENS 的 value 一个未变。
+    // 2026-10-19 review round 4（call-row JSDoc 归位 + 冻结/命名/捕获语义）：render.ts 文档块
+    // 重排使五条 ADR-0013 锚点再次位移（1078→1075、1235→1232、1329→1326、1331→1328、1326→1323），
+    // 失败区间 1326-1334 → 1323-1331；逐条按内容重钉，PIN_TOKENS 的 value 未变。
     // 2026-10-16 第八次复核（#199：usage 升为记录的一等载体，render.ts / subagent.ts 的改动把
     // 下面 10 条引用整体后移）。逐条按**内容**核对后改正，ADR 正文的行号与本表同步改：
     //   140 → render.ts 83→89（`MAX_CODE_LINES_EXPANDED = 3`，区间 89-96）
@@ -1500,12 +1503,12 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // 早已不是 outputSchema 行，本次与 233 一起写成 `233, 569, 766`（三条声明的实际行）。
     "docs/adr/0013-ptc-row-compact-summary.md:146 -> src/tools/render.ts:90",
     "docs/adr/0013-ptc-row-compact-summary.md:180 -> render.ts:153",
-    "docs/adr/0013-ptc-row-compact-summary.md:180 -> render.ts:1078",
-    "docs/adr/0013-ptc-row-compact-summary.md:180 -> render.ts:1235",
-    "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:1329",
-    "docs/adr/0013-ptc-row-compact-summary.md:183 -> render.ts:1331",
+    "docs/adr/0013-ptc-row-compact-summary.md:180 -> render.ts:1075",
+    "docs/adr/0013-ptc-row-compact-summary.md:180 -> render.ts:1232",
+    "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:1326",
+    "docs/adr/0013-ptc-row-compact-summary.md:183 -> render.ts:1328",
     "docs/adr/0013-ptc-row-compact-summary.md:184 -> render.ts:137",
-    "docs/adr/0013-ptc-row-compact-summary.md:188 -> render.ts:1326",
+    "docs/adr/0013-ptc-row-compact-summary.md:188 -> render.ts:1323",
     // Hand-confirmed line by line, 2026-09-30 (review round 5). The extractor resolves this
     // one only because the path is qualified: bare `dispatcher.ts` is ambiguous in this repo, and
     // the rule is to refuse rather than guess. Line 438 is

@@ -367,7 +367,7 @@ describe("foreground dispatch over the real 429 transcript", () => {
     // Absent means "no assistant turn named a model", not "the model is unknown": these events
     // carry no model, so the result must not invent one.
     expect(Object.hasOwn(result, "observedProvider")).toBe(false);
-    expect(Object.hasOwn(result, "model")).toBe(false);
+    expect(Object.hasOwn(result, "observedModel")).toBe(false);
   });
 
   test("an abort wins over the child's own 429, on the production path", async () => {
@@ -829,8 +829,8 @@ describe("the background record and ptc_task_output carry the observed model", (
     // must stay byte-identical to a pre-ADR-0044 record.
     const { record, harness } = await runBackground([assistantText("PONG")]);
     expect(record.status).toBe("succeeded");
-    expect(Object.hasOwn(record, "provider")).toBe(false);
-    expect(Object.hasOwn(record, "model")).toBe(false);
+    expect(Object.hasOwn(record, "observedProvider")).toBe(false);
+    expect(Object.hasOwn(record, "observedModel")).toBe(false);
     const tool = createPtcTaskOutputTool(harness.registry, harness.outputs);
     const result = (await tool.execute(
       "call-output-2",

@@ -669,7 +669,7 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
       // task with a block never takes this path, so the line is rendered once either way.
       const usageLine =
         reportBlock === undefined && usage !== undefined ? formatUsageLine(usage) : undefined;
-      // ADR-0044 P1: the model the child actually ran, observed by the host off its assistant
+      // ADR-0044 Decision 2: the model the child actually ran, observed by the host off its assistant
       // turns. It sits in the HEAD, after the report block and the host counter and ahead of the
       // prose — the same position the foreground `ptc_subagent` result gives it — rather than
       // inside `<child-report>`, because it is a HOST measurement: putting it in the report could

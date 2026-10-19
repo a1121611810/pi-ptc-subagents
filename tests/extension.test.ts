@@ -1106,16 +1106,25 @@ test("the subagent call row inherits the session model the host read from pi (AD
     .render(100)
     .join("\n");
   expect(expanded).toContain("deepseek/deepseek-flash");
-  // A switch between turns refreshes the snapshot: turn_start reads the new ctx.model, and the
-  // same tool instance must state the new inherited model on the next render.
+  // turn_start refreshes the host snapshot. This tool CALL already rendered once, so its row
+  // keeps the captured value; a fresh call (fresh render state) sees the new session model.
   await stub.emit(
     "turn_start",
     stubContext(stub, {
       sessionModel: { provider: "minimax-cn-512k", id: "MiniMax-M3.1-Flash-Preview" },
     }),
   );
-  const switched = renderCall({ task: "a survey" }, theme, { ...context, expanded: true })
+  const settled = renderCall({ task: "a survey" }, theme, { ...context, expanded: true })
     .render(100)
     .join("\n");
-  expect(switched).toContain("minimax-cn-512k/MiniMax-M3.1-Flash-Preview");
+  expect(settled).toContain("deepseek/deepseek-flash");
+  expect(settled).not.toContain("minimax-cn-512k/MiniMax-M3.1-Flash-Preview");
+  const fresh = renderCall({ task: "a survey" }, theme, {
+    ...context,
+    expanded: true,
+    state: {},
+  })
+    .render(100)
+    .join("\n");
+  expect(fresh).toContain("minimax-cn-512k/MiniMax-M3.1-Flash-Preview");
 });

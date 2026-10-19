@@ -1011,10 +1011,18 @@ describe("FileTaskStorage: ADR-0045 observed-model rename (legacy record read)",
     const base = await makeBase();
     try {
       const storage: TaskStorage = new FileTaskStorage(base);
-      const record = fixtureTask();
-      // The exact on-disk shape a pre-ADR-0045 writer left: the pair under the old names, the
-      // pair shape is real, only the keys changed. This is a migration fixture, not an invented
-      // shape (constraint #2): `provider` / `model` were the persisted names until ADR-0045.
+      // The exact on-disk shape a pre-ADR-0045 writer left. The old writer stamped the pair at a
+      // TERMINAL close (the pump writes it on every outcome that close can produce), so the fixture
+      // is a terminal record with `provider` / `model`, not a running one with fields that shape
+      // cannot carry (testing-constraints #2: real sample, not an invented shape).
+      const record = fixtureTask({
+        status: "failed",
+        transitionAt: 1_700_000_001_000,
+        finishedAt: 1_700_000_001_000,
+        durationMs: 1_000,
+        exitCode: 0,
+        errorMessage: "429 rate limited",
+      });
       const legacy = { ...record, provider: "deepseek", model: "deepseek-flash" };
       const path = join(base, "tasks", record.id + ".json");
       await mkdir(join(base, "tasks"), { recursive: true });

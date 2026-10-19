@@ -577,14 +577,27 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
       };
     },
     renderCall(args, theme, context) {
+      // ADR-0044: the inherited-model statement is a snapshot of the session model at this
+      // CALL's first render. pi reuses `context.state` for one tool execution, so capturing it
+      // there keeps a settled row from changing its statement after a later model switch; a new
+      // call gets fresh state and captures the then-current model. Without a render state
+      // (older pi), fall back to a live read rather than dropping the statement.
+      const state = context?.state as { inheritedSessionModel?: SessionModel | null } | undefined;
+      let sessionModel: SessionModel | undefined;
+      if (state === undefined) {
+        sessionModel = options.getSessionModel?.();
+      } else {
+        if (state.inheritedSessionModel === undefined) {
+          state.inheritedSessionModel = options.getSessionModel?.() ?? null;
+        }
+        sessionModel = state.inheritedSessionModel ?? undefined;
+      }
       return renderSubagentToolCall(args as SubagentCallArgs, theme, {
         ...(context?.invalidate === undefined ? {} : { requestInvalidate: context.invalidate }),
         ...(context?.isPartial === undefined ? {} : { isPartial: context.isPartial }),
         ...(context?.state === undefined ? {} : { state: context.state }),
         ...(context?.expanded === true ? { expanded: true } : {}),
-        ...(options.getSessionModel === undefined
-          ? {}
-          : { sessionModel: options.getSessionModel() }),
+        ...(sessionModel === undefined ? {} : { sessionModel }),
       });
     },
   });

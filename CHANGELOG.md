@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A dispatch reports the model its child actually ran.** The model used to be resolved inside the
   child and never came back: neither `pi.dispatch`'s `DispatchResult` nor a background
   `TaskRecord` said which provider or model served the call, so a wrong-model delegation could
-  only be inferred from a failure after the fact. Both now carry optional `provider` / `model` —
+  only be inferred from a failure after the fact. Both now carry an optional observed-model pair —
   observed by the host from the child's own assistant turns (last turn wins), not taken from the
   request — and the model-facing surfaces state the same fact as a `model: provider/id` line on
   `ptc_subagent` and `ptc_task_output` and as a `model=` fact in a refusal. A transcript that
@@ -22,7 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `usage`, so a failed or canceled close that named a model still states it. The pair is named
   `observedProvider` / `observedModel` (ADR-0045): the result's `model` input is the requested
   model, and two different facts no longer share a name. Records written before the rename are
-  still read. Additive and backward compatible: old records and old result shapes keep working. The rendered value is stripped of ANSI escape sequences and control characters and head-capped at 200 characters before it enters model-facing text, because the pair is untrusted child wire data. See
+  still read (the field rename itself is breaking for program-visible result shapes — see the
+  rename entry under Changed). The rendered value is stripped of ANSI escape sequences and
+  control characters and head-capped at 200 characters before it enters model-facing text,
+  because the pair is untrusted child wire data. See
   ADR-0044, ADR-0016 §"The child's model", and ADR-0022 §3 as amended.
 - **The `ptc_subagent` call row states the model the call will inherit.** When the call names no
   model, the request row says `model=inherit` and its expanded view names the provider/id the
@@ -32,6 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING — the observed-model fields are named `observedProvider` / `observedModel`.**
+  `DispatchResult.provider` / `model` and `TaskRecord.provider` / `model` carried the observed
+  model, while the input's `model` is the requested model; the shared name made two different
+  facts look comparable. The output fields are renamed, the input keeps its name, the child wire
+  and the model-facing `model:` text are unchanged, and a record written before the rename is
+  normalized on read so its observation is not lost. No aliases: the old result keys are removed,
+  which is why this is breaking for program-visible result shapes. See ADR-0045.
 - **BREAKING — a dispatch that names no model now runs on the caller session's current model, not
   pi's global default.** `pi.dispatch` and `ptc_subagent` resolve the child's model first match
   wins: the dispatch's `model` argument, then the agent definition's frontmatter `model:`, then

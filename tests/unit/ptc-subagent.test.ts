@@ -558,7 +558,6 @@ test("the call row states an inherited model when the call names none (ADR-0044)
     toolCallId: "call-visual-inherit",
     invalidate: vi.fn(),
     lastComponent: undefined,
-    state: {},
     cwd: ".",
     executionStarted: false,
     argsComplete: true,
@@ -611,6 +610,63 @@ test("the call row states an inherited model when the call names none (ADR-0044)
     .render(100)
     .join("\n");
   expect(plainRow).not.toContain("model=inherit");
+  // The inherited-model fact is captured at the CALL's first render. A settled row must not
+  // change its statement after a later model switch; a fresh call captures the then-current model.
+  let liveModel: { provider: string; id: string } = {
+    provider: "deepseek",
+    id: "deepseek-flash",
+  };
+  const captureTool = createPtcSubagentTool({
+    ...baseOptions(".", {}),
+    getSessionModel: () => liveModel,
+  });
+  const captureRender = captureTool.renderCall;
+  if (typeof captureRender !== "function") throw new Error("ptc_subagent registered no renderCall");
+  type CaptureContext = Parameters<typeof captureRender>[2];
+  const capturedContext = { ...context, state: {} } as unknown as CaptureContext;
+  expect(captureRender({ task: "x" }, theme, capturedContext).render(100).join("\n")).toContain(
+    "model=inherit",
+  );
+  liveModel = { provider: "minimax-cn-512k", id: "MiniMax-M3.1-Flash-Preview" };
+  const settled = captureRender({ task: "x" }, theme, {
+    ...capturedContext,
+    expanded: true,
+  } as CaptureContext)
+    .render(100)
+    .join("\n");
+  expect(settled).toContain("deepseek/deepseek-flash");
+  expect(settled).not.toContain("MiniMax-M3.1-Flash-Preview");
+  const fresh = captureRender({ task: "x" }, theme, {
+    ...capturedContext,
+    state: {},
+    expanded: true,
+  } as CaptureContext)
+    .render(100)
+    .join("\n");
+  expect(fresh).toContain("minimax-cn-512k/MiniMax-M3.1-Flash-Preview");
+  // A named agent definition may pin a model (ADR-0044 tier 2 outranks the session tier), and
+  // the row cannot read that definition cheaply: a named agent must not claim inheritance.
+  const agentTool = createPtcSubagentTool({
+    ...baseOptions(".", {}),
+    getSessionModel: inherited,
+  });
+  const agentRender = agentTool.renderCall;
+  if (typeof agentRender !== "function") throw new Error("ptc_subagent registered no renderCall");
+  const agentRow = agentRender(
+    { task: "x", agent: "scout" },
+    theme,
+    context as unknown as Parameters<typeof agentRender>[2],
+  )
+    .render(100)
+    .join("\n");
+  expect(agentRow).not.toContain("model=inherit");
+  const agentExpanded = agentRender({ task: "x", agent: "scout" }, theme, {
+    ...context,
+    expanded: true,
+  } as unknown as Parameters<typeof agentRender>[2])
+    .render(100)
+    .join("\n");
+  expect(agentExpanded).not.toContain("inherit →");
 });
 
 describe("ptc_subagent and the dispatch cap", () => {
