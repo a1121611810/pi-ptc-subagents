@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`whyEnabled`, a default-on switch for the dispatch `why` block.** `~/.pi/agent/ptc.json` takes a
+  boolean `whyEnabled`; when it is `false`, a `why` passed to `pi.dispatch` / `ptc_subagent` is
+  dropped instead of delivered, and both the foreground result and the background record say that a
+  suppression happened. **The switch fails on:** a non-boolean value, an unparseable file, or a file
+  that is not a JSON object all leave the feature ON — a broken value must never remove it. A broken
+  _key_ is reported once at `session_start` with the path, the key and the type that arrived; a broken
+  _file_ is already reported by the default-mode reader, so one typo produces one notice. The
+  `why` argument stays on the schema either way, so a running program is never rejected for passing
+  an argument whose value the switch drops. `DispatchResult.whySuppressed` and
+  `TaskRecord.whySuppressed` record **that a reason was withheld, never what it was** — a background
+  dispatch returns a handle rather than a result, so without the record it would have no way at all
+  to say so. See ADR-0043.
+- **`/ptc why on|off`**, a session-scoped override for the switch above. It records one session entry
+  and never writes `ptc.json` — the difference is "about this conversation" against "about every
+  future one". A resumed session restores the last record; a new one starts from the file. Bare
+  `/ptc why` reports the value _and_ which of the two is in force, and an argument that is neither
+  `on` nor `off` warns and changes nothing. See ADR-0043.
+
 ### Changed
 
 - **BREAKING — a dispatch's `goal` is now `why`.** `pi.dispatch` and `ptc_subagent` took an

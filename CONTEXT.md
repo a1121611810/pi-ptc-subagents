@@ -435,6 +435,27 @@ meaning "detach the child", one schema away. _Avoid_: "goal" (elsewhere that nam
 loop), "context" (that is the host's `pi-ptc-context` policy block), "instructions" (it is not one),
 "prompt" (it is one input to it).
 
+**whyEnabled** — the config key in `~/.pi/agent/ptc.json` that decides
+whether a dispatched child is handed the caller's _why_, default **on**,
+read once at extension load by `readWhyEnabledConfig` and consulted per
+dispatch through `DispatchDeps.whyEnabled`. Its failure direction is the
+design: a non-boolean value, an unparseable file, a file that is not an
+object — all resolve to ON, because a broken value must never remove the
+feature. A broken **key** is reported at `session_start` with the path, the
+key and the type that arrived; a broken **file** is `readDefaultModeConfig`'s
+to report and this reader stays silent, so one typo produces one notice.
+The opposite direction from _opt-in bindings_, which grant a shell and so
+fail closed. When a `why` is dropped, `DispatchResult.whySuppressed` and
+`TaskRecord.whySuppressed` record **that a suppression happened**, never the
+value; `/ptc why on|off` overrides it for the current session only and never
+writes the file. ADR-0043 §Decision 2, which also amends ADR-0042's "not
+persisted on the `TaskRecord`" — the amendment covers the event, not the
+content.
+_Avoid_: "opt out" (it defaults on and inverts), "privacy mode" (the block is
+caller context, not caller data), "per-dispatch" (there is no per-call
+override), and reading the flag as a failure — the call still succeeds, it
+just says the reason was not carried.
+
 **dispatch concurrency** — the hard cap on concurrently in-flight
 dispatch in one pi session. Default 8, configurable via
 `PtcConfig.dispatchConcurrency`; the live control is the

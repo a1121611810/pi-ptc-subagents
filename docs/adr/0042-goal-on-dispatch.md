@@ -75,4 +75,5 @@ goal**.
 
 - Map #208 and its decision tickets.
 - `docs/specs/0042-goal-on-dispatch.md` — the specification.
+- [ADR-0043](./0043-a-why-switch-and-a-name.md) — amended 2026-10-19: the argument is now `why` and the block carries a default-on `whyEnabled` switch. The evidence above stands as recorded; ADR-0043 says what the rename did and did not do to it.
 - ADR-0032 — the child report, whose `summary` arms were measured and dropped in the same effort.
