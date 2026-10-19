@@ -2427,7 +2427,7 @@ async function dispatchBackground(
         const extraction: ChildReportExtraction = reportContract
           ? finishChildReportScan(scan)
           : { reportChannel: "opted-out" };
-        await registry.transition(
+        const resolved = await registry.transition(
           {
             kind: "resolve-exit",
             taskId,
@@ -2467,6 +2467,16 @@ async function dispatchBackground(
           },
           { clock, callerId, logger },
         );
+        // A failed close is already visible to the model on the record, but the host operator's
+        // only other signal is the child's output log — which is empty for the very failure that
+        // matters most (a provider error before the child said anything). One warning names the
+        // task and the reason the record carries, so the failure is never silent on this side
+        // either (docs/testing-constraints.md #3). Successful and model-stopped closes stay quiet.
+        if (resolved.record.status === "failed" && resolved.record.errorMessage !== undefined) {
+          logger.warn(
+            "background dispatch task " + taskId + " failed: " + resolved.record.errorMessage,
+          );
+        }
       } catch (err) {
         // A pump failure must not vanish. A task already driven terminal by a model stop
         // lands here on the illegal running -> terminal edge; log it so it is observable.

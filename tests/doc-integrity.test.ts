@@ -1427,9 +1427,9 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       "outputSchema: LIST_OUTPUT_SCHEMA,",
     // 2026-10-19（#219-#222 · retro）：抽取器现在展开逗号后的数字，这两行才第一次进入判定面。
     // 它们一直是对的，只是以前没有任何东西检查；在这里补上，从此漂移会红。
-    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:569":
+    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:584":
       "outputSchema: OUTPUT_OUTPUT_SCHEMA,",
-    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:766":
+    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:803":
       "outputSchema: STOP_OUTPUT_SCHEMA,",
     "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1775":
       "export function childToolList(",
@@ -1605,13 +1605,19 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // 2026-10-19 第十五次复核（#219-#222 · review round 2）：`resolveWhy` 的总域化注记又给
     // dispatch.ts 加了 10 行，四条锚点整体 +10（2267→2277、1895→1905、1918→1928、1765→1775）。
     // 此次仍是等量位移，仍然逐条按内容核对。读法见本数组的头部说明：数组是现值，注释是移动史。
+    // 2026-10-19 第十六次复核（field report · P0-2）：`ptc_task_output` 新增 error / error_message
+    // 字段后，`ptc-task.ts` 的两条 outputSchema 锚点位移；两条逐个打开目标行按**内容**核对后改正，
+    // 位移量不同（+15 / +37），所以没有做算术平移：
+    //   569 → 584 = `outputSchema: OUTPUT_OUTPUT_SCHEMA,`
+    //   766 → 803 = `outputSchema: STOP_OUTPUT_SCHEMA,`
+    // 233 = `outputSchema: LIST_OUTPUT_SCHEMA,` 未动。ADR-0032 正文同一行的引用同步改为 233, 584, 803。
     "docs/adr/0032-child-report.md:11 -> src/runtime/dispatch.ts:1905",
     "docs/adr/0032-child-report.md:20 -> src/tools/subagent.ts:218",
     "docs/adr/0032-child-report.md:33 -> src/runtime/dispatch.ts:1928",
     "docs/adr/0032-child-report.md:55 -> src/tools/subagent.ts:494",
     "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:233",
-    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:569",
-    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:766",
+    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:584",
+    "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:803",
     "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1775",
     // 新增 1 条（2026-10-12，ADR-0039）：目标行已逐条核对。
     "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:115 -> src/index.ts:567",

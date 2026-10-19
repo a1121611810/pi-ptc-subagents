@@ -167,6 +167,66 @@ const EXPECTED_ESCAPED = `<bg-task-notifications batch-id="01JBZ0000000000000000
   </bg-task-notification>
 </bg-task-notifications>`;
 
+/**
+ * Provenance: the real failure shape behind the 2026-10-19 field report — a child killed by a
+ * 429 after pi retried writes `stopReason: "error"` + this `errorMessage` onto its assistant
+ * `message_end`, produces an empty content list, and leaves a 0-byte output.log (pi 0.87.1
+ * capture recorded in `dispatch.ts`'s child-failure doc). The first line is that captured
+ * string verbatim; the second line is adversarial text added on purpose so the element is
+ * exercised on `<`, `>`, `&`, `"` and a literal newline — the same characters every other
+ * text field must survive.
+ */
+const FAILED_ERROR_RAW =
+  '429 {"type":"error","error":{"type":"rate_limit_error",...}}\n' +
+  "child produced 0 bytes of output & no final text <exit=1>";
+
+/**
+ * Provenance: ADR-0022 §7 layout as amended on 2026-10-19 (field report): the
+ * `<error-message>` child sits between `<output-bytes>` and `<output-ref>`. The zero byte count
+ * is the report's real case, not a placeholder — the log reference exists and the log is
+ * empty, which is exactly why the empty log alone (with no diagnosis beside it) read to the
+ * model as an infrastructure fault.
+ */
+const EXPECTED_FAILED_WITH_ERROR = `<bg-task-notifications batch-id="01JBZ00000000000000000000B" delivered-at-ms="1700000002000">
+  <bg-task-notification
+    id="task:01JBZ00000000000000000000A:->failed"
+    task-id="01JBZ00000000000000000000A"
+    subscription-id="01JBZ00000000000000000010S"
+    status="failed"
+    label="research X"
+    agent-name="researcher"
+    depth="0"
+    duration-ms="3000"
+    transition-at-ms="1700000004000">
+    <output-bytes>0</output-bytes>
+    <error-message>429 {&quot;type&quot;:&quot;error&quot;,&quot;error&quot;:{&quot;type&quot;:&quot;rate_limit_error&quot;,...}}&#10;child produced 0 bytes of output &amp; no final text &lt;exit=1></error-message>
+    <output-ref>tasks/01JBZ00000000000000000000A/output.log</output-ref>
+  </bg-task-notification>
+</bg-task-notifications>`;
+
+/**
+ * Provenance: same amendment layout for a failed record that has no output.log at all
+ * (`record.outputRef === undefined`): the diagnosis still follows `<output-bytes>` and
+ * `<output-preview>` keeps its own ADR-0022 §7 rule, so the two optional children do not
+ * interfere.
+ */
+const EXPECTED_FAILED_NO_REF = `<bg-task-notifications batch-id="01JBZ00000000000000000000B" delivered-at-ms="1700000002000">
+  <bg-task-notification
+    id="task:01JBZ00000000000000000000A:->failed"
+    task-id="01JBZ00000000000000000000A"
+    subscription-id="01JBZ00000000000000000010S"
+    status="failed"
+    label="research X"
+    agent-name="researcher"
+    depth="0"
+    duration-ms="2000"
+    transition-at-ms="1700000003000">
+    <output-bytes>5</output-bytes>
+    <error-message>child exited 1</error-message>
+    <output-preview>boom</output-preview>
+  </bg-task-notification>
+</bg-task-notifications>`;
+
 // --- renderTaskNotifications (ADR-0022 §7) ---------------------------------------------------
 
 describe("renderTaskNotifications (ADR-0022 §7)", () => {
@@ -222,6 +282,191 @@ describe("renderTaskNotifications (ADR-0022 §7)", () => {
 
   test("renders nothing for an empty item list (zero-event batch)", () => {
     expect(renderTaskNotifications([], OPTS)).toBe("");
+  });
+});
+
+// --- <error-message> amendment (ADR-0022 §7, 2026-10-19 field report) -----------------------
+
+describe("<error-message> amendment (ADR-0022 §7, 2026-10-19)", () => {
+  test("renders <error-message> between <output-bytes> and <output-ref>, XML-escaped", () => {
+    const item = makeItem(
+      {
+        status: "failed",
+        exitCode: 1,
+        durationMs: 3000,
+        transitionAt: 1_700_000_004_000,
+        outputRef: "tasks/01JBZ00000000000000000000A/output.log",
+        outputBytes: 0,
+        errorMessage: FAILED_ERROR_RAW,
+      },
+      {
+        type: `task:${TASK_ID}:->failed`,
+        status: "failed",
+        transitionAtMs: 1_700_000_004_000,
+        outputBytes: 0,
+      },
+    );
+
+    const rendered = renderTaskNotifications([item], OPTS);
+
+    expect(rendered).toBe(EXPECTED_FAILED_WITH_ERROR);
+    // Position is an amendment invariant of its own: the diagnosis sits between the byte
+    // count and the log reference, so a model that can read the bytes can read why they are
+    // zero. (The golden literal would catch a move; this names the order directly.)
+    const bytesAt = rendered.indexOf("<output-bytes>");
+    const errorAt = rendered.indexOf("<error-message>");
+    const refAt = rendered.indexOf("<output-ref>");
+    expect(bytesAt).toBeGreaterThanOrEqual(0);
+    expect(errorAt).toBeGreaterThan(bytesAt);
+    expect(refAt).toBeGreaterThan(errorAt);
+    // Counterfactual: interpolating without escapeXml leaves the raw quotes/newline in and
+    // this fails; the golden literal above differs too, but this is the direct claim.
+    expect(rendered).not.toContain(FAILED_ERROR_RAW);
+  });
+
+  test("omits <error-message> when the record carries no errorMessage", () => {
+    // Three shapes the registry can actually produce: running has no terminal diagnosis;
+    // succeeded resolves with errorMessage undefined (#resolveExit returns undefined for
+    // succeeded); a failed non-zero exit that nothing labelled (resolveExitErrorMessage's
+    // fall-through) also has none. All three keep the pre-amendment golden literals intact.
+    const running = renderTaskNotifications([makeItem()], OPTS);
+    expect(running).toBe(EXPECTED_RUNNING);
+    expect(running).not.toContain("<error-message>");
+
+    const succeededItem = makeItem(
+      {
+        status: "succeeded",
+        durationMs: 5432,
+        transitionAt: 1_700_000_005_000,
+        outputRef: "tasks/01JBZ00000000000000000000A/output.log",
+        outputBytes: 11,
+        outputPreview: "partial out",
+      },
+      {
+        type: `task:${TASK_ID}:->succeeded`,
+        status: "succeeded",
+        transitionAtMs: 1_700_000_005_000,
+        outputBytes: 11,
+        outputPreview: "partial out",
+      },
+    );
+    const succeeded = renderTaskNotifications([succeededItem], OPTS);
+    expect(succeeded).toBe(EXPECTED_SUCCEEDED);
+    expect(succeeded).not.toContain("<error-message>");
+
+    const failedUnlabelled = renderTaskNotifications(
+      [
+        makeItem(
+          { status: "failed", exitCode: 1 },
+          { type: `task:${TASK_ID}:->failed`, status: "failed" },
+        ),
+      ],
+      OPTS,
+    );
+    expect(failedUnlabelled).not.toContain("<error-message>");
+  });
+
+  test("truncates an overlong errorMessage to 1023 head chars + an ellipsis", () => {
+    // The cap is a CHARACTER budget, not a byte one: 1024 chars expand to at most ~6 KiB under
+    // escapeXml and the ADR-0022 §7 batch budget is 100 KiB, while estimateItemBytes renders
+    // through this same function so the split accounting agrees by construction. Keep the
+    // head, drop the tail, and say so with a visible ellipsis.
+    const head = "A".repeat(1023);
+    const raw = head + "TAIL-MARKER" + "B".repeat(1000);
+    const rendered = renderTaskNotifications(
+      [
+        makeItem(
+          { status: "failed", errorMessage: raw },
+          { type: `task:${TASK_ID}:->failed`, status: "failed" },
+        ),
+      ],
+      OPTS,
+    );
+
+    const match = /<error-message>([\s\S]*?)<\/error-message>/.exec(rendered);
+    expect(match?.[1]).toBe(`${head}…`);
+    // Counterfactual: a slice(0, 1024) truncation that skips the ellipsis fails the exact
+    // comparison above; one that keeps 1024 head chars keeps a marker character and fails here.
+    expect(rendered).not.toContain("TAIL-MARKER");
+    expect(rendered).not.toContain("B".repeat(10));
+  });
+
+  test("keeps an errorMessage of exactly 1024 chars intact (cap boundary)", () => {
+    const exact = "C".repeat(1024);
+    const rendered = renderTaskNotifications(
+      [
+        makeItem(
+          { status: "failed", errorMessage: exact },
+          { type: `task:${TASK_ID}:->failed`, status: "failed" },
+        ),
+      ],
+      OPTS,
+    );
+
+    // Counterfactual: a >= cap or an unconditional truncation appends the ellipsis here and
+    // fails both assertions, so the boundary states which side of 1024 is untouched.
+    expect(rendered).toContain(`<error-message>${exact}</error-message>`);
+    expect(rendered).not.toContain("…");
+  });
+
+  test("truncates on code points, never splitting a surrogate pair at the cap boundary", () => {
+    // The cap is a CHARACTER budget, and a JavaScript string is UTF-16: 1022 ASCII characters
+    // put an astral character's HIGH surrogate exactly where a `slice(0, 1023)` would cut. The
+    // helper counts code points, so the emoji is kept whole in the head (1022 + 1 = 1023 code
+    // points) and the ellipsis follows it. Counterfactual: a code-unit slice yields a lone high
+    // surrogate here, the exact string comparison fails, and the lone-surrogate scan below
+    // catches the U+FFFD class even if a different tail were chosen.
+    const emoji = "\u{1F600}"; // a surrogate PAIR in UTF-16: code units 2, code points 1
+    const raw = "A".repeat(1022) + emoji + "B".repeat(10);
+    const rendered = renderTaskNotifications(
+      [
+        makeItem(
+          { status: "failed", errorMessage: raw },
+          { type: `task:${TASK_ID}:->failed`, status: "failed" },
+        ),
+      ],
+      OPTS,
+    );
+
+    const match = /<error-message>([\s\S]*?)<\/error-message>/.exec(rendered);
+    expect(match?.[1]).toBe("A".repeat(1022) + emoji + "…");
+    // A lone surrogate cannot survive this scan: the valid pair is two adjacent surrogates,
+    // while a split pair leaves one unpaired. Either direction of the pair is checked.
+    expect(rendered).not.toMatch(
+      /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u,
+    );
+    expect(rendered).not.toContain("\uFFFD");
+  });
+
+  test("renders <error-message> for a failed record with no outputRef, before <output-preview>", () => {
+    const item = makeItem(
+      {
+        status: "failed",
+        exitCode: 1,
+        durationMs: 2000,
+        transitionAt: 1_700_000_003_000,
+        outputBytes: 5,
+        outputPreview: "boom",
+        errorMessage: "child exited 1",
+      },
+      {
+        type: `task:${TASK_ID}:->failed`,
+        status: "failed",
+        transitionAtMs: 1_700_000_003_000,
+        outputBytes: 5,
+        outputPreview: "boom",
+      },
+    );
+
+    const rendered = renderTaskNotifications([item], OPTS);
+
+    expect(rendered).toBe(EXPECTED_FAILED_NO_REF);
+    // No log reference exists, yet the diagnosis still follows <output-bytes>; the preview
+    // keeps its own ADR-0022 §7 rule and stays after the diagnosis.
+    expect(rendered).not.toContain("<output-ref>");
+    const errorAt = rendered.indexOf("<error-message>");
+    expect(errorAt).toBeGreaterThan(rendered.indexOf("<output-bytes>"));
+    expect(rendered.indexOf("<output-preview>")).toBeGreaterThan(errorAt);
   });
 });
 

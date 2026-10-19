@@ -1083,6 +1083,56 @@ describe("dispatch background pump", () => {
   });
 
   /**
+   * The same failed close, on the HOST's side: the pump logs one warning naming the task and
+   * the reason the record carries. Without it a 429 child with zero output bytes leaves the
+   * operator holding an empty log — the exact field report this covers.
+   *
+   * Counterfactual: deleting the warning in the pump turns this red.
+   */
+  test("a failed close logs the child's reason on the host side (issue #70 follow-up)", async () => {
+    await withAgent(async (dir) => {
+      const h = createHarness({ start: 1000 });
+      const warnings: string[] = [];
+      const deps: DispatchDeps = {
+        ...h.deps,
+        logger: {
+          info: (): void => undefined,
+          warn: (message: string): void => {
+            warnings.push(message);
+          },
+        },
+      };
+      const handle = asHandle(
+        await dispatch(
+          { agent: AGENT, task: "rate-limited-logged", background: true, agentScope: "project" },
+          { callId: 22, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          deps,
+        ),
+      );
+      const providerError =
+        '429 {"type":"error","error":{"type":"rate_limit_error","message":"已达到 Token Plan 用量上限"}}';
+
+      h.lifecycle.pushEvent(h.lifecycle.handleAt(0), {
+        type: "message_end",
+        message: {
+          role: "assistant",
+          stopReason: "error",
+          errorMessage: providerError,
+          content: [],
+        },
+      });
+      h.clock.set(1500);
+      h.lifecycle.resolveExit(h.lifecycle.handleAt(0), 0, null);
+
+      const record = await waitForTerminal(h.storage, handle.taskId);
+      expect(record.status).toBe("failed");
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("background dispatch task " + handle.taskId);
+      expect(warnings[0]).toContain(providerError);
+    });
+  });
+
+  /**
    * pi 1.2.0's print-mode truncation close, end to end through the real pump: the child exits 1
    * with partial text and pi's stderr warning (`dist/modes/print-mode.js:126`), and the record
    * names the cause in the foreground's own words. The stderr is planted through the mock

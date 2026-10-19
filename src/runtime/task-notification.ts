@@ -27,6 +27,23 @@
  * number; {@link splitTaskNotificationBatches} consumes it and never re-declares it, so the
  * renderer's split is the single source of the batching rule.
  *
+ * ### Amendment: `<error-message>` (ADR-0022 §7, 2026-10-19 field report)
+ *
+ * §7 shows only `<output-bytes>` / `<output-ref>` / `<output-preview>` under the child, which
+ * assumes a failed child leaves something to read. A real background dispatch disproved that:
+ * a child killed on a 429 wrote an **empty** `output.log` (0 bytes), and the model — seeing
+ * only `<output-bytes>0</output-bytes>` beside a valid log reference — reported an
+ * infrastructure fault. The diagnosis already existed on the `TaskRecord` (`errorMessage`;
+ * ADR-0022 §8 gives `failed` / `lost` one, `succeeded` / `canceled` none) but the §7 message
+ * dropped it, so the record was the only place the reason survived.
+ *
+ * The child element therefore carries one more optional child, `<error-message>`, rendered
+ * between `<output-bytes>` and `<output-ref>` **only when the joined record has an
+ * `errorMessage`** — it is not a field every status carries. Its text is XML-escaped and
+ * head-truncated to {@link MAX_NOTIFICATION_ERROR_CHARS} so a single failure cannot crowd the
+ * §7 batch budget; the splitter renders through this same function, so the two agree by
+ * construction.
+ *
  * ### Delivery policy lives in one place
  *
  * {@link shouldDeliverTaskNotification} is the **only** place the completion-notification
@@ -153,10 +170,45 @@ export function splitTaskNotificationBatches(
 // ---------------------------------------------------------------------------
 
 /**
- * Render one `<bg-task-notification>` child block, exactly the ADR-0022 §7 attribute set and
- * children. Attribute order is the ADR's order; `<output-bytes>` is always present,
- * `<output-ref>` only once the record has a ref, and `<output-preview>` only when the byte
- * count proves the payload is at or below {@link OUTPUT_PREVIEW_MAX_BYTES}.
+ * Cap on the `<error-message>` text, in Unicode code points (not UTF-16 code units).
+ *
+ * Why a cap at all: a failed child may leave **zero** output, so `errorMessage` is the only
+ * diagnosis the model receives — but it is child-produced text of unbounded length, and the
+ * whole point of ADR-0022 §7's batching is a bounded model-facing payload
+ * ({@link DEFAULT_MAX_BATCH_BYTES}, 100 KiB). One error message must not crowd that budget.
+ * 1024 code points is generous for a failure line, and even in the worst case where every
+ * character escapes to a six-byte entity (`&quot;`), it stays around 6 KiB — well under the
+ * batch budget. The splitter's size model ({@link estimateItemBytes}) renders through this same
+ * function, so the truncated text is what gets counted and there is no second size model to
+ * drift. Truncation happens **before** escaping, so the cap counts source characters rather than
+ * their entity forms.
+ *
+ * The unit matters: `String#length` and `String#slice` count UTF-16 code units, so a slice at
+ * the cap can land between a high and a low surrogate. A lone surrogate is not a character; it
+ * reaches the model as U+FFFD and makes the "character" claim false. The helper below counts
+ * code points instead, so an astral character (an emoji, a rare CJK extension) is kept whole or
+ * cut whole — never split.
+ */
+const MAX_NOTIFICATION_ERROR_CHARS = 1024;
+
+/**
+ * Keep the head of an overlong error message and mark the cut with an ellipsis: the reason a
+ * failed child died is usually in its first line (an HTTP status, an exit label), while the
+ * tail is the part that would get cut off anyway by the model's reader.
+ */
+function truncateNotificationError(errorMessage: string): string {
+  const codePoints = Array.from(errorMessage);
+  if (codePoints.length <= MAX_NOTIFICATION_ERROR_CHARS) return errorMessage;
+  return codePoints.slice(0, MAX_NOTIFICATION_ERROR_CHARS - 1).join("") + "…";
+}
+
+/**
+ * Render one `<bg-task-notification>` child block: the ADR-0022 §7 attribute set and children
+ * plus the 2026-10-19 amendment's `<error-message>` (see the module note). Attribute order is
+ * the ADR's order; `<output-bytes>` is always present, `<error-message>` only when the joined
+ * record carries one (`failed` / `lost` in practice), `<output-ref>` only once the record has
+ * a ref, and `<output-preview>` only when the byte count proves the payload is at or below
+ * {@link OUTPUT_PREVIEW_MAX_BYTES}.
  */
 function renderTaskNotificationChild(item: TaskNotificationItem): string {
   const { event, record } = item;
@@ -176,6 +228,15 @@ function renderTaskNotificationChild(item: TaskNotificationItem): string {
     `    transition-at-ms="${event.transitionAtMs}">`,
     `    <output-bytes>${displayedOutputBytes}</output-bytes>`,
   ];
+  // The 2026-10-19 amendment (module note): the diagnosis is rendered only when the record has
+  // one. succeeded / canceled never carry an errorMessage, and an unlabelled failure has none,
+  // so this element's presence is itself the signal that a reason exists. Truncate before
+  // escaping: the cap counts source characters, not their entity forms.
+  if (record.errorMessage !== undefined) {
+    lines.push(
+      `    <error-message>${escapeXml(truncateNotificationError(record.errorMessage))}</error-message>`,
+    );
+  }
   if (record.outputRef !== undefined) {
     lines.push(`    <output-ref>${escapeXml(record.outputRef)}</output-ref>`);
   }

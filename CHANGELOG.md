@@ -41,6 +41,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   carries a `background` argument meaning "detach the child". No compatibility alias is kept: the
   only consumer is a model reading the live schema each session, and a second name for one value
   would cost exactly the comprehension this change buys back.
+- **The background-dispatch guide now says which model a dispatched child runs, and that it is
+  not the caller's.** The child is a fresh `pi` subprocess, so its model resolves — first match
+  wins — as the dispatch's `model` argument, then the named agent definition's frontmatter
+  `model:`, then pi's own global default; the calling session's current model (and therefore a
+  provider switched to mid-session) is **not** inherited. Recorded after the 2026-10-19 field
+  report: the parent had switched provider, and the child it dispatched afterwards ran on pi's
+  default provider and hit a 429. No behaviour change — the resolution order is what the code
+  already did, and the guide states it so the failure is also preventable. See the background
+  dispatch guide, `docs/usage/bgdispatch.md`.
+
+### Fixed
+
+- **A background task that failed with an empty log now says why — on the notification, in
+  `ptc_task_output`, and in the host log.** A 2026-10-19 field report: a child was rate-limited
+  (429) before writing anything, its output log was 0 bytes, the `TaskRecord` carried the reason
+  in `errorMessage`, and the parent agent received only `status="failed"` — it read the empty
+  log as an infrastructure fault and could not act on the real one. Three surfaces now carry the
+  cause. A `<bg-task-notification>` whose record carries an `errorMessage` gains an optional
+  `<error-message>` (head-truncated to at most 1024 code points, an ellipsis marking the cut, and
+  XML-escaped; absent when the record has no such text), so the push that announces the failure
+  states it. `ptc_task_output`
+  renders the reason as an `error=…` line ahead of a failed/lost task's body and exposes the
+  record's `errorMessage` on the codemode projection as `error_message` (and on `details` as
+  `errorMessage`), so the pull after the push reads the same reason. The background pump logs a `logger.warn` with the
+  task id and the failure reason, so the host operator no longer sees only an empty child log. The
+  terminal empty-output fallback also stops saying "yet": a terminal task reads
+  `(no output; task <id> is <status>)`, while `running` / `stopping` keep
+  `(no output yet; …)`. See ADR-0022 §7 as amended (2026-10-19).
 
 ## [3.4.0] - 2026-10-19
 

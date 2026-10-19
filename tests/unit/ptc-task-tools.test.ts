@@ -1517,3 +1517,117 @@ describe("ptc_task_output states the host's counter for a child with no report (
     expect(Object.hasOwn(structured, "report")).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+//  issue #70: the record's failure reason on ptc_task_output
+// ---------------------------------------------------------------------------
+
+/**
+ * The captured 429 body from issue #70's report — the real string pi put on the assistant
+ * `message_end` of the child that exhausted its quota. Copied verbatim from the fixture in
+ * `tests/unit/dispatch-background.test.ts` (the real run: the child exited 0 having produced no
+ * text, so this string is the ONLY explanation of the failure the record holds).
+ */
+const CHILD_429_ERROR =
+  '429 {"type":"error","error":{"type":"rate_limit_error","message":"已达到 Token Plan 用量上限"}}';
+
+/**
+ * Drive TASK_1 to `failed` the way the pump does on issue #70's real run: the child exits 0 with
+ * zero drained bytes and has reported the provider's own error. The `errorMessage` under test is
+ * the registry's single-terminal-writer output — this test never writes the record field itself.
+ */
+async function failTaskWithChildError(h: Harness, childError: string): Promise<void> {
+  h.clock.set(1500);
+  await h.registry.transition(
+    {
+      kind: "resolve-exit",
+      taskId: TASK_1,
+      exitCode: 0,
+      outputBytes: 0,
+      childError,
+      reportChannel: "none",
+    },
+    { clock: h.clock.clock, callerId: CALLER },
+  );
+}
+
+describe("ptc_task_output states the record's failure reason (issue #70)", () => {
+  /*
+   * The failure from the report: the child 429'd, its output.log stayed 0 bytes, and the
+   * TaskRecord carried `errorMessage` — but this tool showed the model an empty page, so the
+   * parent concluded "infrastructure fault". The fix renders the reason the record already holds,
+   * on all three surfaces, next to an empty-output line that says the task SETTLED.
+   *
+   * COUNTERFACTUAL (constraint #5): drop `errorLine` from the head array and the failed-task row
+   * reds on its `error=` assertions while the two absent-error rows stay green; let `usageLine`
+   * ignore `reportBlock` and the report-bearing row reds on its single-counter assertion.
+   */
+
+  test("a failed task states the record's error ahead of the settled empty-output line", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    await failTaskWithChildError(h, CHILD_429_ERROR);
+    const tool = createPtcTaskOutputTool(h.registry, h.outputs);
+
+    const result = await callTool<PtcTaskOutputDetails>(tool, { taskId: TASK_1 });
+    const text = textOf(result);
+    const structured = readStructuredContent(result) as Record<string, unknown>;
+
+    // The registry wrote the reason onto the record; the tool's job is only to surface it.
+    const record = await h.registry.get(TASK_1);
+    expect(record?.status).toBe("failed");
+    expect(record?.errorMessage).toBe(CHILD_429_ERROR);
+    // `error=` is the spelling ptc_task_list already prints for the same field, and it reads
+    // BEFORE the body — the same conclusion-first order the report block follows.
+    expect(text).toContain(`error=${CHILD_429_ERROR}`);
+    expect(text).toContain(`(no output; task ${TASK_1} is failed)`);
+    expect(text.indexOf(`error=${CHILD_429_ERROR}`)).toBeLessThan(
+      text.indexOf(`(no output; task ${TASK_1} is failed)`),
+    );
+    // All three surfaces: a model reads the text, a codemode script sees only structuredContent,
+    // and the TUI reads details. camelCase on details (it mirrors the record), snake_case on the
+    // projection (every other key there is) — the same split read_only_tier/why_suppressed use.
+    expect(result.details.errorMessage).toBe(CHILD_429_ERROR);
+    expect(structured.error_message).toBe(CHILD_429_ERROR);
+    // A key whose value is `undefined` survives an in-memory read and vanishes here, so the round
+    // trip is what proves the projection is real JSON (same rule as the other projections).
+    expect(JSON.parse(JSON.stringify(structured))).toStrictEqual(structured);
+  });
+
+  test("a running task states no error, and omits the keys rather than setting them undefined", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    const tool = createPtcTaskOutputTool(h.registry, h.outputs);
+
+    const result = await callTool<PtcTaskOutputDetails>(tool, { taskId: TASK_1 });
+    const structured = readStructuredContent(result) as Record<string, unknown>;
+
+    // A live task has no failure yet, so there is nothing to state — and nothing claimed.
+    expect(textOf(result)).not.toContain("error=");
+    // `undefined` is not a JsonValue: `toBeUndefined` passes for `{key: undefined}` and for
+    // `{}` alike, so Object.hasOwn is the only assertion that tells the two apart.
+    expect(Object.hasOwn(result.details, "errorMessage")).toBe(false);
+    expect(Object.hasOwn(structured, "error_message")).toBe(false);
+  });
+
+  test("a succeeded report-bearing task keeps one counter line and gains no error line", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    h.clock.set(1500);
+
+    const { result, text, structured } = await readClosedTask(h, {
+      exitCode: 0,
+      reportChannel: "prompt-json",
+      report: PERSISTED_REPORT_WITH_HOST_USAGE,
+    });
+
+    // The report block already carries the counter, so the standalone line must not be added
+    // above it (#199's no-double-line rule, re-asserted because the error line now competes for
+    // the same head). A succeeded record has no failure reason, so no `error=` line either.
+    expect((await h.registry.get(TASK_1))?.status).toBe("succeeded");
+    expect(text.match(/usage: input=/g)).toHaveLength(1);
+    expect(text).not.toContain("error=");
+    expect(Object.hasOwn(result.details, "errorMessage")).toBe(false);
+    expect(Object.hasOwn(structured, "error_message")).toBe(false);
+  });
+});

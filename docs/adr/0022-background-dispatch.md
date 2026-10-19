@@ -51,6 +51,25 @@ Status: accepted (2026-09-24). Behavior change on the program-visible side (new 
 > `readOnlyTier`. The four "21 fields" mentions in this document stay the authoring miscount ADR-0023's note
 > already flagged; these are the counts now.
 
+> **Amended by §7 (2026-10-19, field report): a failed/lost notification names the cause.** §7's
+> child element carried the status, the label and the output size, so a child that died before
+> writing anything reached the model as `status="failed"` with a zero-byte output log and no
+> reason. In the field report the reason was a provider 429; the `TaskRecord` had written it to
+> `errorMessage`, and the model still read the empty log as an infrastructure fault — the record
+> knew what the notification did not say. The child element now carries an optional
+> `<error-message>` child: the record's `errorMessage`, head-truncated to at most 1024
+> **code points** (an ellipsis marks the cut; the cut never splits a surrogate pair) and
+> XML-escaped, rendered **whenever the joined record carries one** — in practice the `failed`
+> and `lost` records, since a `succeeded` or `canceled` close records no reason of its own. A
+> `failed` record whose `errorMessage` is absent omits the element: a non-zero exit with no
+> diagnostic leaves a status with no stated cause, and the renderer does not invent one. §7's
+> example below marks where the element appears — between `<output-bytes>` and `<output-ref>`.
+> No `TaskRecord` schema change and no state-machine change: the §7 renderer is the only thing
+> amended here, and `ptc_task_output` states the same reason (usage guide). One asymmetry is
+> deliberate: the 1024-code-point cap belongs to **this push surface only**, because the batch
+> has a byte budget; the pull surface (`ptc_task_output`) and the host log keep the record's
+> full text, so a reader who needs the whole string asks rather than being handed a cut one.
+
 ## Context
 
 This ADR closes the bgdispatch map. The four research/decision tickets it crystallizes are:
@@ -233,6 +252,7 @@ G2 verdict, locked:
     duration-ms="0"
     transition-at-ms="12345">
     <output-bytes>0</output-bytes>
+    <!-- <error-message> only when the record carries one (failed / lost in practice) -->
     <!-- output-ref once output.log exists -->
     <!-- output-preview only when outputBytes <= 2048 -->
   </bg-task-notification>
@@ -241,6 +261,14 @@ G2 verdict, locked:
 ```
 
 `<bg-` prefix (map Notes clause 1) avoids pi's general notification prefix. `subscription-id` is debug metadata (<=10 B), does not affect payload-size budget. Parent label carries no summary, model expands `<bg-task>` children directly. TUI panel rendering is handled in P1 (#43).
+
+**`<error-message>` (added 2026-10-19, field report).** The child element carries the record's
+`errorMessage` — head-truncated to at most 1024 code points, an ellipsis marking the cut, and
+XML-escaped — and only when the joined record carries one (`failed` / `lost` in practice; a `succeeded` or
+`canceled` close records no reason). The failed/lost event is where the element earns its place: a
+child that died before writing output has a zero-byte log, so the notification is the only surface
+the model is shown without asking, and `status="failed"` alone is indistinguishable from an
+infrastructure fault. `ptc_task_output` states the same text for a reader who comes later.
 
 A single batch carries N events. When a single-batch content exceeds the byte budget `DEFAULT_MAX_BATCH_BYTES = 100 * 1024` (100 KiB), the TaskRegistry splits along event boundaries into N batches. Each batch has its own `<bg-task-notifications>` parent. The model sees N consecutive parent tags; the cursor advances by N events, not N batches.
 

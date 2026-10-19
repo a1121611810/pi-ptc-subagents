@@ -288,6 +288,14 @@ export interface PtcTaskOutputDetails {
   /** Total bytes stored for the task, regardless of `sinceBytes` or truncation. */
   outputBytes: number;
   /**
+   * ADR-0022 §2 / issue #70: the record's own reason for a `failed` or `lost` task — the
+   * `errorMessage` the registry wrote on the terminal close (or the recovery sweep). Present if
+   * and only if the record carries one; the text block states it as `error=…` and
+   * `structuredContent` as `error_message`. A record with no reason omits the key rather than
+   * claiming an empty one, so "no reason recorded" and "reason recorded as empty" stay distinct.
+   */
+  errorMessage?: string;
+  /**
    * ADR-0022 §7: inline preview of the stored output, present only when `outputBytes` is at
    * or below the 2048-byte Map+preview ceiling (OUTPUT_PREVIEW_MAX_BYTES).
    */
@@ -466,6 +474,12 @@ const OUTPUT_OUTPUT_SCHEMA = Type.Object({
     description:
       "The task's status at read time (ADR-0022 §2's six states), so a polling script does not need a second ptc_task_list call.",
   }),
+  error_message: Type.Optional(
+    Type.String({
+      description:
+        "The record's raw reason for a `failed` or `lost` task (ADR-0022 §2 / issue #70) — the string the text block prints as `error=…` after sanitizing it for display, and the same field `ptc_task_list` projects as `error_message`. Absent unless the record carries an error: a running task has no failure yet, and a `succeeded` or `canceled` close records no reason of its own.",
+    }),
+  ),
   output: Type.String({
     description: "The page the model reads: the stored output's tail, ADR-0015-truncated.",
   }),
@@ -559,6 +573,7 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
     description: [
       "Read a background task's captured output.",
       'A succeeded task also renders its child report (summary, findings, files touched, usage) ahead of the prose, and says which channel delivered it; a channel of "none" means the child ignored the report contract.',
+      "A failed or lost task also states the record's error message — the reason it did not succeed — ahead of the output, so an empty output.log is not mistaken for an infrastructure fault.",
       "The text is tail-truncated to pi's ADR-0015 limits (50 KB / 2000 lines); when anything is cut, outputFullPath names a file with the complete output.",
       "Pass sinceBytes to skip a prefix of the stored output when paging.",
     ].join("\n"),
@@ -617,6 +632,7 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
         taskId,
         output: truncation.text,
         outputBytes,
+        ...(record.errorMessage === undefined ? {} : { errorMessage: record.errorMessage }),
         ...(outputPreview === undefined ? {} : { outputPreview }),
         outputTruncated: truncation.truncated,
         ...(truncation.fullPath === undefined ? {} : { outputFullPath: truncation.fullPath }),
@@ -627,17 +643,37 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
       };
       // ADR-0032 rendering: the report reads first, the child's prose after — conclusion first,
       // reasoning second. A task with a report always has output too (a `succeeded` child produced
-      // text), so the "(no output yet)" fallback can never swallow the report block.
+      // text), so the empty-output fallback can never swallow the report block. The fallback
+      // distinguishes a task still in flight ("yet") from a settled one: issue #70's 0-byte failed
+      // page used to read "(no output yet …)", which a parent could only take for a live task or
+      // an infrastructure fault.
       const body =
         details.output.length > 0
           ? details.output
-          : `(no output yet; task ${taskId} is ${record.status})`;
+          : record.status === "running" || record.status === "stopping"
+            ? `(no output yet; task ${taskId} is ${record.status})`
+            : `(no output; task ${taskId} is ${record.status})`;
+      // Issue #70 / ADR-0022 §2: the record's own reason for the failure, in the `error=` spelling
+      // `formatTaskLine` already uses for ptc_task_list, so the two surfaces cannot disagree and a
+      // model that read the reason in the list reads the same string here. Absent exactly when the
+      // record carries none.
+      const errorLine =
+        record.errorMessage === undefined
+          ? undefined
+          : `error=${sanitizeText(record.errorMessage)}`;
       // Issue #199: a started child the host measured that has NO block to print the line in. A
       // `failed` or `canceled` record carries neither a report nor a channel (ADR-0032: "has not
       // reported yet" is not "reported nothing"), so there is no `<child-report>` element to put it
       // inside — it goes exactly where a block would go, above the prose, in the same format. A
       // task with a block never takes this path, so the line is rendered once either way.
-      const head = reportBlock ?? (usage === undefined ? undefined : formatUsageLine(usage));
+      const usageLine =
+        reportBlock === undefined && usage !== undefined ? formatUsageLine(usage) : undefined;
+      // One head, in reading order: the report block (which already carries the counter), then the
+      // failure reason, then the standalone counter for the children that have no block.
+      const headParts = [reportBlock, errorLine, usageLine].filter(
+        (part): part is string => part !== undefined,
+      );
+      const head = headParts.length === 0 ? undefined : headParts.join("\n");
       const text = head === undefined ? body : `${head}\n${body}`;
       // ADR-0041 §Reporting: the tier, on the THIRD model-facing surface. `structuredContent`
       // and `details` both carry it below, but neither reaches the model — this tool is `direct`,
@@ -658,6 +694,7 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
       const structuredContent: Static<typeof OUTPUT_OUTPUT_SCHEMA> = {
         task_id: taskId,
         status: record.status,
+        ...(record.errorMessage === undefined ? {} : { error_message: record.errorMessage }),
         output: truncation.text,
         output_bytes: outputBytes,
         ...(outputPreview === undefined ? {} : { output_preview: outputPreview }),

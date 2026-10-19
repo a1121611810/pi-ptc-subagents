@@ -120,6 +120,27 @@ reads `readOnlyTier` on the result — `readOnlyTier` on the record, `read_only_
 projection — and a **model** reads a rendered line above the child report, since pi never hands a
 `direct` tool's `structuredContent` to the model. Neither line appears when no tier was requested.
 
+### Which model the child runs
+
+A child is a fresh `pi` subprocess, so it does **not** inherit the model the calling session
+happens to be on — and therefore not the provider a mid-session switch selected. Its model
+resolves first match wins:
+
+1. the dispatch's `model` argument;
+2. the named agent definition's frontmatter `model:`;
+3. pi's own global default — no `--model` flag is passed at all.
+
+A session that switched provider or model mid-conversation does not carry that choice into the next
+child it dispatches: unless the dispatch or the definition names a model, the child starts on pi's
+configured default, on pi's default provider.
+
+That is an orchestration fact, not only an implementation one. In the 2026-10-19 field report the
+parent had switched provider; the child it dispatched afterwards resolved to pi's default provider
+and died on a **429** before writing a byte. The failure notification and `ptc_task_output` now
+carry the cause (see [Notification delivery](#notification-delivery)), but the prevention is here:
+if the parent changed model for a reason — rate limit, cost, capability — pin the child's model
+with `model` or in the agent definition instead of assuming the change carries.
+
 On a refusal — depth cap, concurrency cap, unknown agent, or a spawn that never came up — the call
 resolves with a `DispatchResult` instead: `{ status: "rejected", started: false, errorMessage: … }`.
 The binding never throws, so branch on the shape:
@@ -202,6 +223,16 @@ ptc_task_list({ status: ["running"], limit: 20 });
 ptc_task_output({ taskId: "01JBZ000000000000000000002", sinceBytes: 1024 });
 ```
 
+For a `failed` or `lost` task whose record carries an `errorMessage` — the same reason the
+failure notification carried — the text block gains an `error=…` line ahead of the body: the
+record's reason sanitized for the text surface (`sanitizeText`: ANSI escapes and control
+characters are stripped; embedded newlines and tabs are preserved, so this is a prefixed line,
+not a guaranteed single line). The codemode projection exposes the record's own **raw**
+`errorMessage` as `error_message` (and the `details` object carries it as `errorMessage`), so a
+script that needs the exact bytes asks there rather than parsing the text line. This is the
+empty-log case: a child that died before writing output has no other model-facing evidence, so
+the reason is the one thing worth reading.
+
 #### The child report
 
 A background child's [child report](../adr/0032-child-report.md) is as inspectable as a
@@ -259,8 +290,14 @@ carry neither `report` nor `reportChannel`: a child that has not finished has no
 and "has not reported yet" is a different claim from "ran and complied with nothing to say"
 (`reportChannel: "none"`). Usage is a separate claim: `failed` and `canceled` are terminal closes
 of a started child, so their records still carry the host-measured `usage`; `running` / `stopping`
-have simply not reached a close yet, and a `lost` record carries none. The record's status and
-`errorMessage` are what describe those tasks.
+have simply not reached a close yet, and a `lost` record carries none.
+
+For a `failed` or `lost` record that carries an `errorMessage`, the reason is now rendered
+rather than left on the record: `ptc_task_output` puts an `error=…` line ahead of the body, and
+the codemode projection exposes the record's `errorMessage` as `error_message`. That is what
+makes an empty log readable. The empty-output fallback agrees with it: a terminal task reads `(no output; task <id> is
+<status>)`, and only `running` / `stopping` keep the `yet` — a task that will never write
+again is not still waiting to write.
 
 **`ptc_task_stop`** — ask a running task to stop.
 
@@ -338,8 +375,9 @@ When a `TaskRecord` changes, the change is delivered to the model as a user-role
     duration-ms="18422"
     transition-at-ms="1758700000123">
     <output-bytes>913</output-bytes>
-    <output-preview>…only when outputBytes &lt;= 2048…</output-preview>
+    <!-- <error-message> only when the record carries one (failed / lost in practice) -->
     <!-- <output-ref>…/tasks/01JBZ…/output.log</output-ref> once the log exists -->
+    <output-preview>…only when outputBytes &lt;= 2048…</output-preview>
   </bg-task-notification>
 </bg-task-notifications>
 ```
@@ -347,6 +385,17 @@ When a `TaskRecord` changes, the change is delivered to the model as a user-role
 - **Inline preview.** `<output-preview>` is included only when the task's `outputBytes` is at or below
   **2048 bytes**. Above that the event carries `<output-bytes>` only, and the model dereferences the
   body with `ptc_task_output`.
+- **Failure text.** A record that carries an `errorMessage` (`failed` / `lost` in practice —
+  a `succeeded` or `canceled` close records no reason) renders it as `<error-message>`, between
+  `<output-bytes>` and `<output-ref>`: head-truncated to at most 1024 **code points**, an ellipsis
+  marking the cut, and XML-escaped (the cut never splits a surrogate pair). A record with no
+  `errorMessage` omits the element — a `failed` child that exited non-zero with no diagnostic has
+  no stated cause, and the element does not invent one. This is what makes a zero-byte failure
+  readable: the log is empty and `status="failed"` alone reads as an infrastructure fault. The
+  rule is the ADR-0022 §7 amendment of 2026-10-19, which records the field report behind it.
+  **The cap is this push surface's alone** — it bounds the batch. `ptc_task_output` states the
+  record's full `errorMessage`, so a reader who needs the whole string pulls instead of being
+  handed a truncated one.
 - **Batch split.** A batch is split along event boundaries so its estimated payload stays within the
   default **100 KiB** budget (`DEFAULT_MAX_BATCH_BYTES = 100 * 1024`). The split never drops an event:
   an event that alone exceeds the budget gets its own batch. The cursor advances by _events_, not by

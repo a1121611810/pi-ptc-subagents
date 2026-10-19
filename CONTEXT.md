@@ -758,8 +758,10 @@ the model when a `TaskRecord` changes. Batch parent `<bg-task-notifications>`
 wraps N per-event children; per-event `<bg-task-notification>` carries
 `id="task:<ulid>:-><status>"`, `task-id`, `subscription-id`, `status`,
 `label`, `agent-name`, `depth`, `duration-ms`, `transition-at-ms`,
-`<output-bytes>`, optional `<output-ref>`, optional `<output-preview>`
-(only when outputBytes <= 2048). See ADR-0022.
+`<output-bytes>`, optional `<error-message>` (only when the record carries an `errorMessage`
+— `failed` / `lost` in practice; head-truncated to 1024 code points, an ellipsis marking the
+cut, and XML-escaped), optional `<output-ref>`, optional `<output-preview>` (only when
+outputBytes <= 2048). See ADR-0022.
 
 **dispatch sub-row** — the variant of a sub-row for `pi.dispatch(...)`
 calls. Uses the binding's `agent` argument for the args preview and reads
