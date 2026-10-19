@@ -1631,3 +1631,45 @@ describe("ptc_task_output states the record's failure reason (issue #70)", () =>
     expect(Object.hasOwn(structured, "error_message")).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+//  ADR-0022 §8: a `lost` record on ptc_task_output
+// ---------------------------------------------------------------------------
+
+describe("ptc_task_output states a lost task's recovery reason (ADR-0022 §8)", () => {
+  test("a lost task states the §8 reason ahead of the settled empty-output line", async () => {
+    const h = createHarness(1000);
+    await spawnTask(h, TASK_1);
+    h.clock.set(1500);
+    // Drive TASK_1 to `lost` through the recovery edge the restart reconciler uses. The reason
+    // is one of ADR-0022 §8's three `LostReason`s; `session_ended_while_running` is the one
+    // written when a session ended with a child still in flight — the shape that leaves an
+    // empty output.log and no close at all.
+    await h.registry.transition(
+      { kind: "reconcile-lost", taskId: TASK_1, reason: "session_ended_while_running" },
+      { clock: h.clock.clock, callerId: CALLER },
+    );
+    const tool = createPtcTaskOutputTool(h.registry, h.outputs);
+
+    const result = await callTool<PtcTaskOutputDetails>(tool, { taskId: TASK_1 });
+    const text = textOf(result);
+    const structured = readStructuredContent(result) as Record<string, unknown>;
+
+    // The registry wrote the reason onto the record; the tool's job is only to surface it.
+    const record = await h.registry.get(TASK_1);
+    expect(record?.status).toBe("lost");
+    expect(record?.errorMessage).toBe("session_ended_while_running");
+    // The P0-2 surfaces: `error=` first (the same spelling ptc_task_list prints), then the
+    // empty-output line in its SETTLED form — "no output yet" would claim a live task.
+    expect(text).toBe(`error=session_ended_while_running\n(no output; task ${TASK_1} is lost)`);
+    expect(text).not.toContain("(no output yet");
+    // details mirrors the record (camelCase), structuredContent is the snake_case projection.
+    expect(result.details.errorMessage).toBe("session_ended_while_running");
+    expect(structured.error_message).toBe("session_ended_while_running");
+    // A lost record has no report and no channel: the close never happened. The keys must be
+    // ABSENT, not present-and-undefined (a `JsonValue` has no undefined).
+    expect(Object.hasOwn(result.details, "reportChannel")).toBe(false);
+    expect(Object.hasOwn(structured, "report_channel")).toBe(false);
+    expect(JSON.parse(JSON.stringify(structured))).toStrictEqual(structured);
+  });
+});
