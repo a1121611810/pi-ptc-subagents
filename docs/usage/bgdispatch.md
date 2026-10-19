@@ -152,7 +152,7 @@ visible even when the call site did not pin it.
 
 **What the child ran is reported.** The host observes the provider/model from the child's own
 assistant turns (last turn wins) and states it on every surface that carries the child's facts:
-`provider` / `model` on a foreground `DispatchResult`, the same optional pair on the background
+`observedProvider` / `observedModel` on a foreground `DispatchResult`, the same optional pair on the background
 `TaskRecord`, as a `model: provider/id` line on this page's `ptc_task_output` text and on a
 successful `ptc_subagent` result, and as a `model=` fact in a rejected `ptc_subagent` call's
 diagnostic. Either half may be absent when the transcript named only the other; both absent means
@@ -535,7 +535,7 @@ The task state goes through the `TaskStorage` seam. There are two adapters: an i
 under the session directory so a restart can reconcile:
 
 ```text
-<sessionDir>/tasks/<taskId>.json                                 # the TaskRecord, 28 fields today: 19 ADR-0022 §3 originals plus the 2026-10-16 `usage`, 2 optional ADR-0023 owner fields, 2 optional ADR-0032 report fields on a succeeded record, the optional ADR-0041 `readOnlyTier`, the optional ADR-0043 `whySuppressed`, and the optional observed-model pair `provider` / `model` (ADR-0044) (atomic temp+rename)
+<sessionDir>/tasks/<taskId>.json                                 # the TaskRecord, 28 fields today: 19 ADR-0022 §3 originals plus the 2026-10-16 `usage`, 2 optional ADR-0023 owner fields, 2 optional ADR-0032 report fields on a succeeded record, the optional ADR-0041 `readOnlyTier`, the optional ADR-0043 `whySuppressed`, and the optional observed-model pair `observedProvider` / `observedModel` (ADR-0044, renamed by ADR-0045) (atomic temp+rename)
 <sessionDir>/subscriptions/<subscriberId>-<taskId>.json          # the per-subscriber cursor (atomic temp+rename)
 <sessionDir>/events/<subscriberId>-<taskId>.jsonl                # append-only newline-delimited events
 <sessionDir>/tasks/<taskId>/output.log                           # the captured output

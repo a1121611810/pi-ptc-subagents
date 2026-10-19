@@ -48,6 +48,7 @@ ADRs for pi-ptc-subagents, per `docs/agents/domain.md` (single-context repo).
 | [0042](./0042-goal-on-dispatch.md)                         | A dispatch may carry the caller's reason, as context rather than authority                                    | accepted              |
 | [0043](./0043-a-why-switch-and-a-name.md)                  | `goal` was the wrong name, and the switch that hides it fails on                                              | accepted              |
 | [0044](./0044-a-dispatch-inherits-the-session-model.md)    | A dispatch inherits the session model; what it ran and why it failed are reported                             | accepted              |
+| [0045](./0045-observed-model-field-names.md)               | The observed-model fields are named `observedProvider` / `observedModel`; the input keeps `model`             | accepted              |
 
 Numbering gaps are deliberate: 0001/0006 were reserved while wayfinder map #7 was charting and dropped when G1 resolved; keeping their slots means every cross-reference in the map and its tickets stays valid.
 

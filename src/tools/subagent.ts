@@ -347,7 +347,7 @@ export function describeSettledFailure(outcome: DispatchResult): string {
     "turns=" + String(outcome.usage?.turns ?? 0),
     "reportChannel=" + outcome.reportChannel,
   ];
-  const model = formatObservedModel(outcome.provider, outcome.model);
+  const model = formatObservedModel(outcome.observedProvider, outcome.observedModel);
   if (model !== undefined) facts.push("model=" + model);
   const text = cause + " (" + facts.join(", ") + ")";
   // Keep the tail: a provider's diagnosis usually ends with the actionable part, and the cause
@@ -565,7 +565,7 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
       // conclusion the caller asked for; before the prose because that prose is evidence
       // produced by the process whose model this line names. Absent when no assistant turn was
       // observed -- a missing line is the honest claim "we saw no model", never `model: undefined`.
-      const observedModel = formatObservedModel(outcome.provider, outcome.model);
+      const observedModel = formatObservedModel(outcome.observedProvider, outcome.observedModel);
       const modelText = observedModel === undefined ? "" : "model: " + observedModel;
       const text = [tierText, suppressedText, reportBlock, modelText, outcome.text]
         .filter((part) => part.length > 0)

@@ -4,6 +4,8 @@ status: accepted (2026-10-19)
 
 # A dispatch inherits the session model
 
+> **Amended by [ADR-0045](./0045-observed-model-field-names.md) (2026-10-19): the result/record fields are named `observedProvider` / `observedModel`. This record's Decision 2 keeps the semantics; only the names change.**
+
 ## Context
 
 A dispatched child is a fresh `pi` subprocess: it has its own session, its own context, and its
@@ -75,7 +77,7 @@ a new model.
 One observation, folded from the child's assistant turns by one accumulator (last turn wins, per
 field), is stated on every surface that already carries the child's facts:
 
-- `DispatchResult.provider?` / `DispatchResult.model?` — the foreground result.
+- `DispatchResult.observedProvider?` / `DispatchResult.observedModel?` — the foreground result.
 - `TaskRecord.provider?` / `TaskRecord.model?` — the background record, written at the same
   terminal close that writes `usage`, so a failed or canceled close still states the pair when a
   turn named it.

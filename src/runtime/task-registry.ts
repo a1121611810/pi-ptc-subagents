@@ -193,8 +193,9 @@ export type TaskCommand =
       report?: ChildReport;
       reportChannel: ChildReportChannel;
       usage?: DispatchUsage;
-      provider?: string;
-      model?: string;
+      /** ADR-0045: the observed model names; a legacy on-disk record is normalized on read. */
+      observedProvider?: string;
+      observedModel?: string;
     };
 
 /** Outcome of one successful command: the persisted record, emitted events, and cursor. */
@@ -730,8 +731,8 @@ export class DefaultTaskRegistry implements TaskRegistry {
       usage: command.usage,
       // ADR-0044 Decision 2: the observed model, on the same "every outcome" rule as `usage`
       // for the same reason -- the model ran whether or not the close was a success.
-      provider: command.provider,
-      model: command.model,
+      observedProvider: command.observedProvider,
+      observedModel: command.observedModel,
       // A non-succeeded close contributes no report fields at all: `undefined` here means
       // "leave the record's absent report alone", never "write an empty one".
       ...(to === "succeeded"
@@ -775,9 +776,9 @@ export class DefaultTaskRegistry implements TaskRegistry {
       reportChannel?: ChildReportChannel;
       /** ADR-0032's counter (issue #199); set on EVERY close outcome, not just `succeeded`. */
       usage?: DispatchUsage;
-      /** ADR-0044 Decision 2: host-observed model pair; set on EVERY close outcome. */
-      provider?: string;
-      model?: string;
+      /** ADR-0044 Decision 2 / ADR-0045: host-observed model pair; set on EVERY close outcome. */
+      observedProvider?: string;
+      observedModel?: string;
     },
   ): Promise<TransitionResult> {
     const now = Math.max(0, Math.floor(ctx.clock()));
@@ -804,8 +805,8 @@ export class DefaultTaskRegistry implements TaskRegistry {
     // ADR-0044 Decision 2: one field at a time, like `usage`. A transcript may report a model
     // without a provider, and dropping the half-observation would be worse than reporting it
     // unqualified.
-    if (fields.provider !== undefined) updated.provider = fields.provider;
-    if (fields.model !== undefined) updated.model = fields.model;
+    if (fields.observedProvider !== undefined) updated.observedProvider = fields.observedProvider;
+    if (fields.observedModel !== undefined) updated.observedModel = fields.observedModel;
     if (fields.reason !== undefined) {
       // The generic `reason` lands in the field ADR-0022 §8 gives that state: stopReason for
       // the stop states, errorMessage for the failure states. Explicit fields win.

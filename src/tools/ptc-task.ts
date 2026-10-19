@@ -675,7 +675,7 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
       // inside `<child-report>`, because it is a HOST measurement: putting it in the report could
       // only happen by the child reporting on itself. Absent when no turn was observed, so an
       // old record and an unstarted child render exactly the text they rendered before.
-      const observedModel = formatObservedModel(record.provider, record.model);
+      const observedModel = formatObservedModel(record.observedProvider, record.observedModel);
       const modelLine = observedModel === undefined ? undefined : "model: " + observedModel;
       // One head, in reading order: the report block (which already carries the counter), then the
       // failure reason, then the standalone counter for the children that have no block, then the

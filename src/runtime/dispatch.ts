@@ -519,13 +519,13 @@ export interface DispatchResult {
    * learn which default that was -- a wrong-model incident was invisible on the one surface
    * that had room to state it.
    */
-  provider?: string;
+  observedProvider?: string;
   /**
-   * The model id the child actually ran, observed like {@link provider}. Present even when
-   * the provider field is absent -- a transcript may carry a model without a provider, and
-   * dropping a half-observation would be worse than reporting it qualified by nothing.
+   * The model id the child actually ran, observed like {@link observedProvider}. Present even
+   * when the provider field is absent -- a transcript may carry a model without a provider,
+   * and dropping a half-observation would be worse than reporting it qualified by nothing.
    */
-  model?: string;
+  observedModel?: string;
   stderr?: string;
   errorMessage?: string;
   /** The child's child report, when one arrived over either channel. */
@@ -2572,8 +2572,8 @@ async function dispatchBackground(
             // `usage` -- a failed or canceled child still ran a model, and that is exactly the
             // incident shape this field exists to make visible. Absent means no assistant turn
             // NAMED one (no turn was observed, or the pi does not report the pair).
-            provider: childModel?.provider,
-            model: childModel?.model,
+            observedProvider: childModel?.provider,
+            observedModel: childModel?.model,
             // The report's four-field `usage` view is derived from that SAME accumulator
             // instance, so the two carriers cannot disagree about input / output / cost / turns
             // when both are present. The registry applies the pair only when this close resolves
@@ -2910,8 +2910,8 @@ export async function dispatch(
       // ADR-0044 Decision 2: stamped only for a value the wire named. ABSENT means no assistant
       // turn NAMED a provider/model -- an older pi may report neither, and a refusal that never
       // spawned has no turns at all -- not "we do not know what the child ran".
-      if (childModel?.provider !== undefined) out.provider = childModel.provider;
-      if (childModel?.model !== undefined) out.model = childModel.model;
+      if (childModel?.provider !== undefined) out.observedProvider = childModel.provider;
+      if (childModel?.model !== undefined) out.observedModel = childModel.model;
       if (stderrText.length > 0) out.stderr = stderrText;
       if (errorMessage) out.errorMessage = errorMessage;
       // A rejected foreground close that the child itself diagnosed is the one case where no

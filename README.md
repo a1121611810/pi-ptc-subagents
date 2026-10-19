@@ -79,7 +79,7 @@ const result = await tools["pi.dispatch"]({
 // result.status: "fulfilled" | "rejected"  (the binding never throws)
 // result.text:   final assistant text
 // result.usage:  { input, output, cacheRead, cacheWrite, cost, turns }
-// result.provider?, result.model?: the provider/model the child actually ran
+// result.observedProvider?, result.observedModel?: the provider/model the child actually ran
 // result.exitCode, result.durationMs, result.stderr?, result.errorMessage?
 ```
 
@@ -134,7 +134,7 @@ dispatch inherits the child's own session model. Pin the model at the call site 
 definition to opt out; there is no config key for it, and a direct library caller (or a pi that
 exposes no session model) falls back to pi's default exactly as before.
 
-The result says which model the child actually ran: `provider` / `model` on a foreground
+The result says which model the child actually ran: `observedProvider` / `observedModel` on a foreground
 `DispatchResult`, the same optional pair on a background task record (which `ptc_task_output`
 renders as a line), and a `model: provider/id` line in `ptc_subagent`'s text. Absence means no
 observed assistant turn named the pair — no turn, a supported pi that does not report it, or an

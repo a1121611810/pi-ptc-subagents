@@ -335,8 +335,8 @@ describe("foreground dispatch over the real 429 transcript", () => {
       cost: 0,
       turns: 4,
     });
-    expect(result.provider).toBe(CAPTURED_PROVIDER);
-    expect(result.model).toBe(CAPTURED_MODEL);
+    expect(result.observedProvider).toBe(CAPTURED_PROVIDER);
+    expect(result.observedModel).toBe(CAPTURED_MODEL);
   });
 
   test("the new failure path leaves one operator warning naming the child's cause", async () => {
@@ -366,7 +366,7 @@ describe("foreground dispatch over the real 429 transcript", () => {
     expect(harness.warnings).toEqual([]);
     // Absent means "no assistant turn named a model", not "the model is unknown": these events
     // carry no model, so the result must not invent one.
-    expect(Object.hasOwn(result, "provider")).toBe(false);
+    expect(Object.hasOwn(result, "observedProvider")).toBe(false);
     expect(Object.hasOwn(result, "model")).toBe(false);
   });
 
@@ -405,8 +405,8 @@ describe("foreground dispatch over the real 429 transcript", () => {
       assistantTextWithModel("PONG", "", "deepseek-flash"),
     ]);
     expect(result.status).toBe("fulfilled");
-    expect(result.model).toBe("deepseek-flash");
-    expect(Object.hasOwn(result, "provider")).toBe(false);
+    expect(result.observedModel).toBe("deepseek-flash");
+    expect(Object.hasOwn(result, "observedProvider")).toBe(false);
   });
 });
 
@@ -472,8 +472,8 @@ describe("describeSettledFailure", () => {
     const outcome = rejectedOutcome({
       errorMessage: FINAL_RATE_LIMIT_ERROR,
       usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 4 },
-      provider: CAPTURED_PROVIDER,
-      model: CAPTURED_MODEL,
+      observedProvider: CAPTURED_PROVIDER,
+      observedModel: CAPTURED_MODEL,
     });
     expect(describeSettledFailure(outcome)).toBe(
       FINAL_RATE_LIMIT_ERROR +
@@ -509,7 +509,7 @@ describe("describeSettledFailure", () => {
   });
 
   test("a model known only by id is named without a provider prefix", () => {
-    const text = describeSettledFailure(rejectedOutcome({ model: "deepseek-flash" }));
+    const text = describeSettledFailure(rejectedOutcome({ observedModel: "deepseek-flash" }));
     expect(text).toBe(
       "the child failed without an error message (child ran, exit=0, turns=0, reportChannel=none, model=deepseek-flash)",
     );
@@ -538,8 +538,8 @@ describe("describeSettledFailure", () => {
     const outcome = rejectedOutcome({
       errorMessage: FINAL_RATE_LIMIT_ERROR,
       usage,
-      provider: CAPTURED_PROVIDER,
-      model: CAPTURED_MODEL,
+      observedProvider: CAPTURED_PROVIDER,
+      observedModel: CAPTURED_MODEL,
     });
     expect(describeSettledFailure(outcome)).toContain("turns=4");
     expect(describeSettledFailure(outcome)).toContain(
@@ -796,8 +796,8 @@ describe("the background record and ptc_task_output carry the observed model", (
     const { record, harness } = await runBackground(FIXTURE_EVENTS);
     expect(record.status).toBe("failed");
     expect(record.errorMessage).toBe(FINAL_RATE_LIMIT_ERROR);
-    expect(record.provider).toBe(CAPTURED_PROVIDER);
-    expect(record.model).toBe(CAPTURED_MODEL);
+    expect(record.observedProvider).toBe(CAPTURED_PROVIDER);
+    expect(record.observedModel).toBe(CAPTURED_MODEL);
     expect(record.usage?.turns).toBe(4);
     // The pump's existing operator warning names the task and the child's cause (issue #70).
     expect(
@@ -919,7 +919,11 @@ describe("the observed-model text is sanitized on every model-facing surface", (
 
   test("the refusal diagnostic's model= fact is sanitized too", () => {
     const text = describeSettledFailure(
-      rejectedOutcome({ errorMessage: "boom", provider: INJECTED_PROVIDER, model: INJECTED_MODEL }),
+      rejectedOutcome({
+        errorMessage: "boom",
+        observedProvider: INJECTED_PROVIDER,
+        observedModel: INJECTED_MODEL,
+      }),
     );
     expect(text).not.toContain("\x1b");
     // One line: the injected newline must not split the diagnostic into facts the caller reads
@@ -959,8 +963,8 @@ describe("a canceled close still records the observed model", () => {
       harness.lifecycle.resolveExit(child, 0, null);
       const record = await waitForTerminal(harness.storage, outcome.taskId);
       expect(record.status).toBe("canceled");
-      expect(record.provider).toBe("deepseek");
-      expect(record.model).toBe("deepseek-flash");
+      expect(record.observedProvider).toBe("deepseek");
+      expect(record.observedModel).toBe("deepseek-flash");
     } finally {
       await removeTempDir(dir);
     }

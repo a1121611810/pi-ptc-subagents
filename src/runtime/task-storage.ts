@@ -80,7 +80,7 @@ export interface TaskSpawnSource {
  * the 2026-10-16 #199 amendment (19 ADR-0022 §3 originals — its "21 fields" heading is an
  * authoring miscount — plus `usage`), two optional ADR-0023 owner-identity fields, two ADR-0032
  * report fields, ADR-0041's `readOnlyTier`, ADR-0043's `whySuppressed` and the host-observed
- * `provider` / `model` pair; 28 today, persisted as-is. Optional fields are
+ * `observedProvider` / `observedModel` pair (ADR-0045); 28 today, persisted as-is. Optional fields are
  * absent on records still `running` (e.g. `finishedAt` / `exitCode` / `outputRef` are written at
  * transition time, not at spawn) and `ownerPid` / `ownerBootMs` are absent on pre-upgrade
  * legacy records. The `report` / `reportChannel` pair is absent unless the record reached
@@ -182,7 +182,8 @@ export interface TaskRecord {
    * The provider that actually served this child, observed by the pump off the child's assistant
    * `message_end` events (last turn wins). Persisted at the terminal close, on every outcome the
    * close can produce -- a failed or canceled child still ran a model, and that is the fact the
-   * model-observability fix exists to state.
+   * model-observability fix exists to state. Named `observedProvider` because the input's `model`
+   * is the requested model, not this one (ADR-0045).
    *
    * ABSENT means no assistant turn NAMED a provider -- not "the child ran on an unknown
    * provider". It covers a child with no observed assistant turn, a supported older pi that
@@ -191,13 +192,34 @@ export interface TaskRecord {
    * dispatch that names no model runs on pi's configured default; `ptc_task_output` projects
    * this pair back so a caller can finally see which default that was.
    */
-  provider?: string;
+  observedProvider?: string;
   /**
-   * The model id the child actually ran, observed like {@link provider}. Present even when
-   * `provider` is absent: a transcript may carry a model without a provider, and a
+   * The model id the child actually ran, observed like {@link observedProvider}. Present even
+   * when `observedProvider` is absent: a transcript may carry a model without a provider, and a
    * half-observation is still an observation.
    */
-  model?: string;
+  observedModel?: string;
+}
+
+/**
+ * One-way compatibility read for TaskRecords written before ADR-0045 renamed the observed-model
+ * fields. A persisted record outlives the writer: a record written by a previous version carries
+ * `provider` / `model`, and dropping that observation on load would silently undo ADR-0044's fix
+ * for every pre-upgrade task. New writes never emit the old keys; this normalizes the legacy
+ * shape once, at the read edge, so no other code has to know the old names.
+ */
+export function normalizeStoredTaskRecord(raw: TaskRecord): TaskRecord {
+  const legacy = raw as TaskRecord & { provider?: unknown; model?: unknown };
+  if (legacy.provider === undefined && legacy.model === undefined) return raw;
+  const { provider: legacyProvider, model: legacyModel, ...rest } = legacy;
+  const normalized: TaskRecord = { ...rest };
+  if (normalized.observedProvider === undefined && typeof legacyProvider === "string") {
+    normalized.observedProvider = legacyProvider;
+  }
+  if (normalized.observedModel === undefined && typeof legacyModel === "string") {
+    normalized.observedModel = legacyModel;
+  }
+  return normalized;
 }
 
 /**

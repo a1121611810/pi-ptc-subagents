@@ -403,7 +403,7 @@ extension).
 Fields: `text` (final assistant text), `status` (`fulfilled` /
 `rejected`), `agentName`, `durationMs`, `exitCode`, `usage?` (input/output/
 cacheRead/cacheWrite/cost/turns; absent when the child reported no usage
-block), `provider?` / `model?` (the _observed model_ pair — what the host read
+block), `observedProvider?` / `observedModel?` (the _observed model_ pair — what the host read
 off the child's assistant turns, last turn wins; absent means no observed
 assistant turn NAMED the pair — no turn, a pi within the declared floor that
 does not report it, or an old record — not "unknown"), `stderr?` (best-effort,
@@ -438,7 +438,7 @@ _Avoid_: "default model" (that is the _configured default model_, the tier below
 **configured default model** — the provider/model pi itself falls back to when neither a dispatch nor its agent definition names a _requested model_ and no _session model_ can be read: the global model pi is configured with. It is the last resolution tier and it belongs to pi, not to the dispatch. A dispatch that lands here says nothing about that model on the request side; if the child ran, the _observed model_ is what names it (ADR-0044).
 _Avoid_: "default model" unqualified (it is the configured fallback, not the session's or the requested one).
 
-**observed model** — the provider/model a dispatched child was actually seen running, read by the host off the child's own assistant turns (last turn wins; either half may be missing). It is a measurement, never a child claim — the same authority rule as a record's `usage`, which the child also cannot declare (ADR-0032). Reported on `DispatchResult` / `TaskRecord` as `provider` + `model`, rendered as a `model:` line on the model-facing surfaces, and stated in a refusal diagnostic. Absence means no observed assistant turn NAMED the pair — no turn, a pi within the declared floor that does not report it, or a record written before the fields existed — never "unknown model"; callers do not substitute the _requested model_ for it. ADR-0044 §Decision 2.
+**observed model** — the provider/model a dispatched child was actually seen running, read by the host off the child's own assistant turns (last turn wins; either half may be missing). It is a measurement, never a child claim — the same authority rule as a record's `usage`, which the child also cannot declare (ADR-0032). Reported on `DispatchResult` / `TaskRecord` as `observedProvider` + `observedModel` (renamed by ADR-0045), rendered as a `model:` line on the model-facing surfaces, and stated in a refusal diagnostic. Absence means no observed assistant turn NAMED the pair — no turn, a pi within the declared floor that does not report it, or a record written before the fields existed — never "unknown model"; callers do not substitute the _requested model_ for it. ADR-0044 §Decision 2.
 _Avoid_: "actual model" (there is no ground truth beyond the measurement), "child model" (ambiguous between the requested, inherited and observed model), "the model" unqualified.
 
 **child-reported error** — the failure a dispatched child itself reports on an assistant turn: pi writes `stopReason: "error"` plus an `errorMessage` (empty content, zero usage) when a model call fails, retries a few times, exits 0. It is the child's own claim of WHY it failed, and a different channel from the host's inferences: `stderr` is best-effort and often empty, the exit code carries no signal here, and a dispatch _refusal_ means the harness declined to start a child at all. Both dispatch fronts put it on the result / record as `errorMessage`, verbatim; a `ptc_subagent` refusal renders it as a bounded diagnostic. Issue #70 (ADR-0022's silent-failure amendment) and ADR-0044 §Decision 3 are why a child that exits 0 with no text is no longer described as "produced no final text" alone.
@@ -775,7 +775,7 @@ completion (`lost_on_session_restart`). See ADR-0022 + ADR-0023.
 lifecycle of one background child. 28 fields today: ADR-0022 §3's code block lists
 22 of them — its 19 originals (the block's "21 fields" heading is the authoring
 miscount it always was), the 2026-10-16 top-level `usage`, and the ADR-0044
-_observed model_ pair (`provider`, `model`, written at the same terminal close as
+_observed model_ pair (`observedProvider`, `observedModel`, written at the same terminal close as
 `usage`: the model the child actually ran, absent when no observed assistant
 turn named it) — and the rest are the two optional owner-identity fields (`ownerPid`,
 `ownerBootMs`, ADR-0023) stamped at spawn, the two optional _child report_

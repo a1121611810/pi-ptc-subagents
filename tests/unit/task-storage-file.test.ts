@@ -1005,3 +1005,44 @@ describe("FileTaskStorage: constructor contract", () => {
     expect(() => new FileTaskStorage("")).toThrow(/baseDir is required/);
   });
 });
+
+describe("FileTaskStorage: ADR-0045 observed-model rename (legacy record read)", () => {
+  test("a record written with the legacy provider/model pair still loads its observation", async () => {
+    const base = await makeBase();
+    try {
+      const storage: TaskStorage = new FileTaskStorage(base);
+      const record = fixtureTask();
+      // The exact on-disk shape a pre-ADR-0045 writer left: the pair under the old names, the
+      // pair shape is real, only the keys changed. This is a migration fixture, not an invented
+      // shape (constraint #2): `provider` / `model` were the persisted names until ADR-0045.
+      const legacy = { ...record, provider: "deepseek", model: "deepseek-flash" };
+      const path = join(base, "tasks", record.id + ".json");
+      await mkdir(join(base, "tasks"), { recursive: true });
+      await writeFile(path, JSON.stringify(legacy, null, 2), { encoding: "utf8" });
+
+      // Counterfactual: a reader that only knows the new names loses the observation and this
+      // pair of assertions fails; a reader that keeps the legacy keys leaks two shapes.
+      const loaded = await storage.loadTask(record.id);
+      expect(loaded?.observedProvider).toBe("deepseek");
+      expect(loaded?.observedModel).toBe("deepseek-flash");
+      expect(loaded === null ? {} : Object.hasOwn(loaded, "provider")).toBe(false);
+
+      // listTasks applies the same read-edge normalization, so a roster scan cannot disagree
+      // with a single load about the record shape.
+      const listed: TaskRecord[] = [];
+      for await (const row of storage.listTasks()) listed.push(row);
+      expect(listed.map((row) => row.observedModel)).toEqual(["deepseek-flash"]);
+
+      // New writes use the new names. If saveTask wrote the record object it received, this
+      // assertion would still see the legacy keys and fail.
+      if (loaded !== null) await storage.saveTask(loaded);
+      const raw = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+      expect(raw.observedProvider).toBe("deepseek");
+      expect(raw.observedModel).toBe("deepseek-flash");
+      expect(Object.hasOwn(raw, "provider")).toBe(false);
+      expect(Object.hasOwn(raw, "model")).toBe(false);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+});
