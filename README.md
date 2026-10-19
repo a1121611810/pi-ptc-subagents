@@ -84,7 +84,7 @@ const result = await tools["pi.dispatch"]({
 ```
 
 **Fan out in parallel** with the rest of PTC's tools — dispatch is a binding, not a
-model-visible lifecycle tool, so the dispatcher handles concurrency the same way it does for
+model-facing lifecycle tool, so the dispatcher handles concurrency the same way it does for
 any other tool call:
 
 ```ts
@@ -232,7 +232,7 @@ Which model-facing tools this package registers is **detected, not configured** 
 setting for it ([ADR-0034](./docs/adr/0034-surface-is-detected-not-set.md)). The short version:
 a pi whose `codemode` is loaded _and_ callable by the model gets the `subagents` surface
 (`ptc_subagent` on top; the program pair underneath at `codemode` reach); every other pi gets
-`full` (`ptc_run_code` / `ptc_workflow` model-visible). To use the `subagents` surface, put
+`full` (`ptc_run_code` / `ptc_workflow` model-facing). To use the `subagents` surface, put
 `codemode` in your tool list (`pi --tools read,bash,edit,write,codemode`, or `"defaultTools":
 ["read", "bash", "edit", "write", "+codemode"]`). To keep this package out of your sessions
 entirely, run `pi config` and disable its extensions there.

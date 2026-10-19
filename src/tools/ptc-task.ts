@@ -5,7 +5,7 @@
  *   - `ptc_task_output` - "give me task X's output" (read-only, ADR-0015-truncated)
  *   - `ptc_task_stop`   - "ask task X to stop" (lifecycle; the *dispatcher* owns the signal)
  *
- * These tools are the *only* model-visible lifecycle face of a background child: the
+ * These tools are the *only* model-facing lifecycle face of a background child: the
  * `pi.dispatch({ background: true })` binding returns a thin `DispatchHandle` at spawn
  * (ADR-0022 §4) and never updates it, so live state is read through `ptc_task_list`.
  *
