@@ -96,7 +96,7 @@ by `agentScope`. Naming one is optional — ADR-0039 — because the child is a 
 dispatch prompt is APPENDED to pi's own system prompt, and no `--tools` flag is passed unless the
 definition declares `tools:`. A definition can therefore only take capability away; there is none it
 can add. A dispatch that names none gets the **generalist child** — pi's own system prompt, pi's full
-toolset, no model pinned by a definition (the _session model_ tier still applies — see _dispatch
+toolset, no _requested model_ pinned by a definition (the _session model_ tier still applies — see _dispatch
 model inheritance_), reported as an empty `agentName`. A definition is not the only narrowing
 axis: _read-only tier_ is the other one, and where the two meet a strict tier at the call site
 decides the tool list outright.
@@ -332,7 +332,10 @@ _parallel binding_ `pi.dispatch` can only be reached from inside a program,
 so a line that handed the program face to `codemode` needs a top-level entry
 point or the subagent capability would be deleted rather than handed over.
 It stays at `direct` reach on that line, and that asymmetry is deliberate —
-the pair underneath is for scripts, this one is for the model itself.
+the pair underneath is for scripts, this one is for the model itself. An
+omitted `model` follows the _dispatch model inheritance_ rule (ADR-0044): the
+surface requests nothing, so the child runs the caller's _session model_
+unless the call site or the agent definition pins a _requested model_.
 ADR-0025 §3 as amended 2026-10-09. _Avoid_: "dispatch tool" (that is the
 _parallel binding_ inside
 a program), "subagent" (see Out-of-glossary: DSH's subagent is a
@@ -382,10 +385,11 @@ concurrently); the PTC program composes with `Promise.all` /
 fresh `pi` subprocess (`--mode json -p` plus session-file flags from R1
 when `{ background: true }` is set) and returns a structured result
 (see _DispatchResult_ for foreground, _DispatchHandle_ for background).
-Its child's model resolves as the dispatch's `model` argument, the agent
-definition's frontmatter `model:`, the caller's _session model_, then pi's
-configured default — see _dispatch model inheritance_ and ADR-0044 — and the
-result states the model the child actually ran, not just the one requested.
+Its child's model resolves as the _requested model_ (the dispatch's `model`
+argument, else the agent definition's frontmatter `model:`), the caller's
+_session model_, then the _configured default model_ — see _dispatch model
+inheritance_ and ADR-0044 — and the result states the _observed model_, not
+just the requested one.
 Subject to a session-wide _dispatch concurrency_ cap (default 8, matches pi's
 `subagent` extension `MAX_PARALLEL_TASKS`): one counter per pi session,
 spent by programs, by the `ptc_subagent` front, and by background children.
@@ -399,15 +403,26 @@ extension).
 Fields: `text` (final assistant text), `status` (`fulfilled` /
 `rejected`), `agentName`, `durationMs`, `exitCode`, `usage?` (input/output/
 cacheRead/cacheWrite/cost/turns; absent when the child reported no usage
-block), `provider?` / `model?` (the provider/model the child actually ran,
-observed by the host from its assistant turns; absent means no observed
-assistant turn named the pair — no turn, a supported pi that does not report
-it, or an old record — not "unknown"), `stderr?` (best-effort, never promised),
-`errorMessage?` (the structured failure channel — the child's own reported
-error, verbatim, when there is one; otherwise the exit-code / truncation
-diagnosis, or absent when there is none). Shape matches `Promise.allSettled`
+block), `provider?` / `model?` (the _observed model_ pair — what the host read
+off the child's assistant turns, last turn wins; absent means no observed
+assistant turn NAMED the pair — no turn, a pi within the declared floor that
+does not report it, or an old record — not "unknown"), `stderr?` (best-effort,
+never promised), `errorMessage?` (the structured failure channel — the
+_child-reported error_, verbatim, when there is one; otherwise the exit-code /
+truncation diagnosis, or absent when there is none). Shape matches `Promise.allSettled`
 settled records, so PTC programs compose without `try/catch`. See
 ADR-0016, ADR-0044.
+
+Four model words are in play in dispatch, and they are different facts rather than synonyms: the _requested model_ (what the caller asked for), the _session model_ (what the caller's session is on), the _configured default model_ (pi's fallback), and the _observed model_ (what the host saw run). A result can name the first and the fourth, and have them differ — that difference is the point of ADR-0044.
+
+**requested model** — the model a dispatch ASKS for: the `model` argument on
+`pi.dispatch` / `ptc_subagent`, else the agent definition's frontmatter
+`model:`. It is an instruction, not an observation: it outranks the _session
+model_, and when neither it nor a definition names one, the session model
+applies instead (ADR-0044 §Decision 1). A call-site value and a definition
+value are both requests; the call site is the more specific one.
+_Avoid_: "the model" (four model words exist — see above), "target model"
+(nothing is sent to it; it is what the child runs on).
 
 **session model** — the provider/model pair the caller's pi session is currently running, as pi
 places it on the tool-execution context it hands a tool's `execute`. Read structurally for the
@@ -416,22 +431,30 @@ turn that issues the dispatch by `readContextModel`, validated and formatted as 
 and resolved into the child's argv at spawn. It is a snapshot of the session's CURRENT model — not
 its configured default, and not necessarily the model an earlier turn ran: a mid-session switch
 changes it, while a model switched after a dispatch starts does not retro-change that child. `undefined` (no context model, or an unusable one) means "do not inherit"
-— the dispatch falls through to pi's configured default. ADR-0044.
-_Avoid_: "default model" (that is pi's configured fallback, the tier below this one), "parent model"
-(dispatch nesting is depth, not a session — a nested dispatch inherits its own session's model).
+— the dispatch falls through to the _configured default model_. ADR-0044.
+_Avoid_: "default model" (that is the _configured default model_, the tier below this one), "parent model"
+(dispatch nesting is depth, not a session — a nested dispatch inherits its own session's model), "the model" (unqualified).
 
-**dispatch model inheritance** — the rule that a dispatch which names no model at its call site and
-whose agent definition names none runs on the caller's _session model_ instead of pi's configured
-default. First match wins: the dispatch's `model` argument, the agent definition's frontmatter
-`model:`, the session model, pi's default. Resolved once at spawn, so a nested dispatch inherits
-the child's own session model, while a direct library caller or a pi that exposes no context model
-falls through to pi's default — the pre-ADR-0044 behaviour. It is paired with observation:
-`DispatchResult` and `TaskRecord` carry the `provider` / `model` the child actually ran, and the
-model-facing surfaces render it as a `model: provider/id` line. Pin the model at the call site or
-in the definition to opt out; there is no config key. ADR-0044.
+**configured default model** — the provider/model pi itself falls back to when neither a dispatch nor its agent definition names a _requested model_ and no _session model_ can be read: the global model pi is configured with. It is the last resolution tier and it belongs to pi, not to the dispatch. A dispatch that lands here says nothing about that model on the request side; if the child ran, the _observed model_ is what names it (ADR-0044).
+_Avoid_: "default model" unqualified (it is the configured fallback, not the session's or the requested one).
+
+**observed model** — the provider/model a dispatched child was actually seen running, read by the host off the child's own assistant turns (last turn wins; either half may be missing). It is a measurement, never a child claim — the same authority rule as a record's `usage`, which the child also cannot declare (ADR-0032). Reported on `DispatchResult` / `TaskRecord` as `provider` + `model`, rendered as a `model:` line on the model-facing surfaces, and stated in a refusal diagnostic. Absence means no observed assistant turn NAMED the pair — no turn, a pi within the declared floor that does not report it, or a record written before the fields existed — never "unknown model"; callers do not substitute the _requested model_ for it. ADR-0044 §Decision 2.
+_Avoid_: "actual model" (there is no ground truth beyond the measurement), "child model" (ambiguous between the requested, inherited and observed model), "the model" unqualified.
+
+**child-reported error** — the failure a dispatched child itself reports on an assistant turn: pi writes `stopReason: "error"` plus an `errorMessage` (empty content, zero usage) when a model call fails, retries a few times, exits 0. It is the child's own claim of WHY it failed, and a different channel from the host's inferences: `stderr` is best-effort and often empty, the exit code carries no signal here, and a dispatch _refusal_ means the harness declined to start a child at all. Both dispatch fronts put it on the result / record as `errorMessage`, verbatim; a `ptc_subagent` refusal renders it as a bounded diagnostic. Issue #70 (ADR-0022's silent-failure amendment) and ADR-0044 §Decision 3 are why a child that exits 0 with no text is no longer described as "produced no final text" alone.
+_Avoid_: "model error" (a cause, not the channel — the same channel carries rate limits and transport failures), "stderr" (a different, best-effort channel), "refusal" (the harness declining to start; a child that ran and failed is not a refusal).
+
+**dispatch model inheritance** — the rule that a dispatch which names no _requested model_ runs on
+the caller's _session model_ instead of falling straight to the _configured default model_. First
+match wins: the call-site `model` argument, the agent definition's frontmatter `model:`, the
+session model, the configured default. Resolved once at spawn, so a nested dispatch inherits its
+own session's model, while a direct library caller or a pi that exposes no context model falls
+through to the configured default — the pre-ADR-0044 behaviour. It is paired with observation: the
+result and the record state the _observed model_. Pin a model at the call site or in the definition
+to opt out; there is no config key. ADR-0044.
 _Avoid_: "model inheritance" unqualified (the caller's session is the source), "inherit the parent
-dispatch" (each level resolves against its own session context), "default model" (that is pi's
-configured fallback — the last tier, not the inherited one).
+dispatch" (each level resolves against its own session context), "default model" (that is the
+_configured default model_ — the last tier, not the inherited one).
 
 **child report** — the structured value a dispatched child produces and
 the host hands back, carrying exactly four things: `summary` (one line, the
@@ -611,9 +634,11 @@ the parent row, a sub-call tree under it, and right-aligned meta not yet
 present. The _subagent surface_'s call row joins the same partial/settled
 distinction with two differences: there is no sub-call tree under it, and its
 right-aligned meta states the dispatch **request** (`foreground`/`background`,
-the read-only tier, a pinned `model`) rather than the run's measured facts — so
-that meta is present from the first frame and only the shimmer band separates
-partial from settled. _Avoid_: "running state", "loading state" (these collide
+the read-only tier, a _requested model_ when the call site pinned one) rather
+than the run's measured facts — so that meta is present from the first frame
+and only the shimmer band separates partial from settled. A dispatch that
+inherits shows no model here: the _observed model_ is a result fact, so it
+appears in the _tool-result text_, not in this request meta. _Avoid_: "running state", "loading state" (these collide
 with pi's own `toolPendingBg` / settled-state distinctions elsewhere in the TUI).
 
 **settled-state render** — the visual treatment after the run completes
@@ -749,7 +774,7 @@ completion (`lost_on_session_restart`). See ADR-0022 + ADR-0023.
 lifecycle of one background child. 28 fields today: ADR-0022 §3's code block lists
 22 of them — its 19 originals (the block's "21 fields" heading is the authoring
 miscount it always was), the 2026-10-16 top-level `usage`, and the ADR-0044
-observed-model pair (`provider`, `model`, written at the same terminal close as
+_observed model_ pair (`provider`, `model`, written at the same terminal close as
 `usage`: the model the child actually ran, absent when no observed assistant
 turn named it) — and the rest are the two optional owner-identity fields (`ownerPid`,
 `ownerBootMs`, ADR-0023) stamped at spawn, the two optional _child report_
