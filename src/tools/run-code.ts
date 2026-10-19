@@ -26,6 +26,7 @@ import { Type } from "typebox";
 import type { TNumber, TOptional, TObject, TString } from "typebox";
 import { createBuiltinBindings } from "../runtime/bindings.ts";
 import { runPtcProgram, type PtcRunOutcome } from "../runtime/dispatcher.ts";
+import { readContextModel } from "../runtime/session-model.ts";
 import type { WorkerPool } from "../runtime/worker-pool.ts";
 import { DEFAULT_CONFIG } from "../runtime/limits.ts";
 import { BINDING_CONTRACT } from "./binding-contract.ts";
@@ -182,6 +183,11 @@ export function createPtcRunCodeTool(
       // ADR-0022 §9/BG-14: the session-scoped dispatch deps, so a background spawn writes into
       // the session registry and shares its slot counter. Absent for direct library callers.
       const dispatchDeps = options.getDispatchDeps?.();
+      // ADR-0044: the model this session is currently running, inherited by a dispatch the
+      // program makes when it names none at the call site and its agent definition names none.
+      // Read structurally, because the declared 0.86.0 floor's type surface may not declare
+      // `ctx.model`; absent means "do not inherit" and keeps pi's configured default.
+      const sessionModel = readContextModel(ctx);
       // Live sub-call pushes: while the program runs, the tree is visible (ADR-0021 §4).
       const updater = createSubCallUpdater({ surface: "run_code", startedAt, onUpdate });
       let outcome: PtcRunOutcome;
@@ -199,6 +205,9 @@ export function createPtcRunCodeTool(
           // ADR-0022 §3/reopen R-m12: this process's own parent task id, read once by the
           // entrypoint from PI_PTC_TASK_ID; stamps a nested spawn's TaskRecord.parentTaskId.
           ...(options.parentTaskId === undefined ? {} : { parentTaskId: options.parentTaskId }),
+          // ADR-0044: the session tier of the dispatch model precedence, threaded to the
+          // `pi.dispatch` binding through the dispatcher's binding context.
+          ...(sessionModel === undefined ? {} : { sessionModel }),
           ...(params.timeoutMs === undefined ? {} : { timeoutMs: params.timeoutMs }),
           ...(signal === undefined ? {} : { signal }),
           ...(options.config === undefined ? {} : { config: options.config }),

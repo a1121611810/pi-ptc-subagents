@@ -245,6 +245,14 @@ export async function makeExtensionStub(
      * historical default, which is `full`'s.
      */
     declaredProgrammingTools?: readonly string[];
+    /**
+     * ADR-0044 test seam: the value a real pi puts on `ctx.model` for `session_start` and
+     * `turn_start`. Absent is the shape a model-less session / old pi / direct library caller
+     * has, which must leave the call row without an inherited-model statement. Added
+     * structurally (not through a pi type) because the declared 0.86.0 floor does not declare
+     * the field.
+     */
+    sessionModel?: unknown;
   } = {},
 ): Promise<ExtensionStub> {
   const tools = new Map<string, ToolDefinition>();
@@ -363,7 +371,11 @@ export async function makeExtensionStub(
   // The session is what registers. Everything the model could be offered exists only after this.
   await stub.emit(
     "session_start",
-    stubContext(stub, { sessionDir: options.sessionDir, mode: options.mode }),
+    stubContext(stub, {
+      sessionDir: options.sessionDir,
+      mode: options.mode,
+      ...(options.sessionModel === undefined ? {} : { sessionModel: options.sessionModel }),
+    }),
   );
   return stub;
 }
@@ -421,9 +433,15 @@ export function stubContext(
     mode?: string;
     entries?: { type: string; customType: string; data?: unknown }[];
     sessionDir?: string;
+    /**
+     * ADR-0044: the `ctx.model` a real pi supplies on `session_start` / `turn_start`. Structural
+     * and optional for the same reason `toolContext`'s model is: the 0.86.0 floor does not
+     * declare the field.
+     */
+    sessionModel?: unknown;
   } = {},
 ): ExtensionContext {
-  return modeContext({
+  const ctx = modeContext({
     ...options,
     // ADR-0033: `ctx.ui.notify` is TUI-only — a `--print` session emits nothing through it
     // (ADR-0025's known limitation, which ADR-0033 restates for its two new notices). The stub
@@ -442,6 +460,12 @@ export function stubContext(
       stub.reloads.push(stub.notifications.length);
     },
   });
+  // Assigned after construction: a missing model must stay absent, and a field in the literal
+  // would be the one place a typo could quietly become `undefined` on a declared floor type.
+  if (options.sessionModel !== undefined) {
+    (ctx as { model?: unknown }).model = options.sessionModel;
+  }
+  return ctx;
 }
 
 /**
@@ -460,19 +484,29 @@ type ToolExecuteContext = Parameters<ToolDefinition<any, any, any>["execute"]>[4
 /**
  * Minimal execution context for tool tests.
  *
- * The tool layer reads exactly one field — `cwd` (see `src/tools/common.ts`) — but the real
+ * The tool layer reads `cwd` (see `src/tools/common.ts`), and since ADR-0044 a dispatch-capable
+ * tool also reads `ctx.model` to inherit the caller session's current model — but the real
  * parameter type is pi's own `ToolExecuteContext` (above), so tests pass this narrowed object
  * through a cast rather than fabricating a whole session.
+ *
+ * `model` is OPTIONAL and its absence is meaningful: passing no model is the direct-library /
+ * pre-ADR-0044 / model-less-session shape, and `readContextModel` must fall back to pi's
+ * configured default there. The field is added structurally rather than through a named pi type
+ * because the declared 0.86.0 floor does not declare it (see `ToolExecuteContext`'s note).
  *
  * Where pi asks for the extension-tool pair, the stub answers both honestly rather than leaving
  * them undefined: an empty tool list, and an `executeTool` that refuses loudly. A test that
  * reaches for it is asking for behaviour no unit test wires up, and a thrown Error names that,
  * where a `TypeError: not a function` three frames later would not.
  */
-export function toolContext(cwd: string): ToolExecuteContext {
+export function toolContext(
+  cwd: string,
+  model?: { readonly provider: string; readonly id: string },
+): ToolExecuteContext {
   return {
     cwd,
     tools: [],
+    ...(model === undefined ? {} : { model }),
     executeTool() {
       throw new Error(
         "toolContext().executeTool is not wired in unit tests: a nested tool call needs the " +

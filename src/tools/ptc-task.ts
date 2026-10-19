@@ -5,7 +5,7 @@
  *   - `ptc_task_output` - "give me task X's output" (read-only, ADR-0015-truncated)
  *   - `ptc_task_stop`   - "ask task X to stop" (lifecycle; the *dispatcher* owns the signal)
  *
- * These tools are the *only* model-visible lifecycle face of a background child: the
+ * These tools are the *only* model-facing lifecycle face of a background child: the
  * `pi.dispatch({ background: true })` binding returns a thin `DispatchHandle` at spawn
  * (ADR-0022 §4) and never updates it, so live state is read through `ptc_task_list`.
  *
@@ -44,6 +44,7 @@ import type { DispatchUsage, ReadOnlyTier } from "../runtime/dispatch.ts";
 import { applyAdr0015Truncation, type OutputStorage } from "../runtime/output-storage.ts";
 import { OUTPUT_PREVIEW_MAX_BYTES, type TaskRegistry } from "../runtime/task-registry.ts";
 import type { TaskRecord, TaskStatus, ULID } from "../runtime/task-storage.ts";
+import { formatObservedModel } from "../runtime/session-model.ts";
 import { renderReadOnlyTierText } from "./read-only-tier-text.ts";
 import { renderWhySuppressedText } from "./why-suppressed-text.ts";
 import { createTaskPanelRenderers } from "./task-panel-render.ts";
@@ -668,9 +669,18 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
       // task with a block never takes this path, so the line is rendered once either way.
       const usageLine =
         reportBlock === undefined && usage !== undefined ? formatUsageLine(usage) : undefined;
+      // ADR-0044 Decision 2: the model the child actually ran, observed by the host off its assistant
+      // turns. It sits in the HEAD, after the report block and the host counter and ahead of the
+      // prose — the same position the foreground `ptc_subagent` result gives it — rather than
+      // inside `<child-report>`, because it is a HOST measurement: putting it in the report could
+      // only happen by the child reporting on itself. Absent when no turn was observed, so an
+      // old record and an unstarted child render exactly the text they rendered before.
+      const observedModel = formatObservedModel(record.observedProvider, record.observedModel);
+      const modelLine = observedModel === undefined ? undefined : "model: " + observedModel;
       // One head, in reading order: the report block (which already carries the counter), then the
-      // failure reason, then the standalone counter for the children that have no block.
-      const headParts = [reportBlock, errorLine, usageLine].filter(
+      // failure reason, then the standalone counter for the children that have no block, then the
+      // observed model (the last fact about the child, stated just before its prose).
+      const headParts = [reportBlock, errorLine, usageLine, modelLine].filter(
         (part): part is string => part !== undefined,
       );
       const head = headParts.length === 0 ? undefined : headParts.join("\n");

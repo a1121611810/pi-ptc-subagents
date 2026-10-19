@@ -70,6 +70,8 @@ Status: accepted (2026-09-24). Behavior change on the program-visible side (new 
 > has a byte budget; the pull surface (`ptc_task_output`) and the host log keep the record's
 > full text, so a reader who needs the whole string asks rather than being handed a cut one.
 
+> **Amended by [ADR-0044](./0044-a-dispatch-inherits-the-session-model.md) (2026-10-19): the record carries the model the child actually ran.** `TaskRecord` gains an optional `observedProvider` / `observedModel` pair (ADR-0045) — the provider and model id observed by the pump from the child's assistant turns (last turn wins), written at the same terminal close that writes `usage` and on every outcome that close can produce, so a failed or canceled close still states the pair when a turn named it. Both are optional and absent when no observed assistant turn **named** a provider or model — no turn at all, a supported pi that does not report the pair, or a record written before the fields existed; absence is "not named", never "ran on an unknown model". §3's code block below now lists **22** fields; the record in the interface today is **28** — the 25 of the 2026-10-16 amendment, plus ADR-0043's `whySuppressed`, plus this pair. This is the background half of ADR-0044's model observability; the state machine, subscription and notification decisions are unchanged. Where this record and ADR-0044 read differently, ADR-0044 governs. **Amended further by [ADR-0045](./0045-observed-model-field-names.md) (2026-10-19): the record's observed-model fields are named `observedProvider` / `observedModel`, and a legacy persisted record is normalized on read.**
+
 ## Context
 
 This ADR closes the bgdispatch map. The four research/decision tickets it crystallizes are:
@@ -186,6 +188,13 @@ interface TaskRecord {
   // records written before the field existed, on children that never started, and on `lost`
   // records.
   usage?: DispatchUsage;
+  // added 2026-10-19 (ADR-0044): the provider/model the pump observed the child running, off its
+  // assistant turns (last turn wins). Written at the terminal close that writes `usage`, on every
+  // outcome the close can produce; absent when no observed assistant turn NAMED the pair (no turn,
+  // a supported pi that does not report it, or a record predating the fields). A transcript may
+  // carry a model without a provider; absence of both is "not named", not "unknown model".
+  observedProvider?: string;
+  observedModel?: string;
 }
 ```
 

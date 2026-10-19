@@ -48,6 +48,7 @@ import type {
   DispatchUsage,
 } from "../runtime/dispatch.ts";
 import { CHILD_REPORT_MAX_FINDINGS } from "../runtime/child-report.ts";
+import { formatSessionModel, type SessionModel } from "../runtime/session-model.ts";
 import { TREE_LAST } from "./read-only-tier-text.ts";
 import { MAX_LINE_CHARS, renderModelValue, sanitizeText } from "./text.ts";
 import { DEFAULT_SHIMMER_INTERVAL_MS, type ShimmerState, withShimmer } from "./shimmer.ts";
@@ -951,18 +952,30 @@ export interface SubagentCallArgs {
 }
 
 /**
+ * Render options for the `ptc_subagent` call row.
+ *
+ * `sessionModel` is ADR-0044's caller-session snapshot, read by the host at session/turn start.
+ * The row is a REQUEST view, so it uses the snapshot only to say what an omitted request will
+ * inherit; the model the child actually ran is an observation and belongs to the result.
+ */
+export interface SubagentRenderOptions extends PtcRenderOptions {
+  expanded?: boolean;
+  sessionModel?: SessionModel;
+}
+
+/**
  * The `ptc_subagent` call row: a heading, then the task preview (collapsed) or the task block
  * (expanded with ctrl+e).
  *
- * The tool used to have no renderer at all, so pi fell back to its raw argument dump —
- * `ptc_subagent task="…\\n\\n…"` — one enormous line of JSON-escaped text (2026-10-19
- * field report). A dispatch's task is deliberately long prose; printing all of it in the call row
- * makes every row of the transcript five lines taller and tells a reader nothing the first line
- * does not.
+ * This row is a REQUEST view. It states the pinned `model` / `agentScope` the caller passed, and
+ * `model=inherit` when the call names no model and no agent (the generalist child, where ADR-0044's
+ * definition tier cannot apply) while the host could read the caller's session model; the expanded
+ * view names that inherited provider/id. A named agent definition may pin a model that outranks the
+ * session tier, and the row cannot read that definition cheaply, so a named agent gets no inherit
+ * claim. The model the child ACTUALLY ran is a result fact and appears in the tool-result text,
+ * never here: the row is rendered before the run has a result.
  *
- * Collapsed: `└─ subagent → (generalist)` with the state flags right-aligned (foreground /
- * background, the read-only tier, and a pinned `model` / `agentScope` when the caller passed
- * one — the model is the field that explains the 2026-10-19 provider mismatch), one task line and
+ * Collapsed: `└─ subagent → (generalist)` with the state flags right-aligned, one task line and
  * `… 还有 N 行（ctrl+e 展开）`. Expanded: `label` / `why` children and the task block. The task
  * row carries the first line; the continuation shows at most {@link MAX_LOG_LINES_EXPANDED} more,
  * the same expanded-block line budget the out/log blocks use, so a long task cannot make an
@@ -975,7 +988,7 @@ export interface SubagentCallArgs {
 export function renderSubagentToolCall(
   args: SubagentCallArgs,
   theme: Theme,
-  options: PtcRenderOptions & { expanded?: boolean } = {},
+  options: SubagentRenderOptions = {},
 ): PtcRow {
   const task = typeof args.task === "string" ? sanitizeText(args.task) : "";
   const taskLines = task
@@ -988,8 +1001,16 @@ export function renderSubagentToolCall(
       : "(generalist)";
   const flags = [args.background === true ? "background" : "foreground"];
   if (args.readOnly !== undefined) flags.push("read-only:" + args.readOnly);
-  if (typeof args.model === "string" && args.model.trim().length > 0) {
-    flags.push("model=" + args.model.trim());
+  const requestedModel =
+    typeof args.model === "string" && args.model.trim().length > 0 ? args.model.trim() : undefined;
+  const agentNamed = typeof args.agent === "string" && args.agent.trim().length > 0;
+  if (requestedModel !== undefined) {
+    flags.push("model=" + requestedModel);
+  } else if (options.sessionModel !== undefined && !agentNamed) {
+    // ADR-0044: no call-site model and no definition (the generalist child), so resolution
+    // inherits the caller session's. A NAMED definition may pin a model (tier 2 outranks the
+    // session tier) and the row cannot read that file cheaply, so a named agent gets no claim.
+    flags.push("model=inherit");
   }
   if (args.agentScope !== undefined) flags.push("scope=" + args.agentScope);
   const title = `${TREE_ROOT}${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("accent", "→ " + who)}`;
@@ -1008,6 +1029,11 @@ export function renderSubagentToolCall(
   } else {
     const column = (label: string): string => theme.fg("dim", label.padEnd(LABEL_WIDTH));
     const meta: Array<[string, string]> = [];
+    if (requestedModel === undefined && !agentNamed && options.sessionModel !== undefined) {
+      // `inherit →` keeps the two model facts apart: a pinned value is a `model=` flag, an
+      // inherited one is a request fact whose value is only as current as the host's snapshot.
+      meta.push(["model", "inherit → " + sanitizeText(formatSessionModel(options.sessionModel))]);
+    }
     if (typeof args.label === "string") {
       const label = firstLine(sanitizeText(args.label));
       if (label.length > 0) meta.push(["label", label]);

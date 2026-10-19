@@ -16,6 +16,7 @@
  * get from the native pipeline.
  */
 import { validateToolArguments } from "@earendil-works/pi-ai";
+import type { SessionModel } from "./session-model.ts";
 import type { ULID } from "./task-storage.ts";
 import {
   createBashTool,
@@ -143,6 +144,13 @@ export interface BindingContext {
    * output storage) so the binding's `dispatch()` call shares them.
    */
   dispatchDeps?: DispatchDeps;
+  /**
+   * ADR-0044: the caller session's current model, read by the host off pi's tool-execution
+   * context. The `pi.dispatch` binding forwards it into the `DispatchContext` so a dispatch
+   * that names no model explicitly inherits the session's. Absent for direct library callers
+   * and for a pi too old to pass `ctx.model`: both keep the pre-ADR-0044 behaviour.
+   */
+  sessionModel?: SessionModel;
 }
 
 export interface Binding {
@@ -257,7 +265,19 @@ export const DISPATCH_PARAMETERS: DispatchParameters = Type.Object({
         'Which agent directories to search: "user" (~/.pi/agent/agents, the default), "project" (<cwd>/.pi/agents), or "both". Defaults to "user", which cannot see project agents.',
     }),
   ),
-  model: Type.Optional(Type.String()),
+  // ADR-0044 Decision 1: the description is the only place a model can learn the inheritance
+  // default. The parameter used to be silent, so "omit it" and "override it" were
+  // indistinguishable on the tool surface and the ambient-model behaviour could only be
+  // discovered by trial. The wording states both halves: omission inherits, an explicit value
+  // overrides (and a named agent may pin a model of its own).
+  model: Type.Optional(
+    Type.String({
+      description:
+        "Omit to inherit the caller session's current model (when this pi exposes one; otherwise " +
+        "pi's configured default applies); pass a model id (or let the agent definition pin one) to " +
+        "override.",
+    }),
+  ),
   thinkingLevel: Type.Optional(Type.String()),
   background: Type.Optional(Type.Boolean()),
   label: Type.Optional(Type.String()),
@@ -577,6 +597,9 @@ export function createBuiltinBindings(options: CreateBuiltinBindingsOptions): Bi
             ...(context.callerId === undefined ? {} : { callerId: context.callerId }),
             ...(context.sessionDir === undefined ? {} : { sessionDir: context.sessionDir }),
             ...(context.parentTaskId === undefined ? {} : { parentTaskId: context.parentTaskId }),
+            // ADR-0044: the session-model tier of the dispatch argv precedence. Spread-as-absent
+            // so a context with no model keeps exactly the shape it had before this field.
+            ...(context.sessionModel === undefined ? {} : { sessionModel: context.sessionModel }),
           },
           context.dispatchDeps,
         );

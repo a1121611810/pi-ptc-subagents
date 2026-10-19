@@ -9,7 +9,7 @@ the surface is **detected, not configured** ([ADR-0034](../adr/0034-surface-is-d
 - `subagents` — `ptc_subagent` plus the three `ptc_task_*` tools, with pi's own `codemode`
   doing the orchestration; warns at startup when `codemode` is not in the active tool set and
   `ptc_run_code` is not declared to the model either (which on a pi below 0.99.0 it is, since
-  `exposure` does not exist there and the pair falls back to being model-visible).
+  `exposure` does not exist there and the pair falls back to being model-facing).
   `ptc_run_code` / `ptc_workflow` are registered here too, but at `codemode` reach: a `codemode`
   script can call them, and the model is not shown them. That is what puts `pi.dispatch` and
   background tasks underneath `codemode`, whose sandbox cannot spawn a process itself.

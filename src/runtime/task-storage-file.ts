@@ -57,6 +57,7 @@ import type {
   TaskStorage,
   ULID,
 } from "./task-storage.ts";
+import { normalizeStoredTaskRecord } from "./task-storage.ts";
 
 /**
  * The subset of node:fs/promises FileTaskStorage uses, so tests can inject a delegating facade
@@ -122,7 +123,9 @@ export class FileTaskStorage implements TaskStorage {
 
   /** O(1) read of tasks/<taskId>.json; null on ENOENT, throw on corruption. */
   async loadTask(taskId: ULID): Promise<TaskRecord | null> {
-    return await this.#readJson<TaskRecord>(this.#taskPath(taskId));
+    const record = await this.#readJson<TaskRecord>(this.#taskPath(taskId));
+    // ADR-0045: a pre-rename record still names its observation provider/model.
+    return record === null ? null : normalizeStoredTaskRecord(record);
   }
 
   /** Atomic write (temp + rename) of tasks/<taskId>.json. */
@@ -148,9 +151,10 @@ export class FileTaskStorage implements TaskStorage {
       const record = await this.#readJson<TaskRecord>(join(dir, name));
       // A file that disappeared between readdir and read is a concurrent delete, not corruption.
       if (record === null) continue;
-      if (filter?.status !== undefined && record.status !== filter.status) continue;
-      if (filter?.label !== undefined && record.label !== filter.label) continue;
-      yield record;
+      const normalized = normalizeStoredTaskRecord(record);
+      if (filter?.status !== undefined && normalized.status !== filter.status) continue;
+      if (filter?.label !== undefined && normalized.label !== filter.label) continue;
+      yield normalized;
     }
   }
 

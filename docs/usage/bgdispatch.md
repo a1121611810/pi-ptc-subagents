@@ -37,7 +37,8 @@ A binding is reached as `tools["<name>"]` inside a program; this binding's name 
 ### Prerequisites
 
 **None.** `task` is the whole required input — omit `agent` and the dispatch runs a **generalist
-child**: pi's own system prompt, pi's full toolset, no model pin.
+child**: pi's own system prompt, pi's full toolset, no model pinned by a definition
+(the child still resolves a model — see [Which model the child runs](#which-model-the-child-runs)).
 
 That is not a fallback. The dispatch prompt is _appended_ to pi's own system prompt rather than
 substituted for it, and no tool list is passed unless a definition declares one, so the child is a
@@ -93,17 +94,17 @@ return handle;
 
 Input fields are the foreground binding's fields plus two:
 
-| field           | type                            | default                  | meaning                                  |
-| --------------- | ------------------------------- | ------------------------ | ---------------------------------------- |
-| `agent`         | `string`                        | omitted = generalist     | optional: narrow the child               |
-| `task`          | `string`                        | — (required)             | task text handed to the child            |
-| `cwd`           | `string`                        | the run's cwd            | child working directory                  |
-| `agentScope`    | `"user" \| "project" \| "both"` | `"user"`                 | which agent directories are searched     |
-| `model`         | `string`                        | agent markdown's `model` | model override                           |
-| `thinkingLevel` | `string`                        | `"off"`                  | thinking-level override                  |
-| `background`    | `boolean`                       | `false`                  | long-lived dispatch                      |
-| `label`         | `string`                        | `task.slice(0, 64)`      | human label on the handle and the record |
-| `readOnly`      | `"strict" \| "lenient"`         | omitted = no tier        | ask for a read-only child (ADR-0041)     |
+| field           | type                            | default                          | meaning                                  |
+| --------------- | ------------------------------- | -------------------------------- | ---------------------------------------- |
+| `agent`         | `string`                        | omitted = generalist             | optional: narrow the child               |
+| `task`          | `string`                        | — (required)                     | task text handed to the child            |
+| `cwd`           | `string`                        | the run's cwd                    | child working directory                  |
+| `agentScope`    | `"user" \| "project" \| "both"` | `"user"`                         | which agent directories are searched     |
+| `model`         | `string`                        | unset: inherit the session model | model override                           |
+| `thinkingLevel` | `string`                        | `"off"`                          | thinking-level override                  |
+| `background`    | `boolean`                       | `false`                          | long-lived dispatch                      |
+| `label`         | `string`                        | `task.slice(0, 64)`              | human label on the handle and the record |
+| `readOnly`      | `"strict" \| "lenient"`         | omitted = no tier                | ask for a read-only child (ADR-0041)     |
 
 `readOnly` is a mode, not a role, and a **string, not a boolean** — strings only, because pi's
 validator coerces booleans and that coercion could silently turn `readOnly: 0` into "no tier".
@@ -122,24 +123,41 @@ projection — and a **model** reads a rendered line above the child report, sin
 
 ### Which model the child runs
 
-A child is a fresh `pi` subprocess, so it does **not** inherit the model the calling session
-happens to be on — and therefore not the provider a mid-session switch selected. Its model
-resolves first match wins:
+A child is a fresh `pi` subprocess, so it resolves its own model. First match wins:
 
 1. the dispatch's `model` argument;
 2. the named agent definition's frontmatter `model:`;
-3. pi's own global default — no `--model` flag is passed at all.
+3. **the caller session's current model** — passed to the child as one
+   `--model provider/id` argument;
+4. pi's own configured default — no `--model` flag is passed at all.
 
-A session that switched provider or model mid-conversation does not carry that choice into the next
-child it dispatches: unless the dispatch or the definition names a model, the child starts on pi's
-configured default, on pi's default provider.
+Tier 3 is inherited behaviour ([ADR-0044](../adr/0044-a-dispatch-inherits-the-session-model.md)):
+a session that switched provider or model mid-conversation carries that choice into the children it
+dispatches, instead of silently falling back to pi's global default. It is a **snapshot**: the
+model the session is on when the dispatch is issued is the one the child gets. A model switched
+after the spawn does not change a child that is already running, a nested dispatch inherits the
+child's own session model, and re-running the dispatch is how a caller picks up a new model. If the
+child should run on a different model — cheaper, pinned, or deliberately not the session's — name it
+at the call site (tier 1) or in the definition (tier 2); those tiers are unchanged, and there is no
+config key or opt-out for tier 3. A direct library caller with no session-model context, or a pi
+that does not expose one, falls through to pi's configured default exactly as before.
 
 That is an orchestration fact, not only an implementation one. In the 2026-10-19 field report the
-parent had switched provider; the child it dispatched afterwards resolved to pi's default provider
-and died on a **429** before writing a byte. The failure notification and `ptc_task_output` now
-carry the cause (see [Notification delivery](#notification-delivery)), but the prevention is here:
-if the parent changed model for a reason — rate limit, cost, capability — pin the child's model
-with `model` or in the agent definition instead of assuming the change carries.
+parent had switched provider, and the child it dispatched afterwards resolved to pi's default
+provider and died on a **429** before writing a byte. The failure notification, `ptc_task_output`
+and a rejected `ptc_subagent` call now carry the cause (see
+[Notification delivery](#notification-delivery) and [The child report](#the-child-report)), and the
+model the child actually ran is reported on the result and the record — so the class of mismatch is
+visible even when the call site did not pin it.
+
+**What the child ran is reported.** The host observes the provider/model from the child's own
+assistant turns (last turn wins) and states it on every surface that carries the child's facts:
+`observedProvider` / `observedModel` on a foreground `DispatchResult`, the same optional pair on the background
+`TaskRecord`, as a `model: provider/id` line on this page's `ptc_task_output` text and on a
+successful `ptc_subagent` result, and as a `model=` fact in a rejected `ptc_subagent` call's
+diagnostic. Either half may be absent when the transcript named only the other; both absent means
+no observed assistant turn named the pair — no turn, a supported pi that does not report it, or an
+old record — never "unknown model".
 
 On a refusal — depth cap, concurrency cap, unknown agent, or a spawn that never came up — the call
 resolves with a `DispatchResult` instead: `{ status: "rejected", started: false, errorMessage: … }`.
@@ -291,7 +309,9 @@ close for a child the host actually started — so a `none` / `opted-out` child,
 or was canceled, still shows what it cost. The `usage:` line in the block above is the report's
 four-field view of that counter, and a started child with **no** report block shows the
 host-measured `usage:` line as well; the structured projections carry it too, shaped to match what
-the model was shown.
+the model was shown. When the record carries an observed model, the block gains a
+`model: provider/id` line after that report/usage block and ahead of the prose — the model the
+child actually ran, stated by the host rather than by the child (ADR-0044).
 
 **When there is no report block at all** — a task that is still `running` or `stopping`, or one
 that ended `failed`, `canceled` or `lost` — the absent report is a claim, not a gap. Those records
@@ -515,7 +535,7 @@ The task state goes through the `TaskStorage` seam. There are two adapters: an i
 under the session directory so a restart can reconcile:
 
 ```text
-<sessionDir>/tasks/<taskId>.json                                 # the TaskRecord, 25 fields today: 19 ADR-0022 §3 originals plus the 2026-10-16 `usage`, 2 optional ADR-0023 owner fields, 2 optional ADR-0032 report fields on a succeeded record, and the optional ADR-0041 `readOnlyTier` (atomic temp+rename)
+<sessionDir>/tasks/<taskId>.json                                 # the TaskRecord, 28 fields today: 19 ADR-0022 §3 originals plus the 2026-10-16 `usage`, 2 optional ADR-0023 owner fields, 2 optional ADR-0032 report fields on a succeeded record, the optional ADR-0041 `readOnlyTier`, the optional ADR-0043 `whySuppressed`, and the optional observed-model pair `observedProvider` / `observedModel` (ADR-0044, renamed by ADR-0045) (atomic temp+rename)
 <sessionDir>/subscriptions/<subscriberId>-<taskId>.json          # the per-subscriber cursor (atomic temp+rename)
 <sessionDir>/events/<subscriberId>-<taskId>.jsonl                # append-only newline-delimited events
 <sessionDir>/tasks/<taskId>/output.log                           # the captured output

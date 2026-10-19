@@ -30,6 +30,23 @@ test("the description names both places an agent definition can load from", () =
   expect(text, "names the project-scope directory").toContain(".pi/agents");
 });
 
+test("the description says an omitted model inherits the session's current model (ADR-0044)", () => {
+  const text = description();
+  // ADR-0044 Decision 1's last tier: a dispatch whose call site and agent definition name no model
+  // runs the model the CALLER'S SESSION is currently running. A model that never learns this keeps
+  // pinning a model it did not need to pin, or assumes a global default it will not get — the same
+  // pre-decision problem #181/#185 solved for the agent name.
+  expect(text, "names the inherited tier").toMatch(/session's current model/i);
+  expect(text, "says the omission is what inherits it").toMatch(/omit[^.]*model[^.]*inherit/i);
+  expect(text, "still names the agent definition as an override").toMatch(/agent definition/i);
+  // COUNTERFACTUAL: the pre-ADR-0044 description promised the child "its own model", i.e. the
+  // opposite claim. Restoring that sentence must turn this pair red.
+  expect(text, "does not claim the child gets its own model").not.toMatch(/its own model/i);
+  expect(text, "still opens with the tool's job").toContain(
+    "Start a fresh pi agent as a child process",
+  );
+});
+
 test("the description says an unregistered name is refused, and names the real default", () => {
   const text = description();
   // An unknown name is refused rather than quietly falling back to the generalist. That

@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { ExtensionStub } from "./helpers/ptc.ts";
 import ptcSubagents, {
   createBuiltinBindings,
@@ -18,6 +19,7 @@ import {
   makeExtensionStub,
   makeTempDir,
   removeTempDir,
+  stubContext,
   writeAgentSettings,
 } from "./helpers/ptc.ts";
 import { maskSource } from "./helpers/source-mask.ts";
@@ -1063,4 +1065,66 @@ test("a detected subagents surface on a pi that DOES register codemode stays qui
     else process.env.PI_CODING_AGENT_DIR = previous;
     await removeTempDir(dir);
   }
+});
+
+test("the subagent call row inherits the session model the host read from pi (ADR-0044)", async () => {
+  const stub = await makeExtensionStub({
+    ...SUBAGENTS_AXES,
+    sessionModel: { provider: "deepseek", id: "deepseek-flash" },
+  });
+  const tool = stub.tools.get("ptc_subagent");
+  const renderCall = tool?.renderCall;
+  if (typeof renderCall !== "function") throw new Error("ptc_subagent must expose renderCall");
+  const theme = {
+    fg: (_slot: string, text: string) => text,
+    bold: (text: string) => text,
+  } as unknown as Theme;
+  const context = {
+    args: {},
+    toolCallId: "call-inherited-model",
+    invalidate: () => {},
+    lastComponent: undefined,
+    state: {},
+    cwd: ".",
+    executionStarted: false,
+    argsComplete: true,
+    isPartial: false,
+    expanded: false,
+    showImages: false,
+    isError: false,
+    durationMs: undefined,
+  } as unknown as Parameters<typeof renderCall>[2];
+  // The session_start ctx.model reaches the renderer through the extension factory: delete that
+  // wiring (index.ts's readContextModel at session_start / the getSessionModel option) and this
+  // assertion loses the inherited statement.
+  const collapsed = renderCall({ task: "a survey" }, theme, context).render(100).join("\n");
+  expect(collapsed).toContain("model=inherit");
+  const expanded = renderCall({ task: "a survey" }, theme, {
+    ...context,
+    expanded: true,
+  })
+    .render(100)
+    .join("\n");
+  expect(expanded).toContain("deepseek/deepseek-flash");
+  // turn_start refreshes the host snapshot. This tool CALL already rendered once, so its row
+  // keeps the captured value; a fresh call (fresh render state) sees the new session model.
+  await stub.emit(
+    "turn_start",
+    stubContext(stub, {
+      sessionModel: { provider: "minimax-cn-512k", id: "MiniMax-M3.1-Flash-Preview" },
+    }),
+  );
+  const settled = renderCall({ task: "a survey" }, theme, { ...context, expanded: true })
+    .render(100)
+    .join("\n");
+  expect(settled).toContain("deepseek/deepseek-flash");
+  expect(settled).not.toContain("minimax-cn-512k/MiniMax-M3.1-Flash-Preview");
+  const fresh = renderCall({ task: "a survey" }, theme, {
+    ...context,
+    expanded: true,
+    state: {},
+  })
+    .render(100)
+    .join("\n");
+  expect(fresh).toContain("minimax-cn-512k/MiniMax-M3.1-Flash-Preview");
 });

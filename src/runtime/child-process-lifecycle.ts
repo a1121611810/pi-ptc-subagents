@@ -56,6 +56,14 @@ export interface ParsedAgentEvent {
       cost?: { total?: number };
     };
     model?: string;
+    /**
+     * Provider that served this assistant turn. pi >= 1.0.0 puts the resolved provider on the
+     * assistant message, so a host can report which model actually ran the child (dispatches
+     * otherwise run on pi's configured default, which the caller never sees). Optional and
+     * structurally read -- the 0.86.0 floor's type surface may not declare it, and an absent
+     * field must mean "not observed" rather than a parse failure.
+     */
+    provider?: string;
     stopReason?: string;
     errorMessage?: string;
   };

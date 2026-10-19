@@ -41,6 +41,11 @@ import {
   describeRegisteredAgentRoster,
   resolveReadOnlyTier,
 } from "../runtime/dispatch.ts";
+import {
+  formatObservedModel,
+  readContextModel,
+  type SessionModel,
+} from "../runtime/session-model.ts";
 import type { DispatchHandle } from "../runtime/task-registry.ts";
 import type { ULID } from "../runtime/task-storage.ts";
 import { renderChildReportText, renderSubagentToolCall, type SubagentCallArgs } from "./render.ts";
@@ -61,6 +66,14 @@ export interface CreatePtcSubagentToolOptions {
   parentTaskId?: ULID;
   /** Session-scoped deps, so a background spawn lands in the session registry. */
   getDispatchDeps?: () => DispatchDeps;
+  /**
+   * ADR-0044: the model the caller's session is currently running, read structurally off pi's
+   * tool-execution context by the host. The call row uses it to state the inherited model when
+   * the call names none; absent means the host could not read a session model (an old pi, a
+   * direct library caller), and the row simply omits the inherited part. This is a REQUEST view
+   * fact, not the observed model — that stays on the result.
+   */
+  getSessionModel?: () => SessionModel | undefined;
   /**
    * Scope the roster in the tool description is built from. Defaults to `"both"` because the
    * roster's job is to show what the model COULD dispatch, and a dispatch may still narrow the
@@ -295,6 +308,55 @@ function handleTaskId(outcome: SubagentOutcome): string | undefined {
   const taskId = (outcome as { taskId?: unknown }).taskId;
   return typeof taskId === "string" ? taskId : undefined;
 }
+
+/**
+ * Upper bound on the diagnostic a refused call carries, in characters.
+ *
+ * The facts exist to make a failed dispatch actionable — a real one is a provider's
+ * `429 … (2056)` plus "the child retried four turns and never produced text" — so the budget is
+ * sized to keep the CAUSE readable at the break: an unbounded provider message would otherwise
+ * push the reason it failed out of the first screenful. The bound keeps the TAIL because that is
+ * where a provider's own diagnosis usually is (status code and request id arrive after the
+ * prose), and the leading ellipsis marks the cut so a truncated diagnosis is never mistaken for
+ * a complete one.
+ */
+export const SETTLED_FAILURE_MAX_CHARS = 800;
+
+/**
+ * One line describing why a settled dispatch call was refused: the cause, then the facts the
+ * caller would otherwise have to infer.
+ *
+ * The failure this replaces was `"ptc_subagent refused the call: undefined"`: a rejected
+ * dispatch whose `errorMessage` is absent (a spawn that never happened, or a child that
+ * reported no reason) rendered the string `undefined` and said nothing about what the
+ * dispatcher knew. The facts are the dispatcher's own fields, so a caller reads the same values
+ * the result carries — `started` separates "the harness declined to start a child" from "a
+ * child ran and failed", `exit=` separates a crash from a silent exit, `turns=` (0 when no
+ * usage was measured) says whether the child ever answered at all, `reportChannel=` says
+ * whether the prose had a report behind it, and the model names what actually served the call
+ * when the host observed one.
+ *
+ * Exported rather than inlined into the throw so a test can pin the format without matching the
+ * prefix, and so any other refusal front has one wording to reuse.
+ */
+export function describeSettledFailure(outcome: DispatchResult): string {
+  const cause = outcome.errorMessage ?? "the child failed without an error message";
+  const facts = [
+    outcome.started ? "child ran" : "harness declined to start",
+    "exit=" + String(outcome.exitCode),
+    "turns=" + String(outcome.usage?.turns ?? 0),
+    "reportChannel=" + outcome.reportChannel,
+  ];
+  const model = formatObservedModel(outcome.observedProvider, outcome.observedModel);
+  if (model !== undefined) facts.push("model=" + model);
+  const text = cause + " (" + facts.join(", ") + ")";
+  // Keep the tail: a provider's diagnosis usually ends with the actionable part, and the cause
+  // is already what the caller read before the refusal. Length is exactly the bound either way.
+  return text.length <= SETTLED_FAILURE_MAX_CHARS
+    ? text
+    : "…" + text.slice(-(SETTLED_FAILURE_MAX_CHARS - 1));
+}
+
 export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): AnyTool {
   // Built at registration, so it is a snapshot: an agent file added or edited after this point
   // is not in the description until the next session. That staleness is the accepted cost of
@@ -308,7 +370,7 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
     name: SUBAGENT_TOOL_NAME,
     label: "PTC Subagent",
     description: [
-      "Start a fresh pi agent as a child process: it gets its own context, its own model and its own tools, and it cannot see or change this session except through what it returns. Use it for work that would otherwise flood this context: a survey, a second opinion, or a task that can run while you do something else.",
+      "Start a fresh pi agent as a child process: it gets its own context and tools, and it cannot see or change this session except through what it returns. Omit `model` and the child inherits this session's current model (when this pi exposes one; otherwise it falls back to pi's configured default); pass `model`, or let its agent definition pin one, to override that. Use it for work that would otherwise flood this context: a survey, a second opinion, or a task that can run while you do something else.",
       // T4 (#181): the model cannot learn where agent definitions come from by reading a tool
       // list, so it goes looking -- and in the session that motivated this it spent twenty-plus
       // tool calls inspecting the install and guessing at argument values. The two directories
@@ -349,7 +411,16 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
     // rendered child report above reaches the model either way, which is why the text block
     // rather than this field is what ADR-0032 leans on. See ./pi-compat-types.ts.
     outputSchema: SUBAGENT_OUTPUT_SCHEMA,
-    async execute(_toolCallId, params) {
+    // Only `ctx` (the fifth parameter) is read. The middle three are declared optional so a
+    // direct library caller or a test can stop after `params`, while pi's agent loop still
+    // passes all five. `readContextModel` takes `unknown` so the declared 0.86.0 floor's
+    // context type -- which may not declare a `model` field -- needs no narrowing here.
+    async execute(_toolCallId, params, _signal?, _onUpdate?, ctx?) {
+      // ADR-0044: inherit the caller session's current model when neither the call site nor the
+      // agent definition names one. The snapshot is read here and carried in the dispatch
+      // context; dispatch resolves it at spawn, so a model switch after this call cannot
+      // retro-change a child that is already running.
+      const sessionModel = readContextModel(ctx);
       const outcome = await dispatch(
         params as DispatchInput,
         {
@@ -358,6 +429,7 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
           depth: options.depth,
           maxDispatchDepth: options.maxDispatchDepth,
           ...(options.parentTaskId === undefined ? {} : { parentTaskId: options.parentTaskId }),
+          ...(sessionModel === undefined ? {} : { sessionModel }),
         },
         options.getDispatchDeps?.() ?? {},
       );
@@ -407,7 +479,10 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
         };
       }
       if (outcome.status === "rejected") {
-        throw new Error("ptc_subagent refused the call: " + outcome.errorMessage);
+        // The bounded diagnostic, not the bare `errorMessage`: see `describeSettledFailure` for
+        // the `refused the call: undefined` failure this replaced. The prefix is unchanged so
+        // existing readers that match it keep working.
+        throw new Error("ptc_subagent refused the call: " + describeSettledFailure(outcome));
       }
       // The report is projected verbatim, never rebuilt: `usage` in it was stamped by the host
       // at settle, and a value this tool could recompute would be a second, unauthoritative
@@ -485,7 +560,14 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
       // from this text or not at all. It sits beside the tier rather than after the report,
       // because it is a fact about what the child was TOLD — the report describes what it did.
       const suppressedText = renderWhySuppressedText(outcome.whySuppressed);
-      const text = [tierText, suppressedText, reportBlock, outcome.text]
+      // ADR-0044: the model the child ACTUALLY ran is a host observation, stated after the
+      // report block and before the child's prose. After the report because the report is the
+      // conclusion the caller asked for; before the prose because that prose is evidence
+      // produced by the process whose model this line names. Absent when no assistant turn was
+      // observed -- a missing line is the honest claim "we saw no model", never `model: undefined`.
+      const observedModel = formatObservedModel(outcome.observedProvider, outcome.observedModel);
+      const modelText = observedModel === undefined ? "" : "model: " + observedModel;
+      const text = [tierText, suppressedText, reportBlock, modelText, outcome.text]
         .filter((part) => part.length > 0)
         .join("\n\n");
       return {
@@ -495,11 +577,27 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
       };
     },
     renderCall(args, theme, context) {
+      // ADR-0044: the inherited-model statement is a snapshot of the session model at this
+      // CALL's first render. pi reuses `context.state` for one tool execution, so capturing it
+      // there keeps a settled row from changing its statement after a later model switch; a new
+      // call gets fresh state and captures the then-current model. Without a render state
+      // (older pi), fall back to a live read rather than dropping the statement.
+      const state = context?.state as { inheritedSessionModel?: SessionModel | null } | undefined;
+      let sessionModel: SessionModel | undefined;
+      if (state === undefined) {
+        sessionModel = options.getSessionModel?.();
+      } else {
+        if (state.inheritedSessionModel === undefined) {
+          state.inheritedSessionModel = options.getSessionModel?.() ?? null;
+        }
+        sessionModel = state.inheritedSessionModel ?? undefined;
+      }
       return renderSubagentToolCall(args as SubagentCallArgs, theme, {
         ...(context?.invalidate === undefined ? {} : { requestInvalidate: context.invalidate }),
         ...(context?.isPartial === undefined ? {} : { isPartial: context.isPartial }),
         ...(context?.state === undefined ? {} : { state: context.state }),
         ...(context?.expanded === true ? { expanded: true } : {}),
+        ...(sessionModel === undefined ? {} : { sessionModel }),
       });
     },
   });

@@ -499,6 +499,18 @@ describe("ptc_subagent", () => {
       throw new Error("ptc_subagent registered no renderCall");
     }
     const theme = plainTheme();
+    /**
+     * Cross-version render context (measured on 0.86.0 / 1.0.0 / 1.2.0 by
+     * `scripts/pi-compat-matrix.mjs`).
+     *
+     * pi 1.2.0's `ToolRenderContext` REQUIRES `outputPad`; pi 1.0.0 does not declare the field
+     * at all. A plain literal therefore cannot satisfy both ends — adding `outputPad` is an
+     * excess-property error on 1.0.0, omitting it is a missing-property error on 1.2.0. The
+     * fixture is read against the type of the context THAT pi build hands `renderCall` and
+     * asserted through `unknown`, so the one object compiles on every supported version. Nothing
+     * is lost by the cast: the renderer under test never reads `outputPad` (`grep outputPad
+     * src/` → no reference), it only receives the field because 1.2.0 declares it required.
+     */
     const context = {
       args: {},
       toolCallId: "call-visual-1",
@@ -513,7 +525,7 @@ describe("ptc_subagent", () => {
       showImages: false,
       isError: false,
       durationMs: undefined,
-    };
+    } as unknown as Parameters<typeof renderCall>[2];
     const args = { task: "do the thing\nsecond line", readOnly: "lenient" as const };
     const collapsed = renderCall(args, theme, context).render(80).join("\n");
     expect(collapsed).toContain("└─ subagent → (generalist)");
@@ -537,6 +549,124 @@ describe("ptc_subagent", () => {
       vi.useRealTimers();
     }
   });
+});
+
+test("the call row states an inherited model when the call names none (ADR-0044)", () => {
+  const theme = plainTheme();
+  const context = {
+    args: {},
+    toolCallId: "call-visual-inherit",
+    invalidate: vi.fn(),
+    lastComponent: undefined,
+    cwd: ".",
+    executionStarted: false,
+    argsComplete: true,
+    isPartial: false,
+    expanded: false,
+    showImages: false,
+    isError: false,
+    durationMs: undefined,
+  };
+  const inherited = () => ({ provider: "deepseek", id: "deepseek-flash" }) as const;
+  const tool = createPtcSubagentTool({
+    ...baseOptions(".", {}),
+    getSessionModel: inherited,
+  });
+  const renderCall = tool.renderCall;
+  if (typeof renderCall !== "function") throw new Error("ptc_subagent registered no renderCall");
+  type RenderContext = Parameters<typeof renderCall>[2];
+  const collapsed = renderCall({ task: "do the thing" }, theme, context as unknown as RenderContext)
+    .render(100)
+    .join("\n");
+  expect(collapsed).toContain("model=inherit");
+  // The inherited model is a request fact, not the observed result fact: collapsed stays short.
+  expect(collapsed).not.toContain("deepseek/deepseek-flash");
+  const expanded = renderCall({ task: "do the thing" }, theme, {
+    ...context,
+    expanded: true,
+  } as unknown as RenderContext)
+    .render(100)
+    .join("\n");
+  expect(expanded).toContain("inherit → deepseek/deepseek-flash");
+  // An explicit model is the caller's request and wins: no inherited marker appears beside it.
+  const pinned = renderCall(
+    { task: "do the thing", model: "MiniMax-M3.1-Flash-Preview" },
+    theme,
+    context as unknown as RenderContext,
+  )
+    .render(100)
+    .join("\n");
+  expect(pinned).toContain("model=MiniMax-M3.1-Flash-Preview");
+  expect(pinned).not.toContain("model=inherit");
+  // A host that cannot read a session model (old pi, library caller) leaves the row as it was.
+  const withoutSession = createPtcSubagentTool(baseOptions(".", {}));
+  const plain = withoutSession.renderCall;
+  if (typeof plain !== "function") throw new Error("ptc_subagent registered no renderCall");
+  const plainRow = plain(
+    { task: "do the thing" },
+    theme,
+    context as unknown as Parameters<typeof plain>[2],
+  )
+    .render(100)
+    .join("\n");
+  expect(plainRow).not.toContain("model=inherit");
+  // The inherited-model fact is captured at the CALL's first render. A settled row must not
+  // change its statement after a later model switch; a fresh call captures the then-current model.
+  let liveModel: { provider: string; id: string } = {
+    provider: "deepseek",
+    id: "deepseek-flash",
+  };
+  const captureTool = createPtcSubagentTool({
+    ...baseOptions(".", {}),
+    getSessionModel: () => liveModel,
+  });
+  const captureRender = captureTool.renderCall;
+  if (typeof captureRender !== "function") throw new Error("ptc_subagent registered no renderCall");
+  type CaptureContext = Parameters<typeof captureRender>[2];
+  const capturedContext = { ...context, state: {} } as unknown as CaptureContext;
+  expect(captureRender({ task: "x" }, theme, capturedContext).render(100).join("\n")).toContain(
+    "model=inherit",
+  );
+  liveModel = { provider: "minimax-cn-512k", id: "MiniMax-M3.1-Flash-Preview" };
+  const settled = captureRender({ task: "x" }, theme, {
+    ...capturedContext,
+    expanded: true,
+  } as CaptureContext)
+    .render(100)
+    .join("\n");
+  expect(settled).toContain("deepseek/deepseek-flash");
+  expect(settled).not.toContain("MiniMax-M3.1-Flash-Preview");
+  const fresh = captureRender({ task: "x" }, theme, {
+    ...capturedContext,
+    state: {},
+    expanded: true,
+  } as CaptureContext)
+    .render(100)
+    .join("\n");
+  expect(fresh).toContain("minimax-cn-512k/MiniMax-M3.1-Flash-Preview");
+  // A named agent definition may pin a model (ADR-0044 tier 2 outranks the session tier), and
+  // the row cannot read that definition cheaply: a named agent must not claim inheritance.
+  const agentTool = createPtcSubagentTool({
+    ...baseOptions(".", {}),
+    getSessionModel: inherited,
+  });
+  const agentRender = agentTool.renderCall;
+  if (typeof agentRender !== "function") throw new Error("ptc_subagent registered no renderCall");
+  const agentRow = agentRender(
+    { task: "x", agent: "scout" },
+    theme,
+    context as unknown as Parameters<typeof agentRender>[2],
+  )
+    .render(100)
+    .join("\n");
+  expect(agentRow).not.toContain("model=inherit");
+  const agentExpanded = agentRender({ task: "x", agent: "scout" }, theme, {
+    ...context,
+    expanded: true,
+  } as unknown as Parameters<typeof agentRender>[2])
+    .render(100)
+    .join("\n");
+  expect(agentExpanded).not.toContain("inherit →");
 });
 
 describe("ptc_subagent and the dispatch cap", () => {

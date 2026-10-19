@@ -37,6 +37,7 @@ import {
   type BackgroundTaskRuntime,
 } from "./runtime/background-runtime.ts";
 import { createULID } from "./runtime/child-process-lifecycle.ts";
+import { readContextModel, type SessionModel } from "./runtime/session-model.ts";
 import { OPT_IN_BINDING_NAMES } from "./runtime/bindings.ts";
 import {
   renderTaskNotifications,
@@ -257,6 +258,15 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
    * cross-checks cannot run, before the handler that registers them has been invoked.
    */
   let surface!: DetectedSurface;
+
+  /**
+   * ADR-0044: the caller session's current model, as the host last read it off pi's tool
+   * context. The `ptc_subagent` call row uses it to state the inherited model when the call names
+   * none. It is a snapshot refreshed at session start and at every turn start: a model switch
+   * cannot interleave with a streaming turn, so the value a dispatch issued in this turn sees is
+   * the value the turn started with. Absent = the host could not read one (old pi, library use).
+   */
+  let currentSessionModel: SessionModel | undefined;
 
   // Set on entry, cleared after the briefing has been injected, so the instruction lands once
   // per mode entry instead of on every turn.
@@ -522,6 +532,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
           maxDispatchDepth: DEFAULT_CONFIG.maxDispatchDepth,
           ...(parentTaskId === undefined ? {} : { parentTaskId }),
           getDispatchDeps: () => background.dispatchDeps,
+          getSessionModel: () => currentSessionModel,
         }),
       );
     }
@@ -611,6 +622,8 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
   };
 
   pi.on("turn_start", async (_event, ctx) => {
+    // ADR-0044: refresh before any dispatch can run this turn; a switch between turns lands here.
+    currentSessionModel = readContextModel(ctx);
     turnActive = true;
     notifyCodemodeDrift(ctx);
   });
@@ -782,6 +795,10 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
      * globs, and the one case where they can differ (an SDK embedder passing an explicit `cwd`) is
      * recorded in ADR-0027 as a known limit rather than papered over.
      */
+    // ADR-0044: the call row's inherited-model fact comes from the session, and this is the first
+    // moment one exists. Read it before registration, because the tool registration captures the
+    // getter that reads this snapshot.
+    currentSessionModel = readContextModel(ctx);
     surface = detectSurfaceMode(
       getAgentDir(),
       pi.getActiveTools(),

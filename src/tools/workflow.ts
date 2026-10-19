@@ -27,6 +27,7 @@ import { Type } from "typebox";
 import type { Static, TArray, TObject, TOptional, TRecord, TString, TUnknown } from "typebox";
 import { createBuiltinBindings } from "../runtime/bindings.ts";
 import { runPtcProgram, type PtcRunOutcome } from "../runtime/dispatcher.ts";
+import { readContextModel } from "../runtime/session-model.ts";
 import { BINDING_CONTRACT } from "./binding-contract.ts";
 import { describeValue } from "../runtime/protocol.ts";
 import type { WorkerPool } from "../runtime/worker-pool.ts";
@@ -259,6 +260,9 @@ export function createPtcWorkflowTool(
       const sessionDir = ctx.sessionManager?.getSessionDir?.();
       // ADR-0022 §9/BG-14: the session-scoped dispatch deps (same seam as ptc_run_code).
       const dispatchDeps = options.getDispatchDeps?.();
+      // ADR-0044: same session-model seam as ptc_run_code -- read structurally so the declared
+      // 0.86.0 floor's type surface (which may not declare `ctx.model`) still compiles.
+      const sessionModel = readContextModel(ctx);
       // Live sub-call pushes: while the program runs, the tree is visible (ADR-0021 §4).
       const updater = createSubCallUpdater({ surface: "workflow", startedAt, onUpdate });
       let outcome: PtcRunOutcome;
@@ -275,6 +279,9 @@ export function createPtcWorkflowTool(
           ...(options.depth === undefined ? {} : { depth: options.depth }),
           // ADR-0022 §3/reopen R-m12: same parent-task-id seam as ptc_run_code.
           ...(options.parentTaskId === undefined ? {} : { parentTaskId: options.parentTaskId }),
+          // ADR-0044: same session-model seam as ptc_run_code (the `pi.dispatch` binding's
+          // model-inheritance tier).
+          ...(sessionModel === undefined ? {} : { sessionModel }),
           ...(signal === undefined ? {} : { signal }),
           ...(options.config === undefined ? {} : { config: options.config }),
           ...(pool === undefined ? {} : { pool }),
