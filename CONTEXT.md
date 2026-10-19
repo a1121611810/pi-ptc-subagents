@@ -394,7 +394,7 @@ Subject to a session-wide _dispatch concurrency_ cap (default 8, matches pi's
 `subagent` extension `MAX_PARALLEL_TASKS`): one counter per pi session,
 spent by programs, by the `ptc_subagent` front, and by background children.
 The spawn surface is binding-only (the model cannot call `pi.dispatch`);
-but the **lifecycle face** for background tasks is model-visible via
+but the **lifecycle face** for background tasks is model-facing via
 `ptc_task_*` tools and `<bg-task-notification>` events (see ADR-0022).
 _Avoid_: `agent()` (DSH helper stub, deferred), `subagent` (DSH / pi
 extension).
@@ -636,9 +636,10 @@ distinction with two differences: there is no sub-call tree under it, and its
 right-aligned meta states the dispatch **request** (`foreground`/`background`,
 the read-only tier, a _requested model_ when the call site pinned one) rather
 than the run's measured facts — so that meta is present from the first frame
-and only the shimmer band separates partial from settled. A dispatch that
-inherits shows no model here: the _observed model_ is a result fact, so it
-appears in the _tool-result text_, not in this request meta. _Avoid_: "running state", "loading state" (these collide
+and only the shimmer band separates partial from settled. A dispatch that names no _requested model_ shows `model=inherit` when the host could read the
+caller's session model, and its expanded row names that inherited model; a pinned _requested
+model_ is stated instead. The _observed model_ is still a result fact, so it appears in the
+_tool-result text_, not in this request meta. _Avoid_: "running state", "loading state" (these collide
 with pi's own `toolPendingBg` / settled-state distinctions elsewhere in the TUI).
 
 **settled-state render** — the visual treatment after the run completes

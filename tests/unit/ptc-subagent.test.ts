@@ -551,6 +551,68 @@ describe("ptc_subagent", () => {
   });
 });
 
+test("the call row states an inherited model when the call names none (ADR-0044)", () => {
+  const theme = plainTheme();
+  const context = {
+    args: {},
+    toolCallId: "call-visual-inherit",
+    invalidate: vi.fn(),
+    lastComponent: undefined,
+    state: {},
+    cwd: ".",
+    executionStarted: false,
+    argsComplete: true,
+    isPartial: false,
+    expanded: false,
+    showImages: false,
+    isError: false,
+    durationMs: undefined,
+  };
+  const inherited = () => ({ provider: "deepseek", id: "deepseek-flash" }) as const;
+  const tool = createPtcSubagentTool({
+    ...baseOptions(".", {}),
+    getSessionModel: inherited,
+  });
+  const renderCall = tool.renderCall;
+  if (typeof renderCall !== "function") throw new Error("ptc_subagent registered no renderCall");
+  type RenderContext = Parameters<typeof renderCall>[2];
+  const collapsed = renderCall({ task: "do the thing" }, theme, context as unknown as RenderContext)
+    .render(100)
+    .join("\n");
+  expect(collapsed).toContain("model=inherit");
+  // The inherited model is a request fact, not the observed result fact: collapsed stays short.
+  expect(collapsed).not.toContain("deepseek/deepseek-flash");
+  const expanded = renderCall({ task: "do the thing" }, theme, {
+    ...context,
+    expanded: true,
+  } as unknown as RenderContext)
+    .render(100)
+    .join("\n");
+  expect(expanded).toContain("inherit → deepseek/deepseek-flash");
+  // An explicit model is the caller's request and wins: no inherited marker appears beside it.
+  const pinned = renderCall(
+    { task: "do the thing", model: "MiniMax-M3.1-Flash-Preview" },
+    theme,
+    context as unknown as RenderContext,
+  )
+    .render(100)
+    .join("\n");
+  expect(pinned).toContain("model=MiniMax-M3.1-Flash-Preview");
+  expect(pinned).not.toContain("model=inherit");
+  // A host that cannot read a session model (old pi, library caller) leaves the row as it was.
+  const withoutSession = createPtcSubagentTool(baseOptions(".", {}));
+  const plain = withoutSession.renderCall;
+  if (typeof plain !== "function") throw new Error("ptc_subagent registered no renderCall");
+  const plainRow = plain(
+    { task: "do the thing" },
+    theme,
+    context as unknown as Parameters<typeof plain>[2],
+  )
+    .render(100)
+    .join("\n");
+  expect(plainRow).not.toContain("model=inherit");
+});
+
 describe("ptc_subagent and the dispatch cap", () => {
   test("a saturated counter refuses a foreground call instead of spawning one", async () => {
     // The defect this closes: the only slot acquire lived at the dispatcher's program call site,

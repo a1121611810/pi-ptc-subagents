@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   model is unknown". A background record gains the pair at the same terminal close that writes
   `usage`, so a failed or canceled close that named a model still states it. Additive and backward compatible: old records and old result shapes keep working. The rendered value is stripped of ANSI escape sequences and control characters and head-capped at 200 characters before it enters model-facing text, because the pair is untrusted child wire data. See
   ADR-0044, ADR-0016 §"The child's model", and ADR-0022 §3 as amended.
+- **The `ptc_subagent` call row states the model the call will inherit.** When the call names no
+  model, the request row says `model=inherit` and its expanded view names the provider/id the
+  caller's session is on; a pinned `model` is stated as before. This is a request fact refreshed
+  at every turn start, not the observed model — the observed one still appears only after the
+  child ran. ADR-0044.
 
 ### Changed
 

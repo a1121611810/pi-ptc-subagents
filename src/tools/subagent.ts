@@ -41,7 +41,11 @@ import {
   describeRegisteredAgentRoster,
   resolveReadOnlyTier,
 } from "../runtime/dispatch.ts";
-import { formatObservedModel, readContextModel } from "../runtime/session-model.ts";
+import {
+  formatObservedModel,
+  readContextModel,
+  type SessionModel,
+} from "../runtime/session-model.ts";
 import type { DispatchHandle } from "../runtime/task-registry.ts";
 import type { ULID } from "../runtime/task-storage.ts";
 import { renderChildReportText, renderSubagentToolCall, type SubagentCallArgs } from "./render.ts";
@@ -62,6 +66,14 @@ export interface CreatePtcSubagentToolOptions {
   parentTaskId?: ULID;
   /** Session-scoped deps, so a background spawn lands in the session registry. */
   getDispatchDeps?: () => DispatchDeps;
+  /**
+   * ADR-0044: the model the caller's session is currently running, read structurally off pi's
+   * tool-execution context by the host. The call row uses it to state the inherited model when
+   * the call names none; absent means the host could not read a session model (an old pi, a
+   * direct library caller), and the row simply omits the inherited part. This is a REQUEST view
+   * fact, not the observed model — that stays on the result.
+   */
+  getSessionModel?: () => SessionModel | undefined;
   /**
    * Scope the roster in the tool description is built from. Defaults to `"both"` because the
    * roster's job is to show what the model COULD dispatch, and a dispatch may still narrow the
@@ -570,6 +582,9 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
         ...(context?.isPartial === undefined ? {} : { isPartial: context.isPartial }),
         ...(context?.state === undefined ? {} : { state: context.state }),
         ...(context?.expanded === true ? { expanded: true } : {}),
+        ...(options.getSessionModel === undefined
+          ? {}
+          : { sessionModel: options.getSessionModel() }),
       });
     },
   });

@@ -245,6 +245,14 @@ export async function makeExtensionStub(
      * historical default, which is `full`'s.
      */
     declaredProgrammingTools?: readonly string[];
+    /**
+     * ADR-0044 test seam: the value a real pi puts on `ctx.model` for `session_start` and
+     * `turn_start`. Absent is the shape a model-less session / old pi / direct library caller
+     * has, which must leave the call row without an inherited-model statement. Added
+     * structurally (not through a pi type) because the declared 0.86.0 floor does not declare
+     * the field.
+     */
+    sessionModel?: unknown;
   } = {},
 ): Promise<ExtensionStub> {
   const tools = new Map<string, ToolDefinition>();
@@ -363,7 +371,11 @@ export async function makeExtensionStub(
   // The session is what registers. Everything the model could be offered exists only after this.
   await stub.emit(
     "session_start",
-    stubContext(stub, { sessionDir: options.sessionDir, mode: options.mode }),
+    stubContext(stub, {
+      sessionDir: options.sessionDir,
+      mode: options.mode,
+      ...(options.sessionModel === undefined ? {} : { sessionModel: options.sessionModel }),
+    }),
   );
   return stub;
 }
@@ -421,9 +433,15 @@ export function stubContext(
     mode?: string;
     entries?: { type: string; customType: string; data?: unknown }[];
     sessionDir?: string;
+    /**
+     * ADR-0044: the `ctx.model` a real pi supplies on `session_start` / `turn_start`. Structural
+     * and optional for the same reason `toolContext`'s model is: the 0.86.0 floor does not
+     * declare the field.
+     */
+    sessionModel?: unknown;
   } = {},
 ): ExtensionContext {
-  return modeContext({
+  const ctx = modeContext({
     ...options,
     // ADR-0033: `ctx.ui.notify` is TUI-only — a `--print` session emits nothing through it
     // (ADR-0025's known limitation, which ADR-0033 restates for its two new notices). The stub
@@ -442,6 +460,12 @@ export function stubContext(
       stub.reloads.push(stub.notifications.length);
     },
   });
+  // Assigned after construction: a missing model must stay absent, and a field in the literal
+  // would be the one place a typo could quietly become `undefined` on a declared floor type.
+  if (options.sessionModel !== undefined) {
+    (ctx as { model?: unknown }).model = options.sessionModel;
+  }
+  return ctx;
 }
 
 /**

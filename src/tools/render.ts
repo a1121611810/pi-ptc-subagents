@@ -48,6 +48,7 @@ import type {
   DispatchUsage,
 } from "../runtime/dispatch.ts";
 import { CHILD_REPORT_MAX_FINDINGS } from "../runtime/child-report.ts";
+import { formatSessionModel, type SessionModel } from "../runtime/session-model.ts";
 import { TREE_LAST } from "./read-only-tier-text.ts";
 import { MAX_LINE_CHARS, renderModelValue, sanitizeText } from "./text.ts";
 import { DEFAULT_SHIMMER_INTERVAL_MS, type ShimmerState, withShimmer } from "./shimmer.ts";
@@ -962,8 +963,12 @@ export interface SubagentCallArgs {
  *
  * Collapsed: `└─ subagent → (generalist)` with the state flags right-aligned (foreground /
  * background, the read-only tier, and a pinned `model` / `agentScope` when the caller passed
- * one — the model is the field that explains the 2026-10-19 provider mismatch), one task line and
- * `… 还有 N 行（ctrl+e 展开）`. Expanded: `label` / `why` children and the task block. The task
+ * one — the model is the field that explains the 2026-10-19 provider mismatch). A call that
+ * names no `model` states `model=inherit` when the host could read the caller's session model
+ * (ADR-0044); the expanded view names that inherited provider/id. The model the child ACTUALLY
+ * ran is a result fact and appears in the tool-result text, never here: this row is rendered
+ * before the run has one. One task line and `… 还有 N 行（ctrl+e 展开）`. Expanded: `label` / `why`
+ * children and the task block. The task
  * row carries the first line; the continuation shows at most {@link MAX_LOG_LINES_EXPANDED} more,
  * the same expanded-block line budget the out/log blocks use, so a long task cannot make an
  * expanded row unbounded and no new cap has to be registered.
@@ -972,10 +977,22 @@ export interface SubagentCallArgs {
  * row is one line by construction, and a multi-line value pasted into one `RowLine` would put raw
  * newlines into the grid that `alignRow` does not split on.
  */
+/**
+ * Render options for the `ptc_subagent` call row.
+ *
+ * `sessionModel` is ADR-0044's caller-session snapshot, read by the host at session/turn start.
+ * The row is a REQUEST view, so it uses the snapshot only to say what an omitted request will
+ * inherit; the model the child actually ran is an observation and belongs to the result.
+ */
+export interface SubagentRenderOptions extends PtcRenderOptions {
+  expanded?: boolean;
+  sessionModel?: SessionModel;
+}
+
 export function renderSubagentToolCall(
   args: SubagentCallArgs,
   theme: Theme,
-  options: PtcRenderOptions & { expanded?: boolean } = {},
+  options: SubagentRenderOptions = {},
 ): PtcRow {
   const task = typeof args.task === "string" ? sanitizeText(args.task) : "";
   const taskLines = task
@@ -988,8 +1005,15 @@ export function renderSubagentToolCall(
       : "(generalist)";
   const flags = [args.background === true ? "background" : "foreground"];
   if (args.readOnly !== undefined) flags.push("read-only:" + args.readOnly);
-  if (typeof args.model === "string" && args.model.trim().length > 0) {
-    flags.push("model=" + args.model.trim());
+  const requestedModel =
+    typeof args.model === "string" && args.model.trim().length > 0 ? args.model.trim() : undefined;
+  if (requestedModel !== undefined) {
+    flags.push("model=" + requestedModel);
+  } else if (options.sessionModel !== undefined) {
+    // ADR-0044: the request names no model, so resolution will inherit the caller session's.
+    // The row states THAT request fact; the model the child actually ran is a result fact and
+    // stays in the tool-result text (this row is rendered before the run has a result).
+    flags.push("model=inherit");
   }
   if (args.agentScope !== undefined) flags.push("scope=" + args.agentScope);
   const title = `${TREE_ROOT}${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("accent", "→ " + who)}`;
@@ -1008,6 +1032,11 @@ export function renderSubagentToolCall(
   } else {
     const column = (label: string): string => theme.fg("dim", label.padEnd(LABEL_WIDTH));
     const meta: Array<[string, string]> = [];
+    if (requestedModel === undefined && options.sessionModel !== undefined) {
+      // `inherit →` keeps the two model facts apart: a pinned value is a `model=` flag, an
+      // inherited one is a request fact whose value is only as current as the host's snapshot.
+      meta.push(["model", "inherit → " + sanitizeText(formatSessionModel(options.sessionModel))]);
+    }
     if (typeof args.label === "string") {
       const label = firstLine(sanitizeText(args.label));
       if (label.length > 0) meta.push(["label", label]);
