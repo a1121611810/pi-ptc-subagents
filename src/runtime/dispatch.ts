@@ -450,7 +450,17 @@ export function resolveWhy(
   why: DispatchInput["why"],
   enabled: boolean,
 ): { why: string | undefined; suppressed: boolean } {
-  const trimmed = why?.trim() ?? "";
+  // TOTAL, deliberately, and the type is not what makes it so. Two callers reach this with values
+  // the schema has not approved yet: the binding's pre-`dispatch()` catch hands over the RAW
+  // arguments, and `dispatch()` now resolves before its `readOnly` guard. `true?.trim` is not a
+  // function, so a `typeof` test is the only thing standing between a wrong-typed `why` and a
+  // thrown TypeError — which would replace the rejected `DispatchResult` both fronts promise with
+  // an exception neither contract allows.
+  //
+  // A value that is not a string is therefore treated as NO value: it is not a `why` the contract
+  // can carry, so nothing was withheld and no suppression is claimed. Treating it as present would
+  // claim a delivery that could never have happened.
+  const trimmed = typeof why === "string" ? why.trim() : "";
   if (trimmed.length === 0) return { why: undefined, suppressed: false };
   if (!enabled) return { why: undefined, suppressed: true };
   return { why: trimmed, suppressed: false };

@@ -499,6 +499,47 @@ describe("a config key that is not a boolean fails LOUD and changes nothing", ()
       );
     });
   });
+
+  test("and the notice does not claim a session state when a saved `why off` contradicts it", async () => {
+    /*
+     * The notice is about what the KEY did, not about what this session will end up doing: a
+     * persisted `/ptc why off` is applied later in the SAME `session_start` handler. An earlier
+     * wording said "the block stays ON", which is false in exactly this state — the session has it
+     * OFF — and that is when the notice matters most, because the user's symptom and the notice's
+     * claim would point in opposite directions.
+     *
+     * COUNTERFACTUAL: restore the wording "the block stays ON" and this goes red on the
+     * session-state assertion, because the bare query then reports OFF (the session record wins)
+     * and the notice says ON. Without a persisted record the old wording passes every assertion,
+     * which is why the fixture carries one.
+     */
+    await withSession(
+      {
+        ptc: { whyEnabled: "false" },
+        resumeFrom: [{ type: "custom", customType: PTC_WHY_ENTRY_TYPE, data: { enabled: false } }],
+      },
+      async (stub) => {
+        const said = stub.notifications.find((notice) => notice.message.includes("whyEnabled"));
+        expect(said, "the malformed key is still reported").toBeDefined();
+        // What the notice may claim: the key was ignored, and `/ptc why` decides. What it may NOT
+        // claim: that the block is on.
+        expect(said?.message, "it says the key cannot have switched the block off").toContain(
+          "cannot have switched",
+        );
+        expect(
+          said?.message,
+          "and it must not assert a session state it cannot know",
+        ).not.toContain("stays ON");
+
+        // The state the notice declines to claim, read from the live switch: the session record
+        // wins over the file, so it is OFF while the notice is talking about the same moment.
+        await runPtc(stub, "why");
+        const answered = stub.notifications.at(-1)?.message ?? "";
+        expect(answered, "the session's saved value is what is in force").toContain("OFF");
+        expect(answered).toContain("this session");
+      },
+    );
+  });
 });
 
 describe("the switch writes a session record and nothing else", () => {

@@ -536,16 +536,19 @@ test(
   "a refusal on the binding front states a suppressed why, and stays silent without one",
   async () => {
     /*
-     * The same two refusals as the tier row above, for ADR-0043's field, and for the same reason:
-     * they are the only `DispatchResult`s in the package that never pass through `dispatch()`'s
-     * refusal factories, so a fact stamped by `withWhySuppressed` inside `dispatch()` simply does
-     * not reach a caller who arrived through the binding. Without this row the contract "every
-     * result a caller can observe states a suppression" holds on one front and not the other, and
-     * the divergence is invisible — a refused call returns a result, so nothing looks wrong.
+     * The same CLASS of refusal as the tier row above, for ADR-0043's field, and for the same
+     * reason: these are the only `DispatchResult`s in the package that never pass through
+     * `dispatch()`'s refusal factories, so a fact stamped by `withWhySuppressed` inside
+     * `dispatch()` simply does not reach a caller who arrived through the binding. Without this row
+     * the contract "every result a caller can observe states a suppression" holds on one front and
+     * not the other, and the divergence is invisible — a refused call returns a result, so nothing
+     * looks wrong.
      *
-     * `agent: ""` rather than the `"  "` the tier row uses: `"  "` satisfies the schema's
-     * `minLength: 1`, so it is refused further down rather than in this `catch`, and a row aimed
-     * at THIS branch has to name a value that fails validation outright.
+     * The first row is deliberately NOT the tier row's first row. That one uses `agent: "  "`,
+     * which satisfies the schema's `minLength: 1` and is therefore refused FURTHER DOWN, by
+     * `dispatch()`'s malformed-name check rather than by this `catch`. A row aimed at this catch has
+     * to name a value that fails validation outright, so it uses `agent: ""`. Two rows that claim to
+     * exercise one refusal while taking different paths is how a guard ends up covering neither.
      *
      * COUNTERFACTUAL, measured: drop the `withWhySuppressed(..., suppressed)` wrapper from both
      * refusal literals in `src/runtime/bindings.ts` and this row goes red on the `whySuppressed`
@@ -583,11 +586,19 @@ test(
             `dispatch() does for the same input`,
         ).toBe(true);
 
+        // The comparison must not read machine state. `args.agent` for the second row is "probe",
+        // and `dispatch()` defaults `agentScope` to `"user"` — so on a machine that happens to have
+        // a user-scope `probe`, this would resolve it and spawn a real child (no lifecycle is
+        // injected here). `ghost` cannot exist on any machine, so the comparison stays a unit test
+        // and the two fronts are still compared on the one input both refuse.
         const viaDispatch = (await dispatch(
-          { agent: args.agent as string, task: "t", why: "we are preparing a release" } as never,
+          { agent: "ghost", task: "t", why: "we are preparing a release" } as never,
           { callId: 0, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           { slots: new DispatchSlotCounter(8), whyEnabled: false },
         )) as { status: string; whySuppressed?: true };
+        expect(viaDispatch.status, `${label}: the foreground front refuses it too`).toBe(
+          "rejected",
+        );
         expect(viaDispatch.whySuppressed, `${label}: and the two fronts must agree`).toBe(
           viaBinding.whySuppressed,
         );
@@ -610,6 +621,25 @@ test(
         "whySuppressed" in switchOn,
         "the switch is on, so the why was not withheld by it",
       ).toBe(false);
+
+      // A non-string `why` reaches this catch UNVALIDATED, so the suppression decision has to be
+      // total. `resolveWhy` trims its argument, and `true.trim` is not a function — a throw here
+      // would replace the rejected `DispatchResult` this binding promises with an exception, which
+      // ADR-0016 §3 forbids. The schema refuses the value, so the call is refused either way; what
+      // must not happen is the refusal turning into a throw on its way out.
+      for (const bad of [true, 42, { text: "x" }, [1]] as const) {
+        const refusedBadWhy = (await binding.execute({ agent: "", task: "t", why: bad }, call)) as {
+          status: string;
+          whySuppressed?: true;
+        };
+        expect(refusedBadWhy.status, `why: ${JSON.stringify(bad)} is refused, not thrown`).toBe(
+          "rejected",
+        );
+        expect(
+          Object.hasOwn(refusedBadWhy, "whySuppressed"),
+          "a value that is not a string is not a why, so nothing is claimed about it",
+        ).toBe(false);
+      }
     } finally {
       await removeTempDir(dir);
     }

@@ -124,12 +124,19 @@ whose value the host later drops; the drop is reported, not enforced at the boun
 
 ### D5 — `resolveWhy` is resolved once per dispatch, above every gate
 
-`resolveWhy(input, enabled)` returns `{ why, suppressed }` — blank and not-suppressed is a different
-answer from present and suppressed, and one function is what keeps the two from disagreeing. Both
-`dispatch()` and `dispatchBackground()` resolve it before the background branch and before any gate,
-then fold it through a single `finish` wrapper alongside `withReadOnlyTier`. A refusal that never
-reached a child therefore still says the caller's reason was dropped, because the refusal consumed
-it.
+`resolveWhy(why, enabled)` returns `{ why, suppressed }` — blank and not-suppressed is a different
+answer from present and suppressed, and one function is what keeps the two from disagreeing. It
+takes the `why` VALUE rather than the whole `DispatchInput`, because the binding front reaches its
+two pre-`dispatch()` refusals holding raw, unvalidated arguments and has no `DispatchInput` to hand
+over; fabricating one would be a second spelling of the rule. For the same reason the function is
+TOTAL: a value that is not a string is treated as no value rather than trimmed, since a wrong-typed
+`why` reaches it before any schema has approved it, and a throw there would replace the rejected
+result both fronts promise with an exception.
+
+Both `dispatch()` and `dispatchBackground()` resolve it before the background branch and before any
+gate, then fold it through a single `finish` wrapper alongside `withReadOnlyTier`. A refusal that
+never reached a child therefore still says the caller's reason was dropped, because the refusal
+consumed it.
 
 `DispatchDeps.whyEnabled` is read as `deps.whyEnabled !== false`, so a caller that injects no deps
 gets the default rather than the absence.

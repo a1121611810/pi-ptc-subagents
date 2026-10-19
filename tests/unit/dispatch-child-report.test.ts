@@ -821,6 +821,23 @@ describe("dispatch() foreground under the whyEnabled switch (ADR-0043)", () => {
       Object.hasOwn(withoutWhy, "whySuppressed"),
       "no why passed, so nothing was withheld",
     ).toBe(false);
+
+    // The resolutions now run ABOVE the guard, so they must be total: a wrong-typed `why` reaching
+    // them must not turn the guard's refusal into a thrown exception. `dispatch()` returns a
+    // result for every input, and that is a promise its callers are written against.
+    const badWhy = asResult(
+      await dispatch(
+        { task: "check the gates", readOnly: 1, why: 42 } as never,
+        { callId: 22, cwd: process.cwd(), depth: 0, maxDispatchDepth: 3 },
+        { slots: new DispatchSlotCounter(4), whyEnabled: false },
+      ),
+    );
+    expect(badWhy.started).toBe(false);
+    expect(badWhy.errorMessage ?? "").toContain("readOnly");
+    expect(
+      Object.hasOwn(badWhy, "whySuppressed"),
+      "a value that is not a string is not a why",
+    ).toBe(false);
   });
 });
 
