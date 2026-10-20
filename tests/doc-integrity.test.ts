@@ -659,6 +659,29 @@ const EXTERNAL_VOCABULARY: ReadonlyMap<string, string> = new Map([
     "SyntaxError",
     "JavaScript 内建错误类型名；ADR-0036 引它是因为 oxfmt 解析 HTML 写坏时报的就是这个错（exit 2），文档引的是那段**输出文本**，不是代码符号",
   ],
+  // 2026-10-20（DeepSeek 搜索模块）：下面五个名字是**别的产品或 pi 宿主**的，本仓只在文档里
+  // 点名它们，从不声明也从不调用——ADR-0047 用前两个说明「业界把搜索放在哪个面」，ADR-0048 用
+  // 后三个说明凭据与错误通道长什么样。
+  [
+    "WebFetch",
+    "Claude Code 的抓取工具名；ADR-0047 引它是为了说明「顶层 model-facing 搜索工具」这个业界默认形态，本仓不声明",
+  ],
+  [
+    "search_web",
+    "Zed 的搜索工具名（crates/agent/src/tools/web_search_tool.rs）；ADR-0047 引它是为了同一件事，本仓不声明",
+  ],
+  [
+    "create_web_search_tool",
+    "Codex 生成 hosted 搜索工具的内部函数（codex-rs/core/src/tools/hosted_spec.rs）；ADR-0048 引它是为了说明「工具压根不进请求」那一种缺 key 行为，本仓不声明",
+  ],
+  [
+    "getProviderAuthStatus",
+    "pi ModelRuntime 的方法，返回凭据状态但快照可能未刷新（会假阴性）；ADR-0048 引它是为了说明本模块为什么不用它，本仓不调用",
+  ],
+  [
+    "api_key",
+    "pi-ai 凭据类型判别式（auth.json 里 `type` 的取值之一）；ADR-0048 引它是为了说明「oauth 条目不算配了 key」，本仓不声明这个字面量",
+  ],
 ]);
 
 // ---------------------------------------------------------------------------
@@ -1417,17 +1440,17 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // Confirmed line by line 2026-10-12 (re-checked after #187 moved it): line 505 is
     // `pi.registerTool(createChildReportTool(ptcDepth > 0));` -- the depth gate the ADR cites to
     // explain why a generalist still gets the report tool.
-    "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:115 -> src/index.ts:578":
+    "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:115 -> src/index.ts:620":
       "createChildReportTool(ptcDepth > 0)",
-    "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:1205":
+    "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:1317":
       "export function detectedSurfaceMode(",
-    "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:1051":
+    "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:1148":
       'getActiveTools().includes("codemode")',
-    "docs/adr/0029-surface-follows-codemode-activation.md:120 -> src/index.ts:1051":
+    "docs/adr/0029-surface-follows-codemode-activation.md:120 -> src/index.ts:1148":
       'getActiveTools().includes("codemode")',
     "docs/adr/0029-surface-follows-codemode-activation.md:151 -> ptc-mode.ts:32":
       "## Fail-safe on external loadout changes",
-    "docs/adr/0029-surface-follows-codemode-activation.md:188 -> src/index.ts:1000":
+    "docs/adr/0029-surface-follows-codemode-activation.md:188 -> src/index.ts:1097":
       "if (detected.present && !known) {",
     "docs/adr/0030-surface-switch-reloads.md:94 -> ptc-mode.ts:32":
       "## Fail-safe on external loadout changes",
@@ -1449,6 +1472,21 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       "outputSchema: STOP_OUTPUT_SCHEMA,",
     "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1833":
       "export function childToolList(",
+    // 2026-10-20（DeepSeek 搜索模块）：下面 7 条是该模块的 ADR 与 spec 带进来的新引用，目标行
+    // 逐条核对过内容——矩阵那一行讲的是 `exposure` 字段在 0.86.x 上不存在，通知那一行是 drift
+    // 告警的 `ctx.ui.notify(`，allow-list 那一行是 `WORKER_ENV_ALLOW_LIST` 的声明。
+    "docs/adr/0047-deepseek-search-is-program-internal.md:54 -> docs/agents/pi-compat-matrix.md:63":
+      "`ToolDefinition.exposure` field",
+    "docs/adr/0047-deepseek-search-is-program-internal.md:89 -> docs/agents/pi-compat-matrix.md:63":
+      "`ToolDefinition.exposure` field",
+    "docs/adr/0048-deepseek-search-gate.md:43 -> src/index.ts:653": "ctx.ui.notify(",
+    "docs/adr/0048-deepseek-search-gate.md:71 -> src/runtime/limits.ts:147":
+      "WORKER_ENV_ALLOW_LIST",
+    "docs/specs/0044-deepseek-search-module.md:85 -> docs/agents/pi-compat-matrix.md:63":
+      "`ToolDefinition.exposure` field",
+    "docs/specs/0044-deepseek-search-module.md:141 -> src/index.ts:653": "ctx.ui.notify(",
+    "docs/specs/0044-deepseek-search-module.md:168 -> src/runtime/limits.ts:147":
+      "WORKER_ENV_ALLOW_LIST",
   };
 
   /**
@@ -1555,12 +1593,12 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     //  32  → 962→856  = decision-4 的 `if (surface.surfaceMode === "subagents" && !pi.getActiveTools()…`
     //  105 → 962→856  = 同一处（ADR-0029 正文第二次引用它）
     //  129 → 27 保持    = ` * ## Fail-safe on external loadout changes`，本轮未移动
-    "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:1205",
-    "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:1051",
-    "docs/adr/0029-surface-follows-codemode-activation.md:120 -> src/index.ts:1051",
+    "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:1317",
+    "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:1148",
+    "docs/adr/0029-surface-follows-codemode-activation.md:120 -> src/index.ts:1148",
     "docs/adr/0029-surface-follows-codemode-activation.md:151 -> ptc-mode.ts:32",
     //  166 → 920→807 = `if (detected.present && !known) {`，即交叉核对那一条
-    "docs/adr/0029-surface-follows-codemode-activation.md:188 -> src/index.ts:1000",
+    "docs/adr/0029-surface-follows-codemode-activation.md:188 -> src/index.ts:1097",
     // 2026-10-03 第四次复核（ADR-0030）：0030 引 ptc-mode.ts:27-31 那段「loadout 被外部改写
     // 时模式如何退让」，27 行是段首。本轮该引用在**文档里**的行号因撤回声明从 68 前移到 83，
     // 引用目标（ptc-mode.ts:27）未动。ADR-0030 另外四处引用写的是 pi 宿主的行号而非本仓文件，
@@ -1667,7 +1705,15 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     "docs/adr/0032-child-report.md:55 -> src/tools/ptc-task.ts:813",
     "docs/adr/0032-child-report.md:130 -> src/runtime/dispatch.ts:1833",
     // 新增 1 条（2026-10-12，ADR-0039）：目标行已逐条核对。
-    "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:115 -> src/index.ts:578",
+    "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:115 -> src/index.ts:620",
+    // 2026-10-20（DeepSeek 搜索模块）：新增 7 条，逐条核对过目标行的内容。
+    "docs/adr/0047-deepseek-search-is-program-internal.md:54 -> docs/agents/pi-compat-matrix.md:63",
+    "docs/adr/0047-deepseek-search-is-program-internal.md:89 -> docs/agents/pi-compat-matrix.md:63",
+    "docs/adr/0048-deepseek-search-gate.md:43 -> src/index.ts:653",
+    "docs/adr/0048-deepseek-search-gate.md:71 -> src/runtime/limits.ts:147",
+    "docs/specs/0044-deepseek-search-module.md:85 -> docs/agents/pi-compat-matrix.md:63",
+    "docs/specs/0044-deepseek-search-module.md:141 -> src/index.ts:653",
+    "docs/specs/0044-deepseek-search-module.md:168 -> src/runtime/limits.ts:147",
   ];
 
   test("仓库内引用清单是钉住的基线：新增一条就要有人重新确认一次", () => {

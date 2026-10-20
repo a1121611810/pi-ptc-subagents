@@ -12,6 +12,12 @@
  * a plain `ReferenceError` through the normal code-run error path.
  */
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import type { WebSearchConfig } from "./mode/ptc-mode.ts";
+import { createDeepSeekClient } from "./search/client.ts";
+import { resolveDeepSeekCredential } from "./search/credentials.ts";
+import { createSearchQuota } from "./search/quota.ts";
+import type { WebDsSearchBindingOptions, WebDsSearchDeps } from "./search/run.ts";
+import { createWebDsSearchTool } from "./tools/web-ds-search.ts";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -59,6 +65,7 @@ import {
   readDefaultModeConfig,
   readLegacySurfaceKey,
   readOptInBindingsConfig,
+  readWebSearchConfig,
   readWhyEnabledConfig,
   resolveBaseOnStart,
 } from "./mode/ptc-mode.ts";
@@ -96,6 +103,7 @@ export {
   readDefaultModeConfig,
   readLegacySurfaceKey,
   readOptInBindingsConfig,
+  readWebSearchConfig,
   readWhyEnabledConfig,
   resolveBaseOnStart,
   resolveCodemodeActivation,
@@ -117,6 +125,7 @@ export type {
   OptInBindingsConfig,
   PersistedModeState,
   PtcModeState,
+  WebSearchConfig,
 } from "./mode/ptc-mode.ts";
 export {
   buildPtcSkillsSection,
@@ -329,6 +338,37 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
   const whyConfig: WhyEnabledConfig = readWhyEnabledConfig(getAgentDir());
 
   /**
+   * ADR-0048: the DeepSeek search module's switch and quota, read ONCE at extension load for
+   * the same reason `optInBindings` is — the file is an operator decision, and a program must
+   * not see a surface different from the one the prompt describing it was built from.
+   *
+   * **The switch defaults to OFF.** The capability has a network egress and a per-call bill, so
+   * the absence of a decision is not a decision to allow it (the same direction `bash` fails in,
+   * ADR-0040).
+   */
+  const searchConfig: WebSearchConfig = readWebSearchConfig(getAgentDir());
+
+  /**
+   * The session's search quota.
+   *
+   * **One per pi process**, which is one per pi session in practice: a dispatched child is a
+   * separate process and therefore has its own quota, which is what "per session" has to mean
+   * for a child to be bounded at all. The counter itself only grows on a SUCCESSFUL call, and
+   * a call in flight holds a slot so concurrent calls cannot all pass the check first
+   * (`search/quota.ts`).
+   */
+  const searchQuota = createSearchQuota({ maxCallsPerSession: searchConfig.maxCallsPerSession });
+
+  /**
+   * What the PTC tool factories hand to the binding table, or `undefined` while the capability
+   * is switched off. It is assigned at `session_start`, once the credential verdict is in hand,
+   * and read per RUN — so a program never sees a surface different from the one the prompt
+   * described.
+   */
+  let searchBinding: WebDsSearchBindingOptions | undefined;
+  const getSearchBinding = (): WebDsSearchBindingOptions | undefined => searchBinding;
+
+  /**
    * Depth baseline for PTC runs this pi process starts (ADR-0016 Recursive section).
    * Inside a pi process spawned by `pi.dispatch`, the env carries `PI_PTC_DEPTH`; a
    * normal pi session has none, and the parent turn's runs stay at depth 0.
@@ -493,6 +533,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
         createPtcRunCodeTool({
           getBindingSourceNames,
           getOptInBindings,
+          getSearchBinding,
           getPool: () => turnPools.get("run_code"),
           depth: ptcDepth,
           exposure: programmingToolExposure,
@@ -504,6 +545,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
         createPtcWorkflowTool({
           getBindingSourceNames,
           getOptInBindings,
+          getSearchBinding,
           getPool: () => turnPools.get("workflow"),
           depth: ptcDepth,
           exposure: programmingToolExposure,
@@ -651,6 +693,49 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     turnPools = new TurnPools();
     await draining.drain();
   });
+
+  /**
+   * Register the DeepSeek search module for this session, if the switch is on.
+   *
+   * **The credential verdict is awaited here, and that is why this is not in the factory.** The
+   * verdict needs pi's own resolution — `ModelRuntime.getAuth` is the only public path to a
+   * RESOLVED key, and resolving means running a `!command` and interpolating a `$VAR` — which
+   * is asynchronous. The factory is synchronous, so the verdict lands at `session_start`, the
+   * first moment a session exists.
+   *
+   * **The capability is registered even when the credential is missing.** That is the whole
+   * point of ADR-0048's second state: a model that can see that search exists but is
+   * unavailable can tell the user what is missing, and a model that cannot see search at all
+   * cannot. The description says so, and a call returns the same sentence.
+   */
+  let searchNoticeShown = false;
+  const registerSearchModule = async (ctx: ExtensionContext): Promise<void> => {
+    if (!searchConfig.enabled) return;
+    // The resolver never throws — a failed resolution is reported, not raised — so the notice
+    // channel is handed to it rather than wrapped around it.
+    const credential = await resolveDeepSeekCredential({
+      agentDir: getAgentDir(),
+      onWarn: (message) => ctx.ui.notify(`pi-ptc-subagents: ${message}`, "warning"),
+    });
+    const deps: WebDsSearchDeps = {
+      ...(credential.configured && credential.key !== undefined
+        ? { client: createDeepSeekClient({ apiKey: credential.key }) }
+        : {}),
+      quota: searchQuota,
+      maxCallsPerSession: searchConfig.maxCallsPerSession,
+    };
+    searchBinding = { searchDeps: deps };
+    pi.registerTool(createWebDsSearchTool({ deps }));
+    if (!credential.configured && !searchNoticeShown) {
+      searchNoticeShown = true;
+      ctx.ui.notify(
+        "pi-ptc-subagents: 搜索模块已开启，但 pi 的凭据里没有可用的 DeepSeek key" +
+          "（auth.json 的 deepseek 条目、models.json 的 providers.deepseek.apiKey、" +
+          "DEEPSEEK_API_KEY 都没有）。搜索会失败——工具已注册但不可用。",
+        "warning",
+      );
+    }
+  };
 
   /*
    * The PTC status line: one key, painted from the mode's state, and nothing else.
@@ -808,6 +893,11 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     );
     registerForSession(surface);
 
+    // The DeepSeek search module (ADR-0047 / ADR-0048). Registered AFTER the surface, and
+    // after the await that resolves the credential — pi can add a tool at any point in a
+    // session, but it cannot remove one, so this is the order that does not have to guess.
+    await registerSearchModule(ctx);
+
     // BG-14: bind the session-scoped background runtime before anything else. The records this
     // returns were reconciled to `lost`; delivering them through the one notification path is the
     // ADR-0022 §8 startup guarantee, not a bespoke message. A bind failure is surfaced as a
@@ -848,6 +938,13 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
      *
      * Read from the value captured at extension load, for the same reason as `optInConfig` below.
      */
+    if (searchConfig.error !== undefined) {
+      ctx.ui.notify(
+        `pi-ptc-subagents: ${searchConfig.error}. The search module's switch was read as ` +
+          "OFF and its quota as the default, so the search surface stays narrow.",
+        "warning",
+      );
+    }
     if (whyConfig.error !== undefined) {
       ctx.ui.notify(
         `pi-ptc-subagents: ${whyConfig.error}. That key was ignored rather than acted on, so it ` +

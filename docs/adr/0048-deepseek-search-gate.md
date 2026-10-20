@@ -40,7 +40,7 @@ pi 的凭据有**三条路**（`auth.json` 存储凭据 / `models.json` 的 `api
 **业界没有完全同形先例**——研究覆盖的 7 种缺 key 行为里，没有一个是「总开关打开 + 缺 key 时既保留工具又只在启动时告警一次」。所以本契约自己写死。三件事同时发生：
 
 1. **标注不可用**：工具描述里写明「本会话未配置 DeepSeek 凭据，调用会失败」。**两处都要写**——codemode 工具的描述（codemode 工具的目录里能看到）与 binding contract 文本（模型在 `ptc_run_code` / `ptc_workflow` 描述里读它）——**且两处是同一份共享常量**（one-home rule；先例 `BINDING_CONTRACT`，测试断言两边 `toContain(同一常量)`）。
-2. **启动告警一次**：`ctx.ui.notify(..., "warning")`（先例：codemode drift 告警，`src/index.ts:611`）。once-only latch，不刷屏。
+2. **启动告警一次**：`ctx.ui.notify(..., "warning")`（先例：codemode drift 告警，`src/index.ts:653`）。once-only latch，不刷屏。
 3. **调用返回面向模型的可读错误**，不是原始 `401`。
 
 **为什么「仍注册」而不是「不注册」**：不注册的话，模型分不清「没这功能」和「缺凭据」，不会主动告诉用户去配 key。注册并标注，模型能自己转告。

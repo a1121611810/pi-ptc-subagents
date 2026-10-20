@@ -35,6 +35,7 @@ import type { PtcRunOutcome } from "../runtime/dispatcher.ts";
 import type { PtcConfig, PtcSurface } from "../runtime/limits.ts";
 import type { PtcJsonValue, SubCallRecord } from "../runtime/protocol.ts";
 import type { ULID } from "../runtime/task-storage.ts";
+import type { WebDsSearchBindingOptions } from "../search/run.ts";
 import { renderModelValue, sanitizeText } from "./text.ts";
 
 /** Options every PTC tool factory accepts. */
@@ -69,6 +70,20 @@ export interface PtcToolOptions {
    * a closure that re-reads whatever it likes.
    */
   getOptInBindings?: () => readonly string[];
+  /**
+   * The DeepSeek search binding's options, or `undefined` when the capability is switched off
+   * (ADR-0047 / ADR-0048).
+   *
+   * **A getter, like the two above, and for the same reason**: the surface a program sees is
+   * decided once and must not change under a running program. The switch lives in
+   * `~/.pi/agent/ptc.json` and is read at load time; this closure carries the result of that
+   * read, not the file.
+   *
+   * `undefined` means the binding is NOT in the table — which is the default, because the
+   * switch defaults to off. A deps whose `client` is absent (no credential resolved) is still
+   * a binding: the capability is registered and says so, rather than vanishing.
+   */
+  getSearchBinding?: () => WebDsSearchBindingOptions | undefined;
   /**
    * Depth baseline for PTC runs this tool starts inside a child pi process: the depth of
    * the run that dispatched them, 0 for the parent turn's run (ADR-0016 Recursive

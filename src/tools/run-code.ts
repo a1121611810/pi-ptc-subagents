@@ -175,6 +175,9 @@ export function createPtcRunCodeTool(
         options.getBindingSourceNames?.(),
         options.getOptInBindings?.(),
       );
+      // The DeepSeek search binding, when the capability is switched on. Absent means the
+      // binding is not in the table at all — the default, because the switch defaults to off.
+      const search = options.getSearchBinding?.();
       const startedAt = Date.now();
       const pool = options.getPool?.();
       // ADR-0022 R1: hand the host session dir to background children. Read defensively
@@ -198,7 +201,12 @@ export function createPtcRunCodeTool(
           cwd,
           // The shipped surface always exposes the parallel binding (ADR-0016); the
           // binding-source names only curate the built-in subset.
-          bindings: createBuiltinBindings({ cwd, names, includeDispatch: true }),
+          bindings: createBuiltinBindings({
+            cwd,
+            names,
+            includeDispatch: true,
+            ...(search === undefined ? {} : { includeSearch: true, searchDeps: search.searchDeps }),
+          }),
           ...(sessionDir === undefined ? {} : { sessionDir }),
           ...(dispatchDeps === undefined ? {} : { dispatchDeps }),
           ...(options.depth === undefined ? {} : { depth: options.depth }),

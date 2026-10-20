@@ -253,6 +253,9 @@ export function createPtcWorkflowTool(
         options.getBindingSourceNames?.(),
         options.getOptInBindings?.(),
       );
+      // The DeepSeek search binding, when the capability is switched on. Absent means the
+      // binding is not in the table at all — the default, because the switch defaults to off.
+      const search = options.getSearchBinding?.();
       const startedAt = Date.now();
       const pool = options.getPool?.();
       // ADR-0022 R1: hand the host session dir to background children (same seam as
@@ -272,7 +275,12 @@ export function createPtcWorkflowTool(
           surface: "workflow",
           cwd,
           // Same surface contract as ptc_run_code: pi.dispatch is always bound (ADR-0016).
-          bindings: createBuiltinBindings({ cwd, names, includeDispatch: true }),
+          bindings: createBuiltinBindings({
+            cwd,
+            names,
+            includeDispatch: true,
+            ...(search === undefined ? {} : { includeSearch: true, searchDeps: search.searchDeps }),
+          }),
           ...(sessionDir === undefined ? {} : { sessionDir }),
           ...(dispatchDeps === undefined ? {} : { dispatchDeps }),
           ...(params.args === undefined ? {} : { args: params.args }),

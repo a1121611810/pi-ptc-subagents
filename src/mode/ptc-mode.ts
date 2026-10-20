@@ -318,6 +318,118 @@ export function readOptInBindingsConfig(agentDir: string): OptInBindingsConfig {
 }
 
 /**
+ * Result of reading the search module's config, with enough detail to warn about a broken file.
+ */
+export interface WebSearchConfig {
+  /** Whether the DeepSeek search module is switched on. */
+  enabled: boolean;
+  /** Successful calls allowed per session; `0` means unlimited. */
+  maxCallsPerSession: number;
+  source: "file" | "default" | "invalid";
+  error?: string;
+}
+
+/** The default per-session quota, used when the file says nothing about it. */
+export const DEFAULT_SEARCH_MAX_CALLS_PER_SESSION = 100;
+
+/**
+ * Read the search module's `webDsSearch` key from the agent-dir config file — ADR-0048's
+ * switch and quota.
+ *
+ * **The switch is OFF unless the file says otherwise.** That is the same direction
+ * `optInBindings` fails in (ADR-0040), and for the same reason: the capability has a network
+ * egress and a per-call bill, so the absence of a decision must not be read as a decision to
+ * allow it. A file too broken to parse leaves the module OFF rather than half-on.
+ *
+ * **A broken VALUE is reported and the safe direction is kept.** `"enabled": "yes"` is a typo
+ * the user needs to hear about, but it must not become "on" — the switch fails CLOSED, so a
+ * malformed value narrows the surface rather than widening it, exactly like `optInBindings`.
+ * The quota is the one number here that fails OPEN to its default, because a quota that
+ * silently dropped to zero would be unlimited, and a quota that silently became 1 would break
+ * every program that searches twice.
+ *
+ * **A file too broken to parse is not this function's to report.** `readDefaultModeConfig` owns
+ * the file's parse failure and announces it at `session_start`; a second copy of the same
+ * sentence for the same file trains the user to ignore the notice that matters. What this
+ * reader reports is only what is wrong with the `webDsSearch` KEY — the same boundary
+ * `readOptInBindingsConfig` draws.
+ */
+export function readWebSearchConfig(agentDir: string): WebSearchConfig {
+  const path = join(agentDir, PTC_MODE_CONFIG_FILE);
+  const fallback: WebSearchConfig = {
+    enabled: false,
+    maxCallsPerSession: DEFAULT_SEARCH_MAX_CALLS_PER_SESSION,
+    source: "default",
+  };
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch {
+    return fallback;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return fallback;
+  }
+  const value = (parsed as { webDsSearch?: unknown }).webDsSearch;
+  if (value === undefined) {
+    return fallback;
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return {
+      ...fallback,
+      source: "invalid",
+      error: `${path}: "webDsSearch" must be an object, received ${Array.isArray(value) ? "array" : value === null ? "null" : typeof value}`,
+    };
+  }
+  const record = value as { enabled?: unknown; maxCallsPerSession?: unknown };
+  const errors: string[] = [];
+
+  let enabled = false;
+  if (record.enabled !== undefined) {
+    if (typeof record.enabled !== "boolean") {
+      errors.push(`"webDsSearch.enabled" must be a boolean, received ${typeof record.enabled}`);
+    } else {
+      enabled = record.enabled;
+    }
+  }
+
+  let maxCallsPerSession = DEFAULT_SEARCH_MAX_CALLS_PER_SESSION;
+  if (record.maxCallsPerSession !== undefined) {
+    if (
+      typeof record.maxCallsPerSession !== "number" ||
+      !Number.isInteger(record.maxCallsPerSession) ||
+      record.maxCallsPerSession < 0
+    ) {
+      errors.push(
+        `"webDsSearch.maxCallsPerSession" must be a non-negative integer, received ${
+          typeof record.maxCallsPerSession === "number"
+            ? String(record.maxCallsPerSession)
+            : typeof record.maxCallsPerSession
+        }`,
+      );
+    } else {
+      maxCallsPerSession = record.maxCallsPerSession;
+    }
+  }
+
+  if (errors.length > 0) {
+    return {
+      enabled,
+      maxCallsPerSession,
+      source: "invalid",
+      error: `${path}: ${errors.join("; ")}`,
+    };
+  }
+  return { enabled, maxCallsPerSession, source: "file" };
+}
+
+/**
  * Which model-facing tools this package registers, independent of PTC mode (which decides
  * which registered tools are *active*).
  *
