@@ -19,7 +19,7 @@ DeepSeek 官方在 2026-10-17 开放了 Search / Fetch 两个裸 JSON 接口（`
 
 ## Solution
 
-**一个内置 DeepSeek 搜索模块**：DeepSeek Search + Fetch，一个实现，出现在**两个程序面**上，**永远不面向模型**；由一个**默认关**的开关 + 一条**凭据判定**双重门禁；带一个**per-session 配额**；结果**原样透传**，错误文案**面向模型写**。
+**一个内置 DeepSeek 搜索模块**：DeepSeek Search + Fetch，一个实现，出现在**两个程序面**上，**默认不面向模型**；由一个**默认关**的开关 + 一条**凭据判定**双重门禁；带一个**per-session 配额**；结果**原样透传**，错误文案**面向模型写**。
 
 名字里带 `ds`（`web_ds_search` / `web.ds.search` / `webDsSearch`）不是冗余：一来它只走 DeepSeek，二来 DSH 自带一个叫 `web_search` 的工具，而 pi 的工具注册表按名字做 key、同名会互相覆盖——理由见 [ADR-0047](../adr/0047-deepseek-search-is-program-internal.md)。
 
@@ -76,6 +76,10 @@ per-session，默认 100 次，可配（`0` = 不限）。Search 与 Fetch 共�
 
 搜索**不**注册成 `exposure: "direct"` 的顶层工具。它只出现在 codemode 面与 PTC binding 面。
 
+**「默认不面向模型」是默认状态，不是硬保证。** 真机实测观测到一条路径：会话里若有 `tool_search`，模型可以主动搜到 `codemode` 档的工具**并把它激活进模型声明**。实测证据：模型请求 1/2/3 的工具列表里没有该工具；第 3 次请求发出 `tool_search({ query: … })` 之后，第 4 次请求的工具列表里多出了它。**这一条防不住**——`tool_search` 的可搜集合就是 `codemode` + `deferred` 的注册工具（`dist/extensions/tool-search/tool.js:136-138`），pi 没有「可被 codemode 调、但不被 `tool_search` 搜到」这一档 exposure。
+
+⇒ **实现期要接受并记录的事实**：**不注册成 `direct`** 是本决策能控制的部分；**模型主动调 `tool_search` 把搜索翻到直接面**是 pi 的机制，不是我们注册错了。工具描述里要写明它程序内可达（一旦被激活，模型会在直接面看到它）。取证：`docs/research/pi-codemode-bridge-live-probe-20261020.md`。
+
 **理由**：本包的主题之一是收窄模型直接面（ADR-0010 的 narrowing mode）。主流 harness 恰好相反（Claude Code / Codex / Zed / OpenCode / Cline 的搜索都是顶层 model-facing 工具），但那些 harness 没有本包这条「模型只从程序里调工具」的主张。
 
 **硬约束**：搜索工具**不得**在 `full` surface 以 model-facing 形态注册。0.86.0–0.87.x 上 `exposure` 字段不存在（`docs/agents/pi-compat-matrix.md:63`），注册的工具**一律面向模型** ⇒ 那样做会直接违反本决策。
@@ -86,7 +90,7 @@ per-session，默认 100 次，可配（`0` = 不限）。Search 与 Fetch 共�
 
 **为什么不是 A（只有 codemode 工具）**：A 之下 `full` surface 的模型写 PTC 程序，程序里没有这个 binding ⇒ 拿不到。
 **为什么不是 B（只有 PTC binding）**：B 之下 `subagents` surface 的模型写 codemode 脚本，QuickJS 沙箱里没有 PTC worker ⇒ 要绕两跳（codemode → `ptc_run_code` → binding）。
-**C 是唯一在两个 surface 都既不面向模型、又不缺能力的形状。**
+**C 是唯一在两个 surface 都既默认不面向模型、又不缺能力的形状。**
 
 **两条通道的契约本来就不同，实现要各自成立**：
 
@@ -246,7 +250,9 @@ per-session，默认 100 次，可配（`0` = 不限）。Search 与 Fetch 共�
 5. 结果形状：十个字段原样透传（含 `site_name` / `date` 为 `null` 的情形）。
 6. **跨版本**：`pnpm run compat:pi` 要在 0.86.0（declared floor）上仍绿——搜索在 0.86.0 上只能走 PTC binding 面（`exposure` 不存在 ⇒ 不能注册成 model-facing）。
 
-**实现前要补的实测**：「codemode 脚本真的调到扩展注册的 `exposure:"codemode"` 工具」这件事，#231 的结论全部来自静态取证，**没有观测到一次真实调用**。落地前应补一次真实 pi 的端到端复现（`docs/research/pi-codemode-tool-bridging-20261020.md` §8 完整未核实清单）。
+**已补的实测**（2026-10-20，真机 pi 1.3.0 + 最小探针扩展 + 离线 canned provider，4 次会话跑通）：「codemode 脚本真的调到扩展注册的 `exposure:"codemode"` 工具」**已观测到**——静态结论一条也没有被证伪，且实测多出 6 条细节，其中 `tool_search` 能激活 `codemode` 档工具那条已写进 D1。取证：`docs/research/pi-codemode-bridge-live-probe-20261020.md`。
+
+**仍需在实现期补的**：上面那条实测跑的是 **canned provider**（观测的是**桥**，不是模型的选择）⇒ **真模型**下的行为未验（模型会不会主动用 `tool_search` 把搜索翻到直接面？未观测）。
 
 ## Out of Scope
 
@@ -276,6 +282,7 @@ per-session，默认 100 次，可配（`0` = 不限）。Search 与 Fetch 共�
 | 业界 harness 搜索集成做法            | `docs/research/web-search-integration-practices-20261020.md`（未提交）                       | 三种形态、工具位置、缺 key 的 7 种行为、开关形态、OpenCode 两条入口并存的先例    |
 | pi codemode 工具桥接取证             | `docs/research/pi-codemode-tool-bridging-20261020.md`（未提交）                              | `exposure` 四档语义、桥接四跳、序列化规则、0.86.0 / 0.99.0 跨版本产物            |
 | pi 凭据面取证                        | `docs/research/pi-credential-surface-20261020.md`（未提交）                                  | 五级优先级、判定口径、`readStoredCredential` 的陷阱、泄露面 5 条                 |
+| **真机实测探针**                     | `docs/research/pi-codemode-bridge-live-probe-20261020.md`                                    | 桥接成立；`tool_search` 激活路径；参数/返回的真实形状                            |
 | pi 能力矩阵                          | `docs/agents/pi-compat-matrix.md`                                                            | 15 个已发布版本上 `exposure` / codemode / `isError` 等能力点的实测               |
 | 既有决策                             | ADR-0010（narrowing mode）、ADR-0024（binding contract）、ADR-0040（bash 是 opt-in binding） | 形状与门禁的约束来源                                                             |
 | 决策票                               | #227 / #228 / #229 / #233（已关）+ #230 / #231（已关）                                       | 本 spec 的每个决策的原始讨论与证据                                               |
