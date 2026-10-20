@@ -64,7 +64,7 @@ compatibility: >
    ```bash
    ocr delegate rule --format json <diff 触及的 .md 路径...>   # 解析层对 .md 正常,返回 project group
    ```
-   ② 由 host agent / sub-agent 按 `doc-sync.md` 的 8 条必查项逐条走 —— ADR 状态机与索引、ADR 声明→`src/` 读点双向对照、CHANGELOG、CONTEXT.md 词条、`docs/reviews/` 账本四元对齐、行号/链接/常量漂移、整跑发布门禁。
+   ② 由 host agent / sub-agent 按 `doc-sync.md` 的 8 条必查项逐条走 —— ADR 状态机与索引、ADR 声明→`src/` 读点双向对照、CHANGELOG、GLOSSARY.md 词条、`docs/reviews/` 账本四元对齐、行号/链接/常量漂移、整跑发布门禁。
    ③ `scripts/**` 与 `.github/workflows/**` 同理:它们是 `.mjs` / `.yml`,前者能进 `ocr review`,后者不能。
 9. **汇总**:两轴分列,不合并不重排,结尾一行各轴 finding 数 + 最严重项 + 升级条目数 + SYSTEM-ONLY 门禁结果。
 
@@ -173,7 +173,7 @@ ocr review --from <base> --to HEAD --background-file <spec.md> \
 
 ## Standards 轴
 
-**发现的来源**(优先于 baseline):`AGENTS.md`、`docs/testing-constraints.md`、`docs/adr/`(21 篇 ADR)、README、`CONTEXT.md`。
+**发现的来源**(优先于 baseline):`AGENTS.md`、`docs/testing-constraints.md`、`docs/adr/`(21 篇 ADR)、README、`GLOSSARY.md`。
 
 Fowler smell baseline **12 条已实体化在 `.opencodereview/rules/general.md`**(每个读「是什么 → 怎么修」),
 并随 catch-all 锚下发给每个未被专用契约规则命中的文件——不再依赖「见原版」这种拿不到文件的引用。

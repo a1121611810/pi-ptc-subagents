@@ -57,7 +57,7 @@ The repository carries its own rules in [`AGENTS.md`](./AGENTS.md), and they are
 of "what a reviewer here will ask". Three that change what you write:
 
 - **The docs are not optional.** A behaviour change without the matching note in
-  `docs/adr/` or `CONTEXT.md` is an incomplete change. `CONTEXT.md` is the glossary; if you
+  `docs/adr/` or `GLOSSARY.md` is an incomplete change. `GLOSSARY.md` is the glossary; if you
   introduce a new domain term, it gets an entry, and its definition must match the constant in
   `src/` word for word.
 - **Tests must be falsifiable.** See [`docs/testing-constraints.md`](./docs/testing-constraints.md).

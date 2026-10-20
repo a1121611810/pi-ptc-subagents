@@ -100,7 +100,7 @@ provenance attestations only when publish comes from a public source repository,
 versions of this package carry no `dist.attestations` — including versions published
 through OIDC. That is a property of `a1121611810/pi-ptc-subagents` being private, not a
 broken release path: making the repository public later adds the attestation with no
-change to the workflow. Recorded here, and in `CONTEXT.md`, so the missing badge is not
+change to the workflow. Recorded here, and in `GLOSSARY.md`, so the missing badge is not
 re-diagnosed as a publishing defect.
 
 **8. §8 · The manual path survives as the fallback, and only that.** `npm publish` from

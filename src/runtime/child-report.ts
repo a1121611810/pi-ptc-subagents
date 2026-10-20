@@ -1,5 +1,5 @@
 /**
- * The child report's types (ADR-0032, `CONTEXT.md` §child report).
+ * The child report's types (ADR-0032, `GLOSSARY.md` §child report).
  *
  * These four declarations used to live in `dispatch.ts` next to the extraction that produces
  * them. They moved here so the *persisted* `TaskRecord` field (`task-storage.ts`, Layer 1) can

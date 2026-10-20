@@ -129,7 +129,7 @@ export interface DefaultModeConfig {
 /**
  * Read `defaultMode` from the agent-dir config file.
  *
- * Absent file → on (this package is default-on by design; see CONTEXT.md). A present file with a
+ * Absent file → on (this package is default-on by design; see GLOSSARY.md). A present file with a
  * non-boolean `defaultMode`, or unparseable JSON, is reported as `invalid` **and still defaults to
  * on** — the caller should surface the problem rather than silently changing behavior.
  */
@@ -183,7 +183,7 @@ export interface WhyEnabledConfig {
  * this package already decided what a broken boolean in this file means and a second answer for the
  * same file would be a second failure vocabulary:
  *
- * - Absent file, absent key → **on**. This package is default-on (CONTEXT.md), and ADR-0042's
+ * - Absent file, absent key → **on**. This package is default-on (GLOSSARY.md), and ADR-0042's
  *   measurement is why the block exists at all.
  * - A non-boolean value, or a file that is not a JSON object, or unparseable JSON → reported as
  *   `invalid` **and still resolved to on**.

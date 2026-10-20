@@ -17,7 +17,7 @@
  *                             documentation, and several carry a withdrawn
  *                             status — publishing them would let a reader take
  *                             a retired decision for a current design.
- *   ../../CONTEXT.md      →  same, for the glossary.
+ *   ../../GLOSSARY.md      →  same, for the glossary.
  *   ./sibling.md          →  a site-internal route, because both documents are
  *                             projected and the reader should stay on the site.
  *
@@ -113,9 +113,9 @@ function titleFrom(body, fallback) {
  *
  * The target is resolved with real path arithmetic rather than by stripping
  * `../` and guessing a prefix. `bgdispatch.md` links an ADR as `../adr/X.md`,
- * which lands in `docs/`, and the glossary as `../../CONTEXT.md`, which lands at
+ * which lands in `docs/`, and the glossary as `../../GLOSSARY.md`, which lands at
  * the repository root — the same string operation put the second one at
- * `docs/CONTEXT.md`, which does not exist, and failed the build on correct
+ * `docs/GLOSSARY.md`, which does not exist, and failed the build on correct
  * source content.
  */
 function rewriteTarget(target, fromRel) {

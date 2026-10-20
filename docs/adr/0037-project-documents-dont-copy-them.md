@@ -40,12 +40,12 @@ reader who wants to change something knows where the source is.
 
 Projected markdown contains links written for GitHub's renderer, not VitePress's. Three shapes occur:
 
-| Source shape       | Becomes                                              | Why                                                                                            |
-| ------------------ | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `../adr/NNNN-x.md` | absolute `github.com/…/blob/main/docs/adr/NNNN-x.md` | ADRs are **not** projected. They link back to the repository, where they are edited.           |
-| `../../CONTEXT.md` | absolute URL to `CONTEXT.md`                         | Same, for the glossary.                                                                        |
-| `./sibling.md`     | a site-internal route                                | Both documents are projected, so a site route is correct and keeps navigation inside the site. |
-| anything else      | **left exactly as written**                          | See below.                                                                                     |
+| Source shape        | Becomes                                              | Why                                                                                            |
+| ------------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `../adr/NNNN-x.md`  | absolute `github.com/…/blob/main/docs/adr/NNNN-x.md` | ADRs are **not** projected. They link back to the repository, where they are edited.           |
+| `../../GLOSSARY.md` | absolute URL to `GLOSSARY.md`                        | Same, for the glossary.                                                                        |
+| `./sibling.md`      | a site-internal route                                | Both documents are projected, so a site route is correct and keeps navigation inside the site. |
+| anything else       | **left exactly as written**                          | See below.                                                                                     |
 
 **Rewriting a link to an absolute URL removes it from VitePress's dead-link check**, because that
 check only resolves links inside the site. So the projection validates existence _before_ rewriting:
@@ -60,8 +60,8 @@ build failure for a quiet wrong link.
 ### One correction made during the work
 
 The first implementation resolved repository-relative paths by stripping `../` and prefixing `docs/`.
-That is wrong for exactly the case above: `../../CONTEXT.md` from `docs/usage/` lands at the
-**repository root**, but stripping and prefixing produced `docs/CONTEXT.md`, which does not exist — and
+That is wrong for exactly the case above: `../../GLOSSARY.md` from `docs/usage/` lands at the
+**repository root**, but stripping and prefixing produced `docs/GLOSSARY.md`, which does not exist — and
 the build failed on correct content. The path arithmetic was replaced with real `resolve()` and
 `relative()` against the repository root, plus an explicit rejection of anything resolving outside it.
 

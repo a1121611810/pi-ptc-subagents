@@ -299,7 +299,7 @@ The claim that survives a shift of four claims is not the number: it is that no 
 So a checklist built from those verbs would skip four fifths of the population while feeling like
 coverage, and a reviewer told to flag "unqualified strong-verb claims" would be handed 674 items,
 most of them titles and rationale sentences that are perfectly correct. Sampling 8 of those from
-the densest files (CONTEXT.md, ADR-0017, ADR-0022, ADR-0021) found **zero** defects -- they are dense
+the densest files (GLOSSARY.md, ADR-0017, ADR-0022, ADR-0021) found **zero** defects -- they are dense
 records, not wrong ones.
 
 **There is no cheap predicate, and shipping something that looks like one is worse than shipping

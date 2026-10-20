@@ -246,7 +246,7 @@ assert on content, not on a count.
   record of the experiment, whose arms were called G0 / G1 / G2 under the name `goal`, so renaming its
   prose would make it describe an experiment nobody ran.
 - `docs/specs/0042-goal-on-dispatch.md` — carries the same note in its header.
-- `CONTEXT.md` — the `why` glossary entry (rewritten in #219) gains the `whyEnabled` entry beside it.
+- `GLOSSARY.md` — the `why` glossary entry (rewritten in #219) gains the `whyEnabled` entry beside it.
 - ADR-0040 — cited for `optInBindings`, not amended: its opt-in is a grant, and a grant failing closed
   is still correct there.
 

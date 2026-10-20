@@ -1,6 +1,6 @@
 # Doc Sync (audit 3f, 阻塞级)
 
-适用文件:docs/**(rule.json 锚点 `docs/**`,merge_system_rule: true)。仓库根的 `CONTEXT.md`、
+适用文件:docs/**(rule.json 锚点 `docs/**`,merge_system_rule: true)。仓库根的 `GLOSSARY.md`、
 `CHANGELOG.md`、`AGENTS.md` 不在 `docs/**` 里,它们命中 `**` 兜底 —— 本规则的必查项 4 与 5
 针对它们同样成立,评审时要把这些路径显式传给 `ocr delegate rule` 才能拿到本清单。
 
@@ -50,7 +50,7 @@
    版本号必须与 `package.json` 的 `version` 一致(当前 1.1.0,对应 `## [1.1.0] - 2026-09-29` 条目)。
    完成判据:用户可见变更 100% 有条目;反过来每条 CHANGELOG 条目都能在 diff 里指出对应改动。
 
-5. **CONTEXT.md 词条与实现同步**。仓库根 `CONTEXT.md` 是单上下文领域词表,它里面的 _Avoid:_ 约束
+5. **GLOSSARY.md 词条与实现同步**。仓库根 `GLOSSARY.md` 是单上下文领域词表,它里面的 _Avoid:_ 约束
    (如 output / result 的四义拆分)只有在实现统一后才成立。本次 diff 新引入的领域名词(新 TaskRecord
    字段、新 model-facing tool、新 lost reason 字符串)必须给出词条,或明确说明为何不进词表。
    词表说禁用、实现照用 = 阻塞。

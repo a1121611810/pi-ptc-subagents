@@ -143,7 +143,7 @@ const COPY_PATHS = [
   ".oxlintrc.json",
   ".oxfmtrc.json",
   "AGENTS.md",
-  "CONTEXT.md",
+  "GLOSSARY.md",
   "README.md",
   "CHANGELOG.md",
   "LICENSE",

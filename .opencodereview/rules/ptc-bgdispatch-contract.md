@@ -6,7 +6,7 @@
 `src/tools/task-panel-render.ts`(模式由 `.opencodereview/rule.json` 锚定)。
 
 规范来源: ADR-0022(后台派发)`docs/adr/0022-background-dispatch.md`、ADR-0016(`pi.dispatch` binding)、
-ADR-0015(截断契约)、`CONTEXT.md` 词条(background dispatch / TaskRecord / TaskStatus / TaskRegistry /
+ADR-0015(截断契约)、`GLOSSARY.md` 词条(background dispatch / TaskRecord / TaskStatus / TaskRegistry /
 Subscription / DispatchHandle / `ptc_task_*` / `<bg-task-notification>`)。
 
 ## 状态机(ADR-0022 §2)

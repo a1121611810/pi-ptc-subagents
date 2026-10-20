@@ -19,7 +19,7 @@
  *
  * ## 规范文档 / 历史快照的分界（本文件最重要的范围判断）
  *
- * **规范（normative）**：README.md、CONTEXT.md、docs/adr/**、docs/specs/**、docs/usage/**。
+ * **规范（normative）**：README.md、GLOSSARY.md、docs/adr/**、docs/specs/**、docs/usage/**。
  * 它们是「当前事实的声明」，引用失效就是缺陷，必须断言。
  *
  * **历史快照（snapshot）**：docs/research/** 与 docs/reviews/**。
@@ -31,7 +31,7 @@
  * 守卫一旦变成噪声就等于没有守卫。
  *
  * 但**链接 404 在任何文档里都是缺陷，与行号会不会漂是两回事**，所以相对链接断言扫全量
- * docs/** 加仓库根的 README.md / AGENTS.md / CONTEXT.md，docs/research/** 也在内。
+ * docs/** 加仓库根的 README.md / AGENTS.md / GLOSSARY.md，docs/research/** 也在内。
  * 这条口径上线第一天就抓到一个真缺陷：`docs/research/prototype-pulse-tui-variants/industry-findings.md`
  * 的 16 / 73 / 127 行写 `../../dsh-ptc-page-rendering.md`，从该目录出发落到 `docs/` 下不存在的文件，
  * 正确路径是 `../dsh-ptc-page-rendering.md`。
@@ -76,14 +76,14 @@ const DOCS_DIR = join(REPO_ROOT, "docs");
 const SRC_DIR = join(REPO_ROOT, "src");
 
 /** 仓库根的三份文档：doc-sync 必查 4 / 5 明确说它们不在 docs/** 里但同样受管。 */
-const ROOT_DOCS: readonly string[] = ["README.md", "AGENTS.md", "CONTEXT.md"];
+const ROOT_DOCS: readonly string[] = ["README.md", "AGENTS.md", "GLOSSARY.md"];
 
 /**
  * 符号断言的扫描面（理由见文件头「符号断言为什么缩到只剩 …」）。
  * 链接与行号断言不受此限制，链接扫全量。
  */
 const SYMBOL_SCAN_PREFIXES: readonly string[] = ["docs/adr/", "docs/specs/", "docs/usage/"];
-const SYMBOL_SCAN_ROOT_DOCS: readonly string[] = ["README.md", "CONTEXT.md"];
+const SYMBOL_SCAN_ROOT_DOCS: readonly string[] = ["README.md", "GLOSSARY.md"];
 
 /**
  * 数量下界。每个值都是实测基线（见各处的注释），不是拍脑袋 —— 下界的作用是
@@ -137,7 +137,7 @@ const LINE_REF_FLOOR = 5; // 实测规范文档 8 处 file:line（全部指向�
 const NORMATIVE_PREFIXES: readonly string[] = ["docs/adr/", "docs/specs/", "docs/usage/"];
 
 function isNormative(rel: string): boolean {
-  if (rel === "README.md" || rel === "CONTEXT.md") return true;
+  if (rel === "README.md" || rel === "GLOSSARY.md") return true;
   return NORMATIVE_PREFIXES.some((prefix) => rel.startsWith(prefix));
 }
 
@@ -619,6 +619,18 @@ const EXTERNAL_VOCABULARY: ReadonlyMap<string, string> = new Map([
   [
     "DECLARED_ABSENT",
     "同上，与 MUST_APPEAR 是一对分区常量；ADR-0036 的 2026-10-11 修订记录用它说明被豁免的工具名是登记出来的，不是默认放行",
+  ],
+  // B4. 根仓库 doc-integrity 门禁测试自己声明的两个扫描面常量。与 B3 同一类东西：它们是
+  // tests/doc-integrity.test.ts 里本仓**自己**写的代码，不是第三方配置 schema——但符号断言的
+  // 扫描面是 `src/`（npm 包的源），门禁本身在 `tests/` 里。与 B3 的区别记在这里，免得后人
+  // 把它当成第三方词表：ADR-0046 要说明「门禁的扫描面也跟着改了名」就只能点它们的真名。
+  [
+    "ROOT_DOCS",
+    "doc-integrity 门禁自己声明的根文档清单常量（声明在 tests/doc-integrity.test.ts，不在 src/）；ADR-0046 点它的真名，是为了让「链接断言覆盖仓库根三份文档」这句话有可核对的对象",
+  ],
+  [
+    "SYMBOL_SCAN_ROOT_DOCS",
+    "同上，与 ROOT_DOCS 是一对扫描面常量；ADR-0046 用它说明符号断言面也把仓库根文档算在内",
   ],
   // C. ADR-0022 推迟到 v2 的宿主 PTC 方法（文档自己标注 out of scope）
   ["ptc_parent_query", "ADR-0022 v2 方法，v1 明确 out of scope"],

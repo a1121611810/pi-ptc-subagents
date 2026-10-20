@@ -19,7 +19,7 @@ Closes #
 ## Docs
 
 - [ ] The change is reflected in `docs/adr/`, `docs/usage/`, or `CHANGELOG.md`
-- [ ] `CONTEXT.md` has an entry for any new domain term, matching the constant in `src/` exactly
+- [ ] `GLOSSARY.md` has an entry for any new domain term, matching the constant in `src/` exactly
 - [ ] Any `file:line` citation I added points inside the file it names
 
 ## Notes for the reviewer

@@ -612,4 +612,4 @@ Deferred deliberately; the map items and reasons are in ADR-0022 §8/§10.
 - [ADR-0016 — the `pi.dispatch` binding](../adr/0016-ptc-dispatch-binding.md) — the foreground binding this extends.
 - [ADR-0041 — the read-only dispatch tier](../adr/0041-read-only-is-a-call-site-tier.md) — why `readOnly` is a narrowing and not a boundary.
 - [ADR-0015 — the pi truncation contract](../adr/0015-pi-truncation-contract.md) — the 50 KB / 2000-line rule.
-- [`CONTEXT.md`](../../CONTEXT.md) — canonical terms (background dispatch, TaskRecord, TaskStatus, TaskRegistry, Subscription, DispatchHandle, `ptc_task_*`, `<bg-task-notification>`).
+- [`GLOSSARY.md`](../../GLOSSARY.md) — canonical terms (background dispatch, TaskRecord, TaskStatus, TaskRegistry, Subscription, DispatchHandle, `ptc_task_*`, `<bg-task-notification>`).

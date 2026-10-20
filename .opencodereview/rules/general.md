@@ -200,7 +200,7 @@ config 接线)另有专用规则, 那些文件由专用规则审查, 本层只�
   `ptc-worker-lifecycle.md`(worker 状态机 / signal / drain)、`ptc-bgdispatch-contract.md`(后台派发状态机 /
   终态写入器 / 信号阶梯 / 通知转义)、`ptc-render-bounds.md`(渲染上限与截断契约)、
   `ptc-config-wiring.md`(config 键的生产读点)、`doc-sync.md`(`docs/**` 的文档同步)。
-- 设计决策原文: `CONTEXT.md`(领域词条)与 `docs/adr/`。
+- 设计决策原文: `GLOSSARY.md`(领域词条)与 `docs/adr/`。
 
 ## 本文件的定位
 

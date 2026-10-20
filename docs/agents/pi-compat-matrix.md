@@ -287,7 +287,7 @@ tables above.
 - `.codegraph/.gitignore` — doc-integrity's third baseline treats a basename as "unique in the
   repo"; without this file `.gitignore` is no longer a duplicate and the "ambiguity returns
   null" test goes red.
-- `docs/`, `README.md`, `AGENTS.md`, `CONTEXT.md` — doc-integrity walks them.
+- `docs/`, `README.md`, `AGENTS.md`, `GLOSSARY.md` — doc-integrity walks them.
 - `.opencodereview/` — `tests/ocr-anchor-coverage.test.ts` reads the rule anchors.
 - `.github/` — `tests/action-sha-consistency.test.ts` and `tests/site-checks-on-pr.test.ts`.
 - `LICENSE` — `README.md` links it (doc-integrity's link check).

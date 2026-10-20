@@ -292,7 +292,7 @@ follow from the design decisions in ADR-0020 / ADR-0021 and are not optional.
   (`docs/research/prototype-pulse-tui-variants/industry-findings.md`)
 - DSH parity target — what the page shows while a PTC program is running
   (`docs/research/dsh-ptc-page-rendering.md`)
-- Existing project glossary — `CONTEXT.md` (terms added in this round:
+- Existing project glossary — `GLOSSARY.md` (terms added in this round:
   `partial-state render`, `settled-state render`, `shimmer`,
   `shimmer band`, `bandPos`, `ShimmerDecorator`, `sub-call tree`,
   `SubCallRecord`, `SubCallStatus`, `SubCallTracker`, `args preview`,

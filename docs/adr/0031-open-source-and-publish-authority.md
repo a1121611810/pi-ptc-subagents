@@ -53,7 +53,7 @@ rule, and the `prepublishOnly` duplication argument all remain as specified ther
 > after it. 1.5.1, published after the flip, is the first version whose provenance precondition
 > held — see its `dist.attestations` on the registry.
 
-The repository moves from private to public. The source, the ADRs, `CONTEXT.md`, the tests and
+The repository moves from private to public. The source, the ADRs, `GLOSSARY.md`, the tests and
 the research notes all become readable, and the npm `homepage` stops being a dead link.
 
 `main` is then governed by a repository ruleset:

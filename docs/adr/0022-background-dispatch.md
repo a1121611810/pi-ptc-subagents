@@ -413,7 +413,7 @@ this section, not a tidy-up.
 
 ADR-0016 added `pi.dispatch` as a parallel binding that returns a `DispatchResult` once the child exits. That ADR documented (section "What we deliberately don't add") that the dispatch binding is **not** a tool with model-visible lifecycle.
 
-**This ADR flips that half-sentence.** The spawn surface remains the binding (no new binding `pi.dispatch_background`; one parameterization, not two surfaces). The **lifecycle face** is now model-visible via three tools (`ptc_task_list` / `ptc_task_output` / `ptc_task_stop`), and the cursor-based subscription delivers events to the model. The CONTEXT.md glossary entry for `pi.dispatch` is updated accordingly: the words "_Not_ a model-visible lifecycle tool" are replaced with "spawn is binding; the lifecycle face is model-visible via `ptc_task_*` tools (see `bg-task-notification` events)".
+**This ADR flips that half-sentence.** The spawn surface remains the binding (no new binding `pi.dispatch_background`; one parameterization, not two surfaces). The **lifecycle face** is now model-visible via three tools (`ptc_task_list` / `ptc_task_output` / `ptc_task_stop`), and the cursor-based subscription delivers events to the model. The GLOSSARY.md glossary entry for `pi.dispatch` is updated accordingly: the words "_Not_ a model-visible lifecycle tool" are replaced with "spawn is binding; the lifecycle face is model-visible via `ptc_task_*` tools (see `bg-task-notification` events)".
 
 The flip preserves ADR-0016's other invariants:
 

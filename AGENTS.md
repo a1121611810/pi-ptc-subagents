@@ -10,7 +10,7 @@ The five canonical triage roles, used as label strings directly. See `docs/agent
 
 ### Domain docs
 
-Single-context: one `CONTEXT.md` at the repo root and `docs/adr/` for ADRs. See `docs/agents/domain.md`.
+Single-context: one `GLOSSARY.md` at the repo root and `docs/adr/` for ADRs. See `docs/agents/domain.md`.
 
 ### pi compatibility matrix
 

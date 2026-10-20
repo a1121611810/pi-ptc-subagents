@@ -155,7 +155,7 @@ T-1 and T-4 are the two that fail **silently** if wrong; they get explicit `expe
 
 ### Documents this spec changes
 
-- `CONTEXT.md` — the `goal` entry.
+- `GLOSSARY.md` — the `goal` entry.
 - `docs/adr/0042-goal-on-dispatch.md` — the decision record, which carries the evidence.
 - ADR-0032 is **not** amended: the summary arms were measured and dropped.
 

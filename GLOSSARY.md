@@ -21,7 +21,7 @@ DSH "Code Mode" before the August-2026 rename. The model submits a program
 return value plus collected logs flow back into the model's context.
 This names the **technology**. The session-level switch that puts it to use —
 the one that hides the built-ins — is the _narrowing mode_
-(`CONTEXT.md` §Narrowing mode); the two are separate and both exist, so
+(`GLOSSARY.md` §Narrowing mode); the two are separate and both exist, so
 "PTC mode" never names the switch.
 
 **dsh** = DeepSeek Harness, `deepseek-ai/deepseek-harness` on GitHub. Source
@@ -37,7 +37,7 @@ and registers the extension in `~/.pi/agent/settings.json` automatically.
 **Not** a postinstall hook. **Not** a manual `pi-ptc install` CLI command.
 This is the package's **activation**; what the model may call inside a
 session is a separate question, answered by the _narrowing mode_
-(`CONTEXT.md` §Narrowing mode). The two are independent: the tools are
+(`GLOSSARY.md` §Narrowing mode). The two are independent: the tools are
 available whether or not the mode is on.
 
 ## pi-side terms
@@ -146,7 +146,7 @@ unqualified (that is a research branch, not this surface), and — importantly �
 "the `optInBindings` subset", which is the _opt-in binding_ axis and does the
 opposite thing.
 
-_Avoid_: "subagent" (overloaded; CONTEXT.md §Out-of-glossary), "BINDING_NAMES
+_Avoid_: "subagent" (overloaded; GLOSSARY.md §Out-of-glossary), "BINDING_NAMES
 whitelist" (the binding config is a _policy_, not a _filter_; Q1 grill round,
 2026-09-23).
 
@@ -594,7 +594,7 @@ above as never reaching the model), and the two point in opposite directions:
 `structured result` is machine-only and model-blind, a child report is
 model-facing and is _also_ what a program reads. Reusing the older term for
 this would invert its meaning. _Avoid_: "subagent report" (the word
-_subagent_ is reserved for the top-level _subagent surface_, `CONTEXT.md`
+_subagent_ is reserved for the top-level _subagent surface_, `GLOSSARY.md`
 §subagent surface), "structured output" (pi has no such concept — see
 ADR-0032 §What pi 1.0.0 actually offers), "child result" (the child report is
 one field of a _DispatchResult_, not the whole of it).
