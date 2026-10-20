@@ -313,7 +313,7 @@ behaviour the integration tests used to cover:
 - **`SubCallTracker` (per §9) owns the lifecycle.** Dispatcher holds one instance per run, not
   an inline array. The five-state mutate path, the ordering guarantee, and the `snapshot()`
   snapshot all sit in `src/runtime/sub-call-tracker.ts`. Dispatcher grows only `tracker.recordStart
-(...)` / `tracker.recordEnd(...)` calls and a `snapshot()` at `finish()` — about 8 lines, not 50.
+  (...)` / `tracker.recordEnd(...)` calls and a `snapshot()` at `finish()` — about 8 lines, not 50.
   Memory: 32 records × ~200 bytes = 6.4 KB worst case per run, freed with the run promise
   (ADR-0017 §1).
 - **PtcRow becomes an orchestrator.** Per §10, the renderer reads `details.subCalls`, calls the

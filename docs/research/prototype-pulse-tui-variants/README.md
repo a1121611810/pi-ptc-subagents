@@ -223,8 +223,8 @@ Implementation constraints (carried forward into the ADR):
   `this.invalidate()` + `this.ui.requestRender()`, both pi-`tool-execution.js`.
 - **Visual**: per-character colour split on the description. `PtcRow.render()`
   reads `Date.now() - state.startedAt`, computes `pos = floor(elapsed / 150) %
-(desc.length + 1)`, and renders each character with either `theme.fg("dim",
-c)` (off-band) or `theme.fg("accent", c)` (on-band).
+  (desc.length + 1)`, and renders each character with either `theme.fg("dim",
+  c)` (off-band) or `theme.fg("accent", c)` (on-band).
 - **Settle**: when `options.isPartial === false`, `clearInterval` and force
   the bright position to -1 (no character highlighted) so the settled line is
   uniformly accent. Same as `bash.js:124–130`.

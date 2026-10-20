@@ -49,7 +49,7 @@
 ## 3. merge_system_rule 取舍
 
 - `true` = 项目规则**与**通用系统检查并存。合并后的文本带两段标题:`## System-Specific Rules
-(Mandatory)` 与 `## User-Specific Rules (Mandatory)`。
+  (Mandatory)` 与 `## User-Specific Rules (Mandatory)`。
 - `false` = 只用项目规则,输出里**完全没有** `System-Specific` 段。
 
 实测(`ocr delegate rule --format json <file>` 的 `groups[].rule` 文本):`general.md` 本体 25 行;

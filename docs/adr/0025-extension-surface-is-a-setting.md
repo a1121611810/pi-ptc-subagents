@@ -1,4 +1,4 @@
----
+***
 
 status: **withdrawn 2026-10-10** by
 [ADR-0034](./0034-surface-is-detected-not-set.md). The premise below — that the surface is a

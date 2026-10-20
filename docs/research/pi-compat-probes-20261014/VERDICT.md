@@ -11,7 +11,7 @@ Question (2026-10-14, v2 after the user's correction): "你没看完整,当 code
    `programmingToolExposure = surfaceMode === "full" ? "direct" : "codemode"` 意味着:codemode
    不可用 ⇒ surface=full ⇒ 两个 PTC 工具注册为 `direct` ⇒ 本来就该声明给模型。0.86.1 没有
    exposure 门不是缺陷,恰恰让 "direct" 按设计工作。实测(B4):`ptc_run_code exposure=direct,
-ptc_workflow exposure=direct`。模型看到的正是项目自己 PTC 的约定面。源码注释甚至已写明
+   ptc_workflow exposure=direct`。模型看到的正是项目自己 PTC 的约定面。源码注释甚至已写明
    "Measured across 0.86.1 / 0.87.1 / ... / 1.1.0"。
 2. **"结构化结果失效是模型可见的降级" — 基本错。** structuredContent 的文档语义就是
    "not sent to the model; programmatic callers only"。0.86.x 上没有 codemode,唯一的

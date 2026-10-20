@@ -433,7 +433,7 @@ compaction utilities `compact`/`estimateTokens`/`calculateContextTokens`/`findCu
 ### 4.1 What an extension can do from inside pi
 
 - **Speak to the live session**: `pi.sendMessage({customType, content, display, details},
-{ triggerTurn?, deliverAs? })` — `types.d.ts:977-980`. `deliverAs`:
+  { triggerTurn?, deliverAs? })` — `types.d.ts:977-980`. `deliverAs`:
   `"steer"` (default; after the current assistant turn's tools finish, before the next LLM
   call) / `"followUp"` (only when the agent has no more tool calls) / `"nextTurn"` (queued for
   the next user prompt, triggers nothing) — `docs/extensions.md:1472-1476`.
@@ -479,7 +479,7 @@ compaction utilities `compact`/`estimateTokens`/`calculateContextTokens`/`findCu
   `docs/session-format.md:358-379`.
 - `ctx.sessionManager` is the **read-only** projection — only
   `getCwd, getSessionDir, getSessionId, getSessionFile, getLeafId, getLeafEntry, getEntry,
-getLabel, getBranch, buildContextEntries, getHeader, getEntries, getTree, getSessionName`
+  getLabel, getBranch, buildContextEntries, getHeader, getEntries, getTree, getSessionName`
   — `session-manager.d.ts:152`.
 
 ### 4.3 Spawning sub-agents — the first-party pattern
@@ -535,8 +535,8 @@ Its dispatch contract:
 (`pi-agent-core/dist/harness/agent-harness.d.ts`, 715 lines):
 
 - `AgentHarness.create({ session, models, model, thinkingLevel?, activeToolNames?, tools?,
-toolContext?, systemPrompt?, resources?, streamOptions?, retry?, compaction?, steeringMode?,
-followUpMode?, toolExecution?: "sequential"|"parallel", toProviderMessages?, entryProjectors? })`
+  toolContext?, systemPrompt?, resources?, streamOptions?, retry?, compaction?, steeringMode?,
+  followUpMode?, toolExecution?: "sequential"|"parallel", toProviderMessages?, entryProjectors? })`
   — `:617-635`
 - `harness.lane(name, context)` -> `AgentLane` — `:679-682`, `:636-675`
 - `AgentLane`: `accept`/`drive`/`prompt`/`skill`/`promptFromTemplate`/`compact`/

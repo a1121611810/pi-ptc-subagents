@@ -173,7 +173,7 @@ would be to rebuilt:
    (`src/runtime/limits.ts:13`, and the bindings header: "permission gates and
    sandbox overrides never run for them").
 2. **Discovery at catalog scale.** `exposure: direct | model-only | codemode |
-deferred | hidden`, a BM25 `searchTools`/`describeTool` pair inside the
+   deferred | hidden`, a BM25 `searchTools`/`describeTool` pair inside the
    script, a `tool_search` tool that loads matches for the next model call, and
    auto-generated typed declarations under a token budget. PTC has a fixed
    seven-name whitelist intersected with the session's active tools, and no

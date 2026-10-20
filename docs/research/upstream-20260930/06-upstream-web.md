@@ -262,7 +262,12 @@ interface PtcRunSandbox {
 }
 
 type PtcJsonValue =
-  null | boolean | number | string | PtcJsonValue[] | { [key: string]: PtcJsonValue };
+  | null
+  | boolean
+  | number
+  | string
+  | PtcJsonValue[]
+  | { [key: string]: PtcJsonValue };
 ```
 
 Key documented consequences (i):

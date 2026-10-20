@@ -139,12 +139,12 @@ follow from the design decisions in ADR-0020 / ADR-0021 and are not optional.
 
 - **Two new modules**:
   - `src/tools/shimmer.ts` — `ShimmerDecorator` exposed as `withShimmer<T extends
-Component>(inner, options): T`. The interface follows pi-tui's
+    Component>(inner, options): T`. The interface follows pi-tui's
     `Component` contract; the wrapped component returns the inner's lines
     with the band-coloured character swapped to `accent`.
   - `src/runtime/sub-call-tracker.ts` — `SubCallTracker` class with
     `recordStart`, `recordEnd`, `snapshot()`. Internal `Map<number,
-SubCallRecord>` plus order-preserving array.
+    SubCallRecord>` plus order-preserving array.
 
 - **Existing modules touched**:
   - `src/runtime/protocol.ts` — add `SubCallRecord` and `SubCallStatus` types.
@@ -158,7 +158,7 @@ SubCallRecord>` plus order-preserving array.
     only wrapped surface; result-area renderers do not compose the
     decorator, and sub-call rows are not wrapped — they convey liveness
     via status colour per US16). Add private helpers `subRowsFor(subCalls,
-theme)` and `previewArgs(name, args)`.
+    theme)` and `previewArgs(name, args)`.
 
 - **Render-time state**, not accumulated state. Band position computed in
   `render(width)` from `Date.now() - startedAt`. Deterministic under

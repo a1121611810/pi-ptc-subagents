@@ -579,14 +579,16 @@ const noAnswerer = () =>
   Promise.reject(
     new UserQuestionError("no user-questions answerer accepted the request", "NO_PROVIDER"),
   );
-return await (agent === undefined
-  ? this.ctx.waterfall("user-questions/request", request, noAnswerer)
-  : this.ctx.waterfall(
-      scopeTarget(agent, agent),
-      "user-questions/request",
-      { ...request, agent },
-      noAnswerer,
-    ));
+return await(
+  agent === undefined
+    ? this.ctx.waterfall("user-questions/request", request, noAnswerer)
+    : this.ctx.waterfall(
+        scopeTarget(agent, agent),
+        "user-questions/request",
+        { ...request, agent },
+        noAnswerer,
+      ),
+);
 ```
 
 Wire shapes (`dsh-tool-cordis/lib/types/api-catalog.js:4483-4508`):
