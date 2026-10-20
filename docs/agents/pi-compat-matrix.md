@@ -4,7 +4,8 @@
 because the package makes a RANGE claim it never measured:
 
 - `peerDependencies` declares `@earendil-works/pi-coding-agent: ">=0.86.0"`;
-- `devDependencies` pins `^1.0.0`, so the default gate measures one point of that range;
+- `devDependencies` pins `1.3.0` (as of 2026-10-20), so the default gate measures one point of
+  that range;
 - the project's stated policy is to track new pi releases, so the ceiling moves.
 
 **Those are three numbers, and the one on your PATH is a fourth.** `node_modules/@earendil-works/pi-coding-agent/package.json`
@@ -39,33 +40,41 @@ the binding contract, tool visibility).
 
 ## Capability matrix — every published version from 0.86.0 to latest
 
-Probed 2026-10-14 across **all 14 published versions** (each installed into its own tree, then
-statically probed over the installed artifacts by the throwaway probe
+Probed 2026-10-14 across the **14 versions published at that date** (each installed into its own
+tree, then statically probed over the installed artifacts by the throwaway probe
 `../research/pi-compat-probes-20261014/capability-probe.mjs`; the 0.86.0 / 0.86.1 / 0.99.0 / 1.0.0 /
 1.2.0 columns additionally runtime-verified by `probe-runtime.mjs` loading the real built dist).
 Those probes are one-off prototypes kept in
 [`docs/research/pi-compat-probes-20261014/`](../research/pi-compat-probes-20261014/) — they are the
 evidence behind this table, and nothing in the gate depends on them still being there.
 
-| capability point                                           | 0.86.0 | 0.86.1 | 0.87.0 | 0.87.1 | 0.99.0 | 0.99.1 | 0.99.2 | 1.0.0 | 1.0.1 | 1.0.2 | 1.0.3 | 1.0.4 | 1.1.0 | 1.2.0 |
-| ---------------------------------------------------------- | ------ | ------ | ------ | ------ | ------ | ------ | ------ | ----- | ----- | ----- | ----- | ----- | ----- | ----- |
-| `AgentToolResult.isError` + bash uses it                   | ✗      | ✗      | ✗      | ✗      | ✓      | ✓      | ✓      | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     |
-| `ToolDefinition.outputSchema`                              | ✗      | ✗      | ✗      | ✗      | ✓      | ✓      | ✓      | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     |
-| `ToolDefinition.exposure` field                            | ✗      | ✗      | ✗      | ✗      | ✓      | ✓      | ✓      | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     |
-| agent-session honors exposure (`_getToolExposure`)         | ✗      | ✗      | ✗      | ✗      | ✓      | ✓      | ✓      | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     |
-| agent-loop forwards `structuredContent`                    | ✗      | ✗      | ✗      | ✗      | ✓      | ✓      | ✓      | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     |
-| codemode ships (`extensions/codemode`)                     | ✗      | ✗      | ✗      | ✗      | ✓      | ✓      | ✓      | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     |
-| MCP extension + codemode auto-enable                       | ✗      | ✗      | ✗      | ✗      | ✓      | ✓      | ✓      | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     |
-| extension patterns through `normalizePath` (tilde/file://) | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗     | ✗     | ✗     | ✗     | ✗     | ✗     | ✓     |
-| codemode declares `reachesTools`                           | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗     | ✗     | ✗     | ✗     | ✗     | ✗     | ✓     |
-| `BeforeAgentStartEvent` is a `messageType` union           | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗     | ✗     | ✗     | ✗     | ✗     | ✗     | ✓     |
-| `ToolRenderContext.durationMs` + `outputPad`               | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗     | ✗     | ✗     | ✗     | ✗     | ✓     | ✓     |
-| `registerToolRenderer` API                                 | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗     | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     |
-| `-p` truncated response exits 1                            | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗     | ✗     | ✗     | ✗     | ✗     | ✗     | ✓     |
-| `formatSkillsForPrompt` supports `"indirect"`              | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗     | ✗     | ✗     | ✗     | ✓     | ✓     | ✓     |
-| published settings schema (`schemas/`)                     | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗     | ✗     | ✗     | ✗     | ✗     | ✗     | ✓     |
-| `--tools` keeps MCP tools unless `mcp__` entry             | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗     | ✗     | ✗     | ✗     | ✓     | ✓     | ✓     |
-| **this package typechecks**                                | **✓**  | **✓**  | **✓**  | **✓**  | ✓      | ✓      | ✓      | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     |
+**1.3.0 was added 2026-10-20**, when pi published it (the 15th version in this range). Its column
+is a measurement of the same kind, not an inference from 1.2.0: a 1.3.0 tree was installed on its
+own and the same `capability-probe.mjs` was run over it, and it answered **✓ on all sixteen
+capability points** — identical to 1.2.0. 1.3.0 is also the version this repo now pins, and
+`pnpm run compat:pi 1.3.0` passes every step on it (install, resolved-version, typecheck, lint,
+fmt:check, build, tests, verify:dist; the throw-path leg SKIPS there because 1.3.0 resolves bash
+failures through the `isError` channel, so that path is unreachable rather than broken).
+
+| capability point                                           | 0.86.0 | 0.86.1 | 0.87.0 | 0.87.1 | 0.99.0 | 0.99.1 | 0.99.2 | 1.0.0 | 1.0.1 | 1.0.2 | 1.0.3 | 1.0.4 | 1.1.0 | 1.2.0 | 1.3.0 |
+| ---------------------------------------------------------- | ------ | ------ | ------ | ------ | ------ | ------ | ------ | ----- | ----- | ----- | ----- | ----- | ----- | ----- | ----- |
+| `AgentToolResult.isError` + bash uses it                   | ✗      | ✗      | ✗      | ✗      | ✓      | ✓      | ✓      | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     |
+| `ToolDefinition.outputSchema`                              | ✗      | ✗      | ✗      | ✗      | ✓      | ✓      | ✓      | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     |
+| `ToolDefinition.exposure` field                            | ✗      | ✗      | ✗      | ✗      | ✓      | ✓      | ✓      | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     |
+| agent-session honors exposure (`_getToolExposure`)         | ✗      | ✗      | ✗      | ✗      | ✓      | ✓      | ✓      | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     |
+| agent-loop forwards `structuredContent`                    | ✗      | ✗      | ✗      | ✗      | ✓      | ✓      | ✓      | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     |
+| codemode ships (`extensions/codemode`)                     | ✗      | ✗      | ✗      | ✗      | ✓      | ✓      | ✓      | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     |
+| MCP extension + codemode auto-enable                       | ✗      | ✗      | ✗      | ✗      | ✓      | ✓      | ✓      | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     |
+| extension patterns through `normalizePath` (tilde/file://) | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗     | ✗     | ✗     | ✗     | ✗     | ✗     | ✓     | ✓     |
+| codemode declares `reachesTools`                           | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗     | ✗     | ✗     | ✗     | ✗     | ✗     | ✓     | ✓     |
+| `BeforeAgentStartEvent` is a `messageType` union           | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗     | ✗     | ✗     | ✗     | ✗     | ✗     | ✓     | ✓     |
+| `ToolRenderContext.durationMs` + `outputPad`               | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗     | ✗     | ✗     | ✗     | ✗     | ✓     | ✓     | ✓     |
+| `registerToolRenderer` API                                 | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗     | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     |
+| `-p` truncated response exits 1                            | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗     | ✗     | ✗     | ✗     | ✗     | ✗     | ✓     | ✓     |
+| `formatSkillsForPrompt` supports `"indirect"`              | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗     | ✗     | ✗     | ✗     | ✓     | ✓     | ✓     | ✓     |
+| published settings schema (`schemas/`)                     | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗     | ✗     | ✗     | ✗     | ✗     | ✗     | ✓     | ✓     |
+| `--tools` keeps MCP tools unless `mcp__` entry             | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗      | ✗     | ✗     | ✗     | ✗     | ✓     | ✓     | ✓     | ✓     |
+| **this package typechecks**                                | **✓**  | **✓**  | **✓**  | **✓**  | ✓      | ✓      | ✓      | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     | ✓     |
 
 Three corrections this table forced, all caught by measuring instead of citing:
 
@@ -87,7 +96,7 @@ Three corrections this table forced, all caught by measuring instead of citing:
    measured column for 0.87.x and deliberately refuses to fall back to a neighbouring version's
    one — an unmeasured version is a failure there, not a skip. So the 0-errors claim above is
    about typecheck and stops there; it is not a claim that 0.87.1 is a green matrix leg. 0.87.1
-   sits outside `PI_COMPAT_VERSIONS` (`0.86.0`, `1.0.0`, `1.2.0`), so the default run never
+   sits outside `PI_COMPAT_VERSIONS` (`0.86.0`, `1.0.0`, `1.2.0`, `1.3.0`), so the default run never
    touches it.
 
 3. **The 1.2.0-only features are smaller than the changelog suggests**: `normalizePath` on
@@ -113,14 +122,22 @@ Note that an earlier revision of this document concluded "the real floor is 0.99
 open whether to narrow `peerDependencies` to match. That question is settled: `>=0.86.0` is both
 the claim and the measured truth, so the range stays.
 
-### The 1.0.x → 1.2.0 finding: green, with upstream behaviours worth knowing
+### The 1.0.x → 1.3.0 finding: green, with upstream behaviours worth knowing
 
-pi 1.2.0 passes every step. What it shipped that touches this package: `normalizePath` on
-extension patterns (inert for the codemode answer — measured and documented in
-`src/mode/ptc-mode.ts`), a `reachesTools` gate on MCP auto-enable (inert for pi's own codemode),
-and `read` growing an `outputSchema` (our binding projection drops `structuredContent`, so the
-program-visible shape is unchanged). The one real behavioural change — print-mode exiting 1 on a
-truncated response — is handled by `truncationFailureMessage` in `src/runtime/dispatch.ts`.
+pi 1.2.0 passes every step, and so does pi 1.3.0 (measured 2026-10-20: every step, with the
+throw-path leg SKIPPED because 1.3.0 resolves bash failures through the `isError` channel). What
+1.2.0 shipped that touches this package: `normalizePath` on extension patterns (inert for the
+codemode answer — measured and documented in `src/mode/ptc-mode.ts`), a `reachesTools` gate on MCP
+auto-enable (inert for pi's own codemode), and `read` growing an `outputSchema` (our binding
+projection drops `structuredContent`, so the program-visible shape is unchanged). The one real
+behavioural change — print-mode exiting 1 on a truncated response — is handled by
+`truncationFailureMessage` in `src/runtime/dispatch.ts`.
+
+**1.3.0 changed none of it.** Measured on its own install, it answers ✓ on all sixteen static
+capability points, and its differential resolution of the codemode switch is identical to 1.2.0's
+on all forty cases (`tests/unit/codemode-switch-differential.test.ts` now carries a measured 1.3.0
+column). So the 1.2.0 column in the capability matrix above is also 1.3.0's column, and the
+behaviours worth knowing are the same ones.
 
 ### Feature-level matrix: this package own surface, measured per version (the real answer)
 
@@ -129,7 +146,10 @@ second probe: drive the real built dist through factory + session_start + /ptc +
 program, per version. That probe (`../research/pi-compat-probes-20261014/surface-probe.mjs`, driven
 across all 14 trees by `run-surface-matrix.mjs`, measured 2026-10-14) is a one-off prototype, not
 gate tooling - it is the evidence behind this table and nothing in the gate runs it. Fourteen versions times fifteen features = 210 checks, all pass - including on the four
-pre-0.99.0 versions, which are not type-broken:
+pre-0.99.0 versions, which are not type-broken. The 1.3.0 column below is NOT from that 2026-10-14
+run: 1.3.0 was published later, and what was measured for it on 2026-10-20 is the `compat:pi
+1.3.0` leg (every step green) plus the static capability probe and the forty-case differential
+measurement — not this surface probe across fifteen features, which was not re-run for it.
 
 | feature                                                          | 0.86.0-0.87.1        | 0.99.0-1.2.0           |
 | ---------------------------------------------------------------- | -------------------- | ---------------------- |

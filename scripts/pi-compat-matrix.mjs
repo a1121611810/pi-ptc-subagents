@@ -57,16 +57,19 @@ import { join } from "node:path";
  *   measures the claim the package makes rather than a stand-in for it. 0.86.0 is published on
  *   npm (checked 2026-10-14: the 0.8x/0.9x series is 0.80.1 … 0.86.0, 0.86.1, 0.87.0, 0.87.1,
  *   0.99.0 …), which is why the list can name it directly.
- * - 1.0.0 — the `devDependencies` pin, i.e. what the default gate already measures.
- * - 1.2.0 — the newest release at the time this script was written; move this forward (and add
- *   intermediates when a bisect would help) as pi ships.
+ * - 1.0.0 — the `devDependencies` pin at the time this script was written.
+ * - 1.2.0 — an intermediate, kept so a bisect between the 1.0.0 and 1.3.0 legs can say WHICH
+ *   release changed a behaviour rather than only that something did.
+ * - 1.3.0 — the newest release (published 2026-10-19; checked on npm 2026-10-20) and the
+ *   `devDependencies` pin as of 2026-10-20. Move this forward (and add intermediates when a
+ *   bisect would help) as pi ships.
  *
  * The oldest entry is tied to the peer range's lower bound by
  * `tests/unit/pi-compat-matrix.test.ts`, which PARSES that bound out of package.json and
  * requires equality — so bumping `peerDependencies` without adding the matching leg here turns
  * that test red rather than silently widening what the matrix claims to cover.
  */
-const PI_COMPAT_VERSIONS = ["0.86.0", "1.0.0", "1.2.0"];
+const PI_COMPAT_VERSIONS = ["0.86.0", "1.0.0", "1.2.0", "1.3.0"];
 
 /** The three packages whose devDependency is rewritten per version. */
 const PI_PACKAGES = [
@@ -214,12 +217,17 @@ function rewriteDevDeps(root, version) {
   const source = readFileSync(path, "utf8");
   let rewritten = source;
   for (const pkg of [...PI_PACKAGES, ...PI_TRANSITIVE_PACKAGES]) {
-    const before = rewritten;
-    rewritten = rewritten.replace(
-      new RegExp('("' + pkg + '":\\s*")\\^?[0-9]+\\.[0-9]+\\.[0-9]+"'),
-      "$1" + version + '"',
-    );
-    if (rewritten === before && source.includes('"' + pkg + '"')) {
+    // Whether the entry was FOUND, and whether the text CHANGED, are two different questions.
+    // The first is what this loop needs; the second is what it used to ask, and asking the second
+    // made the script unable to measure the version the repo currently pins: replacing `1.3.0`
+    // with `1.3.0` leaves the text identical, so a MATCH was reported as "no devDependency entry
+    // matched" — measured 2026-10-20, when `compat:pi 1.3.0` aborted on exactly that message
+    // with the pin already at 1.3.0. Asking "did the regex match" instead says what it means:
+    // the entry is there and has been rewritten to the requested version.
+    const pattern = new RegExp('("' + pkg + '":\\s*")\\^?[0-9]+\\.[0-9]+\\.[0-9]+"');
+    const matched = pattern.test(rewritten);
+    rewritten = rewritten.replace(pattern, "$1" + version + '"');
+    if (!matched && source.includes('"' + pkg + '"')) {
       throw new Error('no devDependency entry matched for "' + pkg + '"');
     }
   }

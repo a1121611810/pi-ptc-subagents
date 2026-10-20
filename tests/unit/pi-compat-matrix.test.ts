@@ -7,7 +7,8 @@
  * produced (each is named in the comment carrying it) — the file exists so that editing the copy
  * list, the version list, or the hermetic env silently cannot reintroduce them.
  */
-import { readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
 
@@ -200,4 +201,101 @@ test("the script is wired as a package script but stays out of the default gate"
     rootPackage.scripts?.prepublishOnly ?? "",
     "the default gate does not run the matrix",
   ).not.toContain("compat:pi");
+});
+
+/**
+ * `rewriteDevDeps`, lifted out of the script and RUN.
+ *
+ * The other assertions in this file read the script's SOURCE. This one executes the function,
+ * because the defect it guards is a runtime behaviour that no source shape distinguishes: the
+ * script used to decide "this devDependency entry was not found" by asking whether REPLACING the
+ * version changed the text. Replacing `1.3.0` with `1.3.0` does not change the text, so a version
+ * that IS present was reported as missing — and `compat:pi 1.3.0` aborted with
+ * "no devDependency entry matched for @earendil-works/pi-coding-agent" on a repo whose pin was
+ * already 1.3.0 (measured 2026-10-20). A source-shape assertion cannot see that, because the old
+ * and the new source both contain the same regex and the same replacement.
+ *
+ * The function is extracted rather than imported: the script is an ESM module whose top level
+ * RUNS the matrix (it installs trees and exits non-zero on a failing step), so importing it would
+ * execute the very thing this file guards. The extraction takes the function's own source text —
+ * so a rename or a signature change fails here rather than silently skipping the test.
+ */
+function loadRewriteDevDeps(): (root: string, version: string) => void {
+  const start = script.indexOf("function rewriteDevDeps(");
+  expect(start, "rewriteDevDeps is defined in the script").toBeGreaterThan(-1);
+  // The function body runs to the first line that closes it at column 0.
+  const end = script.indexOf("\n}\n", start);
+  expect(end, "rewriteDevDeps has a closing brace").toBeGreaterThan(start);
+  const source = script.slice(start, end + 3);
+  // oxlint-disable-next-line typescript/no-implied-eval -- executing the script's own function text on purpose; the same construct as src/runtime/worker-main.ts
+  return new Function(
+    "PI_PACKAGES",
+    "PI_TRANSITIVE_PACKAGES",
+    "readFileSync",
+    "writeFileSync",
+    "existsSync",
+    "join",
+    source + "\nreturn rewriteDevDeps;",
+  )(
+    ["@earendil-works/pi-coding-agent", "@earendil-works/pi-ai", "@earendil-works/pi-tui"],
+    [
+      "@earendil-works/pi-codemode",
+      "@earendil-works/pi-mcp",
+      "@earendil-works/pi-agent-core",
+      "@earendil-works/pi-telemetry",
+    ],
+    readFileSync,
+    writeFileSync,
+    existsSync,
+    join,
+  ) as (root: string, version: string) => void;
+}
+
+test("the version the repo currently pins is measurable: rewriting to it must not be reported as missing", () => {
+  // The defect: "was the entry found?" was answered by "did the text change?", so the CURRENT pin
+  // was unmeasurable. The expected values are independent of the script's own logic: the pin is
+  // read out of the real package.json, and the version under test is that same pin.
+  const rewriteDevDeps = loadRewriteDevDeps();
+  const root = mkdtempSync(join(tmpdir(), "ptc-compat-rewrite-"));
+  try {
+    // A scratch package.json shaped like the real one: the three top-level pi devDependencies
+    // pinned to one version, exactly as the repo pins them.
+    const pinned = "1.3.0";
+    const manifest = JSON.stringify(
+      {
+        name: "scratch",
+        devDependencies: {
+          "@earendil-works/pi-coding-agent": pinned,
+          "@earendil-works/pi-ai": pinned,
+          "@earendil-works/pi-tui": pinned,
+        },
+      },
+      null,
+      2,
+    );
+    writeFileSync(join(root, "package.json"), manifest, "utf8");
+    writeFileSync(join(root, "pnpm-workspace.yaml"), "packages:\n  - packages/*\n", "utf8");
+
+    // The counterfactual is the whole point: rewriting to the SAME version used to throw.
+    expect(() => rewriteDevDeps(root, pinned)).not.toThrow();
+
+    // And the rewrite still HAPPENS — "not found" must not become "found but did nothing".
+    const rewritten = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+      devDependencies: Record<string, string>;
+    };
+    expect(rewritten.devDependencies["@earendil-works/pi-coding-agent"]).toBe(pinned);
+    expect(rewritten.devDependencies["@earendil-works/pi-ai"]).toBe(pinned);
+    expect(rewritten.devDependencies["@earendil-works/pi-tui"]).toBe(pinned);
+
+    // A DIFFERENT version still rewrites to that version — the fix is not "never throw".
+    expect(() => rewriteDevDeps(root, "0.86.0")).not.toThrow();
+    const rewritten2 = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+      devDependencies: Record<string, string>;
+    };
+    expect(rewritten2.devDependencies["@earendil-works/pi-coding-agent"]).toBe("0.86.0");
+    expect(rewritten2.devDependencies["@earendil-works/pi-ai"]).toBe("0.86.0");
+    expect(rewritten2.devDependencies["@earendil-works/pi-tui"]).toBe("0.86.0");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
