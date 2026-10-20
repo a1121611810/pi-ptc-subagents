@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.1] - 2026-10-20
+
+### Changed
+
+- **pi 1.3.0 is now measured, not merely claimed.** The package declares
+  `@earendil-works/pi-coding-agent: ">=0.86.0"`, so it has always _claimed_ to work on every pi
+  release in that range — but 1.3.0, published on 2026-10-19, had never been measured. The
+  differential table's measured versions stopped at 1.2.0 and the compatibility matrix's version
+  list did not name it. pi 1.3.0 was installed on its own and the forty codemode-switch cases were
+  driven through **its own** `DefaultPackageManager.resolve()`: it answered identically to 1.2.0 on
+  all forty, and the static capability probe answered ✓ on all sixteen capability points. The
+  1.3.0 column is that measurement, not an inference from 1.2.0 being older. A user on pi 1.3.0
+  now has a version whose behaviour this package has actually observed rather than assumed.
+- **The test toolchain moves to vitest 5, and the compatibility matrix can measure the version the
+  repository currently pins.** `vitest` 4.1.11 → 5.0.5, `@vitest/coverage-v8` 4.1.11 → 5.0.5,
+  `vite-plus` 0.3.3 → 1.3.0, `oxfmt` 0.70.0 → 0.73.0, `oxlint` 1.85.0 → 1.89.0, `@types/node`
+  22.20.4 → 26.6.5. The coverage provider and the test runner have to move together —
+  `@vitest/coverage-v8@5.0.5` declares `vitest: 5.0.5` as a peer, and the mismatched pair is what
+  produced 79 unhandled rejections (one per test file) in the upgrade's own CI. Separately,
+  `scripts/pi-compat-matrix.mjs` decided "this devDependency entry was not found" by asking
+  whether **replacing the version changed the text** — and replacing `1.3.0` with `1.3.0` does
+  not change the text, so the matrix could not measure the version the repository currently pins.
+  It asks whether the pattern matched now, and a test that _runs_ the function pins that.
+- **The toolchain bump reformats 26 markdown files.** oxfmt 0.73 changed list-continuation
+  indentation and thematic-break fences. No prose changed. The files it touched carry a single
+  unpaired `---` rather than a YAML frontmatter block, so the site's frontmatter stripping never
+  matched them and does not match `***` either; the three files that do carry real frontmatter are
+  untouched.
+
+### Fixed
+
+- **Nothing in the published package's behaviour changed.** The runtime code, the tool
+  descriptions, the argument and result shapes and the declared peer range are all as 5.0.0
+  shipped them; this release carries development-side and documentation-side work only.
+
 ## [5.0.0] - 2026-10-19
 
 ### Added
