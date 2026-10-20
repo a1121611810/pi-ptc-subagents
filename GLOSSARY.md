@@ -1188,6 +1188,46 @@ never happened) is `rejected`, a child that ran and failed
 (`started: true`) is `error`, and everything else is `ok`. One per dispatch call; no recursion into the child PTC run's
 tree (ADR-0021 §7).
 
+## DeepSeek search module (ADR-0047, ADR-0048)
+
+**program-internal reach** — a capability the model reaches **only from inside a
+program**, never by calling it directly. Two carriers exist in this package: the
+**PTC binding** table (the Node worker's `tools["<name>"]`) and pi's **codemode
+face** (a pi tool registered with `exposure: "codemode"`, which pi's codemode
+scripts may call but the model is never told about). It is a property of a
+capability's _reach_, not of a session's state — the _narrowing mode_ is the
+session-level toggle, and `exposure: "hidden"` is the opposite of this (hidden
+means unreachable at all). _Avoid_: "hidden tool" (hidden is unreachable, the
+opposite), "internal" (says nothing about reach), "narrowed" (that is the
+_narrowing mode_), "private" (it is not private — the model can still call it from
+a program).
+
+**DeepSeek search module** — this package's built-in web retrieval: DeepSeek's
+**Search** and **Fetch** APIs, which are model-agnostic raw JSON endpoints
+(`POST /v1/tools/search` and `/v1/tools/fetch`) carrying no `model` field, so
+they are decoupled from the chat model entirely. One implementation, two
+**program-internal** faces, gated by the _search gate_, results passed through
+unchanged (no citation assembly — `url` is the only source identifier, and the
+program assembles its own citations). The retrieval source is **fixed**, not
+pluggable. Its three names all carry `ds`, because the capability needs a
+DeepSeek key and bills DeepSeek: the pi tool is `web_ds_search`, the PTC
+binding is `web.ds.search`, and the config key is `webDsSearch`. _Avoid_: "web
+search" unqualified (it does not say which provider — `web_search` is DSH's
+tool, see _Out-of-glossary_), "search tool" unqualified (the model never calls
+it directly).
+
+**search gate** — the two conditions that decide whether the DeepSeek search
+module is usable in a session: a **switch** (`webDsSearch.enabled` in
+`~/.pi/agent/ptc.json`, **off by default**) and a **credential verdict** (the
+DeepSeek credential is present and resolves to a non-empty key). Switch off ⇒
+the capability is not registered on either face. Switch on but no credential ⇒
+it **is** registered, marked unusable, and announced once at session start — the
+missing key is a stated state, never a silent failure. The verdict follows pi's
+own resolution order (stored credential → provider config → environment) and
+must use a **resolved** key, not the raw stored one. _Avoid_: "enabled" /
+"disabled" unqualified (the switch is one of two conditions), "configured"
+unqualified (means the key is present, which is only half the gate).
+
 ## Release & supply chain
 
 **release tag** — an annotated git tag `v<version>` on `main`; pushing it is the act
@@ -1227,3 +1267,14 @@ when to revisit. _Avoid_: "draft release" (that is a GitHub Releases concept).
 **DSH preset / agent-preset** (Standard / PTC / Minimal / Creative) is a
 dsh-side concept. pi has no equivalent preset system today; this package
 is _only_ the PTC mode implementation, not a preset framework.
+
+**DSH `web_search`** (the `dsh-tool-web` tool) is NOT the same object as this
+package's **DeepSeek search module**. DSH's is a dsh-side tool that takes 1–4
+merged queries and returns summaries plus source URLs; ours is a
+program-internal binding and pi tool over DeepSeek's raw Search/Fetch
+endpoints, reached only from inside a program. The names are deliberately
+different in both directions — ours is `web_ds_search` / `web.ds.search`, not
+`web_search` — because pi's tool registry is keyed by tool name
+(`toolRegistry.set(tool.name, tool)`), so two extensions registering the same
+name **overwrite each other** rather than coexisting. _Avoid_: "the web_search
+tool" unqualified (which one?), and "web search" for ours.

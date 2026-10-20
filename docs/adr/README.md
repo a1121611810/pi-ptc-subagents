@@ -50,6 +50,8 @@ ADRs for pi-ptc-subagents, per `docs/agents/domain.md` (single-context repo).
 | [0044](./0044-a-dispatch-inherits-the-session-model.md)    | A dispatch inherits the session model; what it ran and why it failed are reported                             | accepted              |
 | [0045](./0045-observed-model-field-names.md)               | The observed-model fields are named `observedProvider` / `observedModel`; the input keeps `model`             | accepted              |
 | [0046](./0046-the-glossary-is-glossary-md.md)              | The domain glossary is `GLOSSARY.md`, not `CONTEXT.md`                                                        | accepted              |
+| [0047](./0047-deepseek-search-is-program-internal.md)      | DeepSeek web search is program-internal, never a model-facing tool; one implementation, two faces             | accepted              |
+| [0048](./0048-deepseek-search-gate.md)                     | The DeepSeek search gate: an off-by-default switch plus a credential verdict; a missing key is stated         | accepted              |
 
 Numbering gaps are deliberate: 0001/0006 were reserved while wayfinder map #7 was charting and dropped when G1 resolved; keeping their slots means every cross-reference in the map and its tickets stays valid.
 
