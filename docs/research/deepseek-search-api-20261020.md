@@ -1,7 +1,7 @@
 # DeepSeek Search / Fetch API 调研：独立的原始 JSON 检索接口，不是模型内置能力
 
 > 调研日期: 2026-10-20。回答「DeepSeek 官方 API 文档的『网页搜索与抓取』指南页里，Search 到底是什么、怎么开、返回什么、怎么计费、对做 agent/工具编排的人意味着什么」。
-> 方法: 一手文档抓取 + 交叉核对（指南页 → API Reference → 更新日志 → 新闻 → 定价 → Responses API → Chat Completions Reference → Claude Code/Codex 集成页 → 限速页），中英双版本逐条比对。**未实测调用 API**（无 API Key）。
+> 方法: 一手文档抓取 + 交叉核对（指南页 → API Reference → 更新日志 → 新闻 → 定价 → Responses API → Chat Completions Reference → Claude Code/Codex 集成页 → 限速页），中英双版本逐条比对。**另在 §9 补了一次真实调用**（2026-10-20，用本机 `auth.json` 的 deepseek 凭据各调一次 Search 与 Fetch），实测到一处文档没写的差别。
 > 一手来源: 全部为 `api-docs.deepseek.com` 官方页面（每条断言后给 URL）。`help.deepseek.com` 与 `static.deepseek.com/faq` 未能抓取，见 §7.11。
 > 复核命令: 见 §8（逐条给出可直接粘贴的 curl + 抽正文管道）。
 > 仓库快照: `pi-ptc-subagents` HEAD `dc32db6`；本笔记只新增本文件，未改动其它任何文件。
@@ -258,7 +258,62 @@ curl https://api.deepseek.com/v1/tools/search \
 | 7.9  | **schema 示例的 `date` 不是固定值**：Reference 页 "Example (from schema)" 的 `date` 为 `2026-10-19T05:41:50.168Z`（ZH）/ `.090Z`（EN），两语言版本毫秒不同 → 属构建/生成产出的动态值，不宜当固定样例引用（推断：同一构建内生成）                                                                                                                                                                | [api ref ZH](https://api-docs.deepseek.com/zh-cn/api/search) / [EN](https://api-docs.deepseek.com/api/search)                                                                                                                                                                                                        |
 | 7.10 | **「都是只读请求」措辞不严谨**：同一页又说成功请求会计费、402 为余额不足——「只读」只能理解为不改动被搜站点/不写用户数据，不是「无副作用」                                                                                                                                                                                                                                                       | [guide](https://api-docs.deepseek.com/zh-cn/guides/search)                                                                                                                                                                                                                                                           |
 | 7.11 | **帮助中心未核到**：<https://help.deepseek.com/> TLS 握手失败（`SSL_ERROR_SYSCALL`）；文档站实际指向的 <https://static.deepseek.com/faq/index.html?lang=zh#/category/4> 是纯 JS SPA，主 bundle 内**无任何中文字符串**，也未定位到其内容数据接口（仅见 `/api/v0/client/settings`，实测 404）→ **FAQ 是否存在关于搜索的条目，未核实**                                                             | curl 实测                                                                                                                                                                                                                                                                                                            |
-| 7.12 | **未实测 API 行为**：本次无 API Key，未发起任何 Search/Fetch 调用 → 「空结果确实不收费」「`summary` 的 600～800 字符只是 typically 而非契约」「`authority` 分布」等均为文档声明，**未运行验证**                                                                                                                                                                                                 | —                                                                                                                                                                                                                                                                                                                    |
+| 7.12 | **已补一次实测**（2026-10-20，见 §9）：Search 与 Fetch 各真调一次，均 HTTP 200，字段与文档一致。**仍未验**的是「空结果确实不收费」「`summary` 的 600～800 只是 typically 而非契约」「`authority` 分布」——这些需要多次调用与计费核对                                                                                                                                                             | —                                                                                                                                                                                                                                                                                                                    |
+
+## 9. 实测补记（2026-10-20）：接口真通，但 Fetch 的正文带标点转义
+
+§1–§7 全部来自官方文档。**这一节是真机调用**（用本机 `auth.json` 的 deepseek 凭据，`type: "api_key"`，35 字符字面量）。
+
+### 9.1 两次调用都通
+
+| 调用                    | 请求                                                             | 结果                                                                |
+| ----------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `POST /v1/tools/search` | `{ "query": "DeepSeek API 文档 网页搜索", "count": 3 }`          | **HTTP 200**，`results` 3 条                                        |
+| `POST /v1/tools/search` | `{ "query": "…", "count": 2, "need_content": true }`             | **HTTP 200**，`content` 5192 / 9287 字符                            |
+| `POST /v1/tools/fetch`  | `{ "url": "https://api-docs.deepseek.com/zh-cn/guides/search" }` | **HTTP 200**，`title` = 「网页搜索与抓取」，`content` **6405 字符** |
+
+**字段与文档完全一致**：Search 结果项的字段全集实测就是文档那十个——`['authority', 'content', 'date', 'rerank_score', 'site_icon', 'site_name', 'snippet', 'summary', 'title', 'url']`。实测样本里三条结果的 `authority` 都是 3（极权威），`date` 有两条是 `2026-10-18T16:00:00+00:00`、一条是 `null`（与文档说的「未知时为 null」一致）。
+
+**一个有趣的自证**：搜「DeepSeek 搜索 API」返回的前两条，恰好是 2026-10-18/19 报道这个 API 上线的新闻（其中一条标题就是「每千次请求 $0.75」）——文档里的定价与上线时间，搜索引擎自己也印证了。
+
+### 9.2 ⚠️ 文档没写的一处差别：Fetch 的正文带标点转义，Search 的 `content` 不带
+
+| 字段                                        | 字符数      | 反斜杠转义次数 | 转义最多的字符                                                                 |
+| ------------------------------------------- | ----------- | -------------- | ------------------------------------------------------------------------------ |
+| **Fetch** 的 `content`                      | 6405        | **706**        | 双引号(134) 竖线(125) 连字符(117) 冒号(69) 斜杠(53) 句点(40) 逗号(32) 井号(29) |
+| Search 的 `content`（`need_content: true`） | 5192 / 9287 | **6**          | ——                                                                             |
+| Search 的 `summary`                         | ——          | **0**          | ——                                                                             |
+
+实测片段（Fetch 的 `content` 开头）：
+
+```
+Search \/ Fetch API 已上线，使用自研搜索引擎，支持网页搜索与抓取，点此查看使用指南。
+
+\# 网页搜索与抓取
+```
+
+⇒ **Fetch 的正文把大量标点做了反斜杠转义**（连 `-` `.` `,` `:` 都转），而 **Search 的 `content` 字段几乎不转义**（两处各只有 6 次，量级完全不同）。
+
+**对实现的影响**：要拿网页全文时，**优先用 Search 的 `need_content: true`，而不是 Fetch**。Fetch 的输出带着成片的转义序列，标题不会渲染成标题、表格和列表也会被转义噪声淹没；`summary` 字段则是干净的（0 次转义）。这条差别**官方文档里没有**，是实测才知道的。
+
+### 9.3 仍未验的
+
+- 「空结果确实不收费」——需要构造一个必然无结果的查询并核对账单，**未验**。
+- `summary` 的 600～800 字符只是文档说的 "typically"，实测样本里长短不一，**未做多次采样**。
+- `authority` 的分布（0–4 各档出现频率）**未采样**。
+- 错误码路径（401/402/403/404/413/429/500/504）**未逐一触发**——需要构造非法请求或改 key。
+- 本次 3 次调用约合 **0.015 元**（5 元/千次）。
+
+### 9.4 复核命令
+
+见 §8 的通用管道；调用形态是：
+
+```bash
+curl -sS https://api.deepseek.com/v1/tools/search \
+  -H "Authorization: Bearer $DEEPSEEK_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "DeepSeek 搜索 API 定价", "count": 3}'
+```
 
 ## 8. 快照与复核命令
 
