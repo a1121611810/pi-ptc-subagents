@@ -109,6 +109,26 @@ export type WebDsSearchPayload = {
 };
 
 /**
+ * How a PROGRAM calls the search binding — the one shared sentence both PTC surfaces carry.
+ *
+ * **It is a different fact from the binding contract's note, and that is deliberate.** The
+ * contract (ADR-0024) states the RESULT SHAPE and deliberately omits argument lists, because
+ * pi declares a tool's arguments natively in the same request. **That reasoning does not hold
+ * for a binding**: a binding is not in pi's tool list, so nothing else tells the model what
+ * arguments it takes. `pi.dispatch` is in the same position and its calling convention lives
+ * in the tool description — this paragraph is the search binding's equivalent.
+ *
+ * **It is static, and it says so.** The paragraph is spliced into both PTC tool descriptions
+ * whether or not the search is switched on, so it has to be true in both states: it names the
+ * switch as the condition for the binding being bound. A per-session sentence would need a
+ * dynamic description, and the shared shape is worth more than the extra precision.
+ */
+export const WEB_DS_SEARCH_USAGE: string =
+  '`tools["web.ds.search"]` searches the web (`query`) or fetches one page as Markdown (`url`). ' +
+  "Bound only while the search switch is on; a call fails with a sentence when this session has " +
+  "no DeepSeek credential.";
+
+/**
  * The model-facing text for every failure the search API can produce, keyed by HTTP status.
  *
  * **One table, quoted by every surface.** The pi tool's description, the binding contract's

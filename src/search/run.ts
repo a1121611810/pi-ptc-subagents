@@ -98,16 +98,25 @@ export async function runWebDsSearch(
     };
   }
 
-  const result =
-    "url" in params
-      ? await client.fetchPage({ url: params.url })
-      : await client.search({
-          query: params.query,
-          ...(params.count === undefined ? {} : { count: params.count }),
-          ...(params.ori_question === undefined ? {} : { ori_question: params.ori_question }),
-          ...(params.localization === undefined ? {} : { localization: params.localization }),
-          ...(params.need_content === undefined ? {} : { need_content: params.need_content }),
-        });
+  let result: Awaited<ReturnType<DeepSeekClient["search"]>>;
+  try {
+    result =
+      "url" in params
+        ? await client.fetchPage({ url: params.url })
+        : await client.search({
+            query: params.query,
+            ...(params.count === undefined ? {} : { count: params.count }),
+            ...(params.ori_question === undefined ? {} : { ori_question: params.ori_question }),
+            ...(params.localization === undefined ? {} : { localization: params.localization }),
+            ...(params.need_content === undefined ? {} : { need_content: params.need_content }),
+          });
+  } catch (error) {
+    // A client that REJECTS is not the production client (it never throws), but the deps
+    // interface is public and a caller may supply one that does. The reserved slot goes back
+    // here — without it a single throw would silently eat the session's quota for good.
+    reservation.release();
+    throw error;
+  }
 
   if (!result.ok) {
     // A failed call is not a used call: the slot goes back, so a transient 429 does not eat the

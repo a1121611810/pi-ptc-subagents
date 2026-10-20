@@ -18,9 +18,11 @@
  *   `{ ok: false, status, text }`, with `text` already carrying the sentence from
  *   `SEARCH_ERROR_TEXT`: one table, quoted by the tool description, the binding contract note and
  *   this error, so a status code cannot mean one thing to a program and another to a model.
- * - **The API key never survives into a result.** The key is used in exactly one place — the
- *   `Authorization` header — and every string this module produces is passed through `redact`
- *   before it leaves. This is not paranoia about our own code: tool results go into the
+ * - **The API key never leaves in a request BODY, and never survives into a failure text.**
+ *   The key is used in exactly one place — the `Authorization` header — and every string this
+ *   module PRODUCES (the failure texts) is passed through `redact` before it leaves. The
+ *   SUCCESS payload is upstream's own bytes, passed through unchanged: the key is not in the
+ *   request body, so there is nothing of ours in there to redact. This is not paranoia about our own code: tool results go into the
  *   conversation and from there into pi's session transcript
  *   (`docs/research/pi-credential-surface-20261020.md` §5.5), and an upstream error body that
  *   echoes the key back would otherwise be persisted in plain text. The redaction is applied to

@@ -58,6 +58,7 @@ import {
 } from "../search/run.ts";
 import { defineCompatTool, type ToolExposure } from "./pi-compat-types.ts";
 import { TaskPanelRow } from "./task-panel-render.ts";
+import { sanitizeText } from "./text.ts";
 
 /** Mirrors `AnyTool` in `child-report-tool.ts`; written out here rather than imported from there. */
 export type AnyTool = ToolDefinition<any, any, any>;
@@ -124,7 +125,7 @@ export function createWebDsSearchTool(options: { deps: WebDsSearchDeps }): AnyTo
             ? params.url
             : "";
       return new TaskPanelRow([
-        { left: target === "" ? label : label + " " + theme.fg("dim", target) },
+        { left: target === "" ? label : label + " " + theme.fg("dim", sanitizeText(target)) },
       ]);
     },
     renderResult(
@@ -138,7 +139,7 @@ export function createWebDsSearchTool(options: { deps: WebDsSearchDeps }): AnyTo
         .join("\n");
       const label = theme.fg("toolTitle", theme.bold(WEB_DS_SEARCH_LABEL));
       return new TaskPanelRow([
-        { left: text === "" ? label : label + " " + theme.fg("dim", text) },
+        { left: text === "" ? label : label + " " + theme.fg("dim", sanitizeText(text)) },
       ]);
     },
     async execute(_toolCallId, params) {

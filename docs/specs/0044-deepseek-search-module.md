@@ -228,7 +228,12 @@ per-session，默认 100 次，可配（`0` = 不限）。Search 与 Fetch 共�
 
 **三条硬性约束**：
 
-- **单一事实源**：codemode 工具描述、binding contract 文本、程序内调用的返回，三处引用**同一份共享常量**（one-home rule，先例 `BINDING_CONTRACT`）。测试断言三处 `toContain(同一常量)`。
+- **单一事实源**：那句「本会话未配置 DeepSeek 凭据」在**两处**出现，且是**同一份共享常量**——**codemode 工具的描述**（每会话注册一次，那一句说的是这一会话的真话）与**程序内调用失败时返回的那句**。**binding contract 不带它**：契约是静态的、只讲结果形状，而「缺没缺凭据」是每会话的状态，写进静态文本会撒谎。
+
+PTC 面的模型看不到 codemode 工具的描述（它在 `exposure: "codemode"` 上，模型面看不见），所以那一面靠 `WEB_DS_SEARCH_USAGE`——一段**静态**的调用约定（名字、参数、绑定条件、无凭据时的失败），拼进 `ptc_run_code` / `ptc_workflow` 的描述。**参数只能由描述给出**：ADR-0024 说契约不列参数，因为 pi 会在同一个请求里声明工具参数——而 binding 不在 pi 的工具表里，所以 `pi.dispatch` 与 `web.ds.search` 同一分工：**描述给调用约定，契约给结果形状**。
+
+测试断言：工具描述与失败返回 `toContain(同一常量)`；两个 PTC 工具描述 `toContain(WEB_DS_SEARCH_USAGE)`。
+
 - **`param` 恒为 `null`**（DeepSeek 的错误格式如此）⇒ 不能靠 `param` 定位是哪个字段错，只能读 `message` ⇒ 400 的文案**必须带上 `message`**。
 - **不得泄露 key**：401 的文案只说「key 无效」，**绝不回显 key 本身或它的片段**。
 

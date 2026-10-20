@@ -89,7 +89,7 @@ export const WEB_DS_SEARCH_PAYLOAD_SCHEMA: WebDsSearchPayloadSchema = Type.Objec
  *
  * **`query` and `url` are alternatives, and the schema says so in prose because JSON Schema
  * cannot express "exactly one of" here.** The two are discriminated at runtime
- * (`assertSearchParams` in `search/run.ts`): a call with both, or with neither, is refused with a
+ * (`toSearchParams` in `search/run.ts`): a call with both, or with neither, is refused with a
  * sentence rather than sent to the API to be rejected there.
  */
 export type WebDsSearchParametersSchema = TObject<{

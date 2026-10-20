@@ -89,7 +89,7 @@ const NOTE_ENTRIES: ReadonlyArray<readonly [NotedBindingName, string]> = [
   ["edit", "`edit` always reports a `details` object carrying `diff` and `patch`."],
   [
     WEB_DS_SEARCH_BINDING_NAME,
-    '`tools["web.ds.search"]` puts the payload in `details`, not in `content`.',
+    '`tools["web.ds.search"]` puts the payload in `details`, not in `content`; bound only while the search is on.',
   ],
   [
     DISPATCH_BINDING_NAME,

@@ -23,6 +23,7 @@ import { BINDING_CONTRACT } from "../src/tools/binding-contract.ts";
 import { createWebDsSearchTool } from "../src/tools/web-ds-search.ts";
 import {
   SEARCH_ERROR_TEXT,
+  WEB_DS_SEARCH_USAGE,
   SEARCH_NO_RESULTS_TEXT,
   SEARCH_QUOTA_EXHAUSTED_TEXT,
   SEARCH_UNAVAILABLE_NOTICE,
@@ -31,6 +32,7 @@ import {
   type WebDsSearchPayload,
 } from "../src/search/contract.ts";
 import { runWebDsSearch, type WebDsSearchDeps } from "../src/search/run.ts";
+import { captureRegisteredTools } from "./helpers/ptc.ts";
 
 /** The binding context every test drives a binding with. */
 const call = { callId: 1, depth: 0, maxDispatchDepth: 3 };
@@ -209,6 +211,19 @@ describe("the error text is one source", () => {
     // says a failing call rejects.
     expect(BINDING_CONTRACT).toContain(WEB_DS_SEARCH_BINDING_NAME);
     expect(BINDING_CONTRACT).toContain("puts the payload in `details`");
+  });
+
+  test("both PTC surfaces carry the shared calling convention", async () => {
+    // The model on the PTC face never sees the codemode tool's description, so the CALLING
+    // CONVENTION (name, arguments, the conditions) has to reach it another way. `pi.dispatch` and
+    // `web.ds.search` are in the same position and get the same split: the description gives the
+    // convention, the binding contract gives the result shape.
+    for (const surface of ["ptc_run_code", "ptc_workflow"]) {
+      const tool = (await captureRegisteredTools()).get(surface);
+      expect(tool, surface + " is registered").toBeDefined();
+      const description = tool?.description ?? "";
+      expect(description, surface + " carries the shared usage").toContain(WEB_DS_SEARCH_USAGE);
+    }
   });
 
   test("the tool's name and the binding's name are the ones the contract and the config use", () => {

@@ -1442,15 +1442,15 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // explain why a generalist still gets the report tool.
     "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:115 -> src/index.ts:620":
       "createChildReportTool(ptcDepth > 0)",
-    "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:1317":
+    "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:1320":
       "export function detectedSurfaceMode(",
-    "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:1148":
+    "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:1161":
       'getActiveTools().includes("codemode")',
-    "docs/adr/0029-surface-follows-codemode-activation.md:120 -> src/index.ts:1148":
+    "docs/adr/0029-surface-follows-codemode-activation.md:120 -> src/index.ts:1161":
       'getActiveTools().includes("codemode")',
     "docs/adr/0029-surface-follows-codemode-activation.md:151 -> ptc-mode.ts:32":
       "## Fail-safe on external loadout changes",
-    "docs/adr/0029-surface-follows-codemode-activation.md:188 -> src/index.ts:1097":
+    "docs/adr/0029-surface-follows-codemode-activation.md:188 -> src/index.ts:1110":
       "if (detected.present && !known) {",
     "docs/adr/0030-surface-switch-reloads.md:94 -> ptc-mode.ts:32":
       "## Fail-safe on external loadout changes",
@@ -1479,8 +1479,8 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       "`ToolDefinition.exposure` field",
     "docs/adr/0047-deepseek-search-is-program-internal.md:89 -> docs/agents/pi-compat-matrix.md:63":
       "`ToolDefinition.exposure` field",
-    "docs/adr/0048-deepseek-search-gate.md:43 -> src/index.ts:653": "ctx.ui.notify(",
-    "docs/adr/0048-deepseek-search-gate.md:71 -> src/runtime/limits.ts:147":
+    "docs/adr/0048-deepseek-search-gate.md:45 -> src/index.ts:653": "ctx.ui.notify(",
+    "docs/adr/0048-deepseek-search-gate.md:73 -> src/runtime/limits.ts:147":
       "WORKER_ENV_ALLOW_LIST",
     "docs/specs/0044-deepseek-search-module.md:85 -> docs/agents/pi-compat-matrix.md:63":
       "`ToolDefinition.exposure` field",
@@ -1593,12 +1593,12 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     //  32  → 962→856  = decision-4 的 `if (surface.surfaceMode === "subagents" && !pi.getActiveTools()…`
     //  105 → 962→856  = 同一处（ADR-0029 正文第二次引用它）
     //  129 → 27 保持    = ` * ## Fail-safe on external loadout changes`，本轮未移动
-    "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:1317",
-    "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:1148",
-    "docs/adr/0029-surface-follows-codemode-activation.md:120 -> src/index.ts:1148",
+    "docs/adr/0029-surface-follows-codemode-activation.md:29 -> ptc-mode.ts:1320",
+    "docs/adr/0029-surface-follows-codemode-activation.md:32 -> src/index.ts:1161",
+    "docs/adr/0029-surface-follows-codemode-activation.md:120 -> src/index.ts:1161",
     "docs/adr/0029-surface-follows-codemode-activation.md:151 -> ptc-mode.ts:32",
     //  166 → 920→807 = `if (detected.present && !known) {`，即交叉核对那一条
-    "docs/adr/0029-surface-follows-codemode-activation.md:188 -> src/index.ts:1097",
+    "docs/adr/0029-surface-follows-codemode-activation.md:188 -> src/index.ts:1110",
     // 2026-10-03 第四次复核（ADR-0030）：0030 引 ptc-mode.ts:27-31 那段「loadout 被外部改写
     // 时模式如何退让」，27 行是段首。本轮该引用在**文档里**的行号因撤回声明从 68 前移到 83，
     // 引用目标（ptc-mode.ts:27）未动。ADR-0030 另外四处引用写的是 pi 宿主的行号而非本仓文件，
@@ -1709,8 +1709,8 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // 2026-10-20（DeepSeek 搜索模块）：新增 7 条，逐条核对过目标行的内容。
     "docs/adr/0047-deepseek-search-is-program-internal.md:54 -> docs/agents/pi-compat-matrix.md:63",
     "docs/adr/0047-deepseek-search-is-program-internal.md:89 -> docs/agents/pi-compat-matrix.md:63",
-    "docs/adr/0048-deepseek-search-gate.md:43 -> src/index.ts:653",
-    "docs/adr/0048-deepseek-search-gate.md:71 -> src/runtime/limits.ts:147",
+    "docs/adr/0048-deepseek-search-gate.md:45 -> src/index.ts:653",
+    "docs/adr/0048-deepseek-search-gate.md:73 -> src/runtime/limits.ts:147",
     "docs/specs/0044-deepseek-search-module.md:85 -> docs/agents/pi-compat-matrix.md:63",
     "docs/specs/0044-deepseek-search-module.md:141 -> src/index.ts:653",
     "docs/specs/0044-deepseek-search-module.md:168 -> src/runtime/limits.ts:147",

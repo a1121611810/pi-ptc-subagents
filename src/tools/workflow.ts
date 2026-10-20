@@ -29,6 +29,7 @@ import { createBuiltinBindings } from "../runtime/bindings.ts";
 import { runPtcProgram, type PtcRunOutcome } from "../runtime/dispatcher.ts";
 import { readContextModel } from "../runtime/session-model.ts";
 import { BINDING_CONTRACT } from "./binding-contract.ts";
+import { WEB_DS_SEARCH_USAGE } from "../search/contract.ts";
 import { describeValue } from "../runtime/protocol.ts";
 import type { WorkerPool } from "../runtime/worker-pool.ts";
 import {
@@ -63,6 +64,8 @@ const DESCRIPTION = [
   "return value, its `log`/`phase` narration and its `console.log` output.",
   "",
   PTC_BINDING_REACH_NOTE,
+  "",
+  WEB_DS_SEARCH_USAGE,
   "",
   BINDING_CONTRACT,
   "",

@@ -30,6 +30,7 @@ import { readContextModel } from "../runtime/session-model.ts";
 import type { WorkerPool } from "../runtime/worker-pool.ts";
 import { DEFAULT_CONFIG } from "../runtime/limits.ts";
 import { BINDING_CONTRACT } from "./binding-contract.ts";
+import { WEB_DS_SEARCH_USAGE } from "../search/contract.ts";
 import {
   codeRunFailedError,
   createSubCallUpdater,
@@ -63,6 +64,8 @@ const DESCRIPTION = [
   "never has to guess what is bound.",
   "",
   PTC_BINDING_REACH_NOTE,
+  "",
+  WEB_DS_SEARCH_USAGE,
   "",
   BINDING_CONTRACT,
   "",

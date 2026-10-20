@@ -46,6 +46,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { minimatch } from "minimatch";
+import { WEB_DS_SEARCH_CONFIG_KEY } from "../search/contract.ts";
 import {
   BUILTIN_BINDING_NAMES,
   type BuiltinBindingName,
@@ -376,7 +377,7 @@ export function readWebSearchConfig(agentDir: string): WebSearchConfig {
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     return fallback;
   }
-  const value = (parsed as { webDsSearch?: unknown }).webDsSearch;
+  const value = (parsed as { [WEB_DS_SEARCH_CONFIG_KEY]?: unknown })[WEB_DS_SEARCH_CONFIG_KEY];
   if (value === undefined) {
     return fallback;
   }
@@ -384,7 +385,7 @@ export function readWebSearchConfig(agentDir: string): WebSearchConfig {
     return {
       ...fallback,
       source: "invalid",
-      error: `${path}: "webDsSearch" must be an object, received ${Array.isArray(value) ? "array" : value === null ? "null" : typeof value}`,
+      error: `${path}: "${WEB_DS_SEARCH_CONFIG_KEY}" must be an object, received ${Array.isArray(value) ? "array" : value === null ? "null" : typeof value}`,
     };
   }
   const record = value as { enabled?: unknown; maxCallsPerSession?: unknown };
@@ -393,7 +394,9 @@ export function readWebSearchConfig(agentDir: string): WebSearchConfig {
   let enabled = false;
   if (record.enabled !== undefined) {
     if (typeof record.enabled !== "boolean") {
-      errors.push(`"webDsSearch.enabled" must be a boolean, received ${typeof record.enabled}`);
+      errors.push(
+        `"${WEB_DS_SEARCH_CONFIG_KEY}.enabled" must be a boolean, received ${typeof record.enabled}`,
+      );
     } else {
       enabled = record.enabled;
     }
@@ -407,7 +410,7 @@ export function readWebSearchConfig(agentDir: string): WebSearchConfig {
       record.maxCallsPerSession < 0
     ) {
       errors.push(
-        `"webDsSearch.maxCallsPerSession" must be a non-negative integer, received ${
+        `"${WEB_DS_SEARCH_CONFIG_KEY}.maxCallsPerSession" must be a non-negative integer, received ${
           typeof record.maxCallsPerSession === "number"
             ? String(record.maxCallsPerSession)
             : typeof record.maxCallsPerSession

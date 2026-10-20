@@ -725,7 +725,16 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
       maxCallsPerSession: searchConfig.maxCallsPerSession,
     };
     searchBinding = { searchDeps: deps };
-    pi.registerTool(createWebDsSearchTool({ deps }));
+    // The codemode face is registered ONLY on a pi that ships a `codemode` — which is the same
+    // pi that reads `exposure` (both arrive in 0.99.0; `docs/agents/pi-compat-matrix.md:63`).
+    // **Below that, `exposure` does not exist, so the tool would fall back to `direct` and be
+    // declared TO THE MODEL** — a network-egress, per-call-billed tool in the model's direct
+    // face, on the one version where nothing can reach it from a program. ADR-0047's first
+    // hard constraint forbids exactly that. The PTC binding face below is NOT gated: it runs
+    // in this package's own worker and needs no pi API newer than the declared floor.
+    if (surface.codemode.present) {
+      pi.registerTool(createWebDsSearchTool({ deps }));
+    }
     if (!credential.configured && !searchNoticeShown) {
       searchNoticeShown = true;
       ctx.ui.notify(
@@ -896,7 +905,6 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     // The DeepSeek search module (ADR-0047 / ADR-0048). Registered AFTER the surface, and
     // after the await that resolves the credential — pi can add a tool at any point in a
     // session, but it cannot remove one, so this is the order that does not have to guess.
-    await registerSearchModule(ctx);
 
     // BG-14: bind the session-scoped background runtime before anything else. The records this
     // returns were reconciled to `lost`; delivering them through the one notification path is the
@@ -914,6 +922,11 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
           (error instanceof Error ? error.message : String(error)),
       );
     }
+
+    // The search module's registration comes AFTER the background bind, because BG-14's
+    // "bind before anything else" is a documented invariant of this handler and an await in
+    // front of it would break the order that comment states.
+    await registerSearchModule(ctx);
 
     const config = readDefaultModeConfig(getAgentDir());
     if (config.error !== undefined) {
