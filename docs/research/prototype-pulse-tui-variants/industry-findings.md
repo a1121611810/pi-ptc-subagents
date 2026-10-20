@@ -54,7 +54,7 @@ subtly on a tool row":
 9. **Moon phases** — `🌑 🌒 🌓 🌔 🌕 🌖 🌗 🌘` (8 frames, 8 fps). bubbles
    `Moon`, also seen in several "thinking" indicators. Same source.
 10. **Bullet + parenthesised timer** — static `•` glyph followed by `(4m 55s •
-esc to interrupt)`. The glyph does _not_ rotate; only the elapsed-seconds
+    esc to interrupt)`. The glyph does _not_ rotate; only the elapsed-seconds
     counter advances. Codex CLI.
     [TUICommander Detection Matrix](https://tuicommander.com/docs/architecture/agents/detection-matrix.html).
 11. **Animated OSC title glyph** — terminal _title bar_ carries `⠋⠙⠹…` from

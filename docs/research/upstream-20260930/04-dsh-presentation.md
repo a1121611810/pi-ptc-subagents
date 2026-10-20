@@ -453,7 +453,7 @@ This is **not** a truncation — it is a permanent, durable _exclusion from the 
   The gallery component itself lives in `ui-primitives` — **not found in source**.
 - **Image URL minting (trajectory).**
   `loadImage: Object.assign(a => ctx.uiConversation.imageUrl(sessionId, a),
-{ peek: a => ctx.uiConversation.peekImageUrl(sessionId, a) })`
+  { peek: a => ctx.uiConversation.peekImageUrl(sessionId, a) })`
   (`dsh-client-ui-trajectory/lib/client.js:8763`). The URL minting itself is **not found in
   source** (it lives in the conversation engine).
 - **Binary/file blocks (trajectory).** `recordAttachments`

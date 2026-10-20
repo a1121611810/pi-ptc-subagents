@@ -119,7 +119,13 @@ export const SUBAGENT_ROLES = {
 ```ts
 type BackgroundTaskKind = "bash" | "subagent" | "workflow" | "custom";
 type BackgroundTaskStatus =
-  "queued" | "running" | "stopping" | "succeeded" | "failed" | "canceled" | "lost";
+  | "queued"
+  | "running"
+  | "stopping"
+  | "succeeded"
+  | "failed"
+  | "canceled"
+  | "lost";
 ```
 
 合法迁移 (`canTransitionTaskStatus`):

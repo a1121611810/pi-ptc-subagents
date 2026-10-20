@@ -518,7 +518,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([ADR-0025](./docs/adr/0025-extension-surface-is-a-setting.md) §3 as amended).
 
   **A pi older than 0.99.0 is unaffected.** `ToolExposure` does not exist there — `grep -r
-exposure` over `pi-coding-agent@0.86.1`'s `dist/` returns nothing, and so does
+  exposure` over `pi-coding-agent@0.86.1`'s `dist/` returns nothing, and so does
   `AgentSession._getCallableTools` — so the field is ignored and the tools are declared to the
   model, which is correct: such a pi ships no `codemode`, resolves to `full` anyway, and has
   nothing that could call a `codemode`-reach tool. Measured across 0.86.1 / 0.87.1 / 0.99.0 /
@@ -1130,7 +1130,7 @@ exposure` over `pi-coding-agent@0.86.1`'s `dist/` returns nothing, and so does
   immediately instead of queueing.** The dispatcher used to read `maxParallelSubCalls`
   (default 10) and FIFO-queue the overflow; per ADR-0016 §2 the N+1th concurrent
   `pi.dispatch` now resolves at once with `{ status: "rejected", errorMessage:
-"dispatch concurrency limit reached" }`. The cap applies to `pi.dispatch` only and
+  "dispatch concurrency limit reached" }`. The cap applies to `pi.dispatch` only and
   has its own counter; builtin binding fan-out keeps DSH's `maxParallelSubCalls` (10)
   FIFO-queueing semantics (ADR-0004), so in-flight builtin calls never consume
   dispatch slots.

@@ -1,4 +1,4 @@
----
+***
 
 status: accepted (2026-10-03). §Context and §Verification amended 2026-10-09: the pair registers on `subagents`, at `codemode` reach. **§"Absence of evidence" and §"The mirror" and §"We do not make the `session_start` measurement authoritative" amended 2026-10-10 by ADR-0035**, which deletes the reconstruction those sections describe.
 

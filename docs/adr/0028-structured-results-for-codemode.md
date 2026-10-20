@@ -1,4 +1,4 @@
----
+***
 
 status: accepted (2026-10-02). §Context amended 2026-10-09: `ptc_subagent` is no longer the only way a `subagents` session starts one.
 
@@ -51,7 +51,7 @@ release notes:
    that does not match its declared schema is passed through silently. Correctness is entirely ours.
 3. **The consumption point is one line.** `toScriptValue()` in
    `dist/extensions/codemode/execute.js:256-259`: `if (tool.outputSchema && result.structuredContent
-!== undefined) return result.structuredContent;`
+   !== undefined) return result.structuredContent;`
 
 The cost side: `JsonValue` is `null | boolean | number | string | readonly JsonValue[] |
 JsonObject`, and `JsonObject`'s index signature admits no `undefined`. A key set to `undefined` is

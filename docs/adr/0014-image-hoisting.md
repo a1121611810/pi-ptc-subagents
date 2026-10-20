@@ -65,7 +65,7 @@ completion value.
 - **Same tool result, not a deferred user message** (measured, pi 0.87 —
   `docs/research/prototype-image-delivery-ab/`). All three routes deliver the image in the _same_ LLM
   request with **no extra turn**, so this is not a cost argument: it is provenance. `assistant[toolCall] →
-toolResult[text, image]` keeps one call = one result, while `pi.sendUserMessage` and `pi.sendMessage`
+  toolResult[text, image]` keeps one call = one result, while `pi.sendUserMessage` and `pi.sendMessage`
   leave the image in a message that reaches the provider as a **user** message — indistinguishable from
   something the user said in a `context` handler's list or after a compaction pass — and share the steer
   queue with the user's own instructions, so ordering against them is not ours to control. (An earlier

@@ -143,7 +143,7 @@ format list is ESM-only.
 - URL: https://tsdown.dev/reference/api/TypeAlias.OutExtensionFactory
 - URL: https://tsdown.dev/reference/api/Interface.OutExtensionObject
 - Paraphrase: `OutExtensionFactory = (context: OutExtensionContext) =>
-OutExtensionObject | undefined`. `OutExtensionContext` exposes
+  OutExtensionObject | undefined`. `OutExtensionContext` exposes
   `format: InternalModuleFormat`, `options: InputOptions`, and
   `pkgType?: PackageType` ("`"type"` field in project's `package.json`").
   `OutExtensionObject` is `{ js?: string; dts?: string }`.
@@ -228,7 +228,7 @@ OutExtensionObject | undefined`. `OutExtensionContext` exposes
   `package.json#exports` / `main` / `types` point to (`./dist/index.js`,
   `./dist/index.d.ts`), which is a downstream-visible change… A rename
   step (`mv dist/index.mjs dist/index.js && mv dist/index.d.mts
-dist/index.d.ts`) would close the gap, but that puts a post-step in
+  dist/index.d.ts`) would close the gap, but that puts a post-step in
   front of `vp pack`, which defeats the point of replacing
   `rolldown -c`."
 - Claim supported: this is the empirically reproduced failure mode that
