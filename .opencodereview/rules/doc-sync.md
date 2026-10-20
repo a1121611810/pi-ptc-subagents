@@ -47,7 +47,7 @@
 4. **CHANGELOG 与用户可见变更**。`CHANGELOG.md` 走 Keep a Changelog + SemVer。判定标准是「下游
    `pi install npm:pi-ptc-subagents` 装到的能不能察觉」:program-visible / model-visible /
    wire-visible / 发布产物(tarball 内容、minify、source map 排除)算;纯内部重构与测试不算。
-   版本号必须与 `package.json` 的 `version` 一致(当前 1.1.0,对应 `## [1.1.0] - 2026-09-29` 条目)。
+   版本号必须与 `package.json` 的 `version` 一致(`CHANGELOG.md` 里有同名条目)。**别在本规则里写死当前版本号**——版本一升就过期,而过期的版本号会让评审照着错的区段核对。
    完成判据:用户可见变更 100% 有条目;反过来每条 CHANGELOG 条目都能在 diff 里指出对应改动。
 
 5. **GLOSSARY.md 词条与实现同步**。仓库根 `GLOSSARY.md` 是单上下文领域词表,它里面的 _Avoid:_ 约束
