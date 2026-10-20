@@ -19,18 +19,37 @@ precise terms.
 DSH "Code Mode" before the August-2026 rename. The model submits a program
 (JS / TS) that composes multiple tools in one shot, and only the program's
 return value plus collected logs flow back into the model's context.
+This names the **technology**. The session-level switch that puts it to use —
+the one that hides the built-ins — is the _narrowing mode_
+(`CONTEXT.md` §Narrowing mode); the two are separate and both exist, so
+"PTC mode" never names the switch.
 
 **dsh** = DeepSeek Harness, `deepseek-ai/deepseek-harness` on GitHub. Source
 of truth for what PTC mode "means" behaviour-wise; pi-ptc must be re-aligned
 to dsh's current behaviour (not the old pi-ptc SPEC's frozen decisions — see
 map decisions).
 
+**default-on / 默认开启** — for this package, "default-enabled" means: a user
+who runs `pi install npm:pi-ptc-subagents` immediately gets the PTC tools
+(`ptc_run_code`, `ptc_workflow`) on next pi startup, with **no** extra setup.
+Mechanism: pi reads the npm package's `package.json` `pi.extensions` field
+and registers the extension in `~/.pi/agent/settings.json` automatically.
+**Not** a postinstall hook. **Not** a manual `pi-ptc install` CLI command.
+This is the package's **activation**; what the model may call inside a
+session is a separate question, answered by the _narrowing mode_
+(`CONTEXT.md` §Narrowing mode). The two are independent: the tools are
+available whether or not the mode is on.
+
 ## pi-side terms
 
-### The four things "output" can mean
+### "Output" — the four senses, and the terms built on them
 
 The word "output" is ambiguous in this project; use these instead (grill
 round 2026-09-22, when "PTC 输出没可读性" turned out to mean the third one).
+Four terms below are senses of "output" proper; the rest of the section
+carries the terms defined against them.
+
+#### The four senses
 
 **completion value** — the value the program `return`s. Carried structurally
 as `details.result` and textually as the last block of the tool-result text.
@@ -48,6 +67,8 @@ reads; it is not what the human sees. _Avoid_: output, "the result".
 the program pair and the three `ptc_task_*` panels do — or only the call half, as the
 _subagent surface_ does, leaving its result to pi's own text rendering. _Avoid_: output.
 
+#### Terms defined against a sense
+
 **value tree** — the shape a **PTC row** gives a container **completion value**: one row per
 property (or array index), nested containers behind `├─` / `└─` / `│` connectors, bounded by
 depth / children / line-width caps whose withheld amount is stated in-band. A scalar completion
@@ -60,12 +81,7 @@ Mechanism and the deviations from DSH: ADR-0014 (DSH parity: `dsh-tools`'s
 `exec.deferContext`). Nothing is capped or deduped. _Avoid_: attachment, "the program returns the image", base64
 result.
 
-**default-on / 默认开启** — for this package, "default-enabled" means: a user
-who runs `pi install npm:pi-ptc-subagents` immediately gets the PTC tools
-(`ptc_run_code`, `ptc_workflow`) on next pi startup, with **no** extra setup.
-Mechanism: pi reads the npm package's `package.json` `pi.extensions` field
-and registers the extension in `~/.pi/agent/settings.json` automatically.
-**Not** a postinstall hook. **Not** a manual `pi-ptc install` CLI command.
+#### The binding family
 
 **binding** — a function callable from within a PTC program as
 `tools["<name>"](args)`. Every binding lives in the one `tools` table —
@@ -81,42 +97,54 @@ kinds:
   ADR-0005 §2). Currently: `read`, `bash`, `edit`, `write`, `grep`, `find`,
   `ls` — all seven in `BUILTIN_BINDING_NAMES`, which is the set of names that
   _can_ be bound, not what any one session binds. The default table exposes all
-  but the _opt-in bindings_ (`bash`, ADR-0040); an install grants those with
-  `optInBindings` in `~/.pi/agent/ptc.json`, and a caller may instead pass an
-  explicit subset (R3 read-only PTC surface) or an explicit `optIns` list.
+  but the _opt-in binding_ `bash` (ADR-0040); an install grants it with
+  `optInBindings` in `~/.pi/agent/ptc.json` (a GRANT — it adds to the default
+  set), a caller may instead pass an explicit `optIns` list, and a caller that
+  curates the whole surface passes an explicit `names` list instead (the
+  _R3 read-only PTC surface_, which REPLACES the default set). Those are three
+  different shapes and the glossary names all three; they are not the same
+  thing.
 - _parallel binding_ — a non-builtin binding whose semantics are independent
   of pi's parallel-tool execution and which is explicitly designed for
   fan-out. Currently: `pi.dispatch(...)` (see ADR-0016). It spawns a
   fresh `pi` subprocess per call, so the PTC program gets session-level
   isolation without inventing a new task state machine.
 
-**agent definition** — the optional markdown file that NARROWS a dispatched child:
-`~/.pi/agent/agents/<name>.md` (user scope) or `<cwd>/.pi/agents/<name>.md` (project scope), selected
-by `agentScope`. Naming one is optional — ADR-0039 — because the child is a full pi either way: the
-dispatch prompt is APPENDED to pi's own system prompt, and no `--tools` flag is passed unless the
-definition declares `tools:`. A definition can therefore only take capability away; there is none it
-can add. A dispatch that names none gets the **generalist child** — pi's own system prompt, pi's full
-toolset, no _requested model_ pinned by a definition (the _session model_ tier still applies — see _dispatch
-model inheritance_), reported as an empty `agentName`. A definition is not the only narrowing
-axis: _read-only tier_ is the other one, and where the two meet a strict tier at the call site
-decides the tool list outright.
+**opt-in binding** — a binding that is known but NOT exposed unless the install
+asks for it. Currently exactly one: `bash`. It stays in `BUILTIN_BINDING_NAMES`
+because DSH's PTC preset still mounts `tool-bash` / `tool-pwsh`, so a program
+written against DSH may run shell commands; leaving it on by default would hand
+every session a shell, and deleting it would break those programs. An install
+grants it by naming it in `optInBindings` in `~/.pi/agent/ptc.json`; a caller
+may instead pass an `optIns` list to one call. The gate exists in TWO places on
+purpose — `resolveBindingNames()` (which decides the names) and
+`createBuiltinBindings()` (which builds the table) — because a table that
+dropped `bash` while the model-facing list still advertised `tools.bash` would
+hand the model a tool it cannot call and hide the reason. ADR-0040.
+**Fails CLOSED**: an absent file, a file with no `optInBindings` key, an
+unparseable file, and a key that is present but wrong all grant NOTHING, and
+the last one is reported at `session_start`. That is the opposite direction from
+_whyEnabled_, which fails OPEN — see that entry. An opt-in binding **ADDS** to
+the default surface; it does not replace it. _Avoid_: "opt-in tool" (it is a
+binding, and the opt-in is on the binding table), "default binding" (the
+default set is `DEFAULT_BINDING_NAMES`).
 
-**Identity and precedence are both decided on the frontmatter, not the filesystem** (#205, #207).
-A definition's name is its `name:` field and nothing else: naming the file after it is the
-convention and nothing more, so `beta.md` carrying `name: gamma` is the agent `gamma` and is not
-reachable as `beta`, while a `.md` with no `name:` is not an agent at all. When one name is
-registered in BOTH scopes the **user** copy resolves — deliberately the opposite of pi's own
-subagent example README, Claude Code, OpenHands, Roo Code and the Agent Skills client guide, all of
-which say project wins. The reason is asymmetry of ownership: `~/.pi/agent/agents/` is a personal,
-machine-wide choice, while `<cwd>/.pi/agents/` is checked into a repository and shared, so letting
-the shared file silently override the personal one would make which definition runs depend on who
-checked out. It only bites for `agentScope: "both"`, which is not the default. Two files in ONE
-scope declaring one name is a mistake rather than a rule: entries are sorted by file name and the
-first keeps it, and the shadowed file is reported.
-
-_Avoid_: "preset agent" / "default agent" for the generalist. Nothing ships in the package, and the
-generalist is the child pi already is, not a definition this project wrote and installs. Also avoid
-"required": the name is the narrowing path, not the entry fee.
+**R3 read-only PTC surface** — a caller-curated binding surface: an explicit
+`names` list passed to `createBuiltinBindings()`, which is honoured **VERBATIM**
+— it REPLACES the default set rather than adding to it, the opt-in gate does
+not apply to it (an opt-in name inside it is taken at face value), and
+`includeDispatch` defaults to "did the caller curate the surface", so
+`pi.dispatch` stays out unless the caller asks for it explicitly. The name
+comes from the R3 research branch (`research/R3-isolation-tradeoff`): ADR-0016
+§3 and `tests/bindings.test.ts` both name this pattern, and it is what the
+"explicit subset" in the _binding_ entry means. It is the **binding-table**
+axis, and it is a DIFFERENT axis from the _read-only tier_, which narrows a
+dispatched **child's** tool list at the call site. The two meet at one point: a
+strict tier at the call site decides the child's tool list outright. _Avoid_:
+"read-only mode" (that is the read-only tier, and it has a tier name), "R3"
+unqualified (that is a research branch, not this surface), and — importantly —
+"the `optInBindings` subset", which is the _opt-in binding_ axis and does the
+opposite thing.
 
 _Avoid_: "subagent" (overloaded; CONTEXT.md §Out-of-glossary), "BINDING_NAMES
 whitelist" (the binding config is a _policy_, not a _filter_; Q1 grill round,
@@ -185,7 +213,7 @@ _Avoid_: "pi's PTC" (it is one implementation of PTC, and "PTC mode"
 below already names ours), "code mode" (the pre-August-2026 DSH name).
 
 **surface mode** — which model-facing tools this package registers,
-independent of _PTC mode_ (which decides which of the registered tools are
+independent of the _narrowing mode_ (which decides which of the registered tools are
 _active_). **Detected, not configured**: there is no key for it, and the
 former `surfaceMode` key in `ptc.json` was removed 2026-10-10 (ADR-0034).
 Two values, in increasing order of what this package takes responsibility
@@ -203,9 +231,8 @@ session names that outcome at startup rather than defaulting in silence,
 because a detection that cannot be seen is indistinguishable from a pi that
 moved its `dist`. ADR-0025 (withdrawn by ADR-0034), ADR-0026, ADR-0027,
 ADR-0029, ADR-0033, ADR-0034.
-_Avoid_: "PTC mode" (that is the hide-the-built-ins
-toggle; the
-two are separate and both exist), "mode" unqualified (ambiguous in this
+_Avoid_: "PTC mode" (that is the acronym, or the _narrowing mode_ if you mean
+the toggle; the two are separate and both exist), "mode" unqualified (ambiguous in this
 repository), "enable" (a surface mode leaves the package
 installed and doing something, so "disabled" would be a different claim), "default"
 (there is no constant default — the answer is a function of the pi, so call
@@ -344,11 +371,24 @@ face, which can inspect and stop tasks but cannot start one).
 
 **lifecycle face** — the `ptc_task_list` / `ptc_task_output` /
 `ptc_task_stop` trio. Registered on **every** surface mode, `subagents` included,
-and outside the _PTC mode_ loadout on purpose:
-turning _PTC mode_ off must never hide the lifecycle of a task that is
+and outside the _narrowing mode_ loadout on purpose:
+turning the _narrowing mode_ off must never hide the lifecycle of a task that is
 still in flight. ADR-0022, ADR-0025 (withdrawn by ADR-0034, which removed the
 `off` value this entry used to except). _Avoid_: "task tools", "subagent
 tools" (they manage tasks other things started).
+
+**worker surface** — which of the two PTC program surfaces a worker was spawned
+as: `PtcSurface` is `"run_code" | "workflow"`, and a worker is spawned with
+exactly one of them and keeps it for life. The surface decides the program
+surface's helper set (see _helper_) and is sent to the worker in the `init`
+frame. It is NOT the same thing as the model-facing tool name — the two
+coincide in spelling (`ptc_run_code` / `ptc_workflow` are the tools,
+`run_code` / `workflow` are the surfaces) but they are different objects, and
+the _orchestration surface_ is a third: the tool the model calls.
+_Avoid_: "PTC surface" (there are three surfaces in this repo and the phrase
+names none of them), "mode" (collides with _surface mode_ and the
+_narrowing mode_).
+
 **helper** — a global function injected into a worker's runtime. **Not all
 DSH helpers appear in plain PTC mode** — per R1 (`research/dsh-ptc-behaviour-inventory.md`,
 dsh-v0.1.6-alpha.2), `log / phase / parallel / pipeline / agent` are
@@ -367,6 +407,20 @@ pi-ptc worker split mirrors this:
   the program uses the `pi.dispatch(...)` _binding_ (see _binding_), not
   a helper. The `result(value)` form in `ptc_workflow` is the script's
   async return, materialized lossless-JSON.
+
+**builtin binding** — a pi built-in tool whose `execute()` is invoked
+directly from the PTC worker (no `pi.on("tool_call")` route; see ADR-0005 §2).
+Its call is IN-PROCESS, which is the whole contrast with a _parallel binding_,
+whose call spawns a per-call runtime unit. The seven names that CAN be bound
+are `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls` — all seven in
+`BUILTIN_BINDING_NAMES`, which is the set of names that can be bound, not what
+any one session binds. The default table exposes all but the _opt-in binding_
+`bash` (ADR-0040). A builtin binding resolves to a _binding result_; a
+_parallel binding_ does not — it resolves to a `DispatchResult` that carries
+`text` and `status` and has no `content` at all. _Avoid_: "tool binding" (a
+pi built-in tool and a binding are different objects, and the glossary uses
+"tool" for the former), "internal binding" (the call is in-process, not
+internal — it is the same tool a session would call directly).
 
 **parallel binding** — a binding whose call spawns a per-call runtime
 unit (a pi subprocess for `pi.dispatch`; potentially other backends in the
@@ -399,9 +453,60 @@ but the **lifecycle face** for background tasks is model-facing via
 _Avoid_: `agent()` (DSH helper stub, deferred), `subagent` (DSH / pi
 extension).
 
+**agent definition** — the optional markdown file that NARROWS a dispatched child:
+`~/.pi/agent/agents/<name>.md` (user scope) or `<cwd>/.pi/agents/<name>.md` (project scope), selected
+by `agentScope`. Naming one is optional — ADR-0039 — because the child is a full pi either way: the
+dispatch prompt is APPENDED to pi's own system prompt, and no `--tools` flag is passed unless the
+definition declares `tools:`. A definition can therefore only take capability away; there is none it
+can add. A dispatch that names none gets the _generalist child_. A definition is not the only narrowing
+axis: _read-only tier_ is the other one, and where the two meet a strict tier at the call site
+decides the tool list outright.
+
+**Identity and precedence are both decided on the frontmatter, not the filesystem** (#205, #207).
+A definition's name is its `name:` field and nothing else: naming the file after it is the
+convention and nothing more, so `beta.md` carrying `name: gamma` is the agent `gamma` and is not
+reachable as `beta`, while a `.md` with no `name:` is not an agent at all. When one name is
+registered in BOTH scopes the **user** copy resolves — deliberately the opposite of pi's own
+subagent example README, Claude Code, OpenHands, Roo Code and the Agent Skills client guide, all of
+which say project wins. The reason is asymmetry of ownership: `~/.pi/agent/agents/` is a personal,
+machine-wide choice, while `<cwd>/.pi/agents/` is checked into a repository and shared, so letting
+the shared file silently override the personal one would make which definition runs depend on who
+checked out. It only bites for `agentScope: "both"`, which is not the default. Two files in ONE
+scope declaring one name is a mistake rather than a rule: entries are sorted by file name and the
+first keeps it, and the shadowed file is reported.
+
+_Avoid_: "required" (the name is the narrowing path, not the entry fee), "agent file"
+(the name lives in the frontmatter; the file name is a convention and nothing more).
+
+**generalist child** — the child a dispatch creates when the caller names no
+`agent`: pi's own system prompt, pi's full toolset, and no _requested model_
+pinned by a definition — so the _session model_ tier still applies (see _dispatch
+model inheritance_). The result reports it as an EMPTY `agentName`, so a caller
+can see that no definition was resolved rather than being told a plausible-sounding
+one that does not exist. In code it is `GENERALIST_AGENT`, a frozen literal whose
+every field is inert: `name: ""`, `systemPrompt: ""` (the child receives only what
+the dispatch appends, on top of pi's own prompt — nothing is substituted), no `tools`
+key (so no `--tools` flag reaches the child), and `source: "unknown"` (it came
+from no directory). "Absent" and "present but unusable" are different: an absent
+`agent` selects the generalist, while a malformed one — a non-string, or a string
+that is empty after trimming — is REFUSED (issue #185), because collapsing them
+would let a caller's typo silently dispatch something it did not ask for. A
+generalist also has no _child report_ opt-out: with no definition there is no
+`childReport: false` to set. ADR-0039.
+_Avoid_: "preset agent" / "default agent" (nothing ships in the package, and the
+generalist is the child pi already is, not a definition this project wrote and
+installs), "narrowed child" (a definition is what narrows; the generalist is the
+unnarrowed case), "subagent" (see Out-of-glossary: DSH's subagent is a different
+thing).
+
 **DispatchResult** — the structured return type of `pi.dispatch(...)`.
-Fields: `text` (final assistant text), `status` (`fulfilled` /
-`rejected`), `agentName`, `durationMs`, `exitCode`, `usage?` (input/output/
+Fifteen fields. `text` (final assistant text), `status` (`fulfilled` /
+`rejected`), `started` (whether the child process was actually brought up —
+`status: "rejected"` covers two different things, the harness declining to start
+and a child that ran and failed, and this is what tells them apart; the
+_dispatch sub-row_ colours the first `rejected` and the second `error`),
+`agentName` (EMPTY for a _generalist child_), `durationMs`, `exitCode`,
+`usage?` (input/output/
 cacheRead/cacheWrite/cost/turns; absent when the child reported no usage
 block), `observedProvider?` / `observedModel?` (the _observed model_ pair — what the host read
 off the child's assistant turns, last turn wins; absent means no observed
@@ -409,9 +514,19 @@ assistant turn NAMED the pair — no turn, a pi within the declared floor that
 does not report it, or an old record — not "unknown"), `stderr?` (best-effort,
 never promised), `errorMessage?` (the structured failure channel — the
 _child-reported error_, verbatim, when there is one; otherwise the exit-code /
-truncation diagnosis, or absent when there is none). Shape matches `Promise.allSettled`
+truncation diagnosis, or absent when there is none), `report?` (the _child
+report_, when one arrived over either channel), `reportChannel` (TOTAL — always
+present, including on every refusal, so a degradation the caller cannot see is
+not a silent failure; the four values are `tool` / `prompt-json` / `none` /
+`opted-out`), `readOnlyTier?` (the tier actually applied — present whenever a
+tier was requested, absent when none was, so `undefined` is a claim rather than
+a gap; it exists so a caller can see that a definition's declared `tools:` was
+OVERRIDDEN, and it is stamped on refusals too, where it states the tier the
+call resolved to), and `whySuppressed?` (`true` when the caller's _why_ was
+dropped — the fact that a suppression happened is recorded, never the value).
+Shape matches `Promise.allSettled`
 settled records, so PTC programs compose without `try/catch`. See
-ADR-0016, ADR-0044.
+ADR-0016, ADR-0032, ADR-0041, ADR-0043, ADR-0044.
 
 Four model words are in play in dispatch, and they are different facts rather than synonyms: the _requested model_ (what the caller asked for), the _session model_ (what the caller's session is on), the _configured default model_ (pi's fallback), and the _observed model_ (what the host saw run). A result can name the first and the fourth, and have them differ — that difference is the point of ADR-0044.
 
@@ -484,6 +599,25 @@ _subagent_ is reserved for the top-level _subagent surface_, `CONTEXT.md`
 ADR-0032 §What pi 1.0.0 actually offers), "child result" (the child report is
 one field of a _DispatchResult_, not the whole of it).
 
+**child report tool** — the declared tool a dispatched child calls to hand its
+_report_ back: `ptc_child_report`, the preferred of the two report channels.
+The tool is a **carrier, not a validator**: `execute` neither validates its
+arguments nor builds a report — pi has already checked the arguments against
+`CHILD_REPORT_PAYLOAD_SCHEMA` by the time it runs, and the HOST validates what
+comes back through `validateChildReport`. One validator, one shape, and the side
+that stamps the report is the side that reads it. The shape itself is NOT in
+the tool description; it lives in `CHILD_REPORT_SHAPE`, which the child's
+appended system prompt renders, and a second copy in either place is the
+two-copies problem ADR-0032 rejects. The tool is **active only inside a
+dispatched child**: `defaultActive` is decided by whether THIS pi process is
+itself a child (`PI_PTC_DEPTH`), so a parent session registers it and never
+offers it to the model — a parent has no child to report. `buildArgv`
+additionally merges the name into the child's `--tools` list, because without
+that merge pi's allowlist would filter the tool straight back out.
+_Avoid_: "the report tool" unqualified (the child report has two channels and
+this is one), "child report API" (it is a pi tool, and the shape lives in the
+child's prompt, not in a schema the child reads at runtime).
+
 **why** — the caller's reason for one dispatch slice, carried as an optional argument named `why`
 on `pi.dispatch` / `ptc_subagent` and delivered to the child as its own `<pi-ptc-why>` block **after**
 the policy block. It is context, not authority: the task stays the deliverable, and a disagreement
@@ -504,7 +638,7 @@ object — all resolve to ON, because a broken value must never remove the
 feature. A broken **key** is reported at `session_start` with the path, the
 key and the type that arrived; a broken **file** is `readDefaultModeConfig`'s
 to report and this reader stays silent, so one typo produces one notice.
-The opposite direction from _opt-in bindings_, which grant a shell and so
+The opposite direction from _opt-in binding_, which grants a shell and so
 fail closed. When a `why` is dropped, `DispatchResult.whySuppressed` and
 `TaskRecord.whySuppressed` record **that a suppression happened**, never the
 value; `/ptc why on|off` overrides it for the current session only and never
@@ -561,8 +695,9 @@ was tried first, and pi's validator coerced `readOnly: 0` into "no tier", a sile
 full-capability child for a caller who asked to be read-only; the string enum refuses every
 wrong-typed value at the schema (ADR-0041 §Decision). Which side it narrows is load-bearing: the
 child's own tools, decided at the call site — **not** the PTC worker's binding surface, which is
-what the R3 read-only PTC surface (an explicit `optInBindings` subset in `~/.pi/agent/ptc.json`)
-narrows. ADR-0041.
+what the _R3 read-only PTC surface_ narrows (an explicit `names` list curating the binding
+table). The two axes meet at one point: a strict tier at the call site decides the child's tool
+list outright. ADR-0041.
 _Avoid_: "read-only mode" without a tier named, "read-only dispatch" (that names the argument's two
 tiers, not a kind of dispatch), and reading the strict tier as a boundary — it is a narrowing, not
 a sandbox.
@@ -605,6 +740,148 @@ this package compiles and runs there without any of the four. _Avoid_: "floor"
 unqualified (both terms are floors), "minimum pi version" (that is the declared
 floor), "0.99.0 is the floor" (true of these four capabilities, false of
 `peerDependencies`, and the two are set independently).
+
+## Narrowing mode
+
+The session-level switch that makes a session work the PTC way. This is the
+subsystem behind `/ptc on` and `/ptc off`; it is a _toggle_, not the technology
+(see _PTC mode_ in §Project terms).
+
+**narrowing mode** — the session-level tool-restriction state machine: while
+enabled, the session's visible tool loadout is narrowed so the model reaches the
+bound built-ins only from INSIDE a program (`tools.<name>(args)`). It is not a
+separate execution path — same worker, same dispatcher, same bindings; it
+changes only _what the model may call directly_. It is decided per session at
+`session_start`, announced once, and always reversible (`/ptc off` restores the
+loadout). TUI-only: print, JSON and RPC sessions are left exactly as launched,
+because forcing the shape on a CI script buys nothing and breaks it. Distinct
+from _surface mode_, which decides which model-facing tools are REGISTERED, and
+from _PTC mode_, which is the technology this switch puts to use.
+ADR-0010, ADR-0025. _Avoid_: "PTC mode" (that is the acronym — see
+§Project terms), "mode" unqualified (ambiguous: _surface mode_ and the
+_narrowing mode_ both exist), "restriction mode" (that is the _read-only tier_'s
+shape, applied to a child rather than to a session), "PTC default mode"
+(ADR-0010's title — keep it as an alias of this entry, not as a second name).
+
+**base snapshot** — the loadout captured BEFORE the narrowing mode hides
+anything, and the source the binding table is derived from while the mode is
+on. Without it the mode would neuter itself: bindings are computed as
+`BUILTIN_BINDING_NAMES ∩ pi.getActiveTools()`, and the mode hides exactly the
+built-ins that set contains, so reading the LIVE loadout would empty the
+binding table and every `tools.read(…)` would fail with "not bound". The
+snapshot keeps the guarantee that a program never reaches further than the
+session it runs in — `base` IS the session's own loadout, so a session launched
+with `--tools read` has `base = ["read"]` and bindings stay `["read"]` — while
+making the mode's own narrowing transparent to the binding table. It is
+reconstructed at `session_start`: a persisted `base` wins only when the live
+loadout is still the narrowed one (a `/reload` or a resumed session); otherwise
+the live loadout wins, so a new `--tools …` choice is not overridden by an
+older session's snapshot. ADR-0010 §2, ADR-0005 addendum (T7, #21).
+_Avoid_: "binding snapshot" (it is a loadout snapshot that happens to feed the
+binding table), "frozen loadout" (it is not frozen — it is reconstructed per
+session), "the mode's loadout" (that is the NARROWED one, which this snapshot
+exists to be different from).
+
+**hide strategy** — how much of the loadout the narrowing mode hides:
+`ModeHideStrategy` is `"builtins-only" | "all-but-ptc"`. The shipped default is
+`builtins-only` — the seven built-ins go off the model's direct list while every
+other extension's tools stay. `all-but-ptc` leaves only `ptc_run_code` /
+`ptc_workflow` reachable; it is implemented and unit-tested for callers who
+want the strict shape, but it is NOT the default, because pi's
+`pi.getAllTools()` returns metadata only (`name`, `description`, `parameters`,
+`promptGuidelines`, `sourceInfo`) — no `execute` — so a binding for another
+extension's tool is impossible to build, and hiding such a tool would make it
+unreachable for the whole session. This is the one place where the shipped
+behaviour is deliberately LESS strict than DSH's PTC preset, and the reason is
+a hard API limit rather than a preference. ADR-0010 §3.
+_Avoid_: "strict mode" (the _read-only tier_ owns "strict"), "mode" (see
+_narrowing mode_).
+
+**mode entry** — the decision to enter the narrowing mode, and the conditions
+that gate it. `decideModeEntry()` returns a `ModeEntryDecision` whose
+`ModeBlockReason` names the blocker: `not-tui` (a non-TUI session is left
+exactly as launched), `config-off` (`~/.pi/agent/ptc.json` set
+`{"defaultMode": false}`; an absent file means on, and a malformed file is
+reported to the user and still defaults to on, because silently flipping a
+behaviour this visible is worse than the malformed file), `tools-unavailable`
+(neither `ptc_run_code` nor `ptc_workflow` is enabled — there would be nothing
+to run), and `restricted-session` (the session was launched with an explicit
+tool restriction — `--tools`, `--exclude-tools`, `--no-builtin-tools` — so
+narrowing further would override a deliberate instruction; the session stays as
+launched, and the PTC surface would be degraded anyway). The restricted-session
+check deliberately compares against pi's four DEFAULT tools (`read`, `bash`,
+`edit`, `write`), NOT against `BUILTIN_BINDING_NAMES` — that list is every name
+that can be bound, not what a default session has (`grep` / `find` / `ls` are
+bindable but off by default), so requiring all seven would misread every
+ordinary session as restricted and never turn the mode on. `/ptc on` overrides
+everything but the TUI and availability checks: a restricted session enters
+with its own smaller loadout as `base`, so bindings stay inside the user's
+allowlist. There is no CLI flag — pi's extension boolean flags can only be set
+to true, and `--no-ptc "a prompt"` would swallow the prompt as the flag's value.
+ADR-0010 §4–§5. _Avoid_: "mode on" (on is one of two outcomes and this entry
+covers both), "entry policy" (the same thing, less precisely), "activation"
+(that is the package's _default-on_).
+
+**drift notice** — the report that the narrowing mode has EXITED because
+someone else owns the tool loadout now. `detectExternalLoadoutChange()`
+compares the live loadout against `ourLoadout`, the exact array the mode wrote;
+a mismatch means another extension (pi's own `preset.ts` and `tools.ts`
+examples call `setActiveTools()`) or the user took ownership. The mode then
+exits and restores `base` rather than fighting over it — it never re-asserts
+itself over another actor. Always false while the mode is off. ADR-0010 §6.
+_Avoid_: "loadout drift" (that is the condition; the notice is what the user is
+told), "conflict" (implies two parties disagree, when the rule is that the
+later owner wins), "extension takeover" (the user can be the one who changed
+it).
+
+**skills section** — pi's `<skills>` block in the system prompt, and the
+narrowing mode's duty to keep it. pi advertises skills only when the session
+can actually open one: its prompt builder checks whether `read` or `bash` is in
+the selected tools, and the narrowing mode hides exactly those two — so the
+gate drops the section, and with it the model's only way to learn that skills
+exist. Measured on real session files: sessions before PTC-mode-by-default
+carried 43 skills in `SystemMessage.sections.skills`; narrowing-mode sessions
+carried no `skills` section at all. The list body stays pi's own
+(`formatSkillsForPrompt` is a public export and its XML shape is the
+agentskills.io spec, so re-deriving it here would only create drift); only the
+loading SENTENCE changes, because "Use the read tool" is false in a session
+where `read` is hidden and the way in is `tools.read` from inside a program.
+ADR-0011. _Avoid_: "the skills prompt" (it is a section of the system prompt,
+and "prompt" is the thing it is part of), "skill loading" (that is the
+instruction the section carries, not the section).
+
+## PTC run outcomes
+
+**PTC error kind** — the seven-value taxonomy every failed run resolves to, in
+`PTC_ERROR_KIND`: `exception` (program parse error or thrown exception,
+including the `ReferenceError` from a helper that does not exist on this
+surface), `timeout` (elapsed deadline expiry), `abort` (caller cancellation),
+`protocol` (malformed or excessive control traffic), `worker-exit` (early
+worker exit or a worker-level crash), `invalid-output` (the completion value
+could not be materialized as lossless JSON), and `output-limit` (oversized
+outer result; the collected logs are retained). It is R1 §3's taxonomy minus
+`sandbox-unavailable` (this package ships no OS sandbox, ADR-0007) and minus
+every `agent`-related kind (there is no `agent()` helper). The table lives in
+one place, `src/runtime/protocol.ts`, and the worker receives the same tables as
+plain data at spawn, so the two ends of the wire cannot drift on names.
+_Avoid_: "error type" (it is a kind; the shape around it is `PtcErrorShape` —
+`kind`, `message`, optional `stack`), "failure reason" (a reason is a cause;
+this is the taxonomy's bucket), "exit code" (that is one input to the
+diagnosis, not the kind).
+
+**truncation contract** — the model-facing text ceiling this package inherits
+from pi: pi's `truncateTail` at 50 KB / 2000 lines, TAIL-biased. Two rules
+make it a contract rather than a constant: the text is cut from the tail, so
+the end of a long output survives, and the UNTRUNCATED text is written under
+`os.tmpdir()` before the tail is cut, so the pointer the model receives never
+names a partial file. Two call sites implement it — the run-scale text block
+(`renderToolResult`) and the task-scale output dereference (`ptc_task_output`) —
+and both go through one shared implementation, so the two cannot drift.
+ADR-0015. _Avoid_: "truncation" unqualified (the direction matters —
+tail-biased, not head), "output limit" (that is the run's byte budget,
+`maxOutputBytes`, ADR-0003 — a different ceiling at a different boundary), "the
+50 KB limit" (the limit is part of the contract; the contract also carries the
+tmpdir rule).
 
 ## Worker lifecycle (ADR-0017)
 
@@ -749,6 +1026,24 @@ selector misses — **the only place** `JSON.stringify` is acceptable on a
 sub-row. ADR-0021 §3. _Avoid_: "args display" (vague), "args format"
 (implies the JSON-format capability).
 
+## Background dispatch and task lifecycle (ADR-0022, ADR-0023)
+
+**ULID** — the identifier format every task-scoped id uses: 26 characters of
+Crockford base32, `TTTTTTTTTTRRRRRRRRRRRRRRRR` — 10 characters (48 bits) of
+ms-epoch followed by 16 characters (80 bits) of entropy. The alphabet omits
+`I`, `L`, `O` and `U`, and its order means **lexical sort equals creation
+order**, which is what lets a task list be ordered by id without a second sort
+key. Entropy comes from `crypto.randomBytes` (never `Math.random()`), so two
+ids minted in the same millisecond are distinct, and a per-ms increment makes
+them strictly increasing. `ULID` is a compile-time BRAND
+(`string & { __brand: "ULID" }`) and nothing more: the runtime value is a plain
+string, and the brand only keeps a taskId from being passed into a cursor slot
+by accident. `src/runtime/ulid.ts` is the single source of truth for the
+alphabet, the time encoder and the minter — before it, two independent
+implementations had to be kept from drifting and were joined by an `as ULID`
+cast. _Avoid_: "UUID" (a different format, and not lexically sortable), "id"
+unqualified (the format matters: it is what makes the ordering claim true).
+
 **dispatch task** — the instruction prose a caller passes as `task` to
 `pi.dispatch(...)` or `ptc_subagent`: what the child is asked to do, sent as its
 user message (`Task: …`). It is not the whole assembled prompt (the appended
@@ -810,6 +1105,25 @@ Its startup reconcile marks a `running`/`stopping` record `lost` (reason
 still-running records `lost` (reason `session_ended_while_running`).
 Reaping is owner-scoped — see _task owner_. See ADR-0022 + ADR-0023.
 
+**BackgroundTaskRuntime** — the session-scoped holder for everything the
+`ptc_task_*` tools and the background branch of `pi.dispatch` need: the
+`TaskRegistry`, the `OutputStorage`, the notification pipeline, and the ONE
+`DispatchSlotCounter` that sizes the session's _dispatch concurrency_. It is
+constructed once in the extension factory, BEFORE any session exists, because
+the model-facing tools capture its delegates once and are built later — a pi
+session starts after the factory runs and can be re-bound (resume / fork), so
+the holder closes that gap by exposing STABLE delegating objects whose
+per-session delegate is swapped underneath them. Before the first bind they
+delegate to an in-memory pair, so a session-less context (direct library use,
+unit tests) is fully usable. The slot counter lives HERE rather than per-run
+precisely so that a long-lived background child keeps counting against
+`dispatchConcurrency` across program boundaries; the task id is the slot
+token, and the release is idempotent per task, so exactly one slot is freed no
+matter which party (the detached pump or the shutdown reclaim) runs first.
+_Avoid_: "the runtime" unqualified (the worker runtime is a different thing —
+see _worker surface_), "background runtime" (the same object, shorter and less
+distinctive), "task service" (it holds state, it does not serve anything).
+
 **task owner** — the identity of the extension-runtime instance that
 created a `TaskRecord`: `{ ownerPid, ownerBootMs }` (process pid + the
 runtime instance's start ms, minted once per _BackgroundTaskRuntime_).
@@ -825,6 +1139,25 @@ post-fork events only) and it names an explicit-reset surface
 `ptc_task_resubscribe(taskId, since: "initial")`; neither the helper nor that
 tool ships in v1 — the caller supplies `since` and a resubscribe tool is
 deferred to v2. See ADR-0022.
+
+**output storage** — the persistence seam for a background task's captured
+output. The `TaskRecord` deliberately does NOT carry the child's result body:
+it keeps only a small projection — `outputRef` (the path), `outputBytes` (the
+size) and `outputPreview` (≤ 2 KB of inline text) — and the raw text is
+reached by dereferencing `outputRef`. The seam is `OutputStorage`, a
+three-method interface (`readOutput` returns `null` for "no output yet", an
+EXPLICIT ABSENCE that is never a silent empty string; `writeOutput` accepts
+any string), with an in-memory backend for tests and ephemeral sessions and a
+file backend writing `<sessionDir>/tasks/<taskId>/output.log`. The adapters
+store and return the RAW text; truncation is applied by the CALLER (the
+`ptc_task_output` tool), through the _truncation contract_, so the pointer
+the model receives never names a partial file. The inline-preview rule is a
+byte budget, not a heuristic: `outputPreview` is present only when
+`outputBytes <= 2048`, and above that the renderer must dereference
+`outputRef`. ADR-0022 §3 + §6. _Avoid_: "output file" (the in-memory backend
+has no file), "task output" (that is the text; this is where it lives), "log"
+(the file is `output.log`, but the concept is the seam, and the truncation
+contract is not the same as a log rotation).
 
 **`ptc_task_*` (model-facing management tools)** — three tools always
 on (not gated by `/ptc off`, per ADR-0022 + map Notes clause 5):
