@@ -122,9 +122,11 @@ ocr delegate rule --format json $(git ls-files 'src/*.ts') \
 ocr delegate rule --format json $(git ls-files 'src/*.ts')
 ```
 
-当前状态(2026-09-30):`src/*.ts` 33 个文件、`tests/**` 5 个 pattern(`tests/dispatch-*.test.ts` /
+当时的覆盖状态(2026-09-30 实测):`src/*.ts` 33 个文件、`tests/**` 5 个 pattern(`tests/dispatch-*.test.ts` /
 `tests/unit/dispatch-*.test.ts` / `tests/e2e/**/*.test.ts` / `tests/integration/**` /
 `tests/**/*.test.ts`),SYSTEM-ONLY 都是空。
+**别把这里的文件个数当现状** —— 仓库在长,数字会漂。现测跑上面那条批量命令,判据是
+**SYSTEM-ONLY 为空**,不是文件个数。
 
 `ocr rules check` 只验一个文件,发现不了漏网;批量那条是唯一的漏网门禁
 (`.agents/skills/code-review/SKILL.md` 第 3 步的 health gate 就是它在 `src/` 上的实例)。

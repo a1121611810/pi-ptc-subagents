@@ -42,6 +42,7 @@
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
     "compat:pi": "node scripts/pi-compat-matrix.mjs",
+    "check:code-review-upstream": "node scripts/check-code-review-upstream.mjs",
     "test": "pnpm exec vp test --run --coverage",
     "test:watch": "pnpm exec vp test",
     "test:ui": "pnpm exec vp test --ui",

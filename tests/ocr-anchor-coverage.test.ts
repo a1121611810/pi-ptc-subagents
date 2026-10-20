@@ -195,4 +195,25 @@ describe("ocr resolves sentinel files to project rules", () => {
     const reviewed = markdown.filter((file) => file.will_review);
     expect(reviewed.map((file) => file.path)).toEqual([]);
   });
+
+  // The mirror of the assertion above: `.yml` is NOT on the selection layer's exclusion
+  // list. The skill file used to claim the opposite, and the claim was wrong -- so a CI
+  // workflow change was handed to nobody. Expected value source: the ocr CLI's own
+  // selection layer, same as the markdown assertion above.
+  test.skipIf(!ocrAvailable)("yaml is selected for review, unlike markdown", () => {
+    const stdout = execFileSync("ocr", ["scan", "--preview", "--format", "json"], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      maxBuffer: 32 * 1024 * 1024,
+    });
+    const files = (JSON.parse(stdout) as { files?: { path: string; will_review?: boolean }[] })
+      .files;
+    const yaml = (files ?? []).filter(
+      (file) => file.path.endsWith(".yml") || file.path.endsWith(".yaml"),
+    );
+
+    expect(yaml.length, "no yaml was listed; the guard would be vacuous").toBeGreaterThan(0);
+    const reviewed = yaml.filter((file) => file.will_review);
+    expect(reviewed.length, "no yaml was selected for review").toBeGreaterThan(0);
+  });
 });
