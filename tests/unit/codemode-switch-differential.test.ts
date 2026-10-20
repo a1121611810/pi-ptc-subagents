@@ -153,7 +153,7 @@ const INSTALLED_PI_VERSION: string = ((): string => {
  * measurement to a 0.99.x pi whose resolver changed twice on the way up, which is exactly the
  * inheritance the guard test refuses. Add the exact version; the guard turns red until you do.
  */
-const MEASURED_VERSIONS: readonly string[] = ["0.86.0", "0.86.1", "1.0.0", "1.2.0"];
+const MEASURED_VERSIONS: readonly string[] = ["0.86.0", "0.86.1", "1.0.0", "1.2.0", "1.3.0"];
 
 /**
  * What pi **0.86.0** answers for each case, measured 2026-10-14 by driving its own
@@ -358,14 +358,18 @@ const CASES: ReadonlyArray<{
 ];
 
 /**
- * The 1.2.0+ column, derived from `CASES` rather than written out twice.
+ * The 1.0.0+ column, derived from `CASES` rather than written out twice.
  *
  * The `piLoads` values in the table above were measured on pi 1.2.0 and re-measured on pi
- * 1.0.0 with identical results (both installed, both probed with this file's own harness). Deriving
- * the column from the table keeps the two in step by construction: a row added to `CASES` cannot
- * appear in the floor column and be missing from this one without the guard test noticing.
+ * 1.0.0 with identical results (both installed, both probed with this file's own harness).
+ * Re-measured on pi 1.3.0 on 2026-10-20 with identical results again — 40 of 40 rows, so 1.3.0
+ * shares this column rather than getting one of its own.
+ *
+ * Deriving the column from the table keeps the two in step by construction: a row added to
+ * `CASES` cannot appear in the floor column and be missing from this one without the guard test
+ * noticing.
  */
-const COLUMN_1_2_0: Readonly<Record<string, boolean>> = Object.fromEntries(
+const COLUMN_1_0_0: Readonly<Record<string, boolean>> = Object.fromEntries(
   CASES.map((c) => [c.label, c.piLoads]),
 );
 
@@ -374,12 +378,20 @@ const COLUMN_1_2_0: Readonly<Record<string, boolean>> = Object.fromEntries(
  *
  * The floor shares one table because 0.86.0 and 0.86.1 were measured separately and answered
  * identically on all forty rows — both are asserted to still agree by the guard test below.
+ *
+ * 1.0.0, 1.2.0 and 1.3.0 share one table because each was measured SEPARATELY, on its own
+ * install, through this file's own harness, and each answered identically on all forty rows.
+ * Sharing is a measurement, not an assumption: 1.3.0 was installed and probed on 2026-10-20
+ * rather than being inferred from 1.2.0, and the guard test below re-measures the installed pi
+ * against whichever column applies — so a pi that changed its rules turns the table red instead
+ * of quietly agreeing with a stale expectation.
  */
 const COLUMN_BY_VERSION: Readonly<Record<string, Readonly<Record<string, boolean>>>> = {
   "0.86.0": FLOOR_086_PILOADS,
   "0.86.1": FLOOR_086_PILOADS,
-  "1.0.0": COLUMN_1_2_0,
-  "1.2.0": COLUMN_1_2_0,
+  "1.0.0": COLUMN_1_0_0,
+  "1.2.0": COLUMN_1_0_0,
+  "1.3.0": COLUMN_1_0_0,
 };
 
 /**
@@ -481,7 +493,7 @@ function measuredColumnFor(version: string): Readonly<Record<string, boolean>> |
  * source: pass `builtinExtensions: ["codemode"]` and ask whether a settings file saying
  * `["-builtin:codemode", "+builtin:codemode"]` ends up loading it. Measured: 0.86.0 and 0.86.1 no
  * (their constructor ignores the option entirely, and `builtin:` occurs in zero files of their dist),
- * 1.0.0 and 1.2.0 yes.
+ * 1.0.0, 1.2.0 and 1.3.0 yes.
  *
  * This is the fact that decides what the first test asserts. Comparing our answer with pi own is
  * the real contract ONLY where pi has an opinion; on a pi without built-ins pi never loads

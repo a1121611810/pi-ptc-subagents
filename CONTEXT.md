@@ -586,8 +586,8 @@ and the package installs and runs on it. That holds because the three fields pi
 grew onto `ToolDefinition` after it (`outputSchema`, `exposure`,
 `defaultActive`) are declared locally in `CompatToolDefinition` instead of
 being read from pi; on a floor pi they are **inert**, and an unread optional
-field still registers and runs. The dev dependency pins `^1.0.0`, so the
-default gate measures the middle of the range and `compat:pi` is what measures
+field still registers and runs. The dev dependency pins `1.3.0` (as of 2026-10-20), so the
+default gate measures the ceiling of the range and `compat:pi` is what measures
 the edge. The measured table is `docs/agents/pi-compat-matrix.md`. _Avoid_:
 "floor" unqualified (there are two), "minimum supported pi" (same number, but
 it reads like a capability claim, which is the confusion this section exists to
