@@ -421,7 +421,7 @@ describe("renderSubagentToolCall (pi_task_codemode)", () => {
     const out = visible(renderSubagentToolCall({ task, readOnly: "lenient" }, theme));
 
     expect(out).toContain("└─ *task* → (generalist)");
-    expect(out).toContain("foreground · read-only:lenient");
+    expect(out).toContain("not waited · read-only:lenient");
     expect(out).toContain("│ 第一行任务：做一次只读 review");
     // 4 non-empty lines, one shown → 3 withheld.
     expect(out).toContain("… 还有 3 行（ctrl+e 展开）");
@@ -434,15 +434,21 @@ describe("renderSubagentToolCall (pi_task_codemode)", () => {
     expect(out).not.toContain("还有");
   });
 
-  test("named agent, background dispatch and strict tier are stated", () => {
+  test("a waiting call is stated as waited", () => {
+    const out = visible(renderSubagentToolCall({ task: "x", wait: true }, makeTheme()));
+    expect(out).toContain("waited");
+    expect(out).not.toContain("not waited");
+  });
+
+  test("named agent, a not-waiting call and strict tier are stated", () => {
     const out = visible(
       renderSubagentToolCall(
-        { agent: "researcher", task: "x", background: true, readOnly: "strict" },
+        { agent: "researcher", task: "x", wait: false, readOnly: "strict" },
         makeTheme(),
       ),
     );
     expect(out).toContain("→ researcher");
-    expect(out).toContain("background · read-only:strict");
+    expect(out).toContain("not waited · read-only:strict");
   });
 
   test("a pinned model and agent scope are stated (the 2026-10-19 diagnosis fields)", () => {

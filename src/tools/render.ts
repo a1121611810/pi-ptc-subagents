@@ -949,7 +949,7 @@ export interface SubagentCallArgs {
   model?: string;
   agentScope?: "user" | "project" | "both";
   readOnly?: "strict" | "lenient";
-  background?: boolean;
+  wait?: boolean;
 }
 
 /**
@@ -1000,7 +1000,7 @@ export function renderSubagentToolCall(
     typeof args.agent === "string" && args.agent.trim().length > 0
       ? args.agent.trim()
       : "(generalist)";
-  const flags = [args.background === true ? "background" : "foreground"];
+  const flags = [args.wait === true ? "waited" : "not waited"];
   if (args.readOnly !== undefined) flags.push("read-only:" + args.readOnly);
   const requestedModel =
     typeof args.model === "string" && args.model.trim().length > 0 ? args.model.trim() : undefined;

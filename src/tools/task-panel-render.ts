@@ -329,7 +329,7 @@ function renderTaskList(details: unknown, ctx: RenderContext): TaskPanelRow {
   const tasks = Array.isArray(raw.tasks) ? (raw.tasks as TaskRecord[]) : [];
   if (tasks.length === 0) {
     const empty = new TaskPanelRow([
-      { left: `${TREE_ROOT_CONT}${ctx.theme.fg("muted", "(no background tasks)")}` },
+      { left: `${TREE_ROOT_CONT}${ctx.theme.fg("muted", "(no tasks)")}` },
     ]);
     return withAgeTimer(empty, {
       isLive: false,
