@@ -2,6 +2,8 @@
 
 status: accepted (2026-10-03). §Context and §Verification amended 2026-10-09: the pair registers on `subagents`, at `codemode` reach. **§"Absence of evidence" and §"The mirror" and §"We do not make the `session_start` measurement authoritative" amended 2026-10-10 by ADR-0035**, which deletes the reconstruction those sections describe.
 
+> **Amended by [ADR-0051](./0051-the-surface-names-the-orchestrator.md) (2026-10-21): the two surface values are renamed — `full` → `full_ptc`, `subagents` → `codemode_ptc` — and the surface now means _which orchestrator is responsible to the model_. This record's decisions stand unchanged; read its `full` / `subagents` as those names.**
+
 # The detected surface follows whether codemode will be ACTIVE, not only whether it ships or loads
 
 ## Context

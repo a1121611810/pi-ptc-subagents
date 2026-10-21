@@ -2,6 +2,8 @@
 
 status: accepted (2026-10-20). Ticket #227 (map #226) 的形状部分。配套记录：[ADR-0048](./0048-deepseek-search-gate.md)（门禁契约）。取代并同日撤销：[ADR-0047](./0047-deepseek-search-is-program-internal.md)（两个面 / 程序内可达）。
 
+> **修订：[ADR-0051](./0051-the-surface-names-the-orchestrator.md)（2026-10-21）：两个表面值改名——`full` → `full_ptc`、`subagents` → `codemode_ptc`——且「表面」现在指**哪个编排器对模型负责**。本记录的决定不变；读到它的 `full` / `subagents` 时，读作那两个新名字。**
+
 ## Context
 
 ADR-0047 把搜索定成「程序内可达的能力，默认不面向模型」，具体形状是**一份实现、两个面**：pi 工具 `web_ds_search`（`exposure: "codemode"`）+ PTC binding `web.ds.search`。那条记录在同一天被实测修订过一次（见其 §修订），而**三件事把旧形状顶到了墙角**。

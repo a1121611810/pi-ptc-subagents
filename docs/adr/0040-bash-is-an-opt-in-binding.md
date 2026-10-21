@@ -3,6 +3,8 @@
 status: accepted (2026-10-13). Ticket #73 (spec #72, sandbox posture). Not an amendment: the
 binding surface had no governing record before this one.
 
+> **Amended by [ADR-0051](./0051-the-surface-names-the-orchestrator.md) (2026-10-21): the two surface values are renamed — `full` → `full_ptc`, `subagents` → `codemode_ptc` — and the surface now means _which orchestrator is responsible to the model_. This record's decisions stand unchanged; read its `full` / `subagents` as those names.**
+
 **A correction this record makes about its own ticket.** #73's body reads "This is ADR-0023,
 landed." That is false and was repeated in two review rounds before anyone checked it. On `main`,
 `0023-background-task-ownership.md` is background task ownership; the bash-opt-in record was

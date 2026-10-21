@@ -6,7 +6,7 @@
  * `pi.setActiveTools([...active, "codemode"])` for every session with an enabled
  * `codemode`-exposure server (`dist/extensions/mcp/index.js:352-389`). That call records itself
  * in no settings file, so the ADR-0029 loadout mirror answers `inactive` and the surface defaults
- * to `full` while codemode really is active — two orchestration surfaces in one request, the
+ * to `full_ptc` while codemode really is active — two orchestration surfaces in one request, the
  * defect ADR-0025 exists to remove.
  *
  * **This is a weaker guarantee than ADR-0027's switch oracle, and deliberately so**, for the same
@@ -18,7 +18,7 @@
  * What makes the weaker guarantee sufficient is the failure asymmetry, and this evidence is built
  * to keep it one-sided: the server mirror is a strict SUBSET of pi's checks (the `oauth` /
  * `auth.provider` rules are deliberately not mirrored), so a disagreement can only ever claim
- * activation pi will not perform — which lands in the `subagents` surface with no orchestrator,
+ * activation pi will not perform — which lands in the `codemode_ptc` surface with no orchestrator,
  * where the ADR-0025 decision-4 warning measures the real loadout and fires loudly. The direction
  * this ADR exists to close, under-reporting into a silent double surface, is not reachable.
  *
@@ -364,9 +364,9 @@ describe("the union with the loadout mirror", () => {
 describe("readCodemodeActivation over real files", () => {
   test("an agent-dir mcp.json resolves the activation, and the detected surface follows it", async () => {
     // The end-to-end claim of ADR-0033, on files rather than inputs: the same session that
-    // resolved `full` before (ADR-0029's default cell) now resolves `subagents`, because the
+    // resolved `full_ptc` before (ADR-0029's default cell) now resolves `codemode_ptc`, because the
     // mcp.json names a server whose tools are only reachable from codemode scripts. Without the
-    // union, `detectedSurfaceMode` answers `full` and the two surfaces coexist.
+    // union, `detectedSurfaceMode` answers `full_ptc` and the two surfaces coexist.
     const agentDir = await makeTempDir();
     try {
       await writeFile(
@@ -379,7 +379,7 @@ describe("readCodemodeActivation over real files", () => {
       expect(
         detectedSurfaceMode({ present: true, how: "found" }, "absent", resolved.activation),
         "the surface the session actually gets",
-      ).toBe("subagents");
+      ).toBe("codemode_ptc");
     } finally {
       await removeTempDir(agentDir);
     }

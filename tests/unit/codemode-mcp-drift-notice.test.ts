@@ -24,11 +24,11 @@ import { makeStubInAgentDir, stubContext } from "../helpers/ptc.ts";
 /** BG-14: the three always-on background-task tools, in registration order. */
 const TASK_TOOLS = ["ptc_task_list", "ptc_task_output", "ptc_task_stop"] as const;
 
-/** `full`: the pair declared to the model, the lifecycle face, and the report tool. No subagent. */
-const FULL_TOOLS = ["ptc_run_code", "ptc_workflow", ...TASK_TOOLS, "ptc_child_report"] as const;
+/** `full_ptc`: the pair declared to the model, the lifecycle face, and the report tool. No subagent. */
+const FULL_PTC_TOOLS = ["ptc_run_code", "ptc_workflow", ...TASK_TOOLS, "ptc_child_report"] as const;
 
-/** `subagents`: the pair at codemode reach plus the top-level subagent face. */
-const SUBAGENTS_TOOLS = ["ptc_run_code", "ptc_workflow", "ptc_subagent", ...TASK_TOOLS] as const;
+/** `codemode_ptc`: the pair at codemode reach plus the top-level subagent face. */
+const CODEMODE_PTC_TOOLS = ["ptc_run_code", "ptc_workflow", "ptc_subagent", ...TASK_TOOLS] as const;
 
 /** The message of the ADR-0033 drift notice. */
 const DRIFT = "codemode is active in this session";
@@ -93,13 +93,13 @@ test("a session whose loadout already had codemode at startup reports no drift",
   // is nothing to reconcile. Asserted on the tool set too, because a probe that answered `inactive`
   // here would still produce this notice-free surface — the pair would just be the wrong one.
   const { notices, tools } = await startAndTurn({ active: [...DEFAULT_TOOLS, "codemode"] });
-  expect(tools).toEqual([...SUBAGENTS_TOOLS, "ptc_child_report"]);
+  expect(tools).toEqual([...CODEMODE_PTC_TOOLS, "ptc_child_report"]);
   expect(notices.filter((n) => n.message.includes(DRIFT))).toEqual([]);
 });
 
 test("a codemode that appears AFTER startup is reported once, as a warning naming the fix", async () => {
   // The backstop, and now the only reachable drift: nothing named `codemode` when the session
-  // started, the surface was built as `full`, and pi activated the tool anyway. The user is being
+  // started, the surface was built as `full_ptc`, and pi activated the tool anyway. The user is being
   // offered two orchestration tools, which ADR-0025 calls a measured defect, so this is a warning
   // rather than a note — the same level and the same one-line fix as the probe-missed notice.
   const { notices, tools } = await startAndTurn({
@@ -121,11 +121,11 @@ test("a codemode that appears AFTER startup is reported once, as a warning namin
   );
   // The surface was decided before the tool appeared, and pi cannot unregister: this is the
   // registered set the user is stuck with until the session restarts.
-  expect(tools, "the surface it decided is the full one").toEqual(FULL_TOOLS);
+  expect(tools, "the surface it decided is the full one").toEqual(FULL_PTC_TOOLS);
 });
 
 test("a session with no codemode at all is not told about a drift it does not have", async () => {
-  // The crying-wolf guard, and the direction that matters: `full` with codemode inactive is the
+  // The crying-wolf guard, and the direction that matters: `full_ptc` with codemode inactive is the
   // DEFAULT cell after ADR-0029, and a notice on every ordinary session would be noise. Without
   // the `getActiveTools()` check this would fire on the whole user base.
   const { notices, tools } = await startAndTurn({ active: DEFAULT_TOOLS });
@@ -151,7 +151,7 @@ test("an mcp.json we could not read is reported once, and the drift notice still
 
 test("an mcp.json that keeps codemode off resolves full, exactly as ADR-0029's default does", async () => {
   // The row of ADR-0033's table the pure-function cases alone could not carry: the user who read
-  // pi's own docs and set `autoEnableCodemode: false` must get `full`. Asserted on the whole
+  // pi's own docs and set `autoEnableCodemode: false` must get `full_ptc`. Asserted on the whole
   // registered list, because a probe that answered `active` here would still pass every evidence
   // case — this is the only place the negative decision is taken through the real factory.
   const { notices, tools } = await startAndTurn({
@@ -162,25 +162,25 @@ test("an mcp.json that keeps codemode off resolves full, exactly as ADR-0029's d
       mcpServers: { docs: { command: "npx" } },
     }),
   });
-  expect(tools).toEqual(FULL_TOOLS);
+  expect(tools).toEqual(FULL_PTC_TOOLS);
   // And with the tool really active afterwards, the drift notice is exactly what this session
   // should hear — a setting that silenced the evidence does not silence the measurement.
   expect(notices.filter((n) => n.message.includes(DRIFT))).toHaveLength(1);
 });
 
 test("a disabled server resolves full, and a session with no MCP at all resolves full", async () => {
-  // The remaining two negative rows, on the same terms: the registered list, exactly. `full`
+  // The remaining two negative rows, on the same terms: the registered list, exactly. `full_ptc`
   // means `ptc_run_code` and NOT `ptc_subagent` — the second is the assertion that carries, since
-  // `ptc_run_code` alone could be registered beside a `subagents` decision that never happened.
+  // `ptc_run_code` alone could be registered beside a `codemode_ptc` decision that never happened.
   const disabled = await startAndTurn({
     active: DEFAULT_TOOLS,
     activateAfterStart: true,
     mcpJson: JSON.stringify({ mcpServers: { docs: { command: "npx", enabled: false } } }),
   });
-  expect(disabled.tools).toEqual(FULL_TOOLS);
+  expect(disabled.tools).toEqual(FULL_PTC_TOOLS);
   expect(disabled.tools).not.toContain("ptc_subagent");
   const none = await startAndTurn({ active: DEFAULT_TOOLS, activateAfterStart: true });
-  expect(none.tools).toEqual(FULL_TOOLS);
+  expect(none.tools).toEqual(FULL_PTC_TOOLS);
 });
 
 test("a leftover surfaceMode key is inert: it neither pins the surface nor buys silence", async () => {
@@ -190,7 +190,7 @@ test("a leftover surfaceMode key is inert: it neither pins the surface nor buys 
   // buy the user the exemption, or the package would be deciding the surface twice, once from a
   // key it ignores and once from the probes.
   //
-  // The scenario is deliberately the worst one for that: `full` was decided while no codemode was
+  // The scenario is deliberately the worst one for that: `full_ptc` was decided while no codemode was
   // live, and one appears afterwards — which is exactly the double surface the drift notice exists
   // to report. If the key were still honoured the notice would stay silent AND the pair would
   // register.
@@ -207,8 +207,8 @@ test("a leftover surfaceMode key is inert: it neither pins the surface nor buys 
     notices.filter((n) => n.message.includes("no longer read")),
     "and the user is told the key is being ignored, with the replacement",
   ).toHaveLength(1);
-  // The surface came from the probes, not the key: no codemode was live at startup, so `full`.
-  expect(tools).toEqual(FULL_TOOLS);
+  // The surface came from the probes, not the key: no codemode was live at startup, so `full_ptc`.
+  expect(tools).toEqual(FULL_PTC_TOOLS);
 });
 
 test("a --print session is told neither notice, because ctx.ui.notify is TUI-only", async () => {

@@ -2,6 +2,8 @@
 
 status: accepted (2026-10-21). 修订：[ADR-0010](./0010-ptc-default-mode.md) §Decision 5、[ADR-0022](./0022-background-dispatch.md) §"What we add" 6 与 §"What we deliberately don't add" 1。
 
+> **修订：[ADR-0051](./0051-the-surface-names-the-orchestrator.md)（2026-10-21）：两个表面值改名——`full` → `full_ptc`、`subagents` → `codemode_ptc`——且「表面」现在指**哪个编排器对模型负责**。本记录的决定不变；读到它的 `full` / `subagents` 时，读作那两个新名字。**
+
 ## Context
 
 用户把 PTC 关掉之后，发现模型面前还杵着 `ptc_task_list` / `ptc_task_output` / `ptc_task_stop` 这三个工具。他的第一反应是：**PTC 既然都 OFF 了，这三个应该也没用啊。**

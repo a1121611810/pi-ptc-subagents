@@ -1,29 +1,38 @@
-# Surface detection — the full version
+# Surface detection — which orchestrator is responsible to the model
 
 The README's "PTC default mode" section gives the short version. This page carries the deep
 dive: the three questions, the notices, and the edge cases. Nothing here is configurable —
 the surface is **detected, not configured** ([ADR-0034](../adr/0034-surface-is-detected-not-set.md)).
 
-## The two surfaces
+## What a surface is
 
-- `subagents` — `ptc_subagent` plus the three `ptc_task_*` tools, with pi's own `codemode`
-  doing the orchestration; warns at startup when `codemode` is not in the active tool set and
-  `ptc_run_code` is not declared to the model either (which on a pi below 0.99.0 it is, since
-  `exposure` does not exist there and the pair falls back to being model-facing).
-  `ptc_run_code` / `ptc_workflow` are registered here too, but at `codemode` reach: a `codemode`
-  script can call them, and the model is not shown them. That is what puts `pi.dispatch` and
-  background tasks underneath `codemode`, whose sandbox cannot spawn a process itself.
-- `full` — the rest: `ptc_run_code` / `ptc_workflow` plus the three `ptc_task_*` tools. Also the
-  answer to every "the probe could not tell" case.
+**The surface is which orchestrator is responsible to the model**: this package's own PTC, or
+pi's `codemode`. Two values:
 
-Registration is not the same question as being offered. On the `subagents` line the PTC pair
-IS registered, at `codemode` reach, which makes it callable from a pi `codemode` script without
-declaring it to the model: `AgentSession._isDeclarable` admits `direct` and `model-only` only,
-so the request pi sends still carries exactly one orchestrator and it is pi's. The two lines
-are therefore not two orchestrators competing: `full` is this package composing tool calls,
-`subagents` is pi's `codemode` composing tool calls with this package's program reachable
-underneath as the execution layer ([ADR-0025](../adr/0025-extension-surface-is-a-setting.md)
-§3 as amended 2026-10-09).
+- `full_ptc` — **this package's PTC orchestrates.** The model writes a program and runs it
+  with `ptc_run_code` / `ptc_workflow`; the parallel binding lives inside that program.
+- `codemode_ptc` — **pi's `codemode` orchestrates.** The model composes tool calls in a
+  `codemode` script, and this package's program is the execution layer underneath it. The
+  top-level `ptc_subagent` face is offered to the model directly, so a child can be started
+  without a script at all.
+
+Renamed on **2026-10-21** from `full` / `subagents`. The old pair named the _inventory_ — which
+tools this package registers — and an inventory is not the question the model faces. `full` also
+read as "everything is available", which was false: on that surface the PTC pair **is**
+registered, at `codemode` reach, and is **not** model-facing. The new names say who orchestrates.
+The detection did not change with the names: the same pi still lands on the same surface, and
+only the name of that surface changed
+([ADR-0051](../adr/0051-the-surface-names-the-orchestrator.md)).
+
+Registration is not the same question as being offered, and it is not the same question as
+orchestration. On the `codemode_ptc` line the PTC pair IS registered, at `codemode` reach, which
+makes it callable from a pi `codemode` script without declaring it to the model:
+`AgentSession._isDeclarable` admits `direct` and `model-only` only, so the request pi sends
+still carries exactly one orchestrator and it is pi's. The two lines are therefore not two
+orchestrators competing: `full_ptc` is this package composing tool calls, `codemode_ptc` is pi's
+`codemode` composing tool calls with this package's program reachable underneath as the
+execution layer ([ADR-0025](../adr/0025-extension-surface-is-a-setting.md) §3 as amended
+2026-10-09).
 
 ## The three questions
 
@@ -32,21 +41,21 @@ The surface follows three questions, not one
 [ADR-0027](../adr/0027-codemode-switch-decides-surface.md),
 [ADR-0029](../adr/0029-surface-follows-codemode-activation.md)):
 
-| does this pi ship `codemode`? | will pi load it?                               | can the model call it?                        | surface     |
-| ----------------------------- | ---------------------------------------------- | --------------------------------------------- | ----------- |
-| yes                           | yes (default, or `+builtin:codemode`)          | yes (`--tools …,codemode`, or `defaultTools`) | `subagents` |
-| yes                           | yes (default, or `+builtin:codemode`)          | no — **the default on a stock install**       | `full`      |
-| yes                           | no (`-builtin:codemode`, or `--no-extensions`) | —                                             | `full`      |
-| no                            | —                                              | —                                             | `full`      |
+| does this pi ship `codemode`? | will pi load it?                               | can the model call it?                        | surface        |
+| ----------------------------- | ---------------------------------------------- | --------------------------------------------- | -------------- |
+| yes                           | yes (default, or `+builtin:codemode`)          | yes (`--tools …,codemode`, or `defaultTools`) | `codemode_ptc` |
+| yes                           | yes (default, or `+builtin:codemode`)          | no — **the default on a stock install**       | `full_ptc`     |
+| yes                           | no (`-builtin:codemode`, or `--no-extensions`) | —                                             | `full_ptc`     |
+| no                            | —                                              | —                                             | `full_ptc`     |
 
-The third column is the one that decides most sessions, and it is why the answer is `full` on
+The third column is the one that decides most sessions, and it is why the answer is `full_ptc` on
 a pi that has never been configured. pi ships `codemode` and loads it by default, but registers
 it **inactive** (`defaultActive: false`) — it joins the model's tool list only when a loadout
 names it. Handing orchestration to a tool the model cannot call is the failure this avoids, so
-`subagents` is chosen only on positive evidence.
+`codemode_ptc` is chosen only on positive evidence.
 
-A probe that cannot answer falls back to `full` — the safe direction, since `subagents` as a
-failure mode would take away the orchestration tool the session was relying on. There is no key
+A probe that cannot answer falls back to `full_ptc` — the safe direction, since `codemode_ptc` as
+a failure mode would take away the orchestration tool the session was relying on. There is no key
 that overrides this, by design ([ADR-0034](../adr/0034-surface-is-detected-not-set.md)).
 
 ### Activation: pi answers for itself
@@ -88,7 +97,8 @@ and `<agentDir>/settings.json` — in the same order.
 
 **If you had `surfaceMode` in `ptc.json`, it is no longer read** — including `"off"`, so
 upgrading brings this package back. At session start you get one `warning` naming the file and
-pointing here. Delete the key to silence it.
+pointing here. Delete the key to silence it. The values that key ever took are `off`,
+`subagents` and `full`; they are history, and none of them is a surface value today.
 
 ## The notices
 
@@ -102,7 +112,7 @@ it answers `present` for a tool this session does not have (and the mirror: a re
 `dist` answers `not-found` for one pi plainly registers). A third notice covers ADR-0027: a
 settings file that could not be read. **A fourth notice was removed one commit after the change that
 made `agent` optional** — issue #187, which that change blocked on, and not the same commit (ADR-0039
-records the interval). It warned that a `subagents` session had no agent definitions, on
+records the interval). It warned that a `codemode_ptc` session had no agent definitions, on
 the reasoning that a registered-but-uncallable tool is indistinguishable from a working one. That
 reasoning expired with the default it was written against: a dispatch that names nothing runs a
 generalist child, so an install with an empty registry is a **working** install rather than a
@@ -125,7 +135,7 @@ Print / JSON / RPC sessions are left exactly as launched, and so is a session st
 explicit tool restriction (`--tools`, `--exclude-tools`, `--no-builtin-tools`,
 `--no-extensions`) — the extension does not override what you asked for. `--no-extensions`
 does, however, change the **detected surface**: pi's own `codemode` is a built-in extension, so
-turning extensions off means it will not load, and the table resolves to `full` — you keep
+turning extensions off means it will not load, and the table resolves to `full_ptc` — you keep
 `ptc_run_code` / `ptc_workflow` rather than a `ptc_subagent` with nothing to compose with. If
 another extension changes the tool set while the mode is on, the mode yields and tells you.
 

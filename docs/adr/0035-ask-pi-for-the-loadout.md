@@ -2,6 +2,8 @@
 
 status: accepted (2026-10-10)
 
+> **Amended by [ADR-0051](./0051-the-surface-names-the-orchestrator.md) (2026-10-21): the two surface values are renamed — `full` → `full_ptc`, `subagents` → `codemode_ptc` — and the surface now means _which orchestrator is responsible to the model_. This record's decisions stand unchanged; read its `full` / `subagents` as those names.**
+
 ## Context
 
 ADR-0029 added a third question to **surface mode**: will `codemode` be **active**, i.e. callable
