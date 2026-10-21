@@ -437,7 +437,7 @@ const ALL_SCANNED_NAMES: ReadonlySet<string> = new Set(
  *   A. DSH / pi 宿主 API —— 本仓是被宿主加载的 mode extension，不可能声明宿主的类与字段；
  *   B. 打包与构建配置 —— rolldown / vite / package.json 的词表；
  *   C. ADR-0022 明确推迟到 v2 的宿主 PTC 方法（文档自己写了 out of scope）；
- *   D. 第三方词表 —— GitHub Actions、vitest、采集表字面量、npm 发布环境变量。
+ *   D. 第三方词表 —— GitHub Actions、vitest、采集表字面量、npm 发布环境变量、libuv。
  */
 const EXTERNAL_VOCABULARY: ReadonlyMap<string, string> = new Map([
   // A. DSH / pi 宿主 API
@@ -565,6 +565,43 @@ const EXTERNAL_VOCABULARY: ReadonlyMap<string, string> = new Map([
   [
     "ptc_subagent",
     "本仓已删除的 codemode 侧门名（ADR-0052 把它改名为 pi_task_codemode，不留别名）；0013/0016/0022/0025/0026/0027/0028/0029/0032/0033/0039/0041/0042/0043/0044/0045/0049/0050/0053 保留这个名字是为了记录删除事实",
+  ],
+  // A5. **本仓已删除的符号**，2026-10-21 由 ADR-0056 删掉：并发满员不再拒绝，于是并发拒绝的
+  // 消息常量一起没了。文档必须能说出被删掉的是什么，所以名字要留在 ADR-0056 里，
+  // 而 src/ 里当然没有了——与 A3 同一类，只是删除的年份与决定不同。
+  //
+  // 两个**工厂函数**（`dispatchConcurrencyLimitReached()` / `backgroundDispatchConcurrencyLimitReached()`）
+  // 在 ADR-0056 里是带括号写的，形态过滤器不收带括号的 token，所以它们从来没进过断言二的判定面，
+  // 也就不需要清单条目——与上面 `setSurfaceMode()` 那条同一个道理。
+  [
+    "DISPATCH_CONCURRENCY_LIMIT_MESSAGE",
+    "本仓已删除的并发拒绝消息常量（ADR-0056 随拒绝工厂一并删除）；ADR-0056 点名它是为了记录删掉了哪条消息",
+  ],
+  [
+    "BACKGROUND_CONCURRENCY_LIMIT_MESSAGE",
+    "本仓已删除的后台并发拒绝消息常量（ADR-0056 随拒绝工厂一并删除）；ADR-0056 点名它是为了记录删掉了哪条消息",
+  ],
+  // D3. **libuv 的符号**。ADR-0056 把准入队列的形状照着 libuv 的线程池写，所以 ADR 点名了
+  // libuv 源码里的几个常量与函数。libuv 是本仓不依赖、不声明、只引用的第三方 C 库。
+  [
+    "UV_THREADPOOL_SIZE",
+    "libuv 的线程池大小环境变量名；ADR-0056 引用它是为了说明 libuv 的 worker 数可配，本仓不声明也不读",
+  ],
+  [
+    "uv_thread_create",
+    "libuv 的线程创建函数；ADR-0056 引用它是为了说明 libuv 的 worker 是预分配的，本仓不声明也不调用",
+  ],
+  [
+    "uv_cancel",
+    "libuv 的取消 API；ADR-0056 引用它是为了对照「排队中的可取消、已执行的返回忙」，本仓不声明也不调用",
+  ],
+  [
+    "UV_EBUSY",
+    "libuv 的错误码常量（忙）；ADR-0056 引用它是为了对照 libuv 对已执行请求的取消答复，本仓不声明",
+  ],
+  [
+    "uv_work_t",
+    "libuv 的 work item 类型；ADR-0056 引用它是为了说明 libuv 的 work item 从提交起就存在，本仓不声明",
   ],
   ["SessionShutdownEvent", "pi 宿主生命周期事件，本仓只消费不声明"],
   [
@@ -1484,7 +1521,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     "docs/adr/0013-ptc-row-compact-summary.md:186 -> render.ts:138": "function alignRow(",
     "docs/adr/0013-ptc-row-compact-summary.md:190 -> render.ts:1324":
       "The failure text is the reason",
-    "docs/adr/0016-ptc-dispatch-binding.md:45 -> src/runtime/dispatcher.ts:447":
+    "docs/adr/0016-ptc-dispatch-binding.md:47 -> src/runtime/dispatcher.ts:447":
       "new DispatchSlotCounter(",
     // 2026-10-21（ADR-0053：前台也建任务记录）：下面 7 条的目标行因本次实现整体下移，正文引用
     // 与本表同步。目标行逐条按内容核对过——内容未变，只是行号变了：
@@ -1493,7 +1530,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     //   dispatch.ts:2086 → 2127（`function accumulateUsage(`）
     //   dispatch.ts:1905 → 1946（`export function childToolList(`）
     //   ptc-task.ts:253/604/832 → 281/637/870（三处 `outputSchema:` 声明）
-    "docs/adr/0026-surface-default-is-detected.md:262 -> dispatch.ts:2521":
+    "docs/adr/0026-surface-default-is-detected.md:262 -> dispatch.ts:2922":
       "spawnOptions.sessionId = taskId;",
     // Confirmed line by line 2026-10-12 (re-checked after #187 moved it): line 505 is
     // `pi.registerTool(createChildReportTool(ptcDepth > 0));` -- the depth gate the ADR cites to
@@ -1514,21 +1551,21 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       "## Fail-safe on external loadout changes",
     "docs/adr/0031-open-source-and-publish-authority.md:129 -> src/runtime/limits.ts:4":
       "The numbers are DSH's",
-    "docs/adr/0032-child-report.md:15 -> src/runtime/dispatch.ts:2104": "function assistantText(",
+    "docs/adr/0032-child-report.md:15 -> src/runtime/dispatch.ts:2304": "function assistantText(",
     "docs/adr/0032-child-report.md:24 -> src/tools/subagent.ts:240":
       "export const SUBAGENT_OUTPUT_SCHEMA",
-    "docs/adr/0032-child-report.md:37 -> src/runtime/dispatch.ts:2127": "function accumulateUsage(",
+    "docs/adr/0032-child-report.md:37 -> src/runtime/dispatch.ts:2327": "function accumulateUsage(",
     "docs/adr/0032-child-report.md:59 -> src/tools/subagent.ts:592":
       "structuredContent: structured,",
-    "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:281":
+    "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:290":
       "outputSchema: LIST_OUTPUT_SCHEMA,",
     // 2026-10-19（#219-#222 · retro）：抽取器现在展开逗号后的数字，这两行才第一次进入判定面。
     // 它们一直是对的，只是以前没有任何东西检查；在这里补上，从此漂移会红。
-    "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:637":
+    "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:646":
       "outputSchema: OUTPUT_OUTPUT_SCHEMA,",
-    "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:870":
+    "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:881":
       "outputSchema: STOP_OUTPUT_SCHEMA,",
-    "docs/adr/0032-child-report.md:134 -> src/runtime/dispatch.ts:1946":
+    "docs/adr/0032-child-report.md:134 -> src/runtime/dispatch.ts:2146":
       "export function childToolList(",
     // 2026-10-20（DeepSeek 搜索模块改形，ADR-0047 撤销 / ADR-0049 现行）：下面 11 条是该模块
     // 的 ADR 与 spec 带进来的引用，目标行逐条核对过内容——矩阵那一行讲的是 `exposure` 字段在
@@ -1544,14 +1581,14 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     "docs/adr/0047-deepseek-search-is-program-internal.md:107 -> docs/agents/pi-compat-matrix.md:63":
       "`ToolDefinition.exposure` field",
     "docs/adr/0048-deepseek-search-gate.md:44 -> src/index.ts:784": "ctx.ui.notify(",
-    "docs/adr/0048-deepseek-search-gate.md:72 -> src/runtime/limits.ts:147":
+    "docs/adr/0048-deepseek-search-gate.md:72 -> src/runtime/limits.ts:154":
       "WORKER_ENV_ALLOW_LIST",
     "docs/adr/0049-the-search-lives-in-the-child.md:15 -> docs/agents/pi-compat-matrix.md:63":
       "`ToolDefinition.exposure` field",
     "docs/specs/0044-deepseek-search-module.md:98 -> docs/agents/pi-compat-matrix.md:63":
       "`ToolDefinition.exposure` field",
     "docs/specs/0044-deepseek-search-module.md:146 -> src/index.ts:784": "ctx.ui.notify(",
-    "docs/specs/0044-deepseek-search-module.md:173 -> src/runtime/limits.ts:147":
+    "docs/specs/0044-deepseek-search-module.md:173 -> src/runtime/limits.ts:154":
       "WORKER_ENV_ALLOW_LIST",
     "docs/specs/0044-deepseek-search-module.md:298 -> docs/agents/pi-compat-matrix.md:63":
       "`ToolDefinition.exposure` field",
@@ -1654,7 +1691,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // `const dispatchSlots = new DispatchSlotCounter(config.dispatchConcurrency);` -- the FALLBACK
     // counter, since :712 prefers `options.dispatchDeps?.slots ?? dispatchSlots`. ADR-0016 §2
     // names it as where the knob is read when nothing is injected.
-    "docs/adr/0016-ptc-dispatch-binding.md:45 -> src/runtime/dispatcher.ts:447",
+    "docs/adr/0016-ptc-dispatch-binding.md:47 -> src/runtime/dispatcher.ts:447",
     // 2026-10-10 第七次复核：**1096 → 1501**。1096 是一段 JSDoc 的开头，不是本 ADR 声称的
     // `spawnOptions.sessionId = taskId;`（那行在 1501）——而后者正是「同 id 重试从正常路径
     // 不可达」这个论断的落点。**既有漂移**，dispatch.ts 本轮未改，HEAD 上 1096 同样不是它。
@@ -1676,7 +1713,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // 锚点之前，所以四条恰好等量。**等量不等于可以算**：算术平移只在本轮成立，下一轮锚点
     // 分布在两个函数的两侧时就不成立。四条都按内容逐条核对后改正。
     // 上面这组是**当时值**（读法见本数组的头部说明）。
-    "docs/adr/0026-surface-default-is-detected.md:262 -> dispatch.ts:2521",
+    "docs/adr/0026-surface-default-is-detected.md:262 -> dispatch.ts:2922",
     // 2026-10-10 第七次复核：四条全部因本轮删除 surfaceMode 而位移，逐条核对内容后改正。
     //  29  → 628→1160 = `export function detectedSurfaceMode(`
     //  32  → 962→856  = decision-4 的 `if (surface.surfaceMode === "subagents" && !pi.getActiveTools()…`
@@ -1785,14 +1822,14 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     //   569 → 584 = `outputSchema: OUTPUT_OUTPUT_SCHEMA,`
     //   766 → 803 = `outputSchema: STOP_OUTPUT_SCHEMA,`
     // 233 = `outputSchema: LIST_OUTPUT_SCHEMA,` 未动。ADR-0032 正文同一行的引用同步改为 233, 584, 803。
-    "docs/adr/0032-child-report.md:15 -> src/runtime/dispatch.ts:2104",
+    "docs/adr/0032-child-report.md:15 -> src/runtime/dispatch.ts:2304",
     "docs/adr/0032-child-report.md:24 -> src/tools/subagent.ts:240",
-    "docs/adr/0032-child-report.md:37 -> src/runtime/dispatch.ts:2127",
+    "docs/adr/0032-child-report.md:37 -> src/runtime/dispatch.ts:2327",
     "docs/adr/0032-child-report.md:59 -> src/tools/subagent.ts:592",
-    "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:281",
-    "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:637",
-    "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:870",
-    "docs/adr/0032-child-report.md:134 -> src/runtime/dispatch.ts:1946",
+    "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:290",
+    "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:646",
+    "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:881",
+    "docs/adr/0032-child-report.md:134 -> src/runtime/dispatch.ts:2146",
     // 新增 1 条（2026-10-12，ADR-0039）：目标行已逐条核对。
     // 2026-10-20（搜索模块改形）：目标行随 src/index.ts 的改动从 620 移到 598，逐条核对内容未变。
     "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:117 -> src/index.ts:644",
@@ -1810,11 +1847,11 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     "docs/adr/0047-deepseek-search-is-program-internal.md:72 -> docs/agents/pi-compat-matrix.md:63",
     "docs/adr/0047-deepseek-search-is-program-internal.md:107 -> docs/agents/pi-compat-matrix.md:63",
     "docs/adr/0048-deepseek-search-gate.md:44 -> src/index.ts:784",
-    "docs/adr/0048-deepseek-search-gate.md:72 -> src/runtime/limits.ts:147",
+    "docs/adr/0048-deepseek-search-gate.md:72 -> src/runtime/limits.ts:154",
     "docs/adr/0049-the-search-lives-in-the-child.md:15 -> docs/agents/pi-compat-matrix.md:63",
     "docs/specs/0044-deepseek-search-module.md:98 -> docs/agents/pi-compat-matrix.md:63",
     "docs/specs/0044-deepseek-search-module.md:146 -> src/index.ts:784",
-    "docs/specs/0044-deepseek-search-module.md:173 -> src/runtime/limits.ts:147",
+    "docs/specs/0044-deepseek-search-module.md:173 -> src/runtime/limits.ts:154",
     "docs/specs/0044-deepseek-search-module.md:298 -> docs/agents/pi-compat-matrix.md:63",
   ];
 

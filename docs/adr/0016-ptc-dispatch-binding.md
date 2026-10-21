@@ -14,6 +14,8 @@ Amendment (2026-10-12, [ADR-0039](./0039-an-omitted-agent-dispatches-a-generalis
 
 > **Amended by [ADR-0052](./0052-the-two-doors-share-one-prefix.md) (2026-10-21): the two task doors are renamed — `pi.dispatch` → `pi_task_ptc` (the PTC door, a binding inside a program) and `ptc_subagent` → `pi_task_codemode` (the codemode door, reachable from a `codemode` script) — with no alias and no compatibility shim. This record's decisions stand unchanged; read its `pi.dispatch` / `ptc_subagent` as those names.**
 
+> **Amended by [ADR-0056](./0056-admission-queues-instead-of-rejecting.md) (2026-10-21): the cap queues, it does not refuse.** §Decision 2's "A call over the cap … resolves as `{ status: rejected, errorMessage: dispatch concurrency limit reached }` instead of being queued or spawned" and §Decision 3's "The cap is **hard** (reject, never queue)" are both superseded: a call over the cap now JOINS a FIFO wait list — unbounded, no timeout — and runs when it reaches the head. The concurrency number, its session-wide scope and its independence from `maxParallelSubCalls` all stand unchanged; what changed is what happens to the calls over it. The two concurrency refusal shapes and their messages are gone, because the cap is no longer a rejection reason. Queueing creates the task record (status `queued`), so a waiting task is already visible in the task list. Where this record and ADR-0056 read differently, ADR-0056 governs.
+
 Measured before vs after, 24 concurrent foreground calls against a real fake-`pi` spawn:
 
 | scenario                                                    | before                              | after                                          |

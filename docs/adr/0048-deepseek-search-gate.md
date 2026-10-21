@@ -69,7 +69,7 @@ pi 的凭据有**三条路**（`auth.json` 存储凭据 / `models.json` 的 `api
 
 ### 5. 泄露禁令
 
-key **不得**出现在：工具描述、错误文案、日志、异常栈、请求 header 打印。`WORKER_ENV_ALLOW_LIST`（`src/runtime/limits.ts:147-154`）已经挡住 key 类环境变量进 PTC worker，但**扩展跑在 host 进程里**，`process.env.DEEPSEEK_API_KEY` 对它可见 ⇒ 判定必须涵盖环境变量这一级，而它**绝不能被回显**。
+key **不得**出现在：工具描述、错误文案、日志、异常栈、请求 header 打印。`WORKER_ENV_ALLOW_LIST`（`src/runtime/limits.ts:154-161`）已经挡住 key 类环境变量进 PTC worker，但**扩展跑在 host 进程里**，`process.env.DEEPSEEK_API_KEY` 对它可见 ⇒ 判定必须涵盖环境变量这一级，而它**绝不能被回显**。
 
 ## Alternatives considered
 

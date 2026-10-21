@@ -59,16 +59,23 @@ export interface PtcConfig {
    */
   maxParallelSubCalls: number;
   /**
-   * Hard cap on concurrently in-flight dispatch in ONE pi session, not
-   * per run. Enforced inside `dispatch()` by a single
+   * Cap on how many dispatch children run AT ONCE in ONE pi session, not per
+   * run. Enforced inside `dispatch()` by a single
    * `DispatchSlotCounter`, so every front spends it: concurrent programs,
    * the `pi_task_codemode` tool, and background children (which hold their
-   * slot for the task's whole lifetime). The next call over the cap
-   * resolves immediately with `{ status: "rejected", errorMessage:
-   * "dispatch concurrency limit reached" }` — never queued, never
-   * spawned, and never parked behind a long-running child.
+   * slot for the task's whole lifetime).
+   *
+   * **ADR-0056: over the cap a request is QUEUED, never rejected.** The
+   * counter keeps a FIFO wait list; a request that finds every slot taken
+   * joins the back of it and runs when it reaches the head. The queue is
+   * unbounded and has no timeout, exactly like libuv's thread pool. So
+   * this number no longer bounds how many children a session may have in
+   * flight — it bounds only how many RUN at the same time. The
+   * foreground's bound is the program's own timeout.
+   *
    * Default 8, matches pi's `subagent` extension `MAX_PARALLEL_TASKS`.
-   * ADR-0016 section 2 (as amended 2026-09-30), ADR-0022 section 9.
+   * ADR-0016 section 2 (as amended 2026-09-30 and again by ADR-0056),
+   * ADR-0022 section 9.
    *
    * Where the number is READ from is the counter's construction, not
    * this field alone: a pi session's counter is built by

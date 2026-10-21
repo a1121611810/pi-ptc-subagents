@@ -58,7 +58,12 @@ import {
 } from "./task-registry.ts";
 import type { OutputStorage } from "./output-storage.ts";
 import { formatSessionModel, type SessionModel } from "./session-model.ts";
-import { InMemoryTaskStorage, type TaskSpawnSource, type ULID } from "./task-storage.ts";
+import {
+  InMemoryTaskStorage,
+  type TaskRecord,
+  type TaskSpawnSource,
+  type ULID,
+} from "./task-storage.ts";
 
 // Re-exports keep existing imports working after BG-03 moved these definitions.
 // `tests/dispatch-helpers.test.ts` imports `parseAgentEvent` / `safeKill` from this
@@ -83,12 +88,40 @@ export type {
 const DISPATCH_LIFECYCLE: ChildProcessLifecycle = new RealChildProcessLifecycle();
 
 /**
+ * One entry of the admission queue (ADR-0056).
+ *
+ * `holder` is the task id waiting for a slot; `onGranted` is what starts the child once the
+ * slot is free. The counter NEVER calls `onGranted` itself — handing the slot over and
+ * starting a child are two different jobs, and a callback that threw inside `release()` would
+ * take the releasing task down with it.
+ */
+export interface SlotWaiter {
+  readonly holder: string;
+  readonly onGranted: () => void;
+}
+
+/**
+ * The outcome of one admission attempt (ADR-0056).
+ *
+ * `"granted"` means the caller holds a slot right now. `"queued"` means the cap was reached
+ * and the caller is waiting — it is NOT a refusal: the request was admitted, it has a task
+ * record, and it will run when it reaches the head of the queue.
+ */
+export type SlotAdmission = "granted" | "queued";
+
+/**
  * Per-run in-flight `pi.dispatch` counter (ADR-0016 §2 + ADR-0022 §9). The dispatcher's
  * foreground gate owns the canonical counter today; this class is the small exported seam
  * ADR-0022 §9 asks for so the background branch can hold a slot for a child's whole
  * lifetime and release it only on the terminal transition — a background task keeps
  * counting against `dispatchConcurrency` after `dispatch()` has already returned. The
  * dispatcher can adopt this type without a behaviour change.
+ *
+ * **ADR-0056: it is an admission gate, not a rejection gate.** Over the cap a request is
+ * QUEUED, never refused: the counter keeps a FIFO wait list, and a slot that frees up goes
+ * to the OLDEST waiter. Modelled on libuv's thread pool, which has the same shape — a fixed
+ * number of workers and an unbounded queue in front of them, where "if fifty tasks arrive,
+ * forty-six wait". The queue is unbounded and has no timeout.
  */
 export class DispatchSlotCounter {
   readonly limit: number;
@@ -100,6 +133,11 @@ export class DispatchSlotCounter {
    * live task's slot after `shutdown` already released the reclaimed task.
    */
   readonly #holders = new Set<string>();
+  /**
+   * ADR-0056: the FIFO wait list. A waiter holds NO slot — it is waiting for one — so it is
+   * not in {@link #holders} and does not count towards {@link active}.
+   */
+  readonly #waiters: SlotWaiter[] = [];
 
   constructor(limit: number) {
     if (!Number.isInteger(limit) || limit < 0) {
@@ -111,31 +149,90 @@ export class DispatchSlotCounter {
     this.#active = 0;
   }
 
-  /** Number of slots currently held. */
+  /** Number of slots currently held — that is, children that are actually RUNNING. */
   get active(): number {
     return this.#active;
   }
 
-  /** Reserve one in-flight slot (optionally keyed by a per-task holder token); `false` means the cap is reached (hard reject, no queue). */
-  tryAcquire(holder?: string): boolean {
-    if (holder !== undefined && this.#holders.has(holder)) return false;
-    if (this.#active >= this.limit) return false;
-    if (holder !== undefined) this.#holders.add(holder);
-    this.#active += 1;
+  /** ADR-0056: how many dispatches are waiting for a slot. */
+  get queued(): number {
+    return this.#waiters.length;
+  }
+
+  /** ADR-0056: the waiting task ids, oldest first — the queue's FIFO order. */
+  get waiting(): readonly string[] {
+    return this.#waiters.map((waiter) => waiter.holder);
+  }
+
+  /**
+   * ADR-0056: admit one holder. **Never refuses.**
+   *
+   * - A free slot: the holder takes it and the call returns `"granted"`.
+   * - The cap is reached: the holder joins the back of the FIFO wait list and the call
+   *   returns `"queued"`. It holds NO slot until one frees up.
+   *
+   * `onGranted` is called when a slot frees up and this holder is the oldest waiter. It is
+   * NOT called on the `"granted"` path — the caller already knows it may start.
+   *
+   * A holder that already holds a slot is a caller bug, not a queueing situation: the task
+   * is already running, so admitting it twice would double-count one child. It throws
+   * rather than being silently absorbed.
+   */
+  acquire(holder: string, onGranted: () => void): SlotAdmission {
+    if (this.#holders.has(holder)) {
+      throw new Error(`DispatchSlotCounter: task ${holder} already holds a slot`);
+    }
+    if (this.#active < this.limit) {
+      this.#holders.add(holder);
+      this.#active += 1;
+      return "granted";
+    }
+    this.#waiters.push({ holder, onGranted });
+    return "queued";
+  }
+
+  /**
+   * Release one slot; per-token idempotent (a late release for the same task is a no-op).
+   *
+   * The freed slot goes to the OLDEST waiter, and the waiter that got it is RETURNED so the
+   * caller can start it — the counter does not call the waiter's callback itself, because a
+   * callback that threw inside `release()` would take the releasing task down with it.
+   *
+   * Returns `undefined` when nobody was waiting (or when the release was a no-op).
+   */
+  release(holder: string): SlotWaiter | undefined {
+    if (!this.#holders.delete(holder)) return undefined;
+    this.#active -= 1;
+    return this.#promote();
+  }
+
+  /**
+   * ADR-0056: withdraw a waiting holder from the queue.
+   *
+   * It holds no slot, so there is nothing to release — the waiter simply stops waiting.
+   * Returns `true` when the holder was waiting, `false` when it was not (it holds a slot, or
+   * it was never admitted).
+   */
+  cancelQueued(holder: string): boolean {
+    const index = this.#waiters.findIndex((waiter) => waiter.holder === holder);
+    if (index < 0) return false;
+    this.#waiters.splice(index, 1);
     return true;
   }
 
   /**
-   * Release one slot; per-token idempotent (a late release for the same task is a no-op) and
-   * never negative. An anonymous release only frees an anonymous reservation.
+   * Hand the free slot to the oldest waiter, if there is one and there is room.
+   *
+   * The waiter's holder is added to {@link #holders} and {@link active} BEFORE the caller is
+   * told, so the slot is accounted for even if the caller is slow to start the child.
    */
-  release(holder?: string): void {
-    if (holder !== undefined) {
-      if (!this.#holders.delete(holder)) return;
-      this.#active -= 1;
-      return;
-    }
-    if (this.#active > this.#holders.size) this.#active -= 1;
+  #promote(): SlotWaiter | undefined {
+    if (this.#active >= this.limit) return undefined;
+    const waiter = this.#waiters.shift();
+    if (waiter === undefined) return undefined;
+    this.#holders.add(waiter.holder);
+    this.#active += 1;
+    return waiter;
   }
 }
 
@@ -148,6 +245,140 @@ export class DispatchSlotCounter {
 const FALLBACK_DISPATCH_SLOTS: DispatchSlotCounter = new DispatchSlotCounter(
   DEFAULT_CONFIG.dispatchConcurrency,
 );
+
+/**
+ * A promise plus its resolver — the shape the admission queue needs to hand a slot over
+ * across an `await`.
+ */
+interface Deferred {
+  readonly promise: Promise<void>;
+  resolve(): void;
+}
+
+/** Build a {@link Deferred}. */
+function deferred(): Deferred {
+  let resolve!: () => void;
+  const promise = new Promise<void>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+/**
+ * ADR-0056: release a slot and start whoever the queue handed it to.
+ *
+ * **EVERY release goes through here.** The counter gives the freed slot to the oldest waiter
+ * and returns it; starting that waiter's child is this module's job, so a release that
+ * skipped this call would leave a queued task waiting for a slot that is already free.
+ */
+function releaseSlot(slots: DispatchSlotCounter, holder: string, logger?: RegistryLogger): void {
+  const promoted = slots.release(holder);
+  if (promoted === undefined) return;
+  try {
+    promoted.onGranted();
+  } catch (error) {
+    // The waiter's start work threw. The slot it was handed goes back, or the queue stalls
+    // behind a task that will never run.
+    slots.release(promoted.holder);
+    const message = error instanceof Error ? error.message : String(error);
+    (logger ?? DEFAULT_DISPATCH_LOGGER).warn(
+      "dispatch: the queued task " + promoted.holder + " could not start: " + message,
+    );
+  }
+}
+
+/**
+ * ADR-0056: withdraw an admitted dispatch that will not run after all.
+ *
+ * A task that is still WAITING is removed from the queue; a task that already holds a slot
+ * gives it back. Either way it never starts a child.
+ */
+function withdrawAdmission(slots: DispatchSlotCounter, holder: string): void {
+  if (!slots.cancelQueued(holder)) slots.release(holder);
+}
+
+/**
+ * ADR-0056: mark a task whose child never came up as failed.
+ *
+ * The queued path creates its record before the child exists, so a child that could not be
+ * brought up leaves a record that says `running`. That is a lie the model would read, so the
+ * record is corrected: a task whose child never started is a FAILED task.
+ */
+async function markTaskFailed(
+  registry: TaskRegistry,
+  taskId: ULID,
+  errorMessage: string,
+  clock: () => number,
+  callerId: string,
+  logger: RegistryLogger,
+): Promise<void> {
+  try {
+    await registry.transition(
+      { kind: "transition", taskId, to: "failed", errorMessage },
+      { clock, callerId, logger },
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn("dispatch: could not mark the task " + taskId + " failed: " + message);
+  }
+}
+
+/**
+ * ADR-0056: wait for the admission queue to hand this task a slot.
+ *
+ * Returns `true` when the wait was cut short by the caller's abort signal, and `false` when
+ * the slot arrived. The foreground's bound is the CALLER's own deadline -- the PTC program's
+ * timeout is the foreground queue's natural edge -- so an aborted run withdraws its queued
+ * request instead of leaving it to start a child nobody is waiting for.
+ */
+async function waitForAdmission(granted: Promise<void>, signal?: AbortSignal): Promise<boolean> {
+  if (signal === undefined) {
+    await granted;
+    return false;
+  }
+  if (signal.aborted) return true;
+  return await new Promise<boolean>((resolve) => {
+    const settle = (aborted: boolean): void => {
+      signal.removeEventListener("abort", onAbort);
+      resolve(aborted);
+    };
+    const onAbort = (): void => settle(true);
+    signal.addEventListener("abort", onAbort, { once: true });
+    void granted.then(() => {
+      settle(false);
+    });
+  });
+}
+
+/**
+ * ADR-0056: mark a task that left the admission queue without running.
+ *
+ * The withdrawal has to leave a trace (testing-constraints #3): the record goes `canceled`
+ * with the reason on it, so "the model withdrew this" is visible in the task list rather
+ * than being a task that silently stopped existing.
+ */
+async function markQueuedTaskCanceled(
+  registry: TaskRegistry,
+  taskId: ULID,
+  clock: () => number,
+  callerId: string,
+  logger: RegistryLogger,
+): Promise<void> {
+  try {
+    await registry.transition(
+      {
+        kind: "transition",
+        taskId,
+        to: "canceled",
+        reason: "the dispatch was aborted while it waited for a concurrency slot",
+      },
+      { clock, callerId, logger },
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn("dispatch: could not mark the withdrawn task " + taskId + " canceled: " + message);
+  }
+}
 
 /**
  * Injected dependencies. The background branch uses this object for everything; the foreground
@@ -649,10 +880,11 @@ export interface DispatchResult {
  * {@link DispatchResult} a record id of its own (`recordId`), and a background handle carries
  * its id as `taskId` — so a `"taskId" in value` test can no longer tell the two apart by
  * shape alone. `status` is the one field the two shapes cannot share: a handle is always
- * `"running"`, a result is always `"fulfilled"` or `"rejected"`.
+ * `"running"` or `"queued"` (ADR-0056 — a queued task is a handle that has not started its
+ * child yet), a result is always `"fulfilled"` or `"rejected"`.
  */
 export function isDispatchHandle(value: DispatchHandle | DispatchResult): value is DispatchHandle {
-  return value.status === "running";
+  return value.status === "running" || value.status === "queued";
 }
 
 /** Discovery of an agent by name; mirrors pi's subagent extension AgentConfig shape. */
@@ -896,32 +1128,11 @@ export function dispatchDepthLimitReached(): DispatchResult {
 }
 
 /**
- * Verbatim ADR-0016 §2 message for the per-run dispatch concurrency cap. Exported as a
- * named constant so the contract string has one definition and cannot drift (tests pin
- * it character for character).
- */
-export const DISPATCH_CONCURRENCY_LIMIT_MESSAGE = "dispatch concurrency limit reached";
-
-/** Result returned when the per-run dispatch concurrency cap is exceeded (ADR-0016 §2). */
-export function dispatchConcurrencyLimitReached(): DispatchResult {
-  return {
-    text: "",
-    status: "rejected",
-    started: false,
-    agentName: "unknown",
-    durationMs: 0,
-    exitCode: -1,
-    reportChannel: "none",
-    errorMessage: DISPATCH_CONCURRENCY_LIMIT_MESSAGE,
-  };
-}
-
-/**
  * Verbatim ADR-0050 message for a dispatch refused because this session turned PTC off.
  *
- * Exported as a named constant so the contract string has one definition and cannot drift
- * (the same reason `DISPATCH_CONCURRENCY_LIMIT_MESSAGE` is one), and it names the way out,
- * because a refusal the caller cannot act on is a refusal the model will retry.
+ * Exported as a named constant so the contract string has one definition and cannot drift, and
+ * it names the way out, because a refusal the caller cannot act on is a refusal the model will
+ * retry.
  */
 export const DISPATCH_DISABLED_MESSAGE =
   "PTC is off in this session: no new child can be started (run /ptc on to allow them again)";
@@ -982,20 +1193,9 @@ export function killWithEscalation(
 export const BACKGROUND_DEPTH_LIMIT_MESSAGE =
   "dispatch depth limit reached; next_step: call ptc_task_list to inspect the in-flight background tasks";
 
-export const BACKGROUND_CONCURRENCY_LIMIT_MESSAGE =
-  "dispatch concurrency limit reached; next_step: call ptc_task_list to inspect running tasks and ptc_task_stop to free a slot";
-
 /** Background depth refusal: same machine fields as the foreground one, teaching copy added. */
 export function backgroundDispatchDepthLimitReached(): DispatchResult {
   return { ...dispatchDepthLimitReached(), errorMessage: BACKGROUND_DEPTH_LIMIT_MESSAGE };
-}
-
-/** Background concurrency refusal: same machine fields, teaching copy added. */
-export function backgroundDispatchConcurrencyLimitReached(): DispatchResult {
-  return {
-    ...dispatchConcurrencyLimitReached(),
-    errorMessage: BACKGROUND_CONCURRENCY_LIMIT_MESSAGE,
-  };
 }
 
 /**
@@ -2419,13 +2619,14 @@ function childAssistantError(event: ParsedAgentEvent): string | undefined {
 
 /**
  * Background branch of {@link dispatch} (ADR-0022 §1/§3/§4/§9). It applies the same depth
- * and concurrency gates as the foreground path, spawns the child, registers a `running`
- * TaskRecord, starts a detached pump driving the terminal transition from the child's close
- * event, and returns the spawn-time {@link DispatchHandle} immediately.
+ * gate and the same admission queue as the foreground path, spawns the child, registers a
+ * `running` TaskRecord, starts a detached pump driving the terminal transition from the child's
+ * close event, and returns the spawn-time {@link DispatchHandle} immediately.
  *
- * Pre-spawn refusals reuse the exact foreground shapes (`dispatchDepthLimitReached` /
- * `dispatchConcurrencyLimitReached` / the unknown-agent result) so the model and the
- * sub-call tree keep one vocabulary (ADR-0021 §6).
+ * Pre-spawn refusals reuse the exact foreground shapes (`dispatchDepthLimitReached` / the
+ * unknown-agent result) so the model and the sub-call tree keep one vocabulary (ADR-0021 §6).
+ * The concurrency cap is not one of them any more: ADR-0056 made it a queue, so an over-cap
+ * background call is admitted and waits — its handle reads `queued` until it starts.
  */
 async function dispatchBackground(
   input: DispatchInput,
@@ -2457,15 +2658,6 @@ async function dispatchBackground(
       }),
     );
   }
-  // ADR-0022 §4/§9: mint the task id BEFORE acquiring its slot so the reservation is keyed by
-  // the task that owns it. The pump and `shutdown` both release by this id; the release is
-  // idempotent per task, so whichever runs second cannot free another live task's slot.
-  const taskId = createULID();
-  const slots = deps.slots ?? FALLBACK_DISPATCH_SLOTS;
-  if (!slots.tryAcquire(taskId)) {
-    return finish(backgroundDispatchConcurrencyLimitReached());
-  }
-
   const clock = deps.clock ?? ((): number => Date.now());
   const logger = deps.logger ?? DEFAULT_DISPATCH_LOGGER;
   const cwd = input.cwd ?? ctx.cwd;
@@ -2475,23 +2667,232 @@ async function dispatchBackground(
   const registry = resolveTaskRegistry(deps, clock);
   const outputStorage = deps.outputStorage;
 
-  // Resolved OUTSIDE the try, immediately after the slot is taken: the catch below reports the
-  // resolved name, so the resolution has to outlive the block it used to sit in. The ordering
-  // against the other gates is unchanged -- depth, malformed name, acquire, then this -- so a
-  // caller who is at the concurrency cap still hears about the cap.
+  // ADR-0056: the agent is resolved BEFORE the admission, for the same reason the foreground
+  // front resolves it first: the cap is a QUEUE, not a refusal, so there is nothing to
+  // short-circuit ahead of discovery. A request whose agent names nothing is refused now,
+  // rather than sitting in the queue and being refused later.
   const resolution = resolveDispatchAgent(input, cwd, agentScope);
   if (resolution.kind === "unknown") {
-    slots.release(taskId);
     return finish(unknownAgentResult(resolution.name, agentScope, cwd));
   }
   const agent = resolution.agent;
 
+  // ADR-0022 §4/§9: mint the task id BEFORE taking its slot so the reservation is keyed by
+  // the task that owns it. The pump and `shutdown` both release by this id; the release is
+  // idempotent per task, so whichever runs second cannot free another live task's slot.
+  const taskId = createULID();
+  const slots = deps.slots ?? FALLBACK_DISPATCH_SLOTS;
+  // The registry adopts the already-minted id as the TaskRecord id, so the handle the
+  // program carries, the persisted record and the slot token all agree at creation.
+  const label = input.label ?? input.task.slice(0, 64);
+
+  /**
+   * The task record's body. It is written once, at whichever moment the task is created:
+   * at the admission for a task that got a slot at once, or at the enqueue for a task that
+   * had to wait. The body is the same either way -- queueing creates the SAME task, one
+   * state earlier.
+   */
+  const recordBody = {
+    label,
+    agentName: agent.name,
+    depth: childDepth,
+    startedAt: Math.max(0, Math.floor(clock())),
+    finishedAt: undefined,
+    durationMs: undefined,
+    outputRef: undefined,
+    outputBytes: undefined,
+    outputPreview: undefined,
+    stopReason: undefined,
+    errorMessage: undefined,
+    exitCode: undefined,
+    spawnSource: { kind: "ptc-program", callerId } as TaskSpawnSource,
+    parentTaskId: ctx.parentTaskId,
+    // ADR-0041 §"The tier that took effect is reported" on the background front. The
+    // background dispatch returns a DispatchHandle and has no DispatchResult to carry it,
+    // so the record is where the tier has to live; `ptc_task_output` projects it back out
+    // exactly as it projects `reportChannel`. Written AT SPAWN rather than at the terminal
+    // transition, because the tier is a fact about the request, not about how it ended —
+    // a failed or canceled read-only child was still dispatched read-only. Spread so an
+    // untiered dispatch persists no key at all.
+    ...(readOnlyTier === undefined ? {} : { readOnlyTier }),
+    // ADR-0043 on the background front, for the same reason the tier lives here: a
+    // background dispatch returns a DispatchHandle, so this record is the only place a
+    // background caller can learn its `why` was dropped. Same spread-as-absent rule, so an
+    // unsuppressed dispatch persists no key at all.
+    ...(resolvedWhy.suppressed ? { whySuppressed: true as const } : {}),
+    // ADR-0022 §3 (v1, R-m12): `sessionFile` is left UNSET. The extension cannot know
+    // pi's session-file path, and a fabricated value would be worse than an absent one;
+    // a future reader that can learn it may fill the field in.
+  };
+
+  const childParams = {
+    input,
+    ctx,
+    deps,
+    agent,
+    taskId,
+    label,
+    childDepth,
+    resolvedWhy,
+    clock,
+    logger,
+    cwd,
+    lifecycle,
+    callerId,
+    registry,
+    outputStorage,
+    slots,
+    finish,
+    recordBody,
+  };
+
+  // ADR-0056: the admission. Over the cap the request is QUEUED, never refused: the task
+  // record is created right away with status `queued`, and the child starts when this task
+  // reaches the head of the queue.
+  //
+  // A background dispatch does NOT wait for a slot. It returns its handle at once, and the
+  // child waits -- the same shape libuv's work queue has, where the submission returns
+  // immediately and the work item runs when a worker frees up.
+  const granted = deferred();
+  const admission = slots.acquire(taskId, () => granted.resolve());
+  if (admission === "queued") {
+    try {
+      await registry.transition(
+        {
+          kind: "spawn",
+          status: "queued",
+          handle: { taskId, label, status: "queued" },
+          record: recordBody,
+        },
+        { clock, callerId, logger },
+      );
+    } catch (error) {
+      // The record IS the dispatch's trace, so a session that cannot write one cannot
+      // honestly run a dispatch. The request leaves the queue and the call is refused, with
+      // the reason named (testing-constraints #3 -- no silent failure).
+      withdrawAdmission(slots, taskId);
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn("background dispatch could not register its queued task record: " + message);
+      return finish({
+        text: "",
+        status: "rejected",
+        started: false,
+        agentName: agent.name,
+        durationMs: 0,
+        exitCode: -1,
+        reportChannel: "none",
+        errorMessage: "background dispatch failed: " + message,
+      });
+    }
+    // Detached: the child starts when this task reaches the head of the queue. The caller
+    // already has its handle, so a failure here lands on the RECORD, not on a return value.
+    void (async (): Promise<void> => {
+      await granted.promise;
+      // The slot is ours: the task leaves the queue and turns `running` BEFORE the child
+      // starts, so the record never says `running` for a child that is not up yet.
+      try {
+        await registry.transition(
+          { kind: "transition", taskId, to: "running" },
+          { clock, callerId, logger },
+        );
+      } catch (error) {
+        releaseSlot(slots, taskId, logger);
+        const message = error instanceof Error ? error.message : String(error);
+        logger.warn("background dispatch could not leave the admission queue: " + message);
+        return;
+      }
+      const failure = await startBackgroundChild({ ...childParams, recordExists: true });
+      if (failure !== undefined) {
+        // The child could not be brought up. The record says `running`, so it has to be
+        // corrected: a task whose child never started is a failed task, not a running one.
+        await markTaskFailed(
+          registry,
+          taskId,
+          failure.errorMessage ?? "background dispatch failed",
+          clock,
+          callerId,
+          logger,
+        );
+      }
+    })().catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn("background dispatch task " + taskId + " failed while queued: " + message);
+    });
+    return { taskId, label, status: "queued" };
+  }
+
+  const failure = await startBackgroundChild({ ...childParams, recordExists: false });
+  if (failure !== undefined) return failure;
+  return { taskId, label, status: "running" };
+}
+
+/** Everything {@link startBackgroundChild} needs to bring one background child up. */
+interface BackgroundChildParams {
+  input: DispatchInput;
+  ctx: DispatchContext;
+  deps: DispatchDeps;
+  agent: AgentConfigLike;
+  taskId: ULID;
+  label: string;
+  childDepth: number;
+  resolvedWhy: { why: string | undefined; suppressed: boolean };
+  clock: () => number;
+  logger: RegistryLogger;
+  cwd: string;
+  lifecycle: ChildProcessLifecycle;
+  callerId: string;
+  registry: TaskRegistry;
+  outputStorage: OutputStorage | undefined;
+  slots: DispatchSlotCounter;
+  /** The refusal wrapper (the tier and the `why` suppression) both fronts share. */
+  finish: (result: DispatchResult) => DispatchResult;
+  /** The task record's body, written when the record is created. */
+  recordBody: Omit<TaskRecord, "id" | "status" | "createdAt" | "transitionAt">;
+  /**
+   * ADR-0056: whether the task record is ALREADY on the registry.
+   *
+   * `false` for the ordinary admission: the record is created here, after the spawn. `true`
+   * for the queued path: the record was created when the task joined the queue, so creating
+   * it again would be a duplicate spawn.
+   */
+  recordExists: boolean;
+}
+
+/**
+ * Bring one background child up and drive it to its terminal state.
+ *
+ * Returns `undefined` when the child is up, or the refusal to hand back to the caller when
+ * it could not be brought up. The refusal is returned rather than thrown so the ORDINARY
+ * admission can hand it back to its caller, and so the QUEUED path can put it on the record
+ * instead (its caller already has the handle).
+ */
+async function startBackgroundChild(
+  params: BackgroundChildParams,
+): Promise<DispatchResult | undefined> {
+  const {
+    input,
+    ctx,
+    deps,
+    agent,
+    taskId,
+    label,
+    childDepth,
+    resolvedWhy,
+    clock,
+    logger,
+    cwd,
+    lifecycle,
+    callerId,
+    registry,
+    outputStorage,
+    slots,
+    finish,
+    recordBody,
+    recordExists,
+  } = params;
   let childHandle: ChildHandle | undefined;
   let tmp: { dir: string; filePath: string } | undefined;
   try {
-    // The registry adopts the already-minted id as the TaskRecord id, so the handle the
-    // program carries, the persisted record and the slot token all agree at creation.
-    const label = input.label ?? input.task.slice(0, 64);
     const reportContract = isReportContractOn(agent);
     const fullPrompt = appendDepthHint(agent.systemPrompt, childDepth, ctx.maxDispatchDepth, {
       reportContract,
@@ -2525,46 +2926,19 @@ async function dispatchBackground(
     childHandle = lifecycle.spawn([PI_COMMAND, ...argv], spawnOptions);
     const handle: ChildHandle = childHandle;
 
-    const spawnSource: TaskSpawnSource = { kind: "ptc-program", callerId };
-    await registry.transition(
-      {
-        kind: "spawn",
-        handle: { taskId, label, status: "running" },
-        record: {
-          label,
-          agentName: agent.name,
-          depth: childDepth,
-          startedAt: Math.max(0, Math.floor(clock())),
-          finishedAt: undefined,
-          durationMs: undefined,
-          outputRef: undefined,
-          outputBytes: undefined,
-          outputPreview: undefined,
-          stopReason: undefined,
-          errorMessage: undefined,
-          exitCode: undefined,
-          spawnSource,
-          parentTaskId: ctx.parentTaskId,
-          // ADR-0041 §"The tier that took effect is reported" on the background front. The
-          // background dispatch returns a DispatchHandle and has no DispatchResult to carry it,
-          // so the record is where the tier has to live; `ptc_task_output` projects it back out
-          // exactly as it projects `reportChannel`. Written AT SPAWN rather than at the terminal
-          // transition, because the tier is a fact about the request, not about how it ended —
-          // a failed or canceled read-only child was still dispatched read-only. Spread so an
-          // untiered dispatch persists no key at all.
-          ...(readOnlyTier === undefined ? {} : { readOnlyTier }),
-          // ADR-0043 on the background front, for the same reason the tier lives here: a
-          // background dispatch returns a DispatchHandle, so this record is the only place a
-          // background caller can learn its `why` was dropped. Same spread-as-absent rule, so an
-          // unsuppressed dispatch persists no key at all.
-          ...(resolvedWhy.suppressed ? { whySuppressed: true as const } : {}),
-          // ADR-0022 §3 (v1, R-m12): `sessionFile` is left UNSET. The extension cannot know
-          // pi's session-file path, and a fabricated value would be worse than an absent one;
-          // a future reader that can learn it may fill the field in.
+    // ADR-0056: the record is created here for the ORDINARY admission, and it already exists
+    // for the queued one (the queue created it when the task joined). Creating it twice would
+    // be a duplicate spawn.
+    if (!recordExists) {
+      await registry.transition(
+        {
+          kind: "spawn",
+          handle: { taskId, label, status: "running" },
+          record: recordBody,
         },
-      },
-      { clock, callerId, logger },
-    );
+        { clock, callerId, logger },
+      );
+    }
 
     // Stop watcher (ADR-0022 §8, issue #68 §1): the tool only writes running -> stopping; the
     // pump owns the signal. Subscribe right after the spawn is persisted and deliver SIGTERM to
@@ -2751,11 +3125,13 @@ async function dispatchBackground(
         cancelStopEscalation?.();
         cleanupTmp(written);
         // Release the task's own token; `shutdown` may already have released it (no-op then).
-        slots.release(taskId);
+        // ADR-0056: the release goes through `releaseSlot`, which also hands the freed slot to
+        // the oldest task in the admission queue.
+        releaseSlot(slots, taskId, logger);
       }
     })();
 
-    return { taskId, label, status: "running" };
+    return undefined;
   } catch (err) {
     // Spawn / registration / IO failure: release the slot, reap a child that did come up,
     // and keep the ADR-0016 "never throws" contract with a rejected DispatchResult.
@@ -2767,7 +3143,7 @@ async function dispatchBackground(
       killWithEscalation(lifecycle, childHandle, { unref: true });
     }
     if (tmp !== undefined) cleanupTmp(tmp);
-    slots.release(taskId);
+    releaseSlot(slots, taskId, logger);
     logger.warn("background dispatch failed for agent " + agent.name + ": " + message);
     return finish({
       text: "",
@@ -2893,38 +3269,22 @@ export async function dispatch(
   // The only previous acquire lived at the dispatcher's own call site, which the codemode
   // door bypasses by calling `dispatch()` directly -- a foreground `pi_task_codemode` therefore
   // reached the spawn site with every slot held. Measured: it tried to spawn pi, and a saturated
-  // counter said nothing. Order matches `dispatchBackground`: depth, then missing agent, then
-  // acquire.
+  // counter said nothing.
   //
-  // ADR-0053: the reservation is now KEYED by the task id, the same way the background front
-  // keys it. The anonymous form is gone because it was wrong, not merely imprecise: it counted
-  // "some foreground dispatch is in flight" and could not say WHICH, so a release could not be
-  // attributed to the task that earned it. The id is minted above the acquire for that reason --
-  // a keyed reservation needs its key before it is taken.
+  // ADR-0056: the agent is resolved BEFORE the admission.
   //
-  // The gate is still ABOVE the record creation (ADR-0053 decision 1): a request refused here
-  // never started a child, so it leaves no record behind.
-  const taskId = createULID();
-  const slots = deps.slots ?? FALLBACK_DISPATCH_SLOTS;
-  if (!slots.tryAcquire(taskId)) {
-    return finish(dispatchConcurrencyLimitReached());
-  }
-
+  // The order used to be: acquire, then discover. The acquire was a REFUSAL then, so
+  // short-circuiting ahead of discovery cost nothing -- a saturated counter said "no"
+  // without looking at the agent at all. The cap is a QUEUE now (ADR-0056), so there is
+  // nothing to short-circuit: a request whose agent cannot be resolved must fail fast
+  // rather than sit in the queue and fail later, and a request that CAN be resolved must not
+  // be refused for being one request too many.
   const resolution = resolveDispatchAgent(input, cwd, agentScope);
   if (resolution.kind === "unknown") {
-    slots.release(taskId);
     return finish(unknownAgentResult(resolution.name, agentScope, cwd, Date.now() - start));
   }
   const agent = resolution.agent;
 
-  // ADR-0053 decision 1: every dispatch creates a task record FIRST, the foreground front
-  // included. The registry is the only trace a dispatch leaves, so a foreground child that
-  // produced no id and left no record was a child the model could never look up again.
-  //
-  // The record is created BEFORE the child is spawned, so the record's lifetime covers the
-  // whole dispatch -- including a spawn that fails. A failed spawn then reads as a failed
-  // task rather than as a dispatch that never happened, which is the honest shape: the caller
-  // asked for a child, the host tried, and the attempt is on the record.
   const clock = deps.clock ?? ((): number => Date.now());
   const logger = deps.logger ?? DEFAULT_DISPATCH_LOGGER;
   const registry = resolveTaskRegistry(deps, clock);
@@ -2932,52 +3292,159 @@ export async function dispatch(
   const label = input.label ?? input.task.slice(0, 64);
   const callerId = ctx.callerId ?? "dispatch:" + String(ctx.callId);
   const spawnSource: TaskSpawnSource = { kind: "ptc-program", callerId, awaited: true };
-  try {
-    await registry.transition(
-      {
-        kind: "spawn",
-        handle: { taskId, label, status: "running" },
-        record: {
-          label,
-          agentName: agent.name,
-          depth: childDepth,
-          startedAt: Math.max(0, Math.floor(clock())),
-          finishedAt: undefined,
-          durationMs: undefined,
-          outputRef: undefined,
-          outputBytes: undefined,
-          outputPreview: undefined,
-          stopReason: undefined,
-          errorMessage: undefined,
-          exitCode: undefined,
-          spawnSource,
-          parentTaskId: ctx.parentTaskId,
-          // ADR-0041 / ADR-0043: the tier and the suppression are facts about the REQUEST, so
-          // they are written at spawn -- exactly as the background front writes them. Spread so
-          // an untiered dispatch persists no key at all.
-          ...(readOnlyTier === undefined ? {} : { readOnlyTier }),
-          ...(resolvedWhy.suppressed ? { whySuppressed: true as const } : {}),
+
+  // ADR-0053: the reservation is KEYED by the task id, the same way the background front
+  // keys it. The anonymous form is gone because it was wrong, not merely imprecise: it counted
+  // "some foreground dispatch is in flight" and could not say WHICH, so a release could not be
+  // attributed to the task that earned it. The id is minted above the acquire for that reason --
+  // a keyed reservation needs its key before it is taken.
+  //
+  // ADR-0056: the acquire is an ADMISSION, not a refusal. Over the cap the request is QUEUED,
+  // never rejected: the queue is FIFO, unbounded and has no timeout, exactly like libuv's
+  // thread pool.
+  const taskId = createULID();
+  const slots = deps.slots ?? FALLBACK_DISPATCH_SLOTS;
+  const granted = deferred();
+  const admission = slots.acquire(taskId, () => granted.resolve());
+
+  /**
+   * The record's body, shared by the two admission outcomes: a task that got a slot at once
+   * is created `running`, a task that had to wait is created `queued`. The body is the same
+   * either way -- queueing creates the SAME task, one state earlier.
+   */
+  const recordBody = {
+    label,
+    agentName: agent.name,
+    depth: childDepth,
+    startedAt: Math.max(0, Math.floor(clock())),
+    finishedAt: undefined,
+    durationMs: undefined,
+    outputRef: undefined,
+    outputBytes: undefined,
+    outputPreview: undefined,
+    stopReason: undefined,
+    errorMessage: undefined,
+    exitCode: undefined,
+    spawnSource,
+    parentTaskId: ctx.parentTaskId,
+    // ADR-0041 / ADR-0043: the tier and the suppression are facts about the REQUEST, so
+    // they are written at spawn -- exactly as the background front writes them. Spread so
+    // an untiered dispatch persists no key at all.
+    ...(readOnlyTier === undefined ? {} : { readOnlyTier }),
+    ...(resolvedWhy.suppressed ? { whySuppressed: true as const } : {}),
+  };
+
+  if (admission === "queued") {
+    // ADR-0056: "enqueueing creates the record". The queue IS the set of `queued` records,
+    // so a waiting task is already a task: it has an id, a label and a row in the task list,
+    // and it is waiting for a slot rather than refused.
+    try {
+      await registry.transition(
+        {
+          kind: "spawn",
+          status: "queued",
+          handle: { taskId, label, status: "queued" },
+          record: recordBody,
         },
-      },
-      { clock, callerId, logger },
-    );
-  } catch (error) {
-    // The record IS the dispatch's trace, so a session that cannot write one cannot honestly
-    // run a dispatch: the call is refused rather than run unrecorded. The refusal names the
-    // reason (testing-constraints #3 -- no silent failure), and the slot goes back.
-    slots.release(taskId);
-    const message = error instanceof Error ? error.message : String(error);
-    logger.warn("foreground dispatch could not register its task record: " + message);
-    return finish({
-      text: "",
-      status: "rejected",
-      started: false,
-      agentName: agent.name,
-      durationMs: Date.now() - start,
-      exitCode: -1,
-      reportChannel: "none",
-      errorMessage: "dispatch could not register its task record: " + message,
-    });
+        { clock, callerId, logger },
+      );
+    } catch (error) {
+      // The record IS the dispatch's trace, so a session that cannot write one cannot
+      // honestly run a dispatch. The request leaves the queue and the call is refused, with
+      // the reason named (testing-constraints #3 -- no silent failure).
+      withdrawAdmission(slots, taskId);
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn("foreground dispatch could not register its queued task record: " + message);
+      return finish({
+        text: "",
+        status: "rejected",
+        started: false,
+        agentName: agent.name,
+        durationMs: Date.now() - start,
+        exitCode: -1,
+        reportChannel: "none",
+        errorMessage: "dispatch could not register its task record: " + message,
+      });
+    }
+
+    // Wait for the slot. The foreground's bound is the CALLER's own deadline -- the PTC
+    // program's timeout is the foreground queue's natural edge (ADR-0056) -- so an aborted
+    // run withdraws its queued request instead of leaving it to start a child nobody is
+    // waiting for.
+    const aborted = await waitForAdmission(granted.promise, ctx.signal);
+    if (aborted) {
+      withdrawAdmission(slots, taskId);
+      await markQueuedTaskCanceled(registry, taskId, clock, callerId, logger);
+      return finish({
+        text: "",
+        status: "rejected",
+        started: false,
+        agentName: agent.name,
+        durationMs: Date.now() - start,
+        exitCode: -1,
+        reportChannel: "none",
+        errorMessage: "dispatch was aborted while it waited for a concurrency slot",
+      });
+    }
+
+    // The slot is ours: the task leaves the queue and becomes `running` BEFORE the child
+    // starts, so the record never says `running` for a child that is not up yet.
+    try {
+      await registry.transition(
+        { kind: "transition", taskId, to: "running" },
+        { clock, callerId, logger },
+      );
+    } catch (error) {
+      releaseSlot(slots, taskId, logger);
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn("foreground dispatch could not leave the admission queue: " + message);
+      return finish({
+        text: "",
+        status: "rejected",
+        started: false,
+        agentName: agent.name,
+        durationMs: Date.now() - start,
+        exitCode: -1,
+        reportChannel: "none",
+        errorMessage: "dispatch could not leave the admission queue: " + message,
+      });
+    }
+  } else {
+    // ADR-0053 decision 1: every dispatch creates a task record FIRST, the foreground front
+    // included. The registry is the only trace a dispatch leaves, so a foreground child that
+    // produced no id and left no record was a child the model could never look up again.
+    //
+    // The record is created BEFORE the child is spawned, so the record's lifetime covers the
+    // whole dispatch -- including a spawn that fails. A failed spawn then reads as a failed
+    // task rather than as a dispatch that never happened, which is the honest shape: the caller
+    // asked for a child, the host tried, and the attempt is on the record.
+    try {
+      await registry.transition(
+        {
+          kind: "spawn",
+          handle: { taskId, label, status: "running" },
+          record: recordBody,
+        },
+        { clock, callerId, logger },
+      );
+    } catch (error) {
+      // The record IS the dispatch's trace, so a session that cannot write one cannot honestly
+      // run a dispatch: the call is refused rather than run unrecorded. The refusal names the
+      // reason (testing-constraints #3 -- no silent failure), and the slot goes back.
+      releaseSlot(slots, taskId, logger);
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn("foreground dispatch could not register its task record: " + message);
+      return finish({
+        text: "",
+        status: "rejected",
+        started: false,
+        agentName: agent.name,
+        durationMs: Date.now() - start,
+        exitCode: -1,
+        reportChannel: "none",
+        errorMessage: "dispatch could not register its task record: " + message,
+      });
+    }
   }
 
   // ADR-0032 §The opt-out: one read, used by every place that would otherwise ask the child for
@@ -3008,7 +3475,7 @@ export async function dispatch(
     tmp = await promptFileWriter(agent.name, fullPrompt);
     argv = buildArgv(input, agent, tmp.filePath, ctx.sessionModel, deps.searchEnabled);
   } catch (error) {
-    slots.release(taskId);
+    releaseSlot(slots, taskId, logger);
     throw error;
   }
 
@@ -3051,7 +3518,11 @@ export async function dispatch(
       // ADR-0053: the release is KEYED by this task's id, the same token the reservation was
       // taken with. An anonymous release could not say which task it was giving back, so a late
       // release could free a slot a DIFFERENT live task was holding.
-      slots.release(taskId);
+      //
+      // ADR-0056: the release goes through `releaseSlot`, which also hands the freed slot to
+      // the oldest task in the admission queue. A release that stopped at the counter would
+      // leave a queued task waiting for a slot that is already free.
+      releaseSlot(slots, taskId, deps.logger ?? DEFAULT_DISPATCH_LOGGER);
       // Round 5 finding, and it is the reason the seam below is not test-only. Resolving the
       // session lifecycle here means the foreground child joins `TrackingLifecycle.#live`, and that
       // set is pruned ONLY by `exit()`. Without this call every foreground dispatch leaks a handle

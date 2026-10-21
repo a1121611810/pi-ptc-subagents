@@ -63,10 +63,25 @@ import type { ULID } from "./ulid.ts";
 export type { ULID };
 
 /**
- * The 6-state TaskRecord status (ADR-0022 §2). `queued` is deliberately absent in v1
- * (spawn-or-reject, no in-task queue; cap=8 rejects above the limit immediately).
+ * The 7-state TaskRecord status (ADR-0022 §2, as amended by ADR-0056).
+ *
+ * `queued` is the admission-queue state: the task EXISTS — it has an id, a label and a
+ * record — but it has not started a child yet, because every concurrency slot was taken when
+ * it asked. It is the state ADR-0022 §"What we deliberately don't add" 2 and its G1 verdict
+ * deliberately left out ("`queued` deliberately absent in v1"); ADR-0056 puts it back, because
+ * the cap stopped being a rejection reason and became a queue.
+ *
+ * A queued task holds NO concurrency slot (ADR-0056): only a child that is actually RUNNING
+ * holds one.
  */
-export type TaskStatus = "running" | "stopping" | "succeeded" | "failed" | "canceled" | "lost";
+export type TaskStatus =
+  | "queued"
+  | "running"
+  | "stopping"
+  | "succeeded"
+  | "failed"
+  | "canceled"
+  | "lost";
 
 /** Origin of the spawn — `ptc-program` from a PTC run, `ptc-batch` from a future batch entry. */
 export interface TaskSpawnSource {
@@ -111,6 +126,14 @@ export interface TaskRecord {
   status: TaskStatus;
   /** ms epoch. */
   createdAt: number;
+  /**
+   * ms epoch: when the child STARTED.
+   *
+   * For a `queued` record this is the moment the record was created, and it is REWRITTEN when
+   * the task leaves the queue (ADR-0056) — a queued task has not started, so the queue wait
+   * must not be counted as the child's runtime. `durationMs` is measured from this field, so
+   * it reads as "how long the child ran", not "how long the task existed".
+   */
   startedAt: number;
   finishedAt?: number;
   durationMs?: number;
