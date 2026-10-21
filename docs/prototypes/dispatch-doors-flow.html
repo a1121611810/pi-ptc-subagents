@@ -1,0 +1,1486 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>派发与路由 · 全景</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#f7f5f0; --card:#ffffff; --line:#e9e3d6;
+    --ink:#14171e; --ink2:#3a4256; --muted:#7c7a72;
+    --primary:#2f6f5e; --warn:#b06367; --amber:#9a7420;
+    --primary-soft:rgba(47,111,94,.08);
+    --warn-soft:rgba(176,99,103,.09);
+    --amber-soft:rgba(154,116,32,.09);
+    --radius:16px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:'Outfit',sans-serif;font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1120px;margin:0 auto;padding:56px 24px 80px}
+  h1{font-family:'DM Serif Display',serif;font-weight:400;font-size:34px;line-height:1.22;letter-spacing:-.01em;margin:0 0 14px}
+  .lede{font-size:16px;color:var(--ink2);max-width:82ch;margin:0 0 8px}
+  .lede strong{color:var(--primary);font-weight:600}
+  .lede .w{color:var(--warn);font-weight:600}
+  h2{font-family:'DM Serif Display',serif;font-weight:400;font-size:23px;margin:0 0 6px;display:flex;align-items:center;gap:10px}
+  h2 svg{width:19px;height:19px;color:var(--primary);flex:none}
+  h2 .num{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--primary);background:var(--primary-soft);border-radius:7px;padding:3px 9px;flex:none}
+  .sub{color:var(--muted);font-size:13.5px;margin:0 0 20px;max-width:86ch}
+  section{margin:0 0 56px}
+  .rule{height:1px;background:var(--line);margin:44px 0;border:0}
+  code,.mono{font-family:'JetBrains Mono',monospace}
+
+  /* TOC */
+  .toc{display:flex;flex-wrap:wrap;gap:8px;margin:22px 0 0}
+  .toc a{
+    font-size:12.5px;color:var(--ink2);text-decoration:none;background:var(--card);
+    border:1px solid var(--line);border-radius:999px;padding:5px 13px;transition:all .18s;
+  }
+  .toc a:hover{border-color:rgba(47,111,94,.45);color:var(--primary);transform:translateY(-1px)}
+  .toc a b{font-family:'JetBrains Mono',monospace;color:var(--primary);font-weight:600;margin-right:5px}
+
+  /* ---------- chain ---------- */
+  .chainwrap{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:20px 22px;box-shadow:0 2px 8px rgba(0,0,0,.04);margin-bottom:16px}
+  .chainhead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+  .chainhead .mono{font-size:13px;font-weight:500;background:var(--primary-soft);color:var(--primary);padding:3px 9px;border-radius:7px}
+  .chainrow{display:grid;grid-template-columns:1fr 20px 1fr 20px 1fr 20px 1fr;gap:8px;align-items:center}
+  .cnode{border:1px solid var(--line);border-radius:11px;padding:10px 11px;background:#fff;text-align:center}
+  .cnode .t{font-weight:600;font-size:12.5px;display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap}
+  .cnode .t code{font-size:11px}
+  .cnode .d{font-size:11px;color:var(--muted);margin-top:2px;line-height:1.45}
+  .cnode .tag{font-size:10px;border:1px solid var(--line);border-radius:999px;padding:0 6px;color:var(--muted);background:#fff;white-space:nowrap}
+  .cnode.orch{border-color:rgba(47,111,94,.42);background:var(--primary-soft)}
+  .cnode.orch .tag{border-color:rgba(47,111,94,.3);color:var(--primary)}
+  .cnode.door{border-color:rgba(176,99,103,.42);background:var(--warn-soft)}
+  .cnode.door .tag{border-color:rgba(176,99,103,.3);color:var(--warn)}
+  .cnode.gone{border-style:dashed;border-color:rgba(176,99,103,.45);background:var(--warn-soft);opacity:.72}
+  .cnode.gone .t{text-decoration:line-through;text-decoration-color:rgba(176,99,103,.6)}
+  .cnode.task{border-color:rgba(154,116,32,.42);background:var(--amber-soft)}
+  .cnode.task .tag{border-color:rgba(154,116,32,.32);color:var(--amber)}
+  .cnode.plain{background:var(--bg);border-style:dashed}
+  .csep{text-align:center;color:var(--muted);font-size:14px}
+  .cutrow{margin-top:10px}
+  .cutcell{display:flex;flex-direction:column;align-items:center;justify-content:flex-start}
+  .cutline{width:2px;height:20px;background:var(--warn);opacity:.75}
+  .cutlabel{font-size:11px;color:var(--warn);font-weight:600;text-align:center;line-height:1.4;margin-top:2px}
+  .chainfoot{margin-top:13px;padding-top:12px;border-top:1px dashed var(--line);font-size:12.5px;color:var(--ink2)}
+  .chainfoot b{color:var(--ink)}
+
+  /* ---------- panels ---------- */
+  .panels{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:20px;box-shadow:0 2px 8px rgba(0,0,0,.04)}
+  .panel-head{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;margin-bottom:4px}
+  .panel-head .mono{font-size:13px;font-weight:500;background:var(--primary-soft);color:var(--primary);padding:3px 9px;border-radius:7px}
+  .panel .cond{font-size:12.5px;color:var(--muted);margin:8px 0 16px;min-height:30px}
+  .panel .cond b{color:var(--ink2);font-weight:500}
+
+  .node{border:1px solid var(--line);border-radius:12px;padding:11px 13px;background:#fff}
+  .node.model{background:var(--bg);border-style:dashed}
+  .node.orch{border-color:rgba(47,111,94,.42);background:var(--primary-soft)}
+  .node.door{border-color:rgba(176,99,103,.42);background:var(--warn-soft)}
+  .node .t{font-weight:600;font-size:13.5px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .node .t code{font-size:12px;font-weight:500}
+  .node .d{font-size:12px;color:var(--muted);margin-top:3px}
+  .node .d code{font-size:11.5px;color:var(--ink2)}
+  .node .tag{font-size:10.5px;letter-spacing:.03em;border:1px solid var(--line);border-radius:999px;padding:1px 7px;color:var(--muted);background:#fff}
+  .node.orch .tag{border-color:rgba(47,111,94,.3);color:var(--primary)}
+  .node.door .tag{border-color:rgba(176,99,103,.3);color:var(--warn)}
+
+  .link{position:relative;height:38px;display:flex;justify-content:center}
+  .link::before{content:"";position:absolute;top:0;bottom:8px;left:50%;width:2px;background:var(--primary);opacity:.42;transform:translateX(-50%)}
+  .link::after{content:"";position:absolute;bottom:0;left:50%;transform:translateX(-50%);border-left:5.5px solid transparent;border-right:5.5px solid transparent;border-top:8px solid var(--primary);opacity:.75}
+  .link .lab{position:absolute;top:4px;left:calc(50% + 11px);font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--muted);background:#fff;padding:0 5px;line-height:1.35;max-width:calc(100% - 50% - 16px)}
+
+  /* ---------- impl band ---------- */
+  .impl-wrap{margin-top:-2px}
+  .impl-stems{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  .impl-stem{display:flex;flex-direction:column;align-items:center}
+  .impl-stem .stem{height:24px;width:2px;background:var(--primary);opacity:.42}
+  .impl-band{background:var(--card);border:2px solid rgba(47,111,94,.38);border-radius:var(--radius);padding:16px 20px;box-shadow:0 2px 8px rgba(0,0,0,.04);display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:center}
+  .impl-band .ttl{font-weight:600;font-size:15px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .impl-band .ttl .mono{font-size:13px;color:var(--primary)}
+  .impl-band .d{font-size:13px;color:var(--ink2);margin-top:5px}
+  .impl-band .d code{font-size:12px}
+  .impl-band .kv{margin:0;display:grid;grid-template-columns:auto 1fr;row-gap:6px;column-gap:12px;font-size:12.5px}
+  .impl-band .kv dt{color:var(--muted);white-space:nowrap}
+  .impl-band .kv dd{margin:0;color:var(--ink2)}
+  .impl-band .kv dd code{font-size:11.5px}
+
+  /* ---------- flow ---------- */
+  .flow{display:grid;grid-template-columns:1fr 300px;gap:0 14px;align-items:start;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:24px 22px;box-shadow:0 2px 8px rgba(0,0,0,.04)}
+  .frow{grid-column:1/-1;display:grid;grid-template-columns:1fr 300px;gap:14px;align-items:center}
+  .fmain{grid-column:1}
+  .fside{grid-column:2;font-size:12.5px;color:var(--muted)}
+  .fside .ref{display:block;background:var(--warn-soft);color:var(--warn);border:1px solid rgba(176,99,103,.28);border-radius:9px;padding:8px 11px;font-size:12.5px;line-height:1.5}
+  .fside .ref code{font-size:11.5px}
+  .fside .info{display:block;background:var(--primary-soft);color:var(--ink2);border:1px solid rgba(47,111,94,.24);border-radius:9px;padding:8px 11px;font-size:12.5px;line-height:1.5}
+  .fconn{grid-column:1;height:30px;position:relative}
+  .fconn::before{content:"";position:absolute;top:0;bottom:8px;left:50%;width:2px;background:var(--primary);opacity:.4;transform:translateX(-50%)}
+  .fconn::after{content:"";position:absolute;bottom:0;left:50%;transform:translateX(-50%);border-left:6px solid transparent;border-right:6px solid transparent;border-top:9px solid var(--primary);opacity:.7}
+  .step{border:1px solid var(--line);border-radius:12px;padding:11px 14px;background:#fff}
+  .step .t{font-weight:600;font-size:13.5px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .step .d{font-size:12.5px;color:var(--muted);margin-top:3px}
+  .step .d code{font-size:11.5px;color:var(--ink2)}
+  .step.call{border-color:rgba(47,111,94,.45);background:var(--primary-soft)}
+  .step.pre{background:var(--bg);border-style:dashed}
+  .step .tag{font-size:10.5px;letter-spacing:.03em;border:1px solid var(--line);border-radius:999px;padding:1px 7px;color:var(--muted);background:#fff}
+  .step.call .tag{border-color:rgba(47,111,94,.3);color:var(--primary)}
+  .step.out{border-color:rgba(176,99,103,.42);background:var(--warn-soft)}
+  .step.out .tag{border-color:rgba(176,99,103,.3);color:var(--warn)}
+  .gate{background:var(--primary-soft);padding:12px 16px 12px 30px;clip-path:polygon(22px 0, 100% 0, 100% 100%, 22px 100%, 0 50%)}
+  .gate .t{font-weight:600;font-size:13.5px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .gate .d{font-size:12.5px;color:var(--muted);margin-top:3px}
+  .gate .d code{font-size:11.5px;color:var(--ink2)}
+  .gate .tag{font-size:10.5px;letter-spacing:.03em;border:1px solid rgba(47,111,94,.3);border-radius:999px;padding:1px 7px;color:var(--primary);background:#fff}
+  .gate.gray{background:rgba(120,120,120,.07)}
+  .gate.gray .tag{border-color:rgba(120,120,120,.3);color:var(--muted)}
+  .fspread{grid-column:1/-1;position:relative;height:40px}
+  .fspread .vline{position:absolute;top:0;left:50%;width:2px;height:16px;background:var(--primary);opacity:.4;transform:translateX(-50%)}
+  .fspread .hbar{position:absolute;top:16px;left:24%;right:24%;height:2px;background:var(--primary);opacity:.4}
+  .fcols{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .fcol{display:flex;flex-direction:column}
+  .fcol .drop{height:22px;width:2px;background:var(--primary);opacity:.4;margin:0 auto}
+  .fcol .conn{height:26px;position:relative}
+  .fcol .conn::before{content:"";position:absolute;top:0;bottom:7px;left:50%;width:2px;background:var(--primary);opacity:.4;transform:translateX(-50%)}
+  .fcol .conn::after{content:"";position:absolute;bottom:0;left:50%;transform:translateX(-50%);border-left:5.5px solid transparent;border-right:5.5px solid transparent;border-top:8px solid var(--primary);opacity:.7}
+  .fcol .head{font-size:12px;font-weight:600;letter-spacing:.03em;color:var(--primary);text-align:center;margin:0 0 7px}
+  .fcol .head.bg{color:var(--warn)}
+  .fmerge{grid-column:1/-1;position:relative;height:34px}
+  .fmerge .vline{position:absolute;bottom:0;left:50%;width:2px;height:16px;background:var(--primary);opacity:.4;transform:translateX(-50%)}
+  .fmerge .hbar{position:absolute;top:0;left:24%;right:24%;height:2px;background:var(--primary);opacity:.4}
+
+  /* ---------- tables ---------- */
+  table{width:100%;border-collapse:collapse;background:var(--card);border-radius:13px;overflow:hidden;border:1px solid var(--line);font-size:13.5px}
+  th{text-align:left;font-weight:600;font-size:12px;letter-spacing:.03em;color:var(--muted);padding:10px 14px;border-bottom:1px solid var(--line);background:#fbfaf7}
+  td{padding:10px 14px;border-bottom:1px solid #f1ece2;vertical-align:top;color:var(--ink2)}
+  tr:last-child td{border-bottom:0}
+  td code{font-size:12.5px;color:var(--ink)}
+  .req{color:var(--warn);font-weight:600;font-size:12px}
+  .opt{color:var(--muted);font-size:12px}
+  .num{font-family:'JetBrains Mono',monospace;color:var(--primary);font-weight:500}
+
+  .code{background:#fbfaf7;border:1px solid var(--line);border-radius:12px;padding:15px 18px;font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.75;color:var(--ink2);overflow-x:auto;white-space:pre;margin:14px 0 0}
+  .code .cm{color:var(--muted)} .code .kw{color:var(--primary)} .code .str{color:#8a6d3b}
+
+  .tl{list-style:none;margin:0;padding:0;position:relative}
+  .tl::before{content:"";position:absolute;left:8px;top:6px;bottom:6px;width:2px;background:var(--primary);opacity:.35}
+  .tl li{position:relative;padding:0 0 18px 32px}
+  .tl li::before{content:"";position:absolute;left:2px;top:5px;width:14px;height:14px;border-radius:50%;background:#fff;border:2px solid var(--primary)}
+  .tl li:last-child{padding-bottom:0}
+  .tl .t{font-weight:600;font-size:13.5px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .tl .d{font-size:12.5px;color:var(--muted);margin-top:2px}
+  .tl .d code{font-size:11.5px;color:var(--ink2)}
+  .tl .tag{font-size:10.5px;border:1px solid var(--line);border-radius:999px;padding:1px 7px;color:var(--muted);background:#fff}
+
+  .note{margin-top:14px;padding:11px 13px;border-radius:11px;font-size:13px;line-height:1.55;background:var(--primary-soft);color:var(--ink2);border-left:2px solid var(--primary)}
+  .note.warn{background:var(--warn-soft);border-left-color:var(--warn)}
+  .note.amber{background:var(--amber-soft);border-left-color:var(--amber)}
+  .note b{color:var(--ink)}
+  .note code{font-size:12px}
+
+  .opens{display:grid;gap:14px}
+  .op{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--warn);border-radius:13px;padding:15px 17px;display:grid;grid-template-columns:26px 1fr;gap:13px;align-items:start}
+  .op .n{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;font-size:12.5px;font-weight:600;font-family:'JetBrains Mono',monospace;background:var(--warn-soft);color:var(--warn);border:1px solid rgba(176,99,103,.3)}
+  .op h3{margin:0 0 5px;font-size:14.5px;font-weight:600;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .op h3 .pill{font-size:10.5px;letter-spacing:.03em;border-radius:999px;padding:2px 8px;background:var(--warn-soft);color:var(--warn);border:1px solid rgba(176,99,103,.3);font-weight:500}
+  .op p{margin:0 0 7px;font-size:13px;color:var(--ink2)}
+  .op p:last-child{margin-bottom:0}
+  .op .rec{color:var(--ink)}
+  .op .rec b{color:var(--primary)}
+  .op .rec-tag{display:inline-block;font-size:11px;font-weight:600;letter-spacing:.04em;color:var(--primary);background:var(--primary-soft);border:1px solid rgba(47,111,94,.28);border-radius:5px;padding:1px 7px;margin-right:8px;vertical-align:1px}
+  .op code{font-size:12px}
+
+  .chans{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+  .chan{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:14px 15px}
+  .chan .ch-t{font-size:13px;font-weight:600;margin-bottom:3px}
+  .chan .ch-w{font-size:11.5px;color:var(--muted);margin-bottom:10px}
+  .chan ul{margin:0;padding-left:16px;font-size:12.5px;color:var(--ink2);line-height:1.75}
+  .chan li code{font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--ink)}
+
+  .scope{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .sc{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:15px 17px}
+  .sc .h{font-size:13px;font-weight:600;letter-spacing:.02em;margin-bottom:9px}
+  .sc.in .h{color:var(--primary)} .sc.out .h{color:var(--muted)}
+  .sc ul{margin:0;padding-left:17px;font-size:13px;color:var(--ink2);line-height:1.8}
+  .sc li code{font-size:12px}
+  .sc .why{margin-top:10px;font-size:12.5px;color:var(--muted);border-top:1px dashed var(--line);padding-top:9px}
+
+  footer{margin-top:56px;padding-top:20px;border-top:1px solid var(--line);color:var(--muted);font-size:12.5px}
+  footer code{font-size:12px}
+
+  @media (max-width:960px){
+    .panels,.scope,.impl-band,.impl-stems,.chans{grid-template-columns:1fr}
+    .impl-stems{display:none}
+    .flow{grid-template-columns:1fr}
+    .frow{grid-template-columns:1fr}
+    .fside,.fconn{grid-column:1}
+    .fcols{grid-template-columns:1fr}
+    .fspread .hbar{left:48%;right:48%}
+    .chainrow{grid-template-columns:1fr}
+    .csep{display:none}
+    h1{font-size:28px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>派发与路由 · 全景</h1>
+  <p class="lede">
+    <strong>模型只调「建任务」，派发降为内部实现。</strong>模型面前不再出现 <code>dispatch</code> 这个词——
+    入口是 <code>pi_task_ptc</code> / <code>pi_task_codemode</code>，背后是任务侧：
+    <b>建一条任务记录 → 派发（内部实现）→ 按参数决定等不等</b>；
+    并发满了<b>不拒绝，排队等</b>（照 libuv 的线程池）。
+    registry 是派发的<b>唯一痕迹</b>，lifecycle face 是它<b>唯一的模型面</b>。
+    前台和后台不再是两个机制——是一条路径上的一个参数。这一页把八张图放在一起，决策已全部走完（26 条）。
+  </p>
+
+  <nav class="toc">
+    <a href="#s1"><b>一</b>统一后的全景</a>
+    <a href="#s2"><b>二</b>路由文案散落地图</a>
+    <a href="#s3"><b>三</b>路由文案收编</a>
+    <a href="#s4"><b>四</b>/ptc off 截断位置</a>
+    <a href="#s5"><b>五</b>lifecycle face 在哪</a>
+    <a href="#s6"><b>六</b>两扇门给同一个对象</a>
+    <a href="#s7"><b>七</b>一次调用的详细流程</a>
+    <a href="#s8"><b>八</b>PTC 程序的严格模式</a>
+    <a href="#s9"><b>九</b>任务侧怎么流转（并发）</a>
+    <a href="#s10"><b>十</b>决策全部走完</a>
+  </nav>
+
+  <hr class="rule" />
+
+  <!-- ============ 一、大方向全景 ============ -->
+  <section id="s1">
+    <h2><span class="num">一</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v7M12 15v7M2 12h7M15 12h7"/></svg>
+      统一后的全景：<strong>每个派发都是一条任务</strong>
+    </h2>
+    <p class="sub">
+      今天前台派发是<b>纯内存</b>的（不铸 task id、不进 registry、产出只在内存里），后台才进——所以「派发」和「任务」是两件事。
+      统一之后：<strong>门背后先建记录再起进程</strong>，前台 = 建 + 等终态，后台 = 建 + 立即返回。
+      于是 <strong>registry 是派发的唯一痕迹，lifecycle face 是它唯一的模型面</strong>。
+    </p>
+
+    <div class="panels">
+      <div class="panel">
+        <div class="panel-head"><span class="mono">派发侧</span><span style="font-size:12px;color:var(--muted)">一次性：起一个孩子</span></div>
+        <p class="cond" style="border-left:3px solid var(--amber);padding-left:10px;color:var(--ink2)">
+          <b>这条链里没有 lifecycle face。</b>派发链只管「起一个孩子」；管在飞孩子的是<b>另一条链</b>（右边那栏）。</p>
+        <p class="cond">两个 surface 上都是这条链，只是<b>门</b>和<b>编排器</b>不同。</p>
+
+        <div class="node model">
+          <div class="t">父模型 <span class="tag">唯一决策者</span></div>
+          <div class="d">决定要派活</div>
+        </div>
+        <div class="link"><span class="lab">direct</span></div>
+        <div class="node orch">
+          <div class="t">编排器 <span class="tag">按 surface</span></div>
+          <div class="d"><code>ptc_run_code</code> / <code>ptc_workflow</code>（full_ptc）<br>或 <code>codemode</code>（codemode_ptc）</div>
+        </div>
+        <div class="link"><span class="lab">程序内 / 脚本内</span></div>
+        <div class="node door">
+          <div class="t">建任务入口 <span class="tag">模型面只有这个</span></div>
+          <div class="d"><code>pi_task_ptc</code> / <code>pi_task_codemode</code></div>
+        </div>
+        <div class="link"><span class="lab">建记录 + 派发（内部实现）✓</span></div>
+        <div class="node">
+          <div class="t">起进程 → 子代理 <span class="tag">独立 pi 进程</span></div>
+          <div class="d">前台：等它跑完再返回结果；后台：立刻返回 handle</div>
+        </div>
+
+        <div class="note">
+          <b>模型面前没有「派发」这个词。</b>它调的是「建任务」；派发是任务侧内部做的事。
+          换来三件事：<b>前台孩子的报告事后也读得到</b>（今天只在前台的返回值里，回不了头）；
+          并发槽能按 task id 键释放（前台不再匿名占槽，<code>callId: 0</code> 那个假拒绝的坑没了）；
+          <b>生命周期 face 与建任务入口同族</b>——模型学一个概念就够。
+          <br>代价：前台多一次 registry 写 + 一次产出落盘 + 一次读回，会慢一点。
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><span class="mono" style="background:var(--amber-soft);color:var(--amber)">任务面 · lifecycle face</span><span style="font-size:12px;color:var(--muted)">持续存在：管已经在飞的孩子</span></div>
+        <p class="cond" style="border-left:3px solid var(--amber);padding-left:10px;color:var(--ink2)">
+          <b>这是另一条链，不在派发链上。</b>它的位置是 <b>registry 旁边</b>——它不派发任何东西，只<b>读 / 停</b>已经在飞的任务。
+          <br>模型看到的是<b>两张脸</b>：<b>建任务入口</b>（左边，派发用）+ <b>lifecycle face</b>（右边，管着用）。</p>
+
+        <div class="node model">
+          <div class="t">父模型 <span class="tag">唯一决策者</span></div>
+          <div class="d">要查 / 要停</div>
+        </div>
+        <div class="link"><span class="lab">direct</span></div>
+        <div class="node" style="border-color:rgba(154,116,32,.42);background:var(--amber-soft)">
+          <div class="t">lifecycle face <span class="tag" style="border-color:rgba(154,116,32,.32);color:var(--amber)">本包</span></div>
+          <div class="d"><code>ptc_task_list</code> / <code>ptc_task_output</code> / <code>ptc_task_stop</code></div>
+        </div>
+        <div class="link"><span class="lab">读 / 停</span></div>
+        <div class="node">
+          <div class="t">registry（TaskRecord） <span class="tag">枢纽</span></div>
+          <div class="d">任务 id、状态、产出、报告</div>
+        </div>
+
+        <div class="note amber">
+          <b>可见性不用再单独立规则了。</b>它和建任务入口同生共死：<b>有任务记录就在模型面前，没有就收走</b>。
+          第一次派发之前它不在（没东西可管）；派发之后它一直在——前台跑完的记录也留着，历史查得到。
+        </div>
+      </div>
+    </div>
+
+    <div class="impl-wrap">
+      <div class="impl-stems">
+        <div class="impl-stem"><div class="stem"></div></div>
+        <div class="impl-stem"><div class="stem"></div></div>
+      </div>
+      <div class="impl-band">
+        <div>
+          <div class="ttl">同一个 registry，两侧共用 <span class="mono">TaskRecord</span></div>
+          <div class="d">
+            派发侧<b>建</b>它，任务侧<b>读 / 停</b>它。<b>两链唯一的交点</b>就是
+            <code>background: true</code> 返回的那个 <code>taskId</code>——它就是 registry 里的一条记录。
+            今天前台根本不进 registry，所以模型<b>回头查不了一个前台孩子</b>；统一之后两个口径一样。
+          </div>
+        </div>
+        <dl class="kv">
+          <dt>深度</dt><dd>同一个 <code>depth</code> / <code>maxDispatchDepth</code> 闸门</dd>
+          <dt>并发</dt><dd>同一份 slot counter，<b>按 task id 键释放</b></dd>
+          <dt>产出</dt><dd>同一份 output storage（<code>&lt;sessionDir&gt;/tasks/&lt;id&gt;/output.log</code>）</dd>
+          <dt>拒绝</dt><dd>同一句 <code>errorMessage</code></dd>
+        </dl>
+      </div>
+    </div>
+
+    <div class="note" style="margin-top:18px">
+      <b>前台和后台不再是两个机制。</b>同一个门、同一个建记录动作、同一个 registry；
+      区别只在<b>等不等</b>——前台等终态并把结果返回，后台立刻返回 handle 让 pump 接着跑。
+      换 surface 时，<b>只换一个门的名字</b>，写法、参数、返回对象、并行写法全都不变。
+    </div>
+  </section>
+
+  <hr class="rule" />
+
+  <!-- ============ 二、路由文案散落 ============ -->
+  <section id="s2">
+    <h2><span class="num">二</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg>
+      原始问题：选路知识住在 4 个通道
+    </h2>
+    <p class="sub">
+      上面是<b>结构</b>。问题是<b>选路知识</b>（「什么时候该走哪条路」）没有单一出处——它被说了 2–3 遍，散在 4 个 pi 通道里。
+    </p>
+
+    <div class="chans">
+      <div class="chan">
+        <div class="ch-t">自定义 section</div>
+        <div class="ch-w">系统提示词 <code>&lt;ptc&gt;</code></div>
+        <ul>
+          <li><code>src/mode/dispatch-section.ts</code></li>
+          <li>怎么派子代理（按 surface）</li>
+          <li>web 在子代理里</li>
+        </ul>
+      </div>
+      <div class="chan">
+        <div class="ch-t">会话内注入</div>
+        <div class="ch-w">对话里，不在系统提示词</div>
+        <ul>
+          <li><code>src/mode/ptc-mode.ts</code></li>
+          <li><code>[PTC MODE ACTIVE]</code></li>
+          <li>run_code vs workflow、<code>pi.dispatch</code>、图片、web</li>
+        </ul>
+      </div>
+      <div class="chan">
+        <div class="ch-t">rules 扁平日志</div>
+        <div class="ch-w">pi 的 <code>Guidelines</code> 段</div>
+        <ul>
+          <li><code>src/tools/common.ts</code></li>
+          <li><code>PTC_TOOL_GUIDELINES</code></li>
+          <li>图片契约、run_code vs workflow</li>
+        </ul>
+      </div>
+      <div class="chan">
+        <div class="ch-t">tool description</div>
+        <div class="ch-w">每个工具自带</div>
+        <ul>
+          <li>run-code / workflow / subagent</li>
+          <li>ptc-task ×3 / child-report / web-ds-search</li>
+          <li>binding contract + reach note</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="note warn" style="margin-top:18px">
+      <b>已经漂过了，不是「可能会漂」。</b>「run_code vs workflow 怎么选」在 section / 会话注入 / rules 三处各一份；「web 在子代理里」三处；「codemode 脚本不能直接调 <code>pi.dispatch</code>」三处。这三处<b>每一处都是踩过坑之后补的</b>（2026-10-16、2026-10-20 两次实测）。
+      根因是<b>没有强制点</b>：新增一个工具，不声明它在路由里的位置也行，测试不会红。对照组是 ADR-0024 的 <strong>binding contract</strong>——它做到了「一处持有 + 双向覆盖测试」，路由层<b>没有对应物</b>。
+      <br><b>这一整块在本轮范围内</b>——收编方案见第三节（registry 持全部散文 + 两层输出 + 八条强制点）。
+    </div>
+  </section>
+
+  <hr class="rule" />
+
+  <!-- ============ 三、/ptc off 截断位置 ============ -->
+  <section id="s3">
+    <h2><span class="num">三</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M2 12h20"/><circle cx="12" cy="12" r="9"/></svg>
+      路由文案收编：<strong>两层，单一出处</strong>
+    </h2>
+    <p class="sub">
+      原始需求的后一半。前面把「结构」理清了（哪条路由归谁管、<code>/ptc off</code> 切在哪、并发怎么流转），
+      这一节处理「<b>选路知识写在哪儿</b>」——今天它说了 2–3 遍，散在 4 个 pi 通道里（第二节那张地图）。
+      <br><b>已定：</b>registry 持<b>全部</b> model-facing 散文（F1=②）· 一行 = 一条「路」（F2）· 复用 <code>&lt;ptc&gt;</code> 段（F3）·
+      <b>完整两层：常驻索引 + 随包详情文件</b>（照搬 <code>@tylerho/pi-memory</code> 的 <code>MEMORY.md</code> 形状）· usage 文档<b>进 npm 包</b>。
+    </p>
+
+    <h3 style="font-size:16px;font-weight:600;margin:24px 0 12px">一份 registry，两层输出</h3>
+
+    <div class="flow" style="grid-template-columns:1fr;gap:0">
+      <div class="frow" style="grid-template-columns:1fr">
+        <div class="fmain">
+          <div class="node" style="border-color:rgba(47,111,94,.45);background:var(--primary-soft)">
+            <div class="t">route registry（TS · 类型化 · <b>唯一的 model-facing 散文出处</b>） <span class="tag">新文件</span></div>
+            <div class="d">
+              两个区：<b>ROUTES</b>（一行 = 一条「路」：一行 hook · 每个 surface 怎么调 · detail 指针 · 事实边界）·
+              <b>TOOLS</b>（一行 = 一个工具：它是什么 · snippet · guidelines）。
+              散文只在这<b>一个文件</b>里 → 「同一句话写在两个地方」<b>结构上不可能发生</b>。
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="fconn" style="grid-column:1"></div>
+
+      <div class="frow" style="grid-template-columns:1fr">
+        <div class="fmain">
+          <div class="fcols" style="grid-template-columns:1fr 1fr;gap:14px">
+            <div class="node">
+              <div class="t">① 常驻索引（<code>&lt;ptc&gt;</code> section） <span class="tag">每行一条</span></div>
+              <div class="d">
+                每条路<b>一行</b>：<code>when</code> 的一行 hook + detail 指针。
+                <br>照搬 pi-memory 的 <code>MEMORY.md</code>：<b>一条一行，详情永远不在索引里</b>。
+                有 token 预算，超了<b>明说</b>（<code>&gt; WARNING:</code> 那种），不静默截断。
+                <br><b>每 turn 字节相同</b>——改了会废掉 prompt cache。
+              </div>
+            </div>
+            <div class="node">
+              <div class="t">② 详情文件（随包 markdown） <span class="tag">模型 read</span></div>
+              <div class="d">
+                <code>docs/routes/&lt;id&gt;.md</code>：怎么调 · 返回什么 · 坑 · 例子。
+                <br>模型用 pi 核心的 <code>read</code> 读（PTC 模式走 <code>tools.read</code> binding；codemode 侧脚本里 <code>tools.read</code>）。
+                <br><code>docs/usage/*.md</code> 也<b>随包发布</b>——更多背景，不在索引里。
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="fconn" style="grid-column:1"></div>
+
+      <div class="frow" style="grid-template-columns:1fr">
+        <div class="fmain">
+          <div class="fcols" style="grid-template-columns:1fr 1fr 1fr;gap:14px">
+            <div class="node" style="border-style:dashed;background:var(--bg)">
+              <div class="t">留在工具文件</div>
+              <div class="d">参数 schema（<b>连参数的 description</b>）· 实现 · renderers</div>
+            </div>
+            <div class="node" style="border-style:dashed;background:var(--bg)">
+              <div class="t">留在会话内注入</div>
+              <div class="d">只有<b>动态</b>的：当前绑定清单（每会话不一样）</div>
+            </div>
+            <div class="node" style="border-style:dashed;background:var(--bg)">
+              <div class="t">留在 binding-contract.ts</div>
+              <div class="d">「调了得到什么形状」——<b>另一个问题</b>，已有自己的 ADR 与预算</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="note" style="margin-top:16px">
+      <b>为什么 binding contract 不并进来：</b>它回答「<b>调了会得到什么形状</b>」，registry 回答「<b>什么时候调、调的是什么</b>」。
+      两个问题不重叠，所以不存在「同一句话写两遍」。它已经是单点持有 + 双向覆盖 + token 预算——<b>这正是我们要给 registry 用的那套模式</b>。
+    </div>
+
+    <h3 style="font-size:16px;font-weight:600;margin:28px 0 12px">索引行长什么样（真例子）</h3>
+    <div class="code"><span class="cm">// src/routes/registry.ts</span>
+
+<span class="cm">// 区一：ROUTES —— 一行 = 一条「路」</span>
+{
+  id: <span class="str">"dispatch-child"</span>,
+  name: <span class="str">"派一个子代理"</span>,
+  when: <span class="str">"当这件事需要它自己的上下文，或者要跟别的活并行的时候"</span>,   <span class="cm">// 一行 hook</span>
+  how: {
+    full_ptc:     <span class="str">"tools.pi_task_ptc({ task, wait? })"</span>,
+    codemode_ptc: <span class="str">"tools.pi_task_codemode({ task, wait? })"</span>,
+  },
+  fact: <span class="str">"默认不等（wait 省略）：立刻返回 handle，完成时通知回到会话。要结果就 wait: true。"</span>,
+  detail: <span class="str">"docs/routes/dispatch-child.md"</span>,        <span class="cm">// 指针：文件必须随包存在</span>
+}</div>
+
+    <div class="code" style="margin-top:10px"><span class="cm">// 常驻 section 渲染出来的一条（每条路一行）</span>
+- <b>派一个子代理</b> — 当这件事需要它自己的上下文，或者要跟别的活并行的时候。细节：docs/routes/dispatch-child.md</div>
+
+    <h3 style="font-size:16px;font-weight:600;margin:28px 0 12px">强制点：八条机械，一条约定</h3>
+    <table>
+      <thead><tr><th style="width:8%"></th><th style="width:32%">规则</th><th style="width:14%">类型</th><th style="width:46%">怎么测 / 怎么守</th></tr></thead>
+      <tbody>
+        <tr><td><span class="num">1</span></td><td><b>工具 → 行</b>：每个模型可见的工具/绑定，至少被一条 route 提到</td><td><b style="color:var(--primary)">机械</b></td><td>反向覆盖测试——照 ADR-0024 binding contract 的形状（那份测试已经在这个仓库里）</td></tr>
+        <tr><td><span class="num">2</span></td><td><b>行 → 工具</b>：route 里提到的每个工具名/绑定名必须真实存在</td><td><b style="color:var(--primary)">机械</b></td><td>正向覆盖测试——同上</td></tr>
+        <tr><td><span class="num">3</span></td><td><b>route 集完整</b>：每条 route 在每个 surface 上都有交代（怎么走 / 明确「不适用」）</td><td><b style="color:var(--primary)">机械</b></td><td>不留空洞——否则「这条路由在这个 surface 上不存在」和「忘了写」分不清</td></tr>
+        <tr><td><span class="num">4</span></td><td><b>索引有 token 预算</b>，超了要<b>明说</b></td><td><b style="color:var(--primary)">机械</b></td><td>ceiling + floor 两个断言（照 ADR-0024 的 <code>BINDING_CONTRACT_TOKEN_CEILING</code>），外加一条「超预算的渲染结果里含 <code>&gt; WARNING:</code>」——照 pi-memory 的 <code>truncateIndex</code></td></tr>
+        <tr><td><span class="num">5</span></td><td><b>每行事实段非空</b>：一条 route 不能只有「什么时候用」没有「是什么/怎么调」</td><td><b style="color:var(--primary)">机械</b></td><td>防止 route 退化成散文——它必须能回答「怎么调」</td></tr>
+        <tr><td><span class="num">6</span></td><td><b>工具的 description / guidelines / snippet 必须是 registry 的调用</b></td><td><b style="color:var(--primary)">机械</b></td><td>工具文件里不许有这三块的字面量。这是 F1=② 的<b>兑现点</b>：漂移的口子被结构堵死</td></tr>
+        <tr><td><span class="num">7</span></td><td><b>索引每条路一行</b>（不许换行）<b> + detail 指针指向的文件必须随包存在</b></td><td><b style="color:var(--primary)">机械</b></td><td>「一行一条」是 pi-memory 的索引条目规则；指针必须能解到<b>包内</b>的文件——今天 <code>docs/</code> 不在 npm 包里，那个指针是悬空的</td></tr>
+        <tr><td><span class="num">8</span></td><td><b>索引每 turn 字节相同</b></td><td><b style="color:var(--primary)">机械</b></td><td>pi-memory 明说：「changing the system prompt mid-session invalidates the cached prefix」——索引只在 session_start / session_compact 刷新</td></tr>
+        <tr><td><span class="num">9</span></td><td><b>「散文」与「形状」的边界</b>：参数 schema 连它的 description 一起留在工具文件</td><td><b style="color:var(--warn)">约定</b></td><td>schema 的 description 跟参数定义是一体的，拆开反而更难读。写进 ADR，靠 code-review 守——<b>这是唯一的软点</b>，其余八条测试都拦得住</td></tr>
+      </tbody>
+    </table>
+
+    <h3 style="font-size:16px;font-weight:600;margin:28px 0 12px">今天四个通道怎么退役</h3>
+    <table>
+      <thead><tr><th style="width:34%">今天的通道</th><th style="width:32%">处置</th><th style="width:34%">落到哪</th></tr></thead>
+      <tbody>
+        <tr><td>自定义 section <code>&lt;ptc&gt;</code></td><td><b>升级</b>（不新增 section）</td><td>同一个位置，内容换成 registry 渲染的<b>索引</b></td></tr>
+        <tr><td>tool description 里的选路句</td><td>搬走</td><td>registry → 由 registry 注入回 description</td></tr>
+        <tr><td>rules 扁平日志 <code>PTC_TOOL_GUIDELINES</code></td><td>拆开</td><td>选路的 → registry；事实的（图片契约）→ 工具的 TOOLS 行</td></tr>
+        <tr><td>会话内注入 <code>[PTC MODE ACTIVE]</code></td><td>拆开</td><td>静态的（选路、「批成一个程序」）→ registry；<b>动态的</b>（当前绑定清单）→ 留在注入</td></tr>
+        <tr><td>binding reach note（codemode 脚本够不到 <code>pi.dispatch</code>）</td><td>退役</td><td>新模型下这条约束不存在了（门是 codemode 可达的工具，不是 binding）</td></tr>
+      </tbody>
+    </table>
+
+    <div class="note warn" style="margin-top:18px">
+      <b>代价（F1=② + 两层换来的，要认下来）：</b>
+      <br>① <b>registry 变成 ~500 行的大文件</b>，7+ 工具的散文全部搬进去。改一句文案要先找到它在哪个区。
+      <br>② <b>它成了「必须先读」的文件</b>——新加一个工具的人得先读它才知道该写什么。
+      <br>③ <b>多 7 个 route 详情文件</b>（<code>docs/routes/&lt;id&gt;.md</code>），而且它们<b>得随包发布</b>——模型在用户机器上要读得到。
+      <br>④ <b>usage 文档也要进包</b>（<code>files</code> 加 <code>docs/usage/</code>），包会变大一点。
+      <br>⑤ <b>参数 schema 的 description 留在工具文件</b>，这是唯一剩下的漂移口子。
+      <br>换来的：<b>零漂移可能</b>（散文只有一个出处）+ <b>八条强制点全是机械的</b>，只有第 9 条靠人 + <b>context 可控</b>（常驻的只有一行一条，详情按需读）。
+    </div>
+
+    <div class="note" style="margin-top:12px">
+      <b>先例（不是我们的设计，是现役实现的做法）：</b>
+      <code>@tylerho/pi-memory</code>（pi.dev 上的 extension，v0.2.1）——
+      <code>MEMORY.md</code> 是<b>唯一</b>常驻的文件，索引条目<b>一行一条</b>、<b>详情永远不在索引里</b>（<code>prompt.ts</code>：「<code>MEMORY.md</code> is an index, not a memory — each entry should be one line, under ~150 characters」）；
+      预算 <code>200 行 / 25,000 字符</code>，超了追加 <code>&gt; WARNING:</code> 并告诉模型「move detail into topic files」；
+      详情靠 pi 核心的 <code>read</code> 工具读到；索引快照<b>整个 session 稳定</b>，因为「changing the system prompt mid-session invalidates the cached prefix」。
+      <br>它<b>不碰 AGENTS.md</b>——记忆放自己的目录，AGENTS.md 只在 dream 阶段被当对照读。
+      <b>另一个实现</b> <code>ai-memory</code>（MCP）确实往 AGENTS.md 注入，但那是 <b>per-project 的知识</b>，而且是 <b>server 返回内容、由 agent/CLI 写进文件</b>（它自己写明「the MCP server cannot write the host filesystem directly」）。
+      我们的路由表是 <b>per-package 的</b>，所以两者的做法都不适用于我们——留在 registry + 注入 section。
+    </div>
+
+    <div class="note" style="margin-top:12px">
+      <b>已定的三个岔口：</b>F1 = ②（registry 持全部 model-facing 散文）· F2 = 一行 = 一条「路」· F3 = 复用 <code>&lt;ptc&gt;</code> 段。
+      <br><b>F2 为什么重要：</b>「直接用 pi 的内置工具」是最重要的一条路，但它<b>没有我们的工具</b>——按工具分行它就不在表里了。
+      而且同一条路在两个 surface 上是不同的工具，按路分行才能渲染出「这个 surface 上有哪些路」。
+    </div>
+  </section>
+  <section id="s4">
+    <h2><span class="num">四</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18"/><path d="m15 6 6 6-6 6"/></svg>
+      <code>/ptc off</code> 截在哪
+    </h2>
+    <p class="sub">
+      <code>/ptc off</code> 不是调用里的一道闸门——它是<strong>会话层的一次截断</strong>。
+      截断点落在<strong>本包能控制的那一段</strong>的起点：我们的控制覆盖到哪，就在哪切。
+    </p>
+
+    <div class="chainwrap">
+      <div class="chainhead"><span class="mono">surface = full_ptc</span><span style="font-size:12.5px;color:var(--muted)">编排器是<b>我们的</b> PTC</span></div>
+      <div class="chainrow">
+        <div class="cnode"><div class="t">父模型</div><div class="d">built-in 直调</div></div>
+        <div class="csep">→</div>
+        <div class="cnode orch gone"><div class="t"><code>ptc_run_code</code> / <code>ptc_workflow</code> <span class="tag">编排层</span></div><div class="d">撤掉 → 模型回到 built-in 直调</div></div>
+        <div class="csep">→</div>
+        <div class="cnode door gone"><div class="t"><code>pi_task_ptc</code> <span class="tag">建任务入口</span></div><div class="d">整条链不存在</div></div>
+        <div class="csep">→</div>
+        <div class="cnode gone"><div class="t">子代理</div><div class="d">起不来了</div></div>
+      </div>
+      <div class="chainrow cutrow">
+        <div class="cutcell"></div><div class="csep"></div>
+        <div class="cutcell"><div class="cutline"></div><div class="cutlabel">截断点：编排层<br>整条链从编排层起不可用</div></div>
+        <div class="csep"></div><div class="cutcell"></div><div class="csep"></div><div class="cutcell"></div>
+      </div>
+      <div class="chainfoot">
+        <b>我们控制整个编排层</b>——它是本包的。所以 PTC off = <b>把这一层整个撤掉</b>：
+        模型面前不再有 <code>ptc_run_code</code> / <code>ptc_workflow</code>，回到 built-in 直调，
+        没有编排器，也就没有「门」可言。
+      </div>
+    </div>
+
+    <div class="chainwrap">
+      <div class="chainhead"><span class="mono">surface = codemode_ptc</span><span style="font-size:12.5px;color:var(--muted)">编排器是 <b>pi 的</b> codemode</span></div>
+      <div class="chainrow">
+        <div class="cnode"><div class="t">父模型</div><div class="d">写 codemode 脚本</div></div>
+        <div class="csep">→</div>
+        <div class="cnode plain"><div class="t"><code>codemode</code> <span class="tag">pi 的编排器</span></div><div class="d">撤不掉</div></div>
+        <div class="csep">→</div>
+        <div class="cnode door gone"><div class="t"><code>pi_task_codemode</code> <span class="tag">建任务入口</span></div><div class="d">撤掉 → 起不了孩子</div></div>
+        <div class="csep">→</div>
+        <div class="cnode gone"><div class="t">子代理</div><div class="d">起不来了</div></div>
+      </div>
+      <div class="chainrow cutrow">
+        <div class="cutcell"></div><div class="csep"></div>
+        <div class="cutcell"></div>
+        <div class="csep"></div>
+        <div class="cutcell"><div class="cutline"></div><div class="cutlabel">截断点：codemode 之后<br>codemode 还在，它下面没了</div></div>
+        <div class="csep"></div><div class="cutcell"></div>
+      </div>
+      <div class="chainfoot">
+        <b>我们控制不了 codemode</b>——它是 pi 的编排器，我们没法把它从模型面前拿走。
+        所以截断点只能落在它<b>后面</b>：codemode 继续编排（它还能调 built-in、还能干别的），
+        但它下面属于我们的那一段——<code>ptc_run_code</code> / <code>ptc_workflow</code> 执行层和建任务入口——被撤掉。
+        <br><b>这就是两个 surface 上截断位置不同的原因。</b>
+      </div>
+    </div>
+
+    <div class="note">
+      <b>建任务入口本身也撤得走——两个 surface 上都撤得走。</b>
+      <code>pi_task_codemode</code> 是注册的工具：pi 不能 unregister，但 <code>pi.registerTool</code> 是对工具名做
+      <code>Map.set</code>，<b>同名重注册会覆盖</b>；用 <code>exposure: "hidden"</code> 重注册一次，它就从
+      <b>声明集</b>（<code>agent-session.js:1163</code> 排除 <code>hidden</code>）和
+      <b>codemode 可调表</b>（<code>agent-session.js:1151</code> 的判据只认 <code>codemode</code> / <code>deferred</code> / 在用的 <code>direct</code>）
+      里同时消失。pi 自己的 MCP extension 就是这么撤工具的（<code>dist/extensions/mcp/index.js:344</code>）。
+      <br>PTC 侧更简单：<code>pi_task_ptc</code> 是 PTC 程序里的 binding，程序（<code>ptc_run_code</code> / <code>ptc_workflow</code>）被撤，入口就跟着不可达。
+    </div>
+
+    <div class="note warn">
+      <b>现状跟这个模型不一样，这轮要改。</b>
+      今天 <code>/ptc off</code> 只做两件事：narrowing 退出（built-ins 回来）+ dispatch switch 关。
+      结果是：<b><code>full_ptc</code> 上 <code>ptc_run_code</code> / <code>ptc_workflow</code> 仍然可见</b>
+      （<code>exitMode()</code> 恢复的是 narrowing 之前的 loadout，而那对工具本来就是 <code>direct</code>，一直在里面），
+      建任务入口也<b>还在，只是拒绝</b>。
+      <br>按你的模型：<b>撤掉</b>，不是<b>留着让它拒绝</b>。撤掉之后，「PTC off」在两个 surface 上都只有一个意思——
+      <b>本包在链上的那一段没了</b>。
+    </div>
+  </section>
+
+  <hr class="rule" />
+
+  <!-- ============ 四、lifecycle face 在哪 ============ -->
+  <section id="s5">
+    <h2><span class="num">五</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+      lifecycle face：<strong>它现在是链的一部分</strong>
+    </h2>
+    <p class="sub">
+      <code>ptc_task_list</code> / <code>ptc_task_output</code> / <code>ptc_task_stop</code> 这三个（<strong>lifecycle face</strong>）
+      管的是<strong>已经在飞的孩子</strong>，不派发孩子。统一到任务链之后，它的可见性<strong>不再需要单独定规则</strong>——
+      它是任务链唯一的模型面，任务在它就在。
+    </p>
+
+    <div class="chainwrap" style="border-color:rgba(154,116,32,.35)">
+      <div class="chainhead"><span class="mono" style="background:var(--amber-soft);color:var(--amber)">任务链</span><span style="font-size:12.5px;color:var(--muted)">持续存在的：<b>有任务记录时</b>就可用</span></div>
+      <div class="chainrow" style="grid-template-columns:1fr 20px 1fr 20px 1fr 20px 1fr">
+        <div class="cnode"><div class="t">父模型</div><div class="d">要查 / 要停</div></div>
+        <div class="csep">→</div>
+        <div class="cnode task"><div class="t">lifecycle face <span class="tag">本包</span></div><div class="d"><code>ptc_task_list</code> / <code>ptc_task_output</code> / <code>ptc_task_stop</code></div></div>
+        <div class="csep">→</div>
+        <div class="cnode task"><div class="t">registry（TaskRecord） <span class="tag">枢纽</span></div><div class="d">任务 id、状态、产出、报告</div></div>
+        <div class="csep">↔</div>
+        <div class="cnode"><div class="t">在飞的孩子</div><div class="d">pump 驱动终态</div></div>
+      </div>
+      <div class="chainfoot">
+        <b>可见性规则（新）：有任务记录 → 在模型面前；没有 → 收走。</b>
+        第一次建任务之前它不在（没东西可管）；<b>建完任务之后它一直在</b>——因为记录留着（前台跑完的也留着），历史查得到。
+        <br>它<b>不属于「PTC 层」</b>：撤 PTC 不该撤它——在飞的任务必须还能查、还能停（ADR-0050 的原话）。
+        这条规则是任务的<b>后果</b>，不是一条独立的开关规则。
+        <br><b>它和建任务入口同族</b>：一个「建任务」，一个「管任务」——模型学一个概念就够。
+      </div>
+    </div>
+
+    <h3 style="font-size:16px;font-weight:600;margin:28px 0 10px">子代理进程内部：这一层整体不面向父模型</h3>
+    <div class="panels">
+      <div class="panel">
+        <div class="panel-head"><span class="mono">ptc_child_report</span><span class="badge" style="font-size:11.5px;border:1px solid var(--line);border-radius:999px;padding:2px 9px;color:var(--muted)">本包</span></div>
+        <p class="cond">子代理向宿主交一份结构化报告：结论 + 证据 + usage。</p>
+        <table style="font-size:12.5px">
+          <tbody>
+            <tr><td style="width:34%"><b>注册</b></td><td>每个 surface 都注册（<code>src/index.ts</code>）</td></tr>
+            <tr><td><b>激活</b></td><td><code>defaultActive: ptcDepth &gt; 0</code> — 只有子代理里激活</td></tr>
+            <tr><td><b>父模型看得见吗</b></td><td><b>看不见</b> — 但它注册在案，会占一个工具位</td></tr>
+            <tr><td><b>前台孩子也交报告吗</b></td><td>交——报告落在任务记录里，<code>ptc_task_output</code> 读得到</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="mono">web_ds_search</span><span class="badge" style="font-size:11.5px;border:1px solid var(--line);border-radius:999px;padding:2px 9px;color:var(--muted)">本包 · ADR-0049</span></div>
+        <p class="cond">DeepSeek Search API：搜网页 + 抓页面。web 能力<b>住在子代理里</b>。</p>
+        <table style="font-size:12.5px">
+          <tbody>
+            <tr><td style="width:34%"><b>注册</b></td><td>只在子代理进程里注册，父会话从不注册</td></tr>
+            <tr><td><b>激活</b></td><td><code>exposure: "direct"</code> — 在子代理里对模型直连</td></tr>
+            <tr><td><b>父模型看得见吗</b></td><td><b>看不见</b> — 父模型要上网只能派子代理</td></tr>
+            <tr><td><b>两个 surface 一样吗</b></td><td>一样——它住在<b>子代理</b>里，与 surface 无关</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule" />
+
+  <!-- ============ 五、两扇门给同一个对象 ============ -->
+  <section id="s6">
+    <h2><span class="num">六</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18"/><path d="m15 6 6 6-6 6"/></svg>
+      两扇门改名 + 给同一个对象
+    </h2>
+    <p class="sub">旧名退役，两个门各留一个名字——不是「同一个东西两个名字」。</p>
+
+    <div class="chainwrap" style="padding:18px 22px">
+      <div class="chainrow">
+        <div class="cnode gone"><div class="t"><code>tools["pi.dispatch"]</code></div><div class="d">旧 PTC 门</div></div>
+        <div class="csep">→</div>
+        <div class="cnode door"><div class="t"><code>tools.pi_task_ptc</code></div><div class="d">新 PTC 门</div></div>
+        <div class="csep"></div>
+        <div class="cnode gone"><div class="t"><code>tools["ptc_subagent"]</code></div><div class="d">旧 codemode 门</div></div>
+        <div class="csep">→</div>
+        <div class="cnode door"><div class="t"><code>tools.pi_task_codemode</code></div><div class="d">新 codemode 门</div></div>
+      </div>
+    </div>
+
+    <div class="note warn" style="margin-top:14px">
+      <b>顺带修掉一个实测过的坑。</b>旧名 <code>pi.dispatch</code> 带点，程序里必须写 <code>tools["pi.dispatch"]</code>；
+      而在 codemode 脚本里，pi 把工具名映射成 JS 标识符，写出来是 <code>tools.pi_dispatch</code>。
+      2026-10-20 那次实测里，模型在 codemode 脚本里写了 <code>tools["pi.dispatch"]</code>，拿到
+      <code>TypeError: tools.pi.dispatch does not exist</code>，白烧三个调用才回退。
+      改成两个下划线名之后，<b>两个平面都只用点号</b>，这类形状错误整个消失。
+    </div>
+
+    <table style="margin-top:16px">
+      <thead>
+        <tr><th style="width:22%"></th><th style="width:39%">PTC 门（今天 → 之后）</th><th style="width:39%">codemode 门（今天 → 之后）</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><b>名字</b></td><td><code>pi.dispatch</code> → <code>pi_task_ptc</code></td><td><code>ptc_subagent</code> → <code>pi_task_codemode</code></td></tr>
+        <tr><td><b>模型面叫它什么</b></td><td colspan="2" style="text-align:center;background:#fbfaf7"><b>建任务</b>——「派发」是内部实现，模型面前不出现这个词</td></tr>
+        <tr><td><b>它是什么</b></td><td>binding（只在 PTC 程序里存在）</td><td>注册的工具（codemode 可达，模型看不见）</td></tr>
+        <tr><td><b>返回</b></td><td colspan="2" style="text-align:center;background:#fbfaf7">前台：<b>结果 + taskId</b>　｜　后台：<b>handle（含 taskId）</b>——两个 surface 同形</td></tr>
+        <tr><td><b>怎么被调到</b></td><td>程序内 <code>tools.pi_task_ptc(...)</code></td><td>脚本内 <code>tools.pi_task_codemode(...)</code></td></tr>
+        <tr><td><b>参数</b></td><td colspan="2" style="text-align:center;background:#fbfaf7"><b>两门完全相同</b>——今天就共用同一份 <code>DISPATCH_PARAMETERS</code></td></tr>
+        <tr><td><b>返回什么</b></td><td>原始 <code>DispatchResult</code>：<code>text</code> / <code>status</code> / <code>started</code> / <code>agentName</code> / <code>durationMs</code> / <code>exitCode</code> / <code>usage</code> / <code>report</code> / …</td><td>投影：<code>task_id?</code> / <code>status</code> / <code>exit_code?</code> / <code>report_channel</code> / <code>report?</code>——<b>没有 <code>text</code></b></td></tr>
+        <tr><td><b>失败时</b></td><td colspan="2" style="text-align:center;background:#fbfaf7"><b>两个都不抛</b>——拒绝走 <code>status: "rejected"</code> + <code>errorMessage</code>（ADR-0024 的 binding contract 已经钉了「never throws，read <code>status</code>」）</td></tr>
+        <tr><td><b>不等时</b></td><td><code>DispatchHandle { taskId, label, status: "running" }</code></td><td>投影 <code>{ task_id, status: "background", report_channel: "none" }</code></td></tr>
+      </tbody>
+    </table>
+
+    <div class="note warn" style="margin-top:16px">
+      <b>codemode 门今天丢 <code>text</code>。</b>因为它有 <code>outputSchema</code>，pi 让脚本拿到结构化值<b>代替</b>文本块——
+      而那个投影里没有 <code>text</code>。所以在 codemode surface 上，脚本派出去的子代理，<b>它的工作输出正文读不到</b>，只有结构化报告。
+      这是现有功能缺口，不只是形状不齐。
+    </div>
+
+    <p class="sub" style="margin:16px 0 0">按待确认点 2 的建议（两个门都不抛，拒绝走 <code>status</code>），两个 surface 上就是同一份写法：</p>
+    <div class="code"><span class="cm">// 两个 surface 上同一份写法，只有函数名不同</span>
+<span class="kw">const</span> settled = <span class="kw">await</span> Promise.allSettled(
+  tasks.<span class="cm">map</span>((t) =&gt; tools.pi_task_ptc(t)),        <span class="cm">// full_ptc：程序内</span>
+  <span class="cm">// tools.pi_task_codemode(t)                     // codemode_ptc：脚本内</span>
+);
+<span class="kw">for</span> (<span class="kw">const</span> s <span class="kw">of</span> settled) {
+  <span class="kw">if</span> (s.status === <span class="str">"rejected"</span>) <span class="kw">continue</span>;  <span class="cm">// 硬失败：这一次调用本身炸了</span>
+  <span class="kw">const</span> r = s.value;                          <span class="cm">// DispatchResult</span>
+  <span class="kw">if</span> (r.status === <span class="str">"rejected"</span>) <span class="kw">continue</span>;  <span class="cm">// 闸门说不行（深度/并发/未知 agent）</span>
+  <span class="cm">// r.text 是孩子的工作输出正文 —— 两个 surface 上都读得到</span>
+}</div>
+
+    <div class="note warn" style="margin-top:16px">
+      <b>并行用 <code>Promise.allSettled</code>，不是 <code>Promise.all</code>。</b>
+      两扇门的<b>硬失败</b>（参数错、工具错、名字没绑上）都会 <b>reject</b>——
+      PTC 门抛 <code>ToolCallError</code>（ADR-0024 的 binding contract 就写着「wrap the call in <code>try</code>/<code>catch</code> (or <code>Promise.allSettled</code>)」），
+      codemode 门抛 pi 的 <code>Error</code>（pi 自己的 codemode 文档也写着「Use <code>Promise.allSettled()</code> to keep the results of the calls that succeed」）。
+      <code>Promise.all</code> 会在第一个 reject 时把<b>兄弟的结果一起丢掉</b>——一个孩子失败，不该吃掉其它孩子的工作。
+    </div>
+  </section>
+
+  <hr class="rule" />
+
+  <!-- ============ 六、详细流程 ============ -->
+  <section id="s7">
+    <h2><span class="num">七</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+      一次调用的详细流程
+    </h2>
+    <p class="sub">
+      闸门是<strong>菱形节点</strong>，右边写它拒绝时返回的东西。闸门顺序是<strong>代码里写死的</strong>：
+      上面几道在下面几道之前，所以前面的拒绝不会铸出任务 id、不会占并发槽、不会起进程。
+    </p>
+
+    <div class="flow">
+      <div class="frow">
+        <div class="fmain">
+          <div class="step call">
+            <div class="t">调用 <code>tools.pi_task_ptc(...)</code> / <code>tools.pi_task_codemode(...)</code> <span class="tag">入口 · 建任务</span></div>
+            <div class="d">两扇入口同名同形，参数表完全一样（<code>DISPATCH_PARAMETERS</code>）</div>
+          </div>
+        </div>
+        <div class="fside"></div>
+      </div>
+
+      <div class="fconn"></div>
+
+      <div class="frow">
+        <div class="fmain">
+          <div class="step pre">
+            <div class="t">解析两个值（在<b>所有</b>闸门之上，只解析一次） <span class="tag">ADR-0043 / ADR-0041</span></div>
+            <div class="d"><code>why</code> → 孩子提示里的理由（开关关掉则丢弃，记 <code>whySuppressed: true</code>）；<code>readOnly</code> → 档位（<code>strict</code> / <code>lenient</code>）</div>
+          </div>
+        </div>
+        <div class="fside">
+          <span class="info">解析在闸门之上，所以<b>每个</b>拒绝都带着同一份 <code>why</code> / <code>readOnlyTier</code> 事实——调用方不必知道撞的是哪道闸门。</span>
+        </div>
+      </div>
+
+      <div class="fconn"></div>
+
+      <div class="frow">
+        <div class="fmain">
+          <div class="gate">
+            <div class="t"><span class="tag">闸门 1</span> readOnly 的值可用吗？</div>
+            <div class="d">schema 是字符串枚举，pi 的校验器先拒一遍；这里守的是<b>绕过 schema 直接调内部实现</b>的缝</div>
+          </div>
+        </div>
+        <div class="fside">
+          <span class="ref">拒：<code>invalidReadOnlyRequestResult</code>——<b>拒绝，不 coerce</b>。写错值的意图是「只读」，默默当成「没限制」等于给了一个全能力孩子。</span>
+        </div>
+      </div>
+
+      <div class="fconn"></div>
+
+      <div class="frow">
+        <div class="fmain">
+          <div class="gate gray">
+            <div class="t"><span class="tag">闸门 2 · 兜底</span> dispatch switch 开着吗？</div>
+            <div class="d">正常路径<b>走不到这里</b>——PTC off 时建任务入口已被撤走。这一道是<b>纵深防御</b></div>
+          </div>
+        </div>
+        <div class="fside">
+          <span class="info">在 <code>full_ptc</code> 上：编排层已撤，模型根本写不出程序。
+             在 <code>codemode_ptc</code> 上：入口已撤，脚本里没有这个工具。
+             <b>两条路都到不了这一道</b>——它留在代码里，是为了万一有别的入口漏进来还能兜住（和闸门 1 同一个理由）。</span>
+        </div>
+      </div>
+
+      <div class="fconn"></div>
+
+      <div class="frow">
+        <div class="fmain">
+          <div class="step">
+            <div class="t">铸 <code>taskId</code> <span class="tag">新增 · 两条路共用</span></div>
+            <div class="d">并发槽从此按 id 记——前台不再匿名占槽，<code>callId: 0</code> 那个假拒绝的坑没了</div>
+          </div>
+        </div>
+        <div class="fside">
+          <span class="info">前台与后台<b>共用</b>这一步——不再有两条平行的代码路径。</span>
+        </div>
+      </div>
+
+      <div class="fconn"></div>
+
+      <div class="frow">
+        <div class="fmain">
+          <div class="gate">
+            <div class="t"><span class="tag">闸门 3</span> 深度够吗？</div>
+            <div class="d"><code>ctx.depth + 1 &gt; maxDispatchDepth</code> → 拒</div>
+          </div>
+        </div>
+        <div class="fside">
+          <span class="ref">拒：<code>dispatch depth limit reached</code>。后台场景下文案不同（教模型去查在飞任务）——但那是<b>按 <code>wait</code> 参数生成</b>，不是另一条路径。</span>
+        </div>
+      </div>
+
+      <div class="fconn"></div>
+
+      <div class="frow">
+        <div class="fmain">
+          <div class="gate">
+            <div class="t"><span class="tag">闸门 4</span> agent 名字给得干净吗？</div>
+            <div class="d">给了但畸形 / 空串 → 拒。<b>没给</b>不是错——那是通用孩子</div>
+          </div>
+        </div>
+        <div class="fside">
+          <span class="ref">拒：<code>missingAgentResult</code>。</span>
+        </div>
+      </div>
+
+      <div class="fconn"></div>
+
+      <div class="frow">
+        <div class="fmain">
+          <div class="gate">
+            <div class="t"><span class="tag">闸门 5</span> agent 解析得出来吗？</div>
+            <div class="d">按 <code>agentScope</code> 找目录里的定义——在<b>入队之前</b>，坏名字立刻拒，不占用队列位置</div>
+          </div>
+        </div>
+        <div class="fside">
+          <span class="ref">拒：<code>unknownAgentResult</code>。</span>
+        </div>
+      </div>
+
+      <div class="fconn"></div>
+
+      <div class="frow">
+        <div class="fmain">
+          <div class="step" style="border-color:rgba(47,111,94,.42);background:var(--primary-soft)">
+            <div class="t">入队 + 建一条任务记录（<code>status = "queued"</code>） <span class="tag">libuv 模型</span></div>
+            <div class="d">满了<b>不拒绝</b>——FIFO 排队等一个空槽。队列 = registry 里 <code>queued</code> 的那些</div>
+          </div>
+        </div>
+        <div class="fside">
+          <span class="info"><b>并发满员不再是拒绝理由。</b>从这一刻起，任务就是派发的唯一痕迹——可观测、可取消（第七节）</span>
+        </div>
+      </div>
+
+      <div class="fconn"></div>
+
+      <div class="frow">
+        <div class="fmain">
+          <div class="step">
+            <div class="t">出队 → 占槽（按 task id）→ 记录转 <code>running</code> → 起进程 <span class="tag">子代理起来了</span></div>
+            <div class="d">TMPDIR 写提示词文件 → <code>buildArgv</code> → spawn</div>
+          </div>
+        </div>
+        <div class="fside">
+          <span class="info">完成回调回到<b>事件循环线程</b>：终态写回 registry，调用方的 promise 在宿主事件循环上 resolve。模型面前<b>不出现</b> <code>dispatch</code> 这个词。</span>
+        </div>
+      </div>
+
+      <div class="fspread"><div class="vline"></div><div class="hbar"></div></div>
+
+      <div class="fcols">
+        <div class="fcol">
+          <div class="drop"></div>
+          <p class="head">等 · <code>wait: true</code></p>
+          <div class="step out">
+            <div class="t">等它跑完 → 写回记录 + 产出落盘</div>
+            <div class="d">等</div>
+          </div>
+          <div class="conn"></div>
+          <div class="step out">
+            <div class="t">返回「结果 + taskId」 <span class="tag">前台</span></div>
+            <div class="d"><code>DispatchResult</code>：<code>text</code> / <code>status</code> / <code>started</code> / <code>agentName</code> / <code>durationMs</code> / <code>exitCode</code> / <code>usage</code> / <code>report</code> / <code>taskId</code> …</div>
+          </div>
+        </div>
+
+        <div class="fcol">
+          <div class="drop"></div>
+          <p class="head bg"><code>background: true</code></p>
+          <div class="step out">
+            <div class="t">立刻返回，不等</div>
+            <div class="d">后台</div>
+          </div>
+          <div class="conn"></div>
+          <div class="step out">
+            <div class="t">返回 handle（含 taskId） <span class="tag">后台</span></div>
+            <div class="d"><code>DispatchHandle { taskId, label, status: "running" }</code>；脱离调用方的 pump 驱动终态 → 写回记录 + 产出落盘</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="fmerge"><div class="hbar"></div><div class="vline"></div></div>
+
+      <div class="frow">
+        <div class="fmain">
+          <div class="step out">
+            <div class="t">模型拿到结果 <span class="tag">返回</span></div>
+            <div class="d"><b>两个 surface 同形</b>——换 surface 只换一个入口名字，写法、参数、返回对象、并行写法全都不变</div>
+          </div>
+        </div>
+        <div class="fside">
+          <span class="ref"><b>例外</b>：<code>background: true</code> 的调用如果撞上闸门，拿到的是<b>拒绝结果</b>，<b>不是</b> handle。调用方不能假设「后台调用一定返回 handle」。</span>
+        </div>
+      </div>
+    </div>
+
+    <h3 style="font-size:16px;font-weight:600;margin:28px 0 10px">入参：十个（两扇门共用同一份 schema）</h3>
+    <table>
+      <thead>
+        <tr><th style="width:16%">参数</th><th style="width:8%">必填</th><th style="width:40%">语义</th><th style="width:36%">省略 / 非法时</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>task</code></td><td><span class="req">是</span></td><td>孩子要干的活</td><td><code>minLength: 1</code>；空串被 schema 拒</td></tr>
+        <tr><td><code>agent</code></td><td><span class="opt">否</span></td><td>已注册的 agent 名字，用来收窄孩子</td><td>省略 = <b>通用孩子</b>（fresh generalist pi，pi 自己的提示词 + 完整工具集）；给了但没定义 / 空串 → <b>闸门 4 拒</b></td></tr>
+        <tr><td><code>why</code></td><td><span class="opt">否</span></td><td>这一刀为什么切出来（<b>自己的话</b>：不是整段对话，也不是用户原话）</td><td>任务已经说全了就省掉。开关关掉时丢弃，并记 <code>whySuppressed: true</code></td></tr>
+        <tr><td><code>cwd</code></td><td><span class="opt">否</span></td><td>孩子的工作目录</td><td>默认调用方的 cwd</td></tr>
+        <tr><td><code>agentScope</code></td><td><span class="opt">否</span></td><td>去哪找 agent 目录：<code>user</code>（<code>~/.pi/agent/agents</code>）/ <code>project</code>（<code>&lt;cwd&gt;/.pi/agents</code>）/ <code>both</code></td><td>默认 <code>user</code>——<b>看不见</b> project agent</td></tr>
+        <tr><td><code>model</code></td><td><span class="opt">否</span></td><td>覆盖孩子跑的模型</td><td>省略 = 继承本会话当前模型（ADR-0044）；agent 定义里钉了优先用定义的</td></tr>
+        <tr><td><code>thinkingLevel</code></td><td><span class="opt">否</span></td><td>孩子的思考档位</td><td>沿用 pi 的默认</td></tr>
+        <tr><td><code>wait</code></td><td><span class="opt">否</span></td><td><code>true</code> = <b>等这个任务完成</b>，结果在返回值里（<code>DispatchResult</code>）</td><td>默认 <code>false</code>（libuv 回调式）：<b>不等</b>——立刻返回 handle（<code>DispatchHandle</code>），完成时<b>通知回到父会话</b></td></tr>
+        <tr><td><code>label</code></td><td><span class="opt">否</span></td><td>后台任务给人看的标签</td><td>—</td></tr>
+        <tr><td><code>readOnly</code></td><td><span class="opt">否</span></td><td><code>strict</code> / <code>lenient</code>——限制孩子能改什么</td><td>省略 = 今天的行为；<b>写了别的值 → 闸门 1 拒</b>，不 coerce</td></tr>
+      </tbody>
+    </table>
+
+    <h3 style="font-size:16px;font-weight:600;margin:28px 0 10px">返回：两个对象</h3>
+    <table>
+      <thead>
+        <tr><th style="width:22%">字段</th><th style="width:39%"><code>DispatchResult</code>（前台；也是后台的前置拒绝）</th><th style="width:39%"><code>DispatchHandle</code>（后台成功）</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>text</code></td><td>孩子的工作输出正文</td><td>—</td></tr>
+        <tr><td><code>status</code></td><td><code>"fulfilled"</code> / <code>"rejected"</code>（借用 allSettled 记录的词汇）</td><td><code>"running"</code></td></tr>
+        <tr><td><code>started</code></td><td>孩子<b>到底有没有被起起来</b>（拒绝时是 <code>false</code>）</td><td>—</td></tr>
+        <tr><td><code>agentName</code></td><td>实际用的 agent；拒绝时是 <code>"unknown"</code></td><td>—</td></tr>
+        <tr><td><code>durationMs</code> / <code>exitCode</code></td><td>耗时 / 退出码（拒绝时 <code>0</code> / <code>-1</code>）</td><td>—</td></tr>
+        <tr><td><code>usage</code></td><td>input / output / cost / turns——宿主在终态盖的章</td><td>—</td></tr>
+        <tr><td><code>report</code> / <code>reportChannel</code></td><td>孩子交回的结构化报告 / 报告从哪条通道来的（<code>"none"</code> = 没有）</td><td>—</td></tr>
+        <tr><td><code>observedModel</code> / <code>observedProvider</code></td><td><b>观测到的</b>孩子实际跑的模型 / provider（ADR-0045）</td><td>—</td></tr>
+        <tr><td><code>errorMessage</code></td><td>拒绝原因；<b>拒绝时必填</b></td><td>—</td></tr>
+        <tr><td><code>readOnlyTier</code> / <code>whySuppressed</code></td><td>实际生效的档位 / 理由被丢的事实（<b>拒绝时也带</b>）</td><td>—</td></tr>
+        <tr><td><code>taskId</code> / <code>label</code></td><td>—</td><td>后台任务的 id（<code>ptc_task_output</code> 拿它去读）</td></tr>
+      </tbody>
+    </table>
+
+    <h3 style="font-size:16px;font-weight:600;margin:28px 0 10px">失败：一种形状</h3>
+    <p class="sub" style="margin-bottom:0">六道闸门拒绝时返回的东西<b>形状一样</b>，只有 <code>errorMessage</code> 不同——所以调用方读一个字段就知道发生了什么。</p>
+    <div class="code"><span class="cm">// 任何一道闸门拒绝，都是这个形状（并发满员不在其中：那是排队）</span>
+{
+  text: <span class="str">""</span>,
+  status: <span class="str">"rejected"</span>,
+  started: <span class="kw">false</span>,          <span class="cm">// 孩子根本没起来</span>
+  agentName: <span class="str">"unknown"</span>,
+  durationMs: <span class="kw">0</span>,
+  exitCode: <span class="kw">-1</span>,
+  reportChannel: <span class="str">"none"</span>,    <span class="cm">// 拒绝永远没有报告，而且明说</span>
+  errorMessage: <span class="str">"&lt;这一道闸门自己的文案&gt;"</span>,
+  <span class="cm">// 再由 finish() 统一补上：</span>
+  readOnlyTier: <span class="str">"strict"</span>,     <span class="cm">// 实际生效的档位</span>
+  whySuppressed: <span class="kw">true</span>,          <span class="cm">// 理由被丢了</span>
+}</div>
+    <table style="margin-top:16px">
+      <thead>
+        <tr><th style="width:8%">闸门</th><th style="width:30%">什么时候</th><th style="width:30%">前台文案</th><th style="width:32%">后台文案</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><span class="num">1</span></td><td><code>readOnly</code> 值不可用</td><td colspan="2">同一个（不分前后台）</td></tr>
+        <tr><td><span class="num">2</span></td><td>dispatch switch 关了（兜底，正常走不到）</td><td colspan="2">同一个（不分前后台）</td></tr>
+        <tr><td><span class="num">3</span></td><td>深度超限</td><td colspan="2"><code>dispatch depth limit reached</code>；<code>background: true</code> 时<b>按参数生成另一个文案</b>（教模型去查在飞任务）——同一条路径</td></tr>
+        <tr><td><span class="num">4</span></td><td>agent 名畸形 / 空串</td><td colspan="2">同一个（不分前后台）</td></tr>
+        <tr><td><span class="num">5</span></td><td>agent 解析不出来</td><td colspan="2">同一个（不分前后台）——在<b>入队之前</b>，所以没有槽要释放</td></tr>
+      </tbody>
+    </table>
+    <div class="note warn" style="margin-top:16px">
+      <b>拒绝<b>不是</b>抛异常。</b><code>dispatch()</code> 的契约是「never rejects」——
+      调用方用 <code>status</code> 分支，就像分一个 <code>Promise.allSettled</code> 记录。
+      但<b>硬失败</b>（参数错、工具错、名字没绑上）仍然 <b>reject</b>：PTC 门抛 <code>ToolCallError</code>，codemode 门抛 pi 的 <code>Error</code>。
+    </div>
+
+    <h3 style="font-size:16px;font-weight:600;margin:28px 0 10px">后台态：从 handle 到终态</h3>
+    <p class="sub">后台路径返回 handle 之后，<b>pump</b> 脱离调用方继续跑；模型靠 <strong>lifecycle face</strong> 三个工具跟进（第四节那张任务链图）。</p>
+    <ol class="tl">
+      <li>
+        <div class="t">调用返回 <code>DispatchHandle { taskId, label, status: "running" }</code> <span class="tag">立刻</span></div>
+        <div class="d">任务已经在 registry 里登记，槽已按 <code>taskId</code> 占用——<b>这个 taskId 就是任务链那一头的交点</b></div>
+      </li>
+      <li>
+        <div class="t">pump 驱动孩子跑到终态 <span class="tag">脱离调用方</span></div>
+        <div class="d">用户可以同时干别的事；这次调用的栈已经退了</div>
+      </li>
+      <li>
+        <div class="t">终态写回 registry：<code>succeeded</code> / <code>failed</code> / <code>lost</code></div>
+        <div class="d"><code>lost</code> 的三个原因分开记：<code>session_ended_while_running</code> / <code>user_killed_via_esc</code> / <code>lost_on_session_restart</code></div>
+      </li>
+      <li>
+        <div class="t"><code>ptc_task_output(taskId)</code> 读产出 <span class="tag">lifecycle face</span></div>
+        <div class="d">含 <code>details.report</code>（孩子交回的报告）与 usage</div>
+      </li>
+      <li>
+        <div class="t"><code>ptc_task_stop(taskId)</code> 叫停 <span class="tag">lifecycle face</span></div>
+        <div class="d">走 SIGTERM → 宽限 → SIGKILL 的阶梯</div>
+      </li>
+      <li>
+        <div class="t">会话结束 = 隐式停止 <span class="tag">BG-14</span></div>
+        <div class="d"><code>running/stopping → lost(session_ended_while_running)</code>，在飞的孩子被回收</div>
+      </li>
+    </ol>
+  </section>
+
+  <hr class="rule" />
+
+  <!-- ============ 七、待确认点 ============ -->
+  <section id="s8">
+    <h2><span class="num">八</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
+      PTC 程序的严格模式
+    </h2>
+    <p class="sub">
+      这一条跟派发无关，是<b>程序本身的语义</b>：我们的 PTC 程序跑在严格模式还是宽松模式。
+      结论：<b>要强制严格</b>，而且上游 DSH 本来就是严格的——这不是偏好，是<b>对不齐</b>。
+    </p>
+
+    <h3 style="font-size:16px;font-weight:600;margin:24px 0 12px">现状：宽松（sloppy），上游：严格</h3>
+
+    <div class="panels">
+      <div class="panel">
+        <div class="panel-head"><span class="mono" style="background:var(--warn-soft);color:var(--warn)">我们（现状）</span></div>
+        <p class="cond"><code>src/runtime/worker-main.ts:449-458</code>：
+          <code>new Function(\`async function prog() {\n&lt;code&gt;\n}\nreturn prog();\`)</code>
+          → <code>new Function</code> 的函数体<b>默认宽松</b>。</p>
+        <table style="font-size:12.5px">
+          <tbody>
+            <tr><td><b>赋未声明变量</b></td><td><b>静默成功</b>（建全局）</td></tr>
+            <tr><td><b>顶层 / 普通函数的 <code>this</code></b></td><td><code>object</code>（globalThis）</td></tr>
+            <tr><td><b>重复参数</b></td><td>允许</td></tr>
+            <tr><td><b><code>stripTypeScriptTypes</code> 之后</b></td><td>仍是宽松</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><span class="mono">DSH 上游</span></div>
+        <p class="cond"><code>new AsyncFunction(...globals, ..., "'use strict';\n" + data.code)(...)</code>
+          —— 明确加了 <code>'use strict'</code> 前缀。</p>
+        <table style="font-size:12.5px">
+          <tbody>
+            <tr><td><b>赋未声明变量</b></td><td><code>ReferenceError</code></td></tr>
+            <tr><td><b>顶层 / 普通函数的 <code>this</code></b></td><td><code>undefined</code></td></tr>
+            <tr><td><b>重复参数</b></td><td><b>编译期 <code>SyntaxError</code></b></td></tr>
+          </tbody>
+        </table>
+        <div class="note" style="margin-top:12px">
+          依据：<code>docs/research/upstream-20260930/01-dsh-ptc-core.md:44</code>、
+          <code>docs/research/ptc-upstream-parity-audit-20260930.md</code> 的事实表。
+          <b>但那份审计的「DSH 有 / 本项目缺」表（A1–A12）里没有记这一条</b>——是个未登记的对不齐。
+        </div>
+      </div>
+    </div>
+
+    <h3 style="font-size:16px;font-weight:600;margin:28px 0 12px">宽松模式的两处实测代价</h3>
+
+    <div class="note amber" style="margin-bottom:14px">
+      <b>2026-10-21 订正（实现票 #244 在 base commit 上复测）</b>：本页原写的两个「实测后果」被<b>复测推翻了一处、收窄了一处</b>——
+      机制是真的，但当时那两条的<b>后果被说大了</b>。下面两栏是订正后的实测事实；决策本身（强制严格）不变，理由仍然是「与上游 DSH 对齐」。
+    </div>
+
+    <div class="panels">
+      <div class="panel">
+        <div class="panel-head"><span class="mono" style="background:var(--warn-soft);color:var(--warn)">代价一 · 隐式全局真的被建出来</span></div>
+        <p class="cond">宽松模式下赋未声明变量 → 建在 <code>globalThis</code> 上，这一点是实测的（<b>own enumerable property</b>，值 42）。
+          而 worker pool 确实复用 worker（<code>worker-pool.ts</code>：warm worker 服务多次 run）。
+          <b>但</b>：ADR-0017 的 <code>startRun</code> / <code>restoreWarmBaseline</code> 会在下一次 run 之前把隐式全局删掉，
+          所以<b>今天它不会污染到下一段程序</b>——实测同一 worker 内连跑两段，run 2 读到的是 <code>undefined</code>。</p>
+        <div class="code" style="margin-top:0"><span class="cm">// 同一个 worker 上下文里连跑两个程序（base commit 实测）</span>
+run 1: leaked = "我是 run 1 漏下的"  → 成功（全局真的建出来了：own: true, value 42）
+run 2: 读得到吗 → <span class="kw">读不到</span>（warm-baseline 恢复已经把它删了）</div>
+        <p class="cond" style="margin-top:10px">严格模式把「事后被清掉」变成「<b>从不创建</b>」——清理原本由另一个机制承担，
+          而那个机制一旦漏跑，污染就会回来。</p>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><span class="mono" style="background:var(--warn-soft);color:var(--warn)">代价二 · 静默的是「写」，不是「读」</span></div>
+        <p class="cond">原页写的是「<code>results</code> 漏成 <code>result</code> → 模型拿到 <code>undefined</code>，零错误信号」。
+          <b>这一半不成立</b>：读一个未声明的名字在宽松模式下<b>本来就</b>是 <code>ReferenceError</code>（实测 <code>return results;</code> → <code>results is not defined</code>）。
+          真正静默的是<b>写</b>那一侧——给拼错的名字赋值会悄悄建一个全局。</p>
+        <div class="code" style="margin-top:0"><span class="cm">// 宽松模式实测</span>
+<span class="kw">return</span> results;        → ReferenceError（读：本来就响）
+results = 1;            → 成功（写：静默建全局，零错误信号）</div>
+        <p class="cond" style="margin-top:10px">严格模式让<b>写</b>这一侧也变响（<code>ReferenceError</code>），
+          这才是 <code>docs/testing-constraints.md</code> 第 3 条「不留静默失败」在程序语言层的落实。
+          <b>属性名打错</b>（<code>obj.results</code>）两种模式都静默——那不在严格模式的射程内。</p>
+      </div>
+    </div>
+
+    <h3 style="font-size:16px;font-weight:600;margin:28px 0 12px">决定：强制严格（改一行）</h3>
+    <div class="code"><span class="cm">// src/runtime/worker-main.ts:458</span>
+- <span class="kw">return</span> <span class="kw">new</span> Function(`${source}\n<span class="kw">return</span> ${programName}();`);
++ <span class="kw">return</span> <span class="kw">new</span> Function(`<span class="str">"use strict";</span>\n${source}\n<span class="kw">return</span> ${programName}();`);</div>
+
+    <table style="margin-top:16px">
+      <thead><tr><th style="width:34%">为什么</th><th style="width:66%">理由</th></tr></thead>
+      <tbody>
+        <tr><td><b>这是对不齐，不是偏好</b></td><td>上游 DSH 明确严格。我们不跟，就是跟已记录的上游分叉</td></tr>
+        <tr><td><b>我们跑的是 TypeScript</b></td><td>TS 编译成 module 时默认 <code>alwaysStrict</code>；用 <code>stripTypeScriptTypes</code> 等于<b>静默丢掉了 TS 默认的严格性</b>。模型（和用户）写 TS 时预期的就是严格语义</td></tr>
+        <tr><td><b>隐式全局不再被创建 + 写侧的手滑变响</b></td><td>上面两处实测事实。严格模式一次解决两个——代价一不再是「事后靠另一个机制清掉」，代价二从「只有写侧静默」变成读写都响</td></tr>
+        <tr><td><b>用户自带 <code>"use strict";</code> 不冲突</b></td><td>实测：外层加 strict 后，用户那行仍然合法（strict 里再声明是 no-op），不报错</td></tr>
+      </tbody>
+    </table>
+
+    <div class="note warn" style="margin-top:16px">
+      <b>代价（要认下来）：</b>
+      <br>① <b>破坏性变更</b>：依赖宽松语义的现有程序会开始报错——顶层 <code>this</code> 从 globalThis 变 <code>undefined</code>、隐式全局变 <code>ReferenceError</code>、重复参数变<b>编译期</b> <code>SyntaxError</code>、八进制字面量变 <code>SyntaxError</code>。
+      <br>② <b>错误路径多一类</b>（编译期 <code>SyntaxError</code>）。
+      <br>③ <b>程序内无法 opt out</b>——JS 没有 <code>"use sloppy"</code> 这个指令，所以严格化是单向的。
+      <br>归入本轮那个大 breaking release（门改名 + surface 改名 + 严格模式一起发）。
+    </div>
+
+    <div class="note" style="margin-top:12px">
+      <b>顺带（同一块地，别混）：</b>parity audit 的 <b>A8「原型污染加固」</b>我们也没有（grep intrinsics / <code>Object.create(null)</code> 命中 0）——
+      严格模式<b>不</b>解决原型污染（那要靠 A8 那套），但它少一类「往全局乱写」的事故。两件事得分开做。
+    </div>
+  </section>
+  <section id="s9">
+    <h2><span class="num">九</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      任务侧怎么流转：<strong>照 libuv —— 不拒绝，只排队</strong>
+    </h2>
+    <p class="sub">
+      子代理派发<b>不再因满员被拒</b>。满员 → <b>入队等</b>。队列是 <b>FIFO</b>、<b>无界</b>、
+      <b>无超时</b>，<b>排队中的可取消</b>——逐条照 libuv 的线程池。
+    </p>
+
+    <div class="chainwrap" style="border-color:rgba(47,111,94,.35)">
+      <div class="chainhead"><span class="mono">libuv 线程池</span><span style="font-size:12.5px;color:var(--muted)">Node 底下那个，和我们形状最像</span></div>
+      <table style="font-size:13px">
+        <thead><tr><th style="width:30%">libuv</th><th style="width:34%">我们</th><th style="width:36%">出处 / 为什么</th></tr></thead>
+        <tbody>
+          <tr><td>固定 4 线程（<code>UV_THREADPOOL_SIZE</code>，最大 1024），全局共享</td><td>固定 <b>8</b> 个并发槽，<b>session 级</b>，所有前端共用一份</td><td>libuv <code>init_threads()</code>：按上限预分配，上限封顶 1024</td></tr>
+          <tr><td><code>work_queue</code> 是<b>无界</b>链表，满了<b>从不拒绝</b></td><td>待准入队列<b>无界</b>，满了排队等</td><td>「If fifty tasks arrive, forty-six wait.」——业界没有一家在满员时拒绝</td></tr>
+          <tr><td>FIFO（worker 从队首取）</td><td>FIFO</td><td>libuv <code>work_queue</code> 是 mutex 保护的链表</td></tr>
+          <tr><td><code>uv_cancel</code>：<b>排队中的可取消</b>（出队，返回 0）；<b>已执行的返回 <code>UV_EBUSY</code></b></td><td><code>ptc_task_stop</code> 能抽掉一个还在排队的任务；已起的不行</td><td>libuv <code>threadpool.c</code>：仍排队则出队取消，已开始执行则 <code>UV_EBUSY</code></td></tr>
+          <tr><td>队列里的请求<b>无超时</b>，等到有 worker 为止</td><td>排队等待<b>无超时</b></td><td>libuv 没有排队超时这回事</td></tr>
+          <tr><td><code>uv_work_t</code> 从<b>提交起就存在</b>，队列里就挂着它</td><td>记录<b>入队即建</b>（状态 <code>queued</code>）</td><td>队列 = registry 里 <code>queued</code> 的那些 —— 队列状态与任务状态是<b>同一份数据</b></td></tr>
+          <tr><td>完成后 <code>uv_async_send</code> → <b>完成回调回到 loop 线程</b></td><td>终态写回 registry；前台调用方的 promise 在<b>宿主事件循环</b>上 resolve</td><td>libuv：<code>uv__work_done</code> 在 loop 线程回调 <code>after_work_cb</code></td></tr>
+        </tbody>
+      </table>
+      <div class="chainfoot">
+        <b>一句话：</b>干活的槽是固定的，<b>排队是常态而不是例外</b>。应用层的队列可观测、可控制、可取消——
+        这正是 p-limit 那篇说的「<b>Always queue before libuv does</b>」：排队要发生在我们这层，别藏在 runtime 里。
+      </div>
+    </div>
+
+    <h3 style="font-size:16px;font-weight:600;margin:28px 0 12px">一次建任务请求，走完它</h3>
+
+    <div class="flow" style="grid-template-columns:1fr 300px">
+      <div class="frow">
+        <div class="fmain">
+          <div class="step call">
+            <div class="t">调用 <code>tools.pi_task_ptc(...)</code> / <code>tools.pi_task_codemode(...)</code> <span class="tag">建任务</span></div>
+            <div class="d">闸门（readOnly / 深度 / agent 名）先 fail fast，然后铸 <code>taskId</code></div>
+          </div>
+        </div>
+        <div class="fside">
+          <span class="info">闸门在入队<b>之前</b>：被拒的请求不进队列、不留记录、不占槽。</span>
+        </div>
+      </div>
+
+      <div class="fconn"></div>
+
+      <div class="frow">
+        <div class="fmain">
+          <div class="node" style="border-color:rgba(47,111,94,.42);background:var(--primary-soft)">
+            <div class="t">入队 → 建记录（<code>status = "queued"</code>） <span class="tag">队列就在这里</span></div>
+            <div class="d">队列 = registry 里 <code>queued</code> 的那些记录 —— <b>队列状态与任务状态是同一份数据</b>，所以它天然可观测（<code>ptc_task_list</code> 看得见）、可取消</div>
+          </div>
+        </div>
+        <div class="fside">
+          <span class="info"><b>入队即建记录</b>，所以排队中的任务：能被 <code>ptc_task_list</code> 看见、能被 <code>ptc_task_stop</code> 抽掉。</span>
+        </div>
+      </div>
+
+      <div class="fconn"></div>
+
+      <div class="frow">
+        <div class="fmain">
+          <div class="node" style="border-color:rgba(47,111,94,.42);background:var(--primary-soft)">
+            <div class="t">等一个空槽（FIFO 排队） <span class="tag">无界 · 无超时</span></div>
+            <div class="d">8 个并发槽；<b>槽只被「跑起来的孩子」占</b>，排队的不占</div>
+          </div>
+        </div>
+        <div class="fside">
+          <span class="ref"><b>满了不拒绝</b>——这是本轮改掉的旧行为（ADR-0016 §2 / ADR-0022 §9 明写「deliberately no waiter queue」）。<b>要写 ADR 修订。</b></span>
+        </div>
+      </div>
+
+      <div class="fconn"></div>
+
+      <div class="frow">
+        <div class="fmain">
+          <div class="node">
+            <div class="t">出队 → 占槽 → 记录转 <code>running</code> → 起进程 <span class="tag">子代理起来了</span></div>
+            <div class="d">TMPDIR 写提示词文件 → <code>buildArgv</code> → spawn</div>
+          </div>
+        </div>
+        <div class="fside">
+          <span class="info">完成回调回到<b>事件循环线程</b>：终态写回 registry，前台调用方的 promise 在宿主事件循环上 resolve。</span>
+        </div>
+      </div>
+
+      <div class="fspread"><div class="vline"></div><div class="hbar"></div></div>
+
+      <div class="fcols">
+        <div class="fcol">
+          <div class="drop"></div>
+          <p class="head">等 · <code>wait: true</code></p>
+          <div class="step out">
+            <div class="t">等它跑完 → 写回记录 + 产出落盘</div>
+            <div class="d">等</div>
+          </div>
+          <div class="conn"></div>
+          <div class="step out">
+            <div class="t">返回「结果 + taskId」</div>
+            <div class="d"><code>DispatchResult</code>：<code>text</code> / <code>status</code> / <code>started</code> / <code>usage</code> / <code>report</code> / <code>taskId</code> …</div>
+          </div>
+          <div class="conn"></div>
+          <div class="step" style="border-color:rgba(176,99,103,.42);background:var(--warn-soft)">
+            <div class="t">程序 abort（2 分钟 <code>timeoutMs</code>）→ <b>取消还在排队的请求</b></div>
+            <div class="d">libuv <code>uv_cancel</code> 语义 —— 前台队列的天然界</div>
+          </div>
+        </div>
+
+        <div class="fcol">
+          <div class="drop"></div>
+          <p class="head bg">不等 · <code>wait</code> 缺省 / false（libuv 回调式）</p>
+          <div class="step out">
+            <div class="t"><b>立刻</b>返回 handle，<b>不等槽</b></div>
+            <div class="d">不等 —— 孩子等槽排到时才真的起；完成时<b>通知回到父会话</b></div>
+          </div>
+          <div class="conn"></div>
+          <div class="step out">
+            <div class="t">返回 handle（含 taskId）</div>
+            <div class="d"><code>DispatchHandle { taskId, label, status: "running" }</code>；pump 驱动终态 → 写回记录 + 产出落盘</div>
+          </div>
+          <div class="conn"></div>
+          <div class="step" style="border-color:rgba(176,99,103,.42);background:var(--warn-soft)">
+            <div class="t">libuv 没这个形状</div>
+            <div class="d">libuv 每个 work item 的调用方都 await 它；我们是 fire-and-forget，所以不能让它阻塞在队列上</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="fmerge"><div class="hbar"></div><div class="vline"></div></div>
+
+      <div class="frow">
+        <div class="fmain">
+          <div class="step out">
+            <div class="t">模型拿到结果 <span class="tag">返回</span></div>
+            <div class="d">两个 surface 同形——换 surface 只换一个入口名字</div>
+          </div>
+        </div>
+        <div class="fside">
+          <span class="ref">并行一律 <code>Promise.allSettled</code>：<b>没有「因为忙而失败」这一类结果了</b>——满员只会让请求排一会儿。</span>
+        </div>
+      </div>
+    </div>
+
+    <h3 style="font-size:16px;font-weight:600;margin:28px 0 12px">取消：只对还没开始的生效</h3>
+    <div class="panels">
+      <div class="panel">
+        <div class="panel-head"><span class="mono" style="background:var(--primary-soft);color:var(--primary)">排队中</span></div>
+        <p class="cond">记录状态 <code>queued</code>，还没起进程。</p>
+        <div class="node" style="border-color:rgba(47,111,94,.42);background:var(--primary-soft)">
+          <div class="t">可取消</div>
+          <div class="d"><code>ptc_task_stop</code> 把它从队列里抽掉，标记已取消 —— libuv <code>uv_cancel</code> 返回 0</div>
+        </div>
+        <div class="note" style="margin-top:14px">
+          <b>这也让 <code>/ptc off</code> 有了确定的语义</b>：停收新的 + 抽掉排队中的（cancel）+ 在跑的照常（libuv：<code>UV_EBUSY</code>，取消不了）。
+          和 ADR-0050 现在那句「在跑的不受影响」完全吻合。
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="mono" style="background:var(--warn-soft);color:var(--warn)">已起</span></div>
+        <p class="cond">记录状态 <code>running</code>，进程已经在了。</p>
+        <div class="node" style="border-color:rgba(176,99,103,.42);background:var(--warn-soft)">
+          <div class="t">取消不了</div>
+          <div class="d">走 SIGTERM → 宽限 → SIGKILL 的阶梯 —— libuv 的 <code>UV_EBUSY</code></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="note warn" style="margin-top:18px">
+      <b>已知取舍（本轮明确接受）：队列无界。</b>
+      libuv 的队列无界，前提是它的生产者<b>天然有界</b>（外部 HTTP 请求流）；我们的后台生产者是一个能循环调用的程序，
+      而今天 cap-8 白送了「最多 8 个后台孩子」这个界——改成无界队列后这个界就没了。
+      <br>前台的界是程序自己的 2 分钟 <code>timeoutMs</code>（abort → 取消排队中的）。<b>后台没有</b>。
+      这是纯 libuv 的代价，记进 ADR 的「已知取舍」里。
+    </div>
+  </section>
+
+  <section id="s10">
+    <h2><span class="num">十</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      决策全部走完
+    </h2>
+
+    <p class="sub">grill 的决策树走空了，没有遗留分叉。逐条记在这里，供 spec 引用。</p>
+
+    <table>
+      <thead><tr><th style="width:6%"></th><th style="width:40%">定了什么</th><th style="width:54%">为什么</th></tr></thead>
+      <tbody>
+        <tr><td><b>1</b></td><td>surface 值改名：<code>full</code> → <code>full_ptc</code>、<code>subagents</code> → <code>codemode_ptc</code></td><td>surface 的定义改成「<b>哪个编排器对模型负责</b>」。旧的那对名字说的是「注册了什么」，新的说的是「谁在编排」——后者才是模型面对的问题。<code>subagent</code> 这个词也从此不出现在 surface 词汇里（GLOSSARY 本来就标它 overloaded）</td></tr>
+        <tr><td><b>2</b></td><td>模型面只调「建任务」：<code>pi_task_ptc</code> / <code>pi_task_codemode</code></td><td><b>模型面前不出现 <code>dispatch</code> 这个词</b>——派发降为内部实现。两个入口同名同形（共享前缀 + 后缀说 surface），换 surface 只换一个名字</td></tr>
+        <tr><td><b>3</b></td><td>每个派发都先建一条任务记录（<b>前台也建</b>）</td><td>registry 成为派发的<b>唯一痕迹</b>。前台今天纯内存，模型回头查不了一个前台孩子的报告；统一后两个口径一样</td></tr>
+        <tr><td><b>4</b></td><td>前台也落盘 <code>output.log</code>；前台任务跑完<b>记录还留着</b></td><td>不然「任务链是派发的唯一痕迹」破一个口子。<code>ptc_task_list</code> 默认只列在飞的 + 最近的已完成的</td></tr>
+        <tr><td><b>5</b></td><td>lifecycle face：<b>有任务记录就可见</b></td><td>它是任务链唯一的模型面——可见性成了任务的<b>后果</b>，不再是独立的开关规则</td></tr>
+        <tr><td><b>6</b></td><td>建任务入口<b>直接返回结果 + 也给 taskId</b></td><td><code>full_ptc</code> 的 PTC 程序里只有 binding 可用（读不到 <code>ptc_task_output</code>），所以那一侧必须直接给结果；两个 surface 同形</td></tr>
+        <tr><td><b>7</b></td><td>失败时<b>两个入口都不抛</b></td><td>拒绝是「闸门说不行」不是「调用失败」，用 <code>status: "rejected"</code> + <code>errorMessage</code> 承载。ADR-0024 的 binding contract 已钉住「never throws，read <code>status</code>」</td></tr>
+        <tr><td><b>8</b></td><td>等与不等是<b>一条路径</b>，分叉只在最后的「等不等」</td><td>闸门、铸 id、占槽、建记录全共享；不等场景那两条专用拒绝文案改成<b>按 <code>wait</code> 参数生成</b></td></tr>
+        <tr><td><b>9</b></td><td>建任务入口在两个 surface 上<b>都撤得走</b></td><td>codemode 侧：同名重注册 <code>exposure: "hidden"</code>（pi 自己的 MCP extension 就这么干）；PTC 侧：撤掉 PTC 程序即不可达</td></tr>
+        <tr><td><b>10</b></td><td><code>/ptc off</code> 改成<b>截断</b>：<code>full_ptc</code> 撤编排层，<code>codemode_ptc</code> 撤 codemode 底下那一段</td><td>截断点落在<b>本包能控制的那一段</b>的起点。两个 surface 位置不同，是因为我们撤不掉 pi 的 codemode</td></tr>
+        <tr><td><b>11</b></td><td>硬改名，<b>不保留别名</b></td><td>保留 <code>pi.dispatch</code> 等于「同一个东西两个名字」——那正是这轮要消灭的毛病。ADR + CHANGELOG 明写破坏性变更</td></tr>
+        <tr><td><b>12</b></td><td>并行一律 <code>Promise.allSettled</code></td><td>硬失败（参数错、工具错）两条路都 reject；<code>Promise.all</code> 会在第一个 reject 时把兄弟的结果一起丢掉</td></tr>
+        <tr><td><b>13</b></td><td>子代理派发<b>照 libuv：满了不拒绝，排队等</b></td><td>libuv 的 <code>work_queue</code> 是无界链表，「If fifty tasks arrive, forty-six wait」——业界没有一家在满员时拒绝。推翻 ADR-0016 §2 / ADR-0022 §9 的「deliberately no waiter queue」，<b>要写 ADR 修订</b>（理由：前台调用方本来就要等孩子跑完，排队不是新增成本）</td></tr>
+        <tr><td><b>14</b></td><td>队列：<b>FIFO · 无界 · 无超时</b>；<b>入队即建记录</b>（状态 <code>queued</code>）</td><td>队列 = registry 里 <code>queued</code> 的那些 —— 队列状态与任务状态是同一份数据，所以天然可观测（<code>ptc_task_list</code> 看得见）、可取消</td></tr>
+        <tr><td><b>15</b></td><td>取消<b>只对排队中的</b>生效（libuv <code>uv_cancel</code>）</td><td>排队中的：<code>ptc_task_stop</code> 抽掉它；已起的：<code>UV_EBUSY</code>，走 SIGTERM 阶梯。这也给了 <code>/ptc off</code> 确定的语义：停收新的 + 抽掉排队中的 + 在跑的照常（与 ADR-0050「在跑的不受影响」吻合）</td></tr>
+        <tr><td><b>16</b></td><td>不等的派发<b>立刻返回 handle，不等槽</b></td><td>libuv 每个 work item 的调用方都 await 它；我们是 fire-and-forget，让它阻塞在队列上就不「不等」了。孩子等槽排到时才真的起；<b>槽只被「跑起来的孩子」占</b></td></tr>
+        <tr><td><b>18</b></td><td>「等不等」用<b>一个入口 + <code>wait</code> 参数</b>（默认 <code>false</code> = 不等）</td><td>跨边界时 tokio/Python 那一路（句柄 + 调用方 <code>await</code>）做不出来——句柄里的 promise 带不回来（codemode 那侧返回值是结构化数据，promise 根本传不回来）。剩下的只有「参数」和「两个入口」，而两个入口 = 2 门 × 2 等法 = <b>4 个名字</b>，模型调用表翻倍。参数形态下参数语义取 Kotlin 的判据：「<b>这个调用点需要结果吗</b>」。<b>代价</b>：返回形状随参数变，模型可能以为要结果却拿到 handle——Kotlin 管这叫「await 遗忘综合征」，靠静态检查 + CI 规则兜；我们靠描述文案 + handle 里的明写 + <code>ptc_task_output</code> 兜</td></tr>
+        <tr><td><b>19</b></td><td>「等」的返回形状 = <b>原始 <code>DispatchResult</code> / <code>DispatchHandle</code></b></td><td>与已定的一致：两个门给同一个对象，现有 PTC 程序读的字段一个不少。不引入统一信封（那会多一层嵌套）</td></tr>
+        <tr><td><b>20</b></td><td>路由文案<b>收编到一个类型化 route registry</b>，它持<b>全部</b> model-facing 散文（F1=②）：两个区——<code>ROUTES</code>（一行 = 一条「路」，F2）· <code>TOOLS</code>（一行 = 一个工具的事实）</td><td>散文只在一个文件里 → <b>「同一句话写在两个地方」结构上不可能发生</b>。渲染出三个消费者：路由表 section（按 surface，复用 <code>&lt;ptc&gt;</code>，F3）· 工具 description（事实段 + 从 ROUTES 派生的「什么时候用我」）· Guidelines/snippet。留在外面：参数 schema（连它的 description）· 实现 · renderers · <b>动态</b>的绑定清单（会话内注入）· binding contract（另一个问题、已有自己的 ADR 与预算）</td></tr>
+        <tr><td><b>21</b></td><td>强制点：<b>六条机械</b>（工具→行 · 行→工具 · route 集完整 · 渲染 token 预算 · 每行事实段非空 · <b>工具的 description/guidelines/snippet 必须是 registry 的调用</b>）+ <b>一条约定</b>（「散文」与「形状」的边界：参数 schema 连 description 留在工具文件）</td><td>前五条照搬 ADR-0024 binding contract 的双向覆盖测试形状，已经在这个仓库里；第 6 条是 F1=② 的兑现点（漂移的口子被结构堵死）；第 7 条是唯一的软点，写明在案</td></tr>
+        <tr><td><b>22</b></td><td>今天四个通道全部退役：<code>&lt;ptc&gt;</code> section <b>升级</b>成路由表 · description 选路句搬进 registry · Guidelines 拆开 · <code>[PTC MODE ACTIVE]</code> 拆开（只有动态的绑定清单留下）· binding reach note 退役（新模型下那条约束不存在了）</td><td>「子代理不会直接触发、codemode 脚本够不到 <code>pi.dispatch</code>」这条 2026-10-20 的实测教训，在新模型下<b>不再成立</b>——门是 codemode 可达的工具，不是 binding</td></tr>
+        <tr><td><b>23</b></td><td>路由表<b>两层</b>：常驻索引（每条路<b>一行</b> hook + detail 指针）+ <b>随包详情文件</b>（模型 read）</td><td>照搬 <code>@tylerho/pi-memory</code> 的 <code>MEMORY.md</code> 形状：「索引条目一行一条，详情永远不在索引里」。常驻 context 因此可控——模型看到的只是「有哪些路、什么时候走它、细节在哪」</td></tr>
+        <tr><td><b>24</b></td><td><code>docs/usage/</code> 与 <code>docs/routes/</code> <b>进 npm 包</b>（<code>files</code> 加进去）</td><td>detail 指针必须能解到<b>用户机器上</b>的文件。今天 <code>docs/</code> 不在包里，那个指针是<b>悬空的</b>——装了包的用户读不到</td></tr>
+        <tr><td><b>25</b></td><td>索引<b>每 turn 字节相同</b>；超预算要<b>明说</b>（<code>&gt; WARNING:</code> 那种），不静默截断</td><td>pi-memory 明说「changing the system prompt mid-session invalidates the cached prefix」——索引只在 session_start / session_compact 刷新。它的截断警告原文就是「Keep index entries to one line under ~200 chars; move detail into topic files」</td></tr>
+        <tr><td><b>26</b></td><td>PTC 程序<b>强制严格模式</b>（与上游 DSH 对齐）</td><td>现状是宽松（<code>new Function</code> 的 body 默认 sloppy），而 DSH 明确加了 <code>'use strict';</code> 前缀——<b>这是对不齐不是偏好</b>。我们跑的是 TypeScript（<code>stripTypeScriptTypes</code> 等于静默丢掉 TS 默认的 <code>alwaysStrict</code>）；实测两处代价（<b>2026-10-21 实现票 #244 复测订正</b>：机制为真，但后果当时被说大了）：<b>隐式全局真的被建出来</b>（own enumerable property；不过 warm-baseline 恢复会在下一次 run 前把它删掉，所以今天并不污染到下一段程序）· <b>写侧的手滑静默成功</b>（<b>读</b>一个未声明的名字在宽松下<b>本来就</b>是 ReferenceError——静默的是给拼错的名字<b>赋值</b>那一侧）。改一行：<code>new Function</code> 的 body 开头加 <code>"use strict";</code>。代价：破坏性变更（顶层 <code>this</code> 变 undefined、隐式全局变 ReferenceError、重复参数变编译期 SyntaxError），且程序内无法 opt out</td></tr>
+        <tr><td><b>17</b></td><td>前台程序 abort → <b>取消还在排队的请求</b></td><td>libuv 的 <code>uv_cancel</code> 语义。这也是前台队列的天然界：程序 2 分钟 <code>timeoutMs</code> 一过，排队中的全被抽掉</td></tr>
+      </tbody>
+    </table>
+
+    <div class="note" style="margin-top:18px">
+      <b>路由文案收编也在本轮范围内</b>（原始需求的后一半）：方案在第三节——类型化 route registry
+      持全部 model-facing 散文 + 两层输出（常驻索引 + 随包详情文件）+ 八条机械强制点。
+      第二节那张散落地图上的四个通道，今天全部退役。
+    </div>
+  </section>
+
+  <hr class="rule" />
+
+  <!-- ============ 范围 ============ -->
+  <section>
+    <h2>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      本次范围
+    </h2>
+    <div class="scope">
+      <div class="sc in">
+        <div class="h">✓ 本次做</div>
+        <ul>
+          <li>surface 值改名 <code>full</code> → <code>full_ptc</code>、<code>subagents</code> → <code>codemode_ptc</code></li>
+          <li>surface 的定义改成「<b>哪个编排器对模型负责</b>」</li>
+          <li>两个入口改名：<code>pi.dispatch</code> → <code>pi_task_ptc</code>、<code>ptc_subagent</code> → <code>pi_task_codemode</code></li>
+          <li><code>pi_task_codemode</code> 的 exposure 改成 <code>codemode</code>（模型看不见，只能从脚本调）</li>
+          <li><code>pi_task_ptc</code> 只在 <code>full_ptc</code> 的 PTC 程序里绑定</li>
+          <li>两个入口返回同一对象、同一失败语义（都不抛）</li>
+          <li><b>统一到任务链</b>：每个派发都先建记录（含前台）；前台也落盘产出；记录跑完还留着</li>
+          <li>lifecycle face 可见性改成「有任务记录就可见」</li>
+          <li>建任务入口在两个 surface 上都能撤走（<code>exposure: "hidden"</code> 重注册 / 撤 PTC 程序）</li>
+          <li><b><code>/ptc off</code> 改成截断</b>：full_ptc 撤编排层，codemode_ptc 撤 codemode 底下那一段</li>
+          <li>子代理派发改成<b>排队</b>（libuv 模型）：无界 FIFO 队列、入队即建记录、取消只对排队中的生效、<code>wait</code> 默认 false（不等）→ 立刻返回 handle、前台 abort 取消排队中的</li>
+          <li><code>background</code> 参数改名 <code>wait</code>，默认值翻转为「不等」；<code>TaskStatus</code> 加 <code>queued</code>（<code>DispatchHandle.status</code> 今天恒说 "running"，新模型下刚入队的是 <code>queued</code>）</li>
+          <li>路由文案收编：类型化 route registry（持全部 model-facing 散文，两个区 ROUTES/TOOLS）+ <b>两层输出</b>（常驻索引 + 随包详情文件）+ 八条机械强制点；今天四个通道退役</li>
+          <li><code>docs/usage/</code> 与 <code>docs/routes/</code> 进 npm 包（detail 指针不再是悬空的）</li>
+          <li><b>PTC 程序强制严格模式</b>（<code>new Function</code> body 开头加 <code>"use strict";</code>）——与上游 DSH 对齐</li>
+          <li>GLOSSARY / ADR / CHANGELOG / usage 文档同步</li>
+        </ul>
+        <div class="why">改完，两个 surface 的「怎么派子代理」是同一件事的两种写法——模型换 surface 不用改调用代码。</div>
+      </div>
+
+      <div class="sc out">
+        <div class="h">— 本次不做</div>
+        <ul>
+          <li>ADR-0024 binding contract 的<b>整体</b>形状调整（只改 dispatch 那一条 note 的名字）</li>
+        </ul>
+        <div class="why">binding contract 回答的是「调了得到什么形状」，registry 回答的是「什么时候调、调的是什么」——两个问题不重叠，所以它保留自己的一套单点持有 + 双向覆盖 + token 预算。</div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    事实来源：<code>src/index.ts</code>（<code>exitMode()</code> 恢复的是 narrowing 之前的 loadout、注册与 exposure）、
+    <code>src/runtime/dispatch.ts</code>（<code>dispatch()</code> 闸门顺序、<code>dispatchBackground()</code>、<code>DispatchResult</code> / <code>DispatchHandle</code>、六个拒绝工厂）、
+    <code>src/runtime/bindings.ts</code>（<code>DISPATCH_PARAMETERS</code>、<code>includeDispatch</code>）、
+    <code>src/tools/subagent.ts</code>（两个门共用 <code>dispatch()</code>、<code>outputSchema</code>、拒绝时 throw）、
+    <code>src/tools/ptc-task.ts</code>（lifecycle face 三个工具）、
+    <code>src/mode/ptc-mode.ts:57</code>（<code>PTC_MODE_TOOL_NAMES</code> → narrowing mode 在 codemode surface 进不去）、
+    pi 1.3.0 的 <code>docs/extensions.md</code>（exposure 语义）、<code>docs/codemode.md</code>（outputSchema 优先于文本块、工具名→JS 标识符映射）。
+  </footer>
+
+</div>
+</body>
+</html>
