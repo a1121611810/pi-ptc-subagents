@@ -804,7 +804,7 @@ export interface PtcTaskStopDetails {
   task: TaskRecord;
   /**
    * ADR-0022 §8: the status observed before the stop command. `running` for a fresh stop,
-   * `stopping` for the idempotent late-arrival path.
+   * `stopping` for the idempotent late-arrival path, `queued` for a withdrawn one (ADR-0057).
    */
   fromStatus: TaskStatus;
 }
@@ -875,7 +875,7 @@ export function createPtcTaskStopTool(
       TASK_STOP_SEMANTICS,
       "The call is idempotent when the task is already stopping, and errors when the task is already terminal.",
     ].join("\n"),
-    promptSnippet: "Ask a background task to stop (dispatcher delivers the signal)",
+    promptSnippet: "Ask a task to stop (queued: withdrawn, running: signaled)",
     promptGuidelines: [...PTC_TASK_TOOL_GUIDELINES],
     parameters: STOP_PARAMETERS,
     outputSchema: STOP_OUTPUT_SCHEMA,
