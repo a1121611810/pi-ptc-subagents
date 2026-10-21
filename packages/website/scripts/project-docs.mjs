@@ -2,10 +2,10 @@
 /**
  * Project the repository's documentation onto the site.
  *
- * The four documents this publishes are read from the repository at build time
+ * The five documents this publishes are read from the repository at build time
  * and written into the site's source tree, which is gitignored. There is no
  * committed copy and nothing to keep in sync: the only way to change what the
- * site says about `pi.dispatch` is to edit `docs/usage/bgdispatch.md`.
+ * site says about `pi_task_ptc` is to edit `docs/usage/bgdispatch.md`.
  *
  * A copy that someone edits is the failure this replaces. Two documents that
  * say almost the same thing do not stay almost the same thing.

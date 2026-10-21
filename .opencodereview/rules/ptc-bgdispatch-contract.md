@@ -5,19 +5,26 @@
 `src/runtime/dispatch.ts` / `src/runtime/dispatcher.ts` / `src/tools/ptc-task.ts` /
 `src/tools/task-panel-render.ts`(模式由 `.opencodereview/rule.json` 锚定)。
 
-规范来源: ADR-0022(后台派发)`docs/adr/0022-background-dispatch.md`、ADR-0016(`pi.dispatch` binding)、
-ADR-0015(截断契约)、`GLOSSARY.md` 词条(background dispatch / TaskRecord / TaskStatus / TaskRegistry /
+规范来源: ADR-0022(后台派发)`docs/adr/0022-background-dispatch.md`、ADR-0016(`pi_task_ptc` binding)、
+ADR-0056(准入排队,不再拒绝)、ADR-0057(取消只对排队中的生效)、ADR-0015(截断契约)、
+`GLOSSARY.md` 词条(background dispatch / TaskRecord / TaskStatus / TaskRegistry /
 Subscription / DispatchHandle / `ptc_task_*` / `<bg-task-notification>`)。
 
-## 状态机(ADR-0022 §2)
+## 状态机(ADR-0022 §2,经 ADR-0056 / ADR-0057 修订)
 
-    running ──┬─► stopping ──► succeeded | failed | canceled
-              ├─► succeeded
-              ├─► failed
-              ├─► canceled
-              └─► lost(必须带 LostReason)
+    queued  ──┬─► running ──┬─► stopping ──► succeeded | failed | canceled
+              │             ├─► succeeded
+              │             ├─► failed
+              │             ├─► canceled
+              │             └─► lost(必须带 LostReason)
+              ├─► canceled(撤回:还没起进程,没有信号可发)
+              └─► lost(会话没了,还在排队)
 
-- `queued` 不存在:并发上限是"硬拒",没有任务内队列。
+- `queued` 存在:并发上限满了**进队列等,不拒绝**(ADR-0056)。队列 = registry 里 `queued` 的那些
+  记录 —— **队列状态与任务状态是同一份数据**,不是一个平行的账;入队即建记录。
+- 队列 FIFO、无界、无超时;**槽只被跑起来的孩子占**,排队中的不占(它还没有进程)。
+- `queued -> canceled` 是**撤回**而不是停止:被抽掉的那个任务**永远不起进程**,所以它不走信号阶梯
+  (ADR-0057)。模型 stop、前台程序中止、`/ptc off` 三条路都走这一条边。
 - 终态不可再迁移(`succeeded/failed/canceled/lost` 无出边)。
 
 ## 必查
@@ -25,6 +32,8 @@ Subscription / DispatchHandle / `ptc_task_*` / `<bg-task-notification>`)。
 1. **迁移守卫**:每条边都必须显式列在迁移表里;表外的边必须报错(显式错误状态或抛出),不得静默忽略。
    `-> lost` 必须携带 LostReason(`session_ended_while_running` / `user_killed_via_esc` /
    `lost_on_session_restart`);无 reason 的 lost 是阻塞项。
+   `queued -> canceled` 走**撤回**路径:先写终态,再把任务从队列里抽掉并叫醒排队的一方
+   (ADR-0057 决定 3/4);把它实现成"改了状态但还在队列里"是阻塞项。
    **注意 v1 的可达性**:pi 扩展 API 只暴露两个可写 reason——`session_shutdown` 的 reason 枚举是
    `quit | reload | new | resume | fork`(无 Esc/abort 成员),`agent_end` 不带 stop reason,因此 **v1 生产只写
    `session_ended_while_running` 与 `lost_on_session_restart`**,`user_killed_via_esc` 是保留值(ADR-0022 §8
@@ -49,16 +58,22 @@ Subscription / DispatchHandle / `ptc_task_*` / `<bg-task-notification>`)。
 8. **持久化**:`TaskStorage` 的每个 IO 边界成功/失败双路径都要有明确结果——损坏记录必须抛显式错误,
    不得当作 `null`(absent)返回。写入用临时文件 + rename 之类的原子手法。启动 reconcile 必须被生产调用,
    否则"重启后如实 lost"不成立。
-9. **常开注册**:三个 `ptc_task_*` 工具必须通过 `pi.registerTool` 注册,且在 `/ptc` 模式 loadout 之外(`surfaceMode: off` 是唯一例外,见 ADR-0025 决策 5)
-   ——`/ptc off` 只挡新 spawn,不得让在途任务失管。生产代码里搜不到注册点 = 阻塞项。
+9. **常开注册**:三个 `ptc_task_*` 工具必须通过 `pi.registerTool` 注册,且在 `/ptc` 模式 loadout 之外
+   —— `/ptc off` 是**截断**(停收新的 + 抽掉排队中的 + 在跑的照常,ADR-0057 决定 6),不得让在途任务失管。
+   **模型面前的露面条件是"这个会话有没有任务记录",不是"有几个在飞"**(ADR-0053 决定 4 /
+   ADR-0057 决定 7):`src/index.ts` 问的是 `registry.taskFaceVisible()`;按在飞数判断的实现是阻塞项。
+   生产代码里搜不到注册点 = 阻塞项。
 10. **投递与唤醒**:终态必须经同一管线投递给模型;idle 唤醒通道要符合 R2 实测(`agent_settled` 边界,
     扩展工厂体内禁调 `pi.*`)。一个唤醒 handler 抛异常不得中断其余 handler。
-11. **并发额度**:后台任务在 running 期间占用 `dispatchConcurrency`;额度必须是会话级(或显式注入的)
-    计数器,不得每 run 重建导致跨程序失效;宿主注入的计数器不得被默认值覆盖。
+11. **并发额度**:并发上限(default 8)只被**跑起来的孩子**占;排队中的不占槽(ADR-0056 决定 3)。
+    额度必须是会话级(或显式注入的)计数器,不得每 run 重建导致跨程序失效;宿主注入的计数器不得被默认值覆盖。
+    满了**进队列等**,从不拒绝(ADR-0056):任何"并发满员即拒绝"的实现都是阻塞项。
 
 ## 阻塞触发
 
 - 状态迁移无守卫 / `lost` 无 reason / 终态 read-then-write 竞争 → PR 阻塞。
+- 并发满员即拒绝(应当进队列等,ADR-0056)/ `queued` 状态或 `queued -> canceled` 边被删掉 → PR 阻塞。
+- 生命周期面按在飞数判断(应当按任务记录,ADR-0053 / ADR-0057) → PR 阻塞。
 - stop 路径不投递信号 / 信号阶梯缺 grace 或缺 SIGKILL / teardown 会挂起 → PR 阻塞。
 - 通知静默截断 / preview 上限非单源 / 事件在切分中丢失 / XML 未转义 → PR 阻塞。
 - 损坏记录被当作 absent 静默成功 / 持久化失败被吞 → PR 阻塞。
