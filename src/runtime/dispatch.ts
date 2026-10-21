@@ -629,7 +629,7 @@ export function isUsableReadOnlyRequest(readOnly: unknown): boolean {
  *
  * A `DispatchResult`, never a throw: ADR-0016 §3 requires the binding never throws, and
  * `dispatch()` is the binding's implementation. `started: false` puts it in the sub-call tree's
- * `rejected` bucket (the harness said no), beside the depth and concurrency gates rather than
+ * `rejected` bucket (the harness said no), beside the depth gate rather than
  * beside a child that ran and failed.
  *
  * The message names the parameter, the value it received and the values it accepts, because the
@@ -756,7 +756,7 @@ export interface DispatchResult {
    * Whether the child pi process was actually brought up.
    *
    * `status: "rejected"` covers two very different things — the harness declining to start
-   * (depth gate, concurrency gate, unknown agent, a spawn that never happened) and a child that
+   * (depth gate, unknown agent, a spawn that never happened) and a child that
    * ran and failed. The sub-call
    * tree colours the first `rejected` (the harness said no) and the second `error` (the work
    * failed), so it needs the distinction rather than inferring it from `status` alone.
@@ -3122,7 +3122,7 @@ async function driveChildToTerminal(params: ChildDriveParams): Promise<DispatchR
         stderrDiagnostic = exitCode === 0 ? undefined : truncationFailureMessage(stderrText);
 
         // A failed spawn (ENOENT and friends) never brought a child up, so it is a refusal like
-        // the depth and concurrency gates -- `started: false` is what keeps it out of the
+        // the depth gate -- `started: false` is what keeps it out of the
         // sub-call tree's `error` bucket. The adapter marks the stderr with
         // `[spawn-error] <message>` (same convention as the pre-BG-03 dispatch code).
         const spawnErrMatch = stderrText.match(/^\[spawn-error\] (.+)$/m);
