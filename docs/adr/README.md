@@ -2,64 +2,64 @@
 
 ADRs for pi-ptc-subagents, per `docs/agents/domain.md` (single-context repo).
 
-| #                                                                | Decision                                                                                                      | Status                |
-| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | --------------------- |
-| 0001                                                             | (reserved — dropped: `agent()` stub shape; G1 #13 chose no stub, so no ADR)                                   | —                     |
-| [0002](./0002-source-strategy.md)                                | Source strategy: clean-room rewrite                                                                           | accepted              |
-| [0003](./0003-max-output-bytes.md)                               | PTC output budget: 64 MiB, matching DSH                                                                       | accepted              |
-| [0004](./0004-max-pending-calls.md)                              | `maxPendingCalls`: 128, matching DSH                                                                          | accepted              |
-| [0005](./0005-ptc-execution-boundary.md)                         | Execution boundary: `worker_threads` + F1–F4; direct binding execution                                        | accepted              |
-| 0006                                                             | (reserved — dropped: subagent seam; same G1 #13 decision)                                                     | —                     |
-| [0007](./0007-no-os-sandbox.md)                                  | No OS sandbox: inherited risk, stated plainly                                                                 | accepted              |
-| [0008](./0008-vite-plus-and-pnpm.md)                             | Toolchain: adopt `vite-plus` (`vp`) and `pnpm`, staged                                                        | accepted              |
-| [0009](./0009-vitest-adoption.md)                                | Test runner: adopt Vitest 4, retire `node --test`                                                             | accepted              |
-| [0010](./0010-ptc-default-mode.md)                               | PTC default mode: narrow the loadout, snapshot the bindings                                                   | accepted              |
-| [0011](./0011-ptc-mode-restores-skills.md)                       | PTC mode restores the skills section pi withholds                                                             | accepted              |
-| [0012](./0012-model-facing-result-text.md)                       | Model-facing tool-result text: clean it, lay it out for reading                                               | accepted              |
-| [0013](./0013-ptc-row-compact-summary.md)                        | PTC row: one call line + one right-aligned meta line, never a payload dump                                    | accepted              |
-| [0014](./0014-image-hoisting.md)                                 | Image-bearing tool results: hoist them onto the PTC tool result                                               | accepted              |
-| [0015](./0015-pi-truncation-contract.md)                         | Model-facing text: adopt pi's truncation contract (50 KB / 2000 lines)                                        | accepted              |
-| [0016](./0016-ptc-dispatch-binding.md)                           | pi.dispatch binding: PTC programs may explicitly fan out to per-call pi sessions                              | accepted              |
-| [0017](./0017-ptc-worker-pool-and-image-wire-shape.md)           | Worker pool per turn; hoisted images stay base64 (no transferList)                                            | accepted              |
-| [0018](./0018-release-path-oidc-publishing.md)                   | Release path: tag-triggered OIDC publishing (no provenance while private)                                     | accepted              |
-| [0019](./0019-minify-and-source-map-exclusion.md)                | Build pipeline: enable minification + exclude source maps from npm tarball                                    | accepted              |
-| [0020](./0020-ptc-row-pulse.md)                                  | PTC partial-state render: DSH TextShimmer (moving highlight band)                                             | accepted              |
-| [0021](./0021-ptc-sub-call-tree.md)                              | PTC sub-call tree: always visible, dispatcher-tracked, capped at 32                                           | accepted              |
-| [0022](./0022-background-dispatch.md)                            | Background dispatch: long-lived children + model-visible `ptc_task_*` lifecycle                               | accepted              |
-| [0023](./0023-background-task-ownership.md)                      | Background task ownership: owner-tagged records, owner-scoped reaping                                         | accepted              |
-| [0024](./0024-binding-contract-declares-binding-result.md)       | Binding contract: tool descriptions declare what a binding call resolves to                                   | accepted              |
-| [0025](./0025-extension-surface-is-a-setting.md)                 | Extension surface is a setting: `off` / `subagents` / `full`                                                  | **withdrawn** by 0034 |
-| [0026](./0026-surface-default-is-detected.md)                    | The surface default is detected from the pi that loaded us                                                    | accepted              |
-| [0027](./0027-codemode-switch-decides-surface.md)                | The detected surface follows whether pi will LOAD codemode, not whether it ships it                           | accepted              |
-| [0028](./0028-structured-results-for-codemode.md)                | Model-facing tools declare a structured result for codemode — a projection, not a mirror                      | accepted              |
-| [0029](./0029-surface-follows-codemode-activation.md)            | The detected surface follows whether codemode will be ACTIVE, not only whether it ships or loads              | accepted              |
-| [0030](./0030-surface-switch-reloads.md)                         | The surface is switched by writing the file and reloading, not by mutating the loadout                        | **withdrawn** by 0034 |
-| [0031](./0031-open-source-and-publish-authority.md)              | Open source: public repository, owner-only write and publish authority, verified attribution                  | accepted              |
-| [0032](./0032-child-report.md)                                   | A dispatched child returns a child report, over one of two channels, and always says which                    | accepted              |
-| [0033](./0033-mcp-auto-enable-evidence.md)                       | The detected surface reads MCP auto-enable evidence, because pi's MCP extension activates codemode at runtime | accepted              |
-| [0034](./0034-surface-is-detected-not-set.md)                    | The surface is detected only: the `surfaceMode` key and its `off` value are removed                           | accepted              |
-| [0035](./0035-ask-pi-for-the-loadout.md)                         | Surface detection asks pi for the loadout; only the MCP axis stays a file-side read                           | accepted              |
-| [0036](./0036-site-excluded-from-root-gate.md)                   | The site is excluded from the repository's root lint and format gate                                          | accepted              |
-| [0037](./0037-project-documents-dont-copy-them.md)               | The site projects the repository's documents; it stores no copies                                             | accepted              |
-| [0038](./0038-publish-site-on-main-not-tags.md)                  | The site is published on every push to `main`, not on release tags                                            | accepted              |
-| [0039](./0039-an-omitted-agent-dispatches-a-generalist.md)       | An omitted `agent` dispatches a generalist child; the package ships no preset                                 | accepted              |
-| [0040](./0040-bash-is-an-opt-in-binding.md)                      | `bash` stays a known binding and leaves the default surface; an install opts it back in                       | accepted              |
-| [0041](./0041-read-only-is-a-call-site-tier.md)                  | A read-only tier is a call-site decision (`strict` / `lenient`), and a narrowing rather than a boundary       | accepted              |
-| [0042](./0042-goal-on-dispatch.md)                               | A dispatch may carry the caller's reason, as context rather than authority                                    | accepted              |
-| [0043](./0043-a-why-switch-and-a-name.md)                        | `goal` was the wrong name, and the switch that hides it fails on                                              | accepted              |
-| [0044](./0044-a-dispatch-inherits-the-session-model.md)          | A dispatch inherits the session model; what it ran and why it failed are reported                             | accepted              |
-| [0045](./0045-observed-model-field-names.md)                     | The observed-model fields are named `observedProvider` / `observedModel`; the input keeps `model`             | accepted              |
-| [0046](./0046-the-glossary-is-glossary-md.md)                    | The domain glossary is `GLOSSARY.md`, not `CONTEXT.md`                                                        | accepted              |
-| [0047](./0047-deepseek-search-is-program-internal.md)            | DeepSeek web search is program-internal, never a model-facing tool; one implementation, two faces             | **withdrawn** by 0049 |
-| [0048](./0048-deepseek-search-gate.md)                           | The DeepSeek search gate: an off-by-default switch plus a credential verdict; a missing key is stated         | accepted              |
-| [0049](./0049-the-search-lives-in-the-child.md)                  | The search lives in the dispatched child, and the child's own model calls it                                  | accepted              |
-| [0050](./0050-ptc-off-stops-new-dispatch.md)                     | PTC off stops new children; the ones already running are unaffected, and the user is told so                  | accepted              |
-| [0051](./0051-the-surface-names-the-orchestrator.md)             | The surface names the orchestrator: `full_ptc` / `codemode_ptc`, renamed from `full` / `subagents`            | accepted              |
-| [0052](./0052-the-two-doors-share-one-prefix.md)                 | The two task doors share one prefix: `pi_task_ptc` / `pi_task_codemode`, renamed with no alias                | accepted              |
-| [0053](./0053-every-dispatch-is-a-task.md)                       | Every dispatch is a task: the foreground front registers a record, persists its output, and the face follows  | accepted              |
-| [0056](./0056-admission-queues-instead-of-rejecting.md)          | Admission queues instead of refusing: FIFO, unbounded, and the queue creates the record                       | accepted              |
-| [0057](./0057-cancellation-reaches-only-what-has-not-started.md) | Cancellation reaches only what has not started: a queued task is withdrawn, a running one takes the ladder    | accepted              |
-| [0060](./0060-ptc-programs-run-in-strict-mode.md)                | PTC programs run in strict mode, matching upstream DSH                                                        | accepted              |
+| #                                                          | Decision                                                                                                      | Status                |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | --------------------- |
+| 0001                                                       | (reserved — dropped: `agent()` stub shape; G1 #13 chose no stub, so no ADR)                                   | —                     |
+| [0002](./0002-source-strategy.md)                          | Source strategy: clean-room rewrite                                                                           | accepted              |
+| [0003](./0003-max-output-bytes.md)                         | PTC output budget: 64 MiB, matching DSH                                                                       | accepted              |
+| [0004](./0004-max-pending-calls.md)                        | `maxPendingCalls`: 128, matching DSH                                                                          | accepted              |
+| [0005](./0005-ptc-execution-boundary.md)                   | Execution boundary: `worker_threads` + F1–F4; direct binding execution                                        | accepted              |
+| 0006                                                       | (reserved — dropped: subagent seam; same G1 #13 decision)                                                     | —                     |
+| [0007](./0007-no-os-sandbox.md)                            | No OS sandbox: inherited risk, stated plainly                                                                 | accepted              |
+| [0008](./0008-vite-plus-and-pnpm.md)                       | Toolchain: adopt `vite-plus` (`vp`) and `pnpm`, staged                                                        | accepted              |
+| [0009](./0009-vitest-adoption.md)                          | Test runner: adopt Vitest 4, retire `node --test`                                                             | accepted              |
+| [0010](./0010-ptc-default-mode.md)                         | PTC default mode: narrow the loadout, snapshot the bindings                                                   | accepted              |
+| [0011](./0011-ptc-mode-restores-skills.md)                 | PTC mode restores the skills section pi withholds                                                             | accepted              |
+| [0012](./0012-model-facing-result-text.md)                 | Model-facing tool-result text: clean it, lay it out for reading                                               | accepted              |
+| [0013](./0013-ptc-row-compact-summary.md)                  | PTC row: one call line + one right-aligned meta line, never a payload dump                                    | accepted              |
+| [0014](./0014-image-hoisting.md)                           | Image-bearing tool results: hoist them onto the PTC tool result                                               | accepted              |
+| [0015](./0015-pi-truncation-contract.md)                   | Model-facing text: adopt pi's truncation contract (50 KB / 2000 lines)                                        | accepted              |
+| [0016](./0016-ptc-dispatch-binding.md)                     | pi.dispatch binding: PTC programs may explicitly fan out to per-call pi sessions                              | accepted              |
+| [0017](./0017-ptc-worker-pool-and-image-wire-shape.md)     | Worker pool per turn; hoisted images stay base64 (no transferList)                                            | accepted              |
+| [0018](./0018-release-path-oidc-publishing.md)             | Release path: tag-triggered OIDC publishing (no provenance while private)                                     | accepted              |
+| [0019](./0019-minify-and-source-map-exclusion.md)          | Build pipeline: enable minification + exclude source maps from npm tarball                                    | accepted              |
+| [0020](./0020-ptc-row-pulse.md)                            | PTC partial-state render: DSH TextShimmer (moving highlight band)                                             | accepted              |
+| [0021](./0021-ptc-sub-call-tree.md)                        | PTC sub-call tree: always visible, dispatcher-tracked, capped at 32                                           | accepted              |
+| [0022](./0022-background-dispatch.md)                      | Background dispatch: long-lived children + model-visible `ptc_task_*` lifecycle                               | accepted              |
+| [0023](./0023-background-task-ownership.md)                | Background task ownership: owner-tagged records, owner-scoped reaping                                         | accepted              |
+| [0024](./0024-binding-contract-declares-binding-result.md) | Binding contract: tool descriptions declare what a binding call resolves to                                   | accepted              |
+| [0025](./0025-extension-surface-is-a-setting.md)           | Extension surface is a setting: `off` / `subagents` / `full`                                                  | **withdrawn** by 0034 |
+| [0026](./0026-surface-default-is-detected.md)              | The surface default is detected from the pi that loaded us                                                    | accepted              |
+| [0027](./0027-codemode-switch-decides-surface.md)          | The detected surface follows whether pi will LOAD codemode, not whether it ships it                           | accepted              |
+| [0028](./0028-structured-results-for-codemode.md)          | Model-facing tools declare a structured result for codemode — a projection, not a mirror                      | accepted              |
+| [0029](./0029-surface-follows-codemode-activation.md)      | The detected surface follows whether codemode will be ACTIVE, not only whether it ships or loads              | accepted              |
+| [0030](./0030-surface-switch-reloads.md)                   | The surface is switched by writing the file and reloading, not by mutating the loadout                        | **withdrawn** by 0034 |
+| [0031](./0031-open-source-and-publish-authority.md)        | Open source: public repository, owner-only write and publish authority, verified attribution                  | accepted              |
+| [0032](./0032-child-report.md)                             | A dispatched child returns a child report, over one of two channels, and always says which                    | accepted              |
+| [0033](./0033-mcp-auto-enable-evidence.md)                 | The detected surface reads MCP auto-enable evidence, because pi's MCP extension activates codemode at runtime | accepted              |
+| [0034](./0034-surface-is-detected-not-set.md)              | The surface is detected only: the `surfaceMode` key and its `off` value are removed                           | accepted              |
+| [0035](./0035-ask-pi-for-the-loadout.md)                   | Surface detection asks pi for the loadout; only the MCP axis stays a file-side read                           | accepted              |
+| [0036](./0036-site-excluded-from-root-gate.md)             | The site is excluded from the repository's root lint and format gate                                          | accepted              |
+| [0037](./0037-project-documents-dont-copy-them.md)         | The site projects the repository's documents; it stores no copies                                             | accepted              |
+| [0038](./0038-publish-site-on-main-not-tags.md)            | The site is published on every push to `main`, not on release tags                                            | accepted              |
+| [0039](./0039-an-omitted-agent-dispatches-a-generalist.md) | An omitted `agent` dispatches a generalist child; the package ships no preset                                 | accepted              |
+| [0040](./0040-bash-is-an-opt-in-binding.md)                | `bash` stays a known binding and leaves the default surface; an install opts it back in                       | accepted              |
+| [0041](./0041-read-only-is-a-call-site-tier.md)            | A read-only tier is a call-site decision (`strict` / `lenient`), and a narrowing rather than a boundary       | accepted              |
+| [0042](./0042-goal-on-dispatch.md)                         | A dispatch may carry the caller's reason, as context rather than authority                                    | accepted              |
+| [0043](./0043-a-why-switch-and-a-name.md)                  | `goal` was the wrong name, and the switch that hides it fails on                                              | accepted              |
+| [0044](./0044-a-dispatch-inherits-the-session-model.md)    | A dispatch inherits the session model; what it ran and why it failed are reported                             | accepted              |
+| [0045](./0045-observed-model-field-names.md)               | The observed-model fields are named `observedProvider` / `observedModel`; the input keeps `model`             | accepted              |
+| [0046](./0046-the-glossary-is-glossary-md.md)              | The domain glossary is `GLOSSARY.md`, not `CONTEXT.md`                                                        | accepted              |
+| [0047](./0047-deepseek-search-is-program-internal.md)      | DeepSeek web search is program-internal, never a model-facing tool; one implementation, two faces             | **withdrawn** by 0049 |
+| [0048](./0048-deepseek-search-gate.md)                     | The DeepSeek search gate: an off-by-default switch plus a credential verdict; a missing key is stated         | accepted              |
+| [0049](./0049-the-search-lives-in-the-child.md)            | The search lives in the dispatched child, and the child's own model calls it                                  | accepted              |
+| [0050](./0050-ptc-off-stops-new-dispatch.md)               | PTC off stops new children; the ones already running are unaffected, and the user is told so                  | accepted              |
+| [0051](./0051-the-surface-names-the-orchestrator.md)       | The surface names the orchestrator: `full_ptc` / `codemode_ptc`, renamed from `full` / `subagents`            | accepted              |
+| [0052](./0052-the-two-doors-share-one-prefix.md)           | The two task doors share one prefix: `pi_task_ptc` / `pi_task_codemode`, renamed with no alias                | accepted              |
+| [0053](./0053-every-dispatch-is-a-task.md)                 | Every dispatch is a task: the foreground front registers a record, persists its output, and the face follows  | accepted              |
+| [0056](./0056-admission-queues-instead-of-rejecting.md)    | Admission queues instead of refusing: FIFO, unbounded, and the queue creates the record                       | accepted              |
+| [0057](./0057-cancellation-only-reaches-queued-tasks.md)   | Cancellation reaches only what has not started: a queued task is withdrawn, a running one takes the ladder    | accepted              |
+| [0060](./0060-ptc-programs-run-in-strict-mode.md)          | PTC programs run in strict mode, matching upstream DSH                                                        | accepted              |
 
 Numbering gaps are deliberate: 0001/0006 were reserved while wayfinder map #7 was charting and dropped when G1 resolved; keeping their slots means every cross-reference in the map and its tickets stays valid.
 

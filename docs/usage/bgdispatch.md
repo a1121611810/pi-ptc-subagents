@@ -244,7 +244,7 @@ registration — and what is withheld from the model is a different question now
 The tools stay **registered** either way (pi cannot unregister a tool); what changes is whether the
 model is offered them. `/ptc off` still stops new spawns, and an in-flight task still has to stay
 readable and stoppable — and it now also pulls the QUEUED tasks out of the queue
-([ADR-0057](../adr/0057-cancellation-reaches-only-what-has-not-started.md)): a task that has not
+([ADR-0057](../adr/0057-cancellation-only-reaches-queued-tasks.md)): a task that has not
 started is withdrawn rather than signaled, so `/ptc off` means "stop accepting new dispatches, pull
 the queued ones out, let the running ones continue".
 
@@ -379,7 +379,7 @@ A stop while the task is already `stopping` is idempotent (no second event). A s
 is already terminal is an illegal-transition error.
 
 **The stop reaches two different states, and which one it is depends on whether the task has
-started** ([ADR-0057](../adr/0057-cancellation-reaches-only-what-has-not-started.md)):
+started** ([ADR-0057](../adr/0057-cancellation-only-reaches-queued-tasks.md)):
 
 - A task that is still **waiting for a concurrency slot** (`queued`) is **withdrawn**: it leaves
   the queue, it never starts a child, and its record goes `canceled` with your `reason` on it.
@@ -588,12 +588,12 @@ findings usually are. Two conventions keep that from costing a re-dispatch:
 
 Signal handling is layered by who asked:
 
-| source                  | transition                        | notes                                                                                                                                                                                       |
-| ----------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ptc_task_stop` (model) | `running -> stopping -> canceled` | explicit and synchronous; the dispatcher pump owns the actual signal and writes `canceled` when the child closes. A late stop is idempotent.                                                |
-| `ptc_task_stop` (model) | `queued -> canceled`              | a task that has not started is WITHDRAWN, not signaled: no child exists, so it leaves the queue and never runs ([ADR-0057](../adr/0057-cancellation-reaches-only-what-has-not-started.md)). |
-| session stop / Esc      | `running -> lost`                 | implicit; v1 records `session_ended_while_running` (pi exposes no Esc-specific signal, so `user_killed_via_esc` is not emitted).                                                            |
-| session restart         | `running -> lost`                 | startup reconciliation, reason `lost_on_session_restart`; reaps only records whose owner process is dead (or pre-upgrade ownerless ones), and also sweeps a task caught mid-`stopping`.     |
+| source                  | transition                        | notes                                                                                                                                                                                   |
+| ----------------------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ptc_task_stop` (model) | `running -> stopping -> canceled` | explicit and synchronous; the dispatcher pump owns the actual signal and writes `canceled` when the child closes. A late stop is idempotent.                                            |
+| `ptc_task_stop` (model) | `queued -> canceled`              | a task that has not started is WITHDRAWN, not signaled: no child exists, so it leaves the queue and never runs ([ADR-0057](../adr/0057-cancellation-only-reaches-queued-tasks.md)).     |
+| session stop / Esc      | `running -> lost`                 | implicit; v1 records `session_ended_while_running` (pi exposes no Esc-specific signal, so `user_killed_via_esc` is not emitted).                                                        |
+| session restart         | `running -> lost`                 | startup reconciliation, reason `lost_on_session_restart`; reaps only records whose owner process is dead (or pre-upgrade ownerless ones), and also sweeps a task caught mid-`stopping`. |
 
 ## On disk
 

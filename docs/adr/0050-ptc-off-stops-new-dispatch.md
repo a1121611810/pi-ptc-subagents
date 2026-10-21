@@ -2,7 +2,7 @@
 
 status: accepted (2026-10-21). 修订：[ADR-0010](./0010-ptc-default-mode.md) §Decision 5、[ADR-0022](./0022-background-dispatch.md) §"What we add" 6 与 §"What we deliberately don't add" 1。
 
-> **Amended by [ADR-0057](./0057-cancellation-reaches-only-what-has-not-started.md) (2026-10-21): `/ptc off` now has three parts — it stops accepting new dispatches, it PULLS THE QUEUED ONES OUT of the admission queue, and the ones already running are unaffected as before; and the task face follows the RECORDS rather than the in-flight count, so a session that has a finished record keeps the three task tools in the model's face.**
+> **Amended by [ADR-0057](./0057-cancellation-only-reaches-queued-tasks.md) (2026-10-21): `/ptc off` now has three parts — it stops accepting new dispatches, it PULLS THE QUEUED ONES OUT of the admission queue, and the ones already running are unaffected as before; and the task face follows the RECORDS rather than the in-flight count, so a session that has a finished record keeps the three task tools in the model's face.**
 
 > **修订：[ADR-0051](./0051-the-surface-names-the-orchestrator.md)（2026-10-21）：两个表面值改名——`full` → `full_ptc`、`subagents` → `codemode_ptc`——且「表面」现在指**哪个编排器对模型负责**。本记录的决定不变；读到它的 `full` / `subagents` 时，读作那两个新名字。**
 

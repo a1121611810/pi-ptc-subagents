@@ -2,7 +2,7 @@
 
 status: accepted (2026-10-21). 修订：[ADR-0016](./0016-ptc-dispatch-binding.md) §Decision 2 与 §Decision 3、[ADR-0022](./0022-background-dispatch.md) §"What we add" 2、§"What we deliberately don't add" 2、G1 与 §2 状态机。**本篇与 ADR-0016 / ADR-0022 读得不一样的地方，以本篇为准。**
 
-> **Amended by [ADR-0057](./0057-cancellation-reaches-only-what-has-not-started.md) (2026-10-21): both items this record left as "the next step" are now done — the model can withdraw a task that is still waiting (`ptc_task_stop` on a `queued` task takes it out of the queue and marks it `canceled`), and `/ptc off` pulls the queued ones out while the running ones continue. Decision 7 (the foreground abort withdraws its queued request) stands unchanged.**
+> **Amended by [ADR-0057](./0057-cancellation-only-reaches-queued-tasks.md) (2026-10-21): both items this record left as "the next step" are now done — the model can withdraw a task that is still waiting (`ptc_task_stop` on a `queued` task takes it out of the queue and marks it `canceled`), and `/ptc off` pulls the queued ones out while the running ones continue. Decision 7 (the foreground abort withdraws its queued request) stands unchanged.**
 
 ## Context
 
