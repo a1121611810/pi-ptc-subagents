@@ -2,6 +2,8 @@
 
 status: accepted (2026-10-21). 修订：[ADR-0010](./0010-ptc-default-mode.md) §Decision 5、[ADR-0022](./0022-background-dispatch.md) §"What we add" 6 与 §"What we deliberately don't add" 1。
 
+> **Amended by [ADR-0058](./0058-ptc-off-truncates-the-chain.md) (2026-10-21): `/ptc off` is no longer a switch that leaves a door in place to refuse — it is a TRUNCATION of this package's place in the chain, cut at the start of the segment this package controls. On `full_ptc` the whole orchestration layer (`ptc_run_code` / `ptc_workflow`) is withdrawn and the model is back to the built-in tools; on `codemode_ptc` pi's `codemode` cannot be withdrawn — it is pi's, not ours — so the cut lands after it, and this package's segment under it (the execution layer and the task door) goes instead. The determinate meaning of the switch is unchanged and is now stated in one place: stop accepting new + pull the queued ones out + the running ones go on. Decision 1's gate in `dispatch()` stays as defence in depth for the window in which the model still holds the old declaration.**
+
 > **Amended by [ADR-0057](./0057-cancellation-only-reaches-queued-tasks.md) (2026-10-21): `/ptc off` now has three parts — it stops accepting new dispatches, it PULLS THE QUEUED ONES OUT of the admission queue, and the ones already running are unaffected as before; and the task face follows the RECORDS rather than the in-flight count, so a session that has a finished record keeps the three task tools in the model's face.**
 
 > **修订：[ADR-0051](./0051-the-surface-names-the-orchestrator.md)（2026-10-21）：两个表面值改名——`full` → `full_ptc`、`subagents` → `codemode_ptc`——且「表面」现在指**哪个编排器对模型负责**。本记录的决定不变；读到它的 `full` / `subagents` 时，读作那两个新名字。**

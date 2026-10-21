@@ -46,7 +46,8 @@ import { homedir } from "node:os";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { minimatch } from "minimatch";
-import { WEB_DS_SEARCH_CONFIG_KEY } from "../search/contract.ts";
+import { WEB_DS_SEARCH_CONFIG_KEY, PTC_CHILD_SEARCH_NOTE } from "../search/contract.ts";
+import { SUBAGENT_TOOL_NAME } from "../tools/subagent.ts";
 import {
   BUILTIN_BINDING_NAMES,
   type BuiltinBindingName,
@@ -468,6 +469,34 @@ export type SurfaceMode = (typeof SURFACE_MODES)[number];
  * the resolved value and two spellings of "the fallback" would be two things to drift.
  */
 export const FALLBACK_SURFACE_MODE: SurfaceMode = "full_ptc";
+
+/**
+ * ADR-0058: the tools `/ptc off` withdraws, per surface.
+ *
+ * **The two surfaces truncate at different places, for exactly one reason: pi's `codemode` cannot
+ * be withdrawn.** It is pi's orchestrator, not this package's, so there is no way to take it away
+ * from the model — and a switch that leaves a door in place to refuse is what ADR-0058 replaces.
+ *
+ * - `full_ptc` — the orchestrator IS this package's own PTC, so the whole orchestration layer goes
+ *   (`ptc_run_code`, `ptc_workflow`) and the model is back to calling the built-in tools directly.
+ *   The task door (`pi_task_ptc`) is a binding INSIDE a program, so withdrawing the program
+ *   withdraws the door with it: there is no separate registration to take away.
+ * - `codemode_ptc` — the orchestrator is pi's `codemode`, which stays. The cut therefore lands
+ *   AFTER it: this package's segment underneath — the execution layer (the program pair) and the
+ *   task door (`pi_task_codemode`, a registered tool) — is what goes.
+ *
+ * **The task door is withdrawable on both surfaces**, but by different means: on `codemode_ptc` it
+ * is a REGISTERED tool and is withdrawn by re-registering the same name as `hidden`; on `full_ptc`
+ * it lives inside a program and is simply unreachable once the program tools are gone.
+ *
+ * The names are the tool names pi knows them by. `PTC_MODE_TOOL_NAMES` is this package's own
+ * constant for the program pair; the codemode door's name belongs to the door's module, so it is
+ * read from there rather than spelled out here.
+ */
+export const PTC_TRUNCATED_TOOL_NAMES: Record<SurfaceMode, readonly string[]> = {
+  full_ptc: PTC_MODE_TOOL_NAMES,
+  codemode_ptc: [...PTC_MODE_TOOL_NAMES, SUBAGENT_TOOL_NAME],
+};
 
 /**
  * Whether the pi that launched us will actually LOAD its `codemode` extension.
@@ -1708,13 +1737,14 @@ export function buildModeInstruction(
     "Image-bearing tool results inside a program are attached to you after the run — never return",
     "base64 image data as your program's value.",
     // The parent has no web tool of its own (the search module lives in the CHILD), so the only
-    // route to the web is a child. Saying so is what turns "I need the web" into "dispatch a
-    // child" — and it is conditional, because a child with the switch off cannot search either.
-    options.childCanSearch === true
-      ? "You have no web tool of your own, but a dispatched child does: it can search the web with" +
-        " its `web_ds_search` tool. When the task needs the web — a fact you cannot know, a page" +
-        " you have to find — dispatch a child and let it search."
-      : "",
+    // route to the web is a task whose child searches. Saying so is what turns "I need the web"
+    // into "create a task and let the child search" — and it is conditional, because a child
+    // with the switch off cannot search either.
+    //
+    // ADR-0052: the sentence is the search module's own constant, carried by the two PTC tool
+    // descriptions and the `<ptc>` section as well. Three surfaces, one wording — a copy here
+    // would be a fourth.
+    options.childCanSearch === true ? PTC_CHILD_SEARCH_NOTE : "",
     "If the PTC surfaces cannot express what you need, say so and the user can run /ptc off.",
   ]
     .filter((line) => line.length > 0)

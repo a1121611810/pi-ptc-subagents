@@ -140,22 +140,34 @@ export type WebDsSearchPayload = {
 export const SEARCH_QUERY_MAX_LENGTH = 128;
 
 /**
- * The sentence that tells the PARENT a dispatched child can search the web.
+ * The sentence that tells the PARENT that a child can search the web.
  *
  * **The parent has no web tool of its own** — the search module lives in the child (ADR-0049)
- * — so the only route to the web is a program that dispatches a child. But the parent's model
- * reads neither the child's tool list nor the search tool's description, so without this sentence
- * the parent has no reason to believe a child can search; the live end-to-end run measured it
+ * — so the only route to the web is a task whose child searches. But the parent's model reads
+ * neither the child's tool list nor the search tool's description, so without this sentence the
+ * parent has no reason to believe a child can search; the live end-to-end run measured it
  * writing a task that said "use bash/curl", and the child duly curled instead of using
  * `web_ds_search`.
  *
- * **It is one sentence in one place**, spliced into both PTC tool descriptions and the mode
- * briefing — the three surfaces the parent's model reads when it decides what to write.
+ * **It is ONE sentence in ONE place, carried by THREE model-facing surfaces**: the two PTC tool
+ * descriptions (`ptc_run_code`, `ptc_workflow`), the `<ptc>` section, and the mode briefing.
+ * Those are the three places the parent's model reads when it decides what to write, and three
+ * copies of one fact are three things that can drift — the `<ptc>` section and the briefing
+ * already had their own wording, and the section's had been rewritten while the briefing's had
+ * not.
+ *
+ * **The vocabulary is TASK, not "dispatch"** (ADR-0052). The thing the model creates is a task;
+ * "dispatch" is what the task side does with a task afterwards, and it is not the model's word.
+ *
+ * **It is stated as what this package PROVIDES, not as what the model can reach by any means:**
+ * a session that still has `bash` can always curl, so a sentence claiming the model has no way
+ * to the web would be false there. "This package gives you no web tool of your own" is the claim
+ * that survives that.
  */
 export const PTC_CHILD_SEARCH_NOTE: string =
-  "You have no web tool of your own, but a dispatched child does: it can search the web with its" +
-  " `web_ds_search` tool (and fetch a page's text). When the task needs the web — a fact you" +
-  " cannot know, or a page you have to find — dispatch a child and let it search.";
+  "This package gives you no web tool of your own, but a child does: it can search the web with" +
+  " its `web_ds_search` tool (and fetch a page's text). When the task needs the web — a fact you" +
+  " cannot know, or a page you have to find — create a task and let the child search.";
 export const SEARCH_COUNT_MIN = 1;
 export const SEARCH_COUNT_MAX = 50;
 
