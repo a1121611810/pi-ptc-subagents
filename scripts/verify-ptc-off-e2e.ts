@@ -1,7 +1,8 @@
 /**
  * ADR-0050, measured on a real pi: with the PTC dispatch switch off, a new child cannot be
- * started — on the top-level front (`ptc_subagent`) and the program's front (`pi.dispatch` inside
- * a `ptc_run_code` program) alike — and the three background-task tools leave the model's face.
+ * started — on the codemode front (`pi_task_codemode`) and the program's front (`pi_task_ptc`
+ * inside a `ptc_run_code` program) alike — and the three background-task tools leave the model's
+ * face.
  *
  * ## What is measured, and how
  *
@@ -137,7 +138,7 @@ const answer = events
   .join("\n\n");
 
 const present = TASK_TOOLS.filter((name) => tools.includes(name));
-const triedDispatch = calls.some((name) => name === "ptc_subagent" || name === "ptc_run_code");
+const triedDispatch = calls.some((name) => name === "pi_task_codemode" || name === "ptc_run_code");
 const refusalReachedTheModel = out.includes("PTC is off in this session");
 
 console.log("── what happened\n");
@@ -156,8 +157,8 @@ console.log(
 
 const checks: [string, boolean][] = [
   ["the three task tools left the model's face", present.length === 0],
-  ["the section says dispatching is off", section.includes("PTC is off")],
-  ["the section does NOT teach how to dispatch", !section.includes("ptc_subagent")],
+  ["the section says creating a task is off", section.includes("PTC is off")],
+  ["the section does NOT teach how to create a task", !section.includes("pi_task_codemode")],
   ["the model was told, so it did not need to fail first", refusalReachedTheModel],
 ];
 for (const [label, ok] of checks) console.log(`   ${ok ? "✓" : "✗"} ${label}`);

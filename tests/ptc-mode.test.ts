@@ -157,7 +157,7 @@ test("detectSurfaceMode answers from the three axes, and reports every probe it 
 test("a present, loadable codemode that the model cannot call resolves to full (ADR-0029)", async () => {
   // The cell the previous table did not have, and the DEFAULT on a real 1.0.0 install: pi ships
   // codemode, loads it, registers it with `defaultActive: false`, and the model still cannot call
-  // it. Delegating here is what produced a session with `ptc_subagent` and no orchestrator.
+  // it. Delegating here is what produced a session with the codemode door and no orchestrator.
   //
   // The activation argument is the ONLY difference from the `codemode_ptc` expectation above, so
   // dropping the third check from `detectedSurfaceMode` turns both of these red.
@@ -501,9 +501,10 @@ test("the injected briefing lists the bindings of this session, not a hardcoded 
   for (const name of BUILTIN_BINDING_NAMES) expect(full).toContain(`tools.${name}(args)`);
   expect(full).toContain("[PTC MODE ACTIVE]");
   expect(full).toContain("/ptc off");
-  // Pitfall #1: the briefing must surface the always-bound parallel binding in its
-  // string-indexed form, plus the per-run manifest global (pitfall #5).
-  expect(full).toContain('tools["pi.dispatch"](args)');
+  // Pitfall #1: the briefing must surface the always-bound PTC door, plus the per-run manifest
+  // global (pitfall #5). ADR-0052: the door is dot-accessible, so the briefing names the dot
+  // form — there is no string-indexed form to show any more.
+  expect(full).toContain("tools.pi_task_ptc(args)");
   expect(full).toContain("ptcBindings");
 
   const restricted = buildModeInstruction(["read"], "builtins-only");

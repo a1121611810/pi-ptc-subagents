@@ -85,7 +85,7 @@ const NOTE_ENTRIES: ReadonlyArray<readonly [NotedBindingName, string]> = [
   ["edit", "`edit` always reports a `details` object carrying `diff` and `patch`."],
   [
     DISPATCH_BINDING_NAME,
-    '`tools["pi.dispatch"]` is the exception: it resolves to `{ text, status, ... }` with no `content` and' +
+    "`pi_task_ptc` is the exception: it resolves to `{ text, status, ... }` with no `content` and" +
       " never throws, so read `status`.",
   ],
 ];

@@ -475,7 +475,7 @@ describe("the registration the switch actually produces", () => {
       const names = [...stub.tools.keys()];
       expect(names).toContain("ptc_run_code");
       expect(names).toContain("ptc_workflow");
-      expect(names).not.toContain("ptc_subagent");
+      expect(names).not.toContain("pi_task_codemode");
     } finally {
       await removeTempDir(dir);
     }
@@ -494,7 +494,7 @@ describe("the registration the switch actually produces", () => {
       });
       try {
         const names = [...stub.tools.keys()];
-        expect(names, sw).toContain("ptc_subagent");
+        expect(names, sw).toContain("pi_task_codemode");
         // The program pair IS registered on this line, at `codemode` reach — callable from a
         // pi `codemode` script, which is what a loaded-and-enabled codemode provides. What must
         // NOT hold is the pair being declared to the model, which is the duplicate surface this
@@ -511,7 +511,7 @@ describe("the registration the switch actually produces", () => {
 
   test("loaded but not activated registers the PTC surfaces instead (ADR-0029)", async () => {
     // The cell that is the DEFAULT on a real 1.0.0 install, and the one that used to produce a
-    // session holding `ptc_subagent` with no orchestrator. Asserted here at the registration
+    // session holding `pi_task_codemode` with no orchestrator. Asserted here at the registration
     // rather than only on the resolved surface: a factory that stopped consulting the activation
     // probe would keep `detectedSurfaceMode` correct and still register the wrong tool set.
     const { stub, dir } = await makeStubInAgentDir({
@@ -522,7 +522,7 @@ describe("the registration the switch actually produces", () => {
       const names = [...stub.tools.keys()];
       expect(names).toContain("ptc_run_code");
       expect(names).toContain("ptc_workflow");
-      expect(names).not.toContain("ptc_subagent");
+      expect(names).not.toContain("pi_task_codemode");
     } finally {
       await removeTempDir(dir);
     }
@@ -538,7 +538,7 @@ describe("the registration the switch actually produces", () => {
       // Naming a tool pi does not have cannot conjure it: a loadout that says `+codemode` on a pi
       // without one is a configuration with nothing to point at, not a surface change.
       expect([...stub.tools.keys()]).toContain("ptc_run_code");
-      expect([...stub.tools.keys()]).not.toContain("ptc_subagent");
+      expect([...stub.tools.keys()]).not.toContain("pi_task_codemode");
     } finally {
       await removeTempDir(dir);
     }

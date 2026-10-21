@@ -270,7 +270,7 @@ export function createPtcTaskListTool(registry: TaskRegistry): AnyTool {
     name: PTC_TASK_LIST_TOOL_NAME,
     label: "PTC Task List",
     description: [
-      "List the background tasks this session has dispatched (from pi.dispatch({ background: true })).",
+      "List the background tasks this session has created (from pi_task_ptc({ background: true })).",
       "Returns each task's id, status, agent, depth, label and output size, newest first.",
       'Filter with status (e.g. ["running"]); limit caps the row count (default 100).',
     ].join("\n"),
@@ -728,7 +728,7 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
         reportBlock === undefined && usage !== undefined ? formatUsageLine(usage) : undefined;
       // ADR-0044 Decision 2: the model the child actually ran, observed by the host off its assistant
       // turns. It sits in the HEAD, after the report block and the host counter and ahead of the
-      // prose — the same position the foreground `ptc_subagent` result gives it — rather than
+      // prose — the same position the foreground `pi_task_codemode` result gives it — rather than
       // inside `<child-report>`, because it is a HOST measurement: putting it in the report could
       // only happen by the child reporting on itself. Absent when no turn was observed, so an
       // old record and an unstarted child render exactly the text they rendered before.

@@ -8,6 +8,8 @@ status: accepted (2026-10-21). 修订：[ADR-0010](./0010-ptc-default-mode.md) �
 
 > **未完成的一格（本记录自己知道）：** `/ptc off` 时 `src/index.ts` 仍然按「没有在飞任务」把那三个工具从 active 集合里摘掉。于是「PTC 关着、而会话里有一条**已经跑完**的记录」时，那一格还与上面的规则不一致。补上它是 `src/index.ts` 里的一处小改动（问「有没有任何任务记录」而不是「有几个在飞」），而那个文件不归 ADR-0053 所有——`/ptc off` 的截断是另一票的事。在飞的那一格本来就是对的（本记录的决定 3 与 ADR-0053 的规则在那一格上给出同一个答案）。
 
+> **Amended by [ADR-0052](./0052-the-two-doors-share-one-prefix.md) (2026-10-21): the two task doors are renamed — `pi.dispatch` → `pi_task_ptc` (the PTC door, a binding inside a program) and `ptc_subagent` → `pi_task_codemode` (the codemode door, reachable from a `codemode` script) — with no alias and no compatibility shim. This record's decisions stand unchanged; read its `pi.dispatch` / `ptc_subagent` as those names.**
+
 ## Context
 
 用户把 PTC 关掉之后，发现模型面前还杵着 `ptc_task_list` / `ptc_task_output` / `ptc_task_stop` 这三个工具。他的第一反应是：**PTC 既然都 OFF 了，这三个应该也没用啊。**

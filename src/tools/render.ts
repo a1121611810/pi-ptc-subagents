@@ -32,6 +32,7 @@
 import type { Theme, ThemeColor, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { MAX_SUBCALLS, type PtcToolDetails } from "./common.ts";
+import { DISPATCH_BINDING_NAME } from "../runtime/bindings.ts";
 import type {
   PtcJsonObject,
   PtcJsonValue,
@@ -939,7 +940,7 @@ export interface PtcRenderOptions {
   state?: ShimmerState;
 }
 
-/** Structural subset of `DISPATCH_PARAMETERS` the `ptc_subagent` call row reads. */
+/** Structural subset of `DISPATCH_PARAMETERS` the `pi_task_codemode` call row reads. */
 export interface SubagentCallArgs {
   agent?: string;
   task?: string;
@@ -952,7 +953,7 @@ export interface SubagentCallArgs {
 }
 
 /**
- * Render options for the `ptc_subagent` call row.
+ * Render options for the `pi_task_codemode` call row.
  *
  * `sessionModel` is ADR-0044's caller-session snapshot, read by the host at session/turn start.
  * The row is a REQUEST view, so it uses the snapshot only to say what an omitted request will
@@ -964,7 +965,7 @@ export interface SubagentRenderOptions extends PtcRenderOptions {
 }
 
 /**
- * The `ptc_subagent` call row: a heading, then the task preview (collapsed) or the task block
+ * The `pi_task_codemode` call row: a heading, then the task preview (collapsed) or the task block
  * (expanded with ctrl+e).
  *
  * This row is a REQUEST view. It states the pinned `model` / `agentScope` the caller passed, and
@@ -1083,15 +1084,15 @@ function errorText(result: PtcRenderResult): string {
  * Pick one short, readable argument string for a binding call, so each sub-row tells the reader
  * what it was operating on without dumping a JSON payload (ADR-0021 §3, ADR-0013 §1's selector).
  *
- * The `pi.dispatch` selector returns `→ <agent>` (the binding's own `DispatchInput.agent`), so
- * dispatch rows read as `pi.dispatch → <agent>`; the rest pluck a known args key. Falls back to
+ * The `pi_task_ptc` selector returns `→ <agent>` (the binding's own `DispatchInput.agent`), so
+ * task rows read as `pi_task_ptc → <agent>`; the rest pluck a known args key. Falls back to
  * `JSON.stringify(args)`
  * capped at `MAX_SUBCALL_PREVIEW_CHARS` with embedded newlines folded to spaces — this is the one
  * place `JSON.stringify` is acceptable on a sub-row because the input is one args object whose
  * keys are already known.
  */
 function previewArgs(name: string, args: unknown): string {
-  if (name === "pi.dispatch" && typeof args === "object" && args !== null) {
+  if (name === DISPATCH_BINDING_NAME && typeof args === "object" && args !== null) {
     const agent = (args as { agent?: unknown }).agent;
     // A usable name is what the row is for: it says which agent the call reached. Anything else
     // is one of two different situations and they must not read the same.

@@ -62,7 +62,7 @@ export interface PtcConfig {
    * Hard cap on concurrently in-flight dispatch in ONE pi session, not
    * per run. Enforced inside `dispatch()` by a single
    * `DispatchSlotCounter`, so every front spends it: concurrent programs,
-   * the `ptc_subagent` tool, and background children (which hold their
+   * the `pi_task_codemode` tool, and background children (which hold their
    * slot for the task's whole lifetime). The next call over the cap
    * resolves immediately with `{ status: "rejected", errorMessage:
    * "dispatch concurrency limit reached" }` — never queued, never

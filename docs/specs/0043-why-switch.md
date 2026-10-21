@@ -16,7 +16,7 @@ Status: **shipped** — this spec describes what is implemented; ADR-0043 record
 The argument ADR-0042 added works, and it has two defects that only show up once it ships into a
 session.
 
-The first is the name. `pi.dispatch`'s new optional argument is called `goal`, and in an agent
+The first is the name. `pi_task_ptc`'s new optional argument is called `goal`, and in an agent
 ecosystem `goal` is spent on an objective or a loop — a thing worked toward across many steps. This
 argument is narrower than that: the reason one slice was cut out of the parent's work right now. A
 caller that meets the word already has a meaning for it and has to discard that meaning to read the
@@ -38,7 +38,7 @@ visible to every existing caller.
 
 Two independent changes, one record.
 
-1. **`goal` becomes `why`**, on `pi.dispatch`, on `ptc_subagent`, and in the child's block tag
+1. **`goal` becomes `why`**, on `pi_task_ptc`, on `pi_task_codemode`, and in the child's block tag
    (`<pi-ptc-goal>` → `<pi-ptc-why>`). Breaking, with no compatibility alias. The block's prose is
    untouched, and §Why the prose is unchanged below says why that is a constraint rather than an
    oversight.
@@ -80,7 +80,7 @@ delivered.
 
 ### D1 — `why` replaces `goal` on both surfaces, and the tag with it
 
-`why?: string` on `DISPATCH_PARAMETERS` (`src/runtime/bindings.ts`), which `ptc_subagent` imports, so
+`why?: string` on `DISPATCH_PARAMETERS` (`src/runtime/bindings.ts`), which `pi_task_codemode` imports, so
 a test pinning the two key sets equal covers both. `whyBlock` (`src/runtime/dispatch.ts`) emits
 `<pi-ptc-why>`. `TaskRecord`, the child report and the tool descriptions follow the rename.
 
@@ -118,7 +118,7 @@ what the feature is by default.
 
 ### D4 — The argument stays on the schema
 
-`why` is declared on `pi.dispatch` and `ptc_subagent` regardless of the switch, and the tool
+`why` is declared on `pi_task_ptc` and `pi_task_codemode` regardless of the switch, and the tool
 description is unchanged by the switch. A running program is never rejected for passing an argument
 whose value the host later drops; the drop is reported, not enforced at the boundary.
 

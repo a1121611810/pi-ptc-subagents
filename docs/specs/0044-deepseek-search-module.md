@@ -143,7 +143,7 @@ pi 工具名走 `--tools` allowlist 匹配，**不带点更安全** ⇒ 工具�
 **业界没有完全同形先例**（研究结论：没有 harness 做到「总开关打开 + 缺 key 时既保留工具又只在启动时告警一次」），所以本契约自己写死。三件事同时发生：
 
 1. **标注不可用** — 工具描述里写明「本会话未配置 DeepSeek 凭据，调用会失败」。**两处都要写**：工具的描述（每会话注册一次，那一句说的是这一会话的真话）与**调用失败时抛出的那句**。**两处必须是同一个共享常量**（one-home rule；先例 `BINDING_CONTRACT`，测试断言两边 `toContain(同一常量)`）。
-2. **启动告警一次** — `ctx.ui.notify(..., "warning")`（仓库先例：codemode drift 告警，`src/index.ts:783`）。**一次**（once-only latch），不刷屏。**只在子代理里发**——父会话没有这个能力，也就没有可告警的东西。
+2. **启动告警一次** — `ctx.ui.notify(..., "warning")`（仓库先例：codemode drift 告警，`src/index.ts:784`）。**一次**（once-only latch），不刷屏。**只在子代理里发**——父会话没有这个能力，也就没有可告警的东西。
 3. **调用返回面向模型的可读错误** — 文案见 D9。**抛错**，不用 `isError`（0.86.0 的 `AgentToolResult` 没有那个字段）。
 
 **为什么「仍注册」而不是「不注册」**：不注册的话模型分不清「没这功能」和「缺凭据」，不会主动告诉用户去配 key。
@@ -329,7 +329,7 @@ pi 工具名走 `--tools` allowlist 匹配，**不带点更安全** ⇒ 工具�
 
 改完之后同一条链路：父 → 派子代理 → 子调 `web_ds_search` → 中英文两版逐字原文回到父。
 
-**第三个 e2e（同一个脚本，`PTC_E2E_SURFACE=subagents`）量的是「不是我们造的 PTC 模式」**（pi 自己的 codemode 激活 ⇒ 本包降为 `codemode` reach，模型直接看到的是 pi 的 `codemode` ＋ 我们的 `ptc_subagent`）。它量到的三件事里，**第 3 件是一个真缺陷，而且是本规格里「能力给到子代理」这条主张的第一次被真机证伪**：
+**第三个 e2e（同一个脚本，`PTC_E2E_SURFACE=codemode_ptc`）量的是「不是我们造的 PTC 模式」**（pi 自己的 codemode 激活 ⇒ 本包降为 `codemode` reach，模型直接看到的是 pi 的 `codemode` ＋ 我们的 `ptc_subagent`）。它量到的三件事里，**第 3 件是一个真缺陷，而且是本规格里「能力给到子代理」这条主张的第一次被真机证伪**：
 
 1. **pi 自带的 codemode 确实被主动调用了**——父会话的第一反应就是写一段 codemode 脚本去派子代理，连调三次。
 2. **但那三次全部失败**（`TypeError: tools.pi.dispatch does not exist`），父会话随后改用 `ptc_subagent` 才派成功。
@@ -338,7 +338,7 @@ pi 工具名走 `--tools` allowlist 匹配，**不带点更安全** ⇒ 工具�
    ⇒ 修法见 [ADR-0041](../adr/0041-read-only-is-a-call-site-tier.md) §"The strict set is derived, not a constant" 的修订：strict 档在搜索模块开着时**保留** `web_ds_search`（它只读网页，不写，符合 strict 的承诺）。
 4. **reach note 在上下文里也没能阻止那个 TypeError。** 它一直挂在 `ptc_run_code` 的描述里（pi 的 codemode 描述会把脚本可调的工具连同描述一起列出，所以父会话**读到了**它），父会话仍然把 `await tools["pi.dispatch"]({ task })` 抄进了脚本。原因不是它没读，而是**它上面那个例子没有作用域标记**：抄例子的模型不会去读例子下面那段话。⇒ **例子标明「inside the program」**；**reach note 先说一跳的路**（`ptc_subagent`），并让读者**看自己的工具表**。
 
-**修完之后同一条链路（`PTC_E2E_SURFACE=subagents PTC_E2E_TASK_VARIANT=readonly`，`readonly` 这个变体就是专门为了让 strict 路径被量到的）**：父会话派单带 `readOnly: "strict"` ⇒ 孩子的工具表是 `read, grep, find, ls, ptc_child_report, web_ds_search`——**搜索工具在，`bash` 不在**（strict 的承诺没破）⇒ 孩子调了 **17 次** `web_ds_search`，自己找到并抓取了那页 ⇒ VERDICT: DISPATCHED。
+**修完之后同一条链路（`PTC_E2E_SURFACE=codemode_ptc PTC_E2E_TASK_VARIANT=readonly`，`readonly` 这个变体就是专门为了让 strict 路径被量到的）**：父会话派单带 `readOnly: "strict"` ⇒ 孩子的工具表是 `read, grep, find, ls, ptc_child_report, web_ds_search`——**搜索工具在，`bash` 不在**（strict 的承诺没破）⇒ 孩子调了 **17 次** `web_ds_search`，自己找到并抓取了那页 ⇒ VERDICT: DISPATCHED。
 
 ## Out of Scope
 

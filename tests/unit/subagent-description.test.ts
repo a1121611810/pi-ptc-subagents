@@ -42,9 +42,12 @@ test("the description says an omitted model inherits the session's current model
   // COUNTERFACTUAL: the pre-ADR-0044 description promised the child "its own model", i.e. the
   // opposite claim. Restoring that sentence must turn this pair red.
   expect(text, "does not claim the child gets its own model").not.toMatch(/its own model/i);
+  // ADR-0052: the door creates a TASK, and the description opens with that word — "dispatch" is
+  // the task side's internal word and the model never reads it.
   expect(text, "still opens with the tool's job").toContain(
-    "Start a fresh pi agent as a child process",
+    "Create a task: start a fresh pi agent as a child process",
   );
+  expect(text, "does not use the internal word").not.toMatch(/dispatch/i);
 });
 
 test("the description says an unregistered name is refused, and names the real default", () => {
@@ -93,14 +96,14 @@ test("the description still describes the tool, and the guidance survives", () =
   const tool = createPtcSubagentTool({ cwd: "/repo", depth: 0, maxDispatchDepth: 3 });
   // The original description earned its place: it explains what a subagent IS and when to reach
   // for one. Adding the registry location must not crowd that out.
-  expect(tool.description).toContain("Start a fresh pi agent as a child process");
+  expect(tool.description).toContain("Create a task: start a fresh pi agent as a child process");
   expect(tool.promptGuidelines?.join(" ")).toMatch(/prefer one subagent/i);
 });
 
 test("the registered name is one constant, not a string repeated per file", () => {
-  // `session_start` asks "does this surface register ptc_subagent?" and this tool answers it.
-  // Two copies of the name is how a rename leaves a session being warned about a tool it no
-  // longer has.
-  expect(SUBAGENT_TOOL_NAME).toBe("ptc_subagent");
+  // `session_start` asks "does this surface register the codemode door?" and this tool answers
+  // it. Two copies of the name is how a rename leaves a session being warned about a tool it no
+  // longer has. ADR-0052 renamed it to `pi_task_codemode`.
+  expect(SUBAGENT_TOOL_NAME).toBe("pi_task_codemode");
   expect(description()).not.toContain("no registered agent");
 });

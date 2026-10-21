@@ -111,17 +111,17 @@ test("createBuiltinBindings rejects unknown binding names", () => {
   expect((caught as Error).message).toMatch(/unknown PTC binding "teleport"/);
 });
 
-test("createBuiltinBindings mirrors the production shape: resolved names plus includeDispatch expose pi.dispatch", () => {
+test("createBuiltinBindings mirrors the production shape: resolved names plus includeDispatch expose pi_task_ptc", () => {
   // Production never passes `names: undefined`: both tools resolve the binding source through
   // `resolveBindingNames()` (a .filter() that always returns a fresh array), and ADR-0016
-  // requires pi.dispatch in every shipped surface, so both tools pass `includeDispatch: true`.
+  // requires pi_task_ptc in every shipped surface, so both tools pass `includeDispatch: true`.
   // This test pins that full chain so a reference-equality regression cannot ship green again.
   const names = resolveBindingNames([...BUILTIN_BINDING_NAMES]);
   const table = createBuiltinBindings({ cwd: process.cwd(), names, includeDispatch: true });
   expect(table.has(DISPATCH_BINDING_NAME)).toBe(true);
 });
 
-test("an explicit full name set without includeDispatch opts out of pi.dispatch", () => {
+test("an explicit full name set without includeDispatch opts out of pi_task_ptc", () => {
   // R3's read-only PTC surface pattern: an explicit `names` list is a caller-curated surface,
   // so the parallel binding stays out unless the caller asks for it explicitly.
   const table = createBuiltinBindings({ cwd: process.cwd(), names: [...BUILTIN_BINDING_NAMES] });
@@ -129,7 +129,7 @@ test("an explicit full name set without includeDispatch opts out of pi.dispatch"
   expect(table.has(DISPATCH_BINDING_NAME)).toBe(false);
 });
 
-test("includeDispatch: true mixes pi.dispatch into an explicit subset", () => {
+test("includeDispatch: true mixes pi_task_ptc into an explicit subset", () => {
   const table = createBuiltinBindings({
     cwd: process.cwd(),
     names: ["read"],
@@ -387,7 +387,7 @@ test(
 );
 
 test(
-  "the pi.dispatch binding validates arguments and refuses bad calls without throwing",
+  "the pi_task_ptc binding validates arguments and refuses bad calls without throwing",
   async () => {
     const dir = await makeTempDir();
     try {
@@ -402,7 +402,7 @@ test(
         includeDispatch: true,
       });
       const binding = bindings.get(DISPATCH_BINDING_NAME);
-      if (binding === undefined) throw new Error("pi.dispatch binding is missing");
+      if (binding === undefined) throw new Error("pi_task_ptc binding is missing");
 
       /*
        * An unusable agent: actionable refusal, same shape dispatch() itself returns — and no
@@ -442,7 +442,7 @@ test(
         call,
       )) as { status: string; errorMessage?: string };
       expect(badScope.status).toBe("rejected");
-      expect(badScope.errorMessage ?? "").toContain('Validation failed for tool "pi.dispatch"');
+      expect(badScope.errorMessage ?? "").toContain('Validation failed for tool "pi_task_ptc"');
       expect(badScope.errorMessage ?? "").toContain("agentScope");
 
       // The happy path through validation still reaches dispatch(): unknown agent here, so
@@ -492,7 +492,7 @@ test(
         includeDispatch: true,
       });
       const binding = bindings.get(DISPATCH_BINDING_NAME);
-      if (binding === undefined) throw new Error("pi.dispatch binding is missing");
+      if (binding === undefined) throw new Error("pi_task_ptc binding is missing");
       const call = { callId: 0 } as never;
 
       for (const [label, args] of [
@@ -568,7 +568,7 @@ test(
         includeDispatch: true,
       });
       const binding = bindings.get(DISPATCH_BINDING_NAME);
-      if (binding === undefined) throw new Error("pi.dispatch binding is missing");
+      if (binding === undefined) throw new Error("pi_task_ptc binding is missing");
       const call = { callId: 0, dispatchDeps: { whyEnabled: false } } as never;
 
       for (const [label, args] of [

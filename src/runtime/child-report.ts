@@ -83,7 +83,7 @@ export interface ChildReportExtraction {
 /**
  * The one bound both report renderers share (ADR-0032).
  *
- * There are TWO renderers, deliberately: `ptc_subagent` renders inline in the tool-result text
+ * There are TWO renderers, deliberately: `pi_task_codemode` renders inline in the tool-result text
  * and follows the value-tree conventions of `tools/render.ts`, while `ptc_task_output` renders a
  * stored background record and follows the `<bg-task-notification>` XML convention the rest of
  * that subsystem already uses. Two surfaces, two house styles — that part is fine and each is

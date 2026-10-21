@@ -4,6 +4,8 @@ status: accepted (2026-10-08)
 
 > **Amended by [ADR-0051](./0051-the-surface-names-the-orchestrator.md) (2026-10-21): the two surface values are renamed — `full` → `full_ptc`, `subagents` → `codemode_ptc` — and the surface now means _which orchestrator is responsible to the model_. This record's decisions stand unchanged; read its `full` / `subagents` as those names.**
 
+> **Amended by [ADR-0052](./0052-the-two-doors-share-one-prefix.md) (2026-10-21): the two task doors are renamed — `pi.dispatch` → `pi_task_ptc` (the PTC door, a binding inside a program) and `ptc_subagent` → `pi_task_codemode` (the codemode door, reachable from a `codemode` script) — with no alias and no compatibility shim. This record's decisions stand unchanged; read its `pi.dispatch` / `ptc_subagent` as those names.**
+
 # A dispatched child returns a child report, over one of two channels, and always says which
 
 ## Context
@@ -19,7 +21,7 @@ Both kinds of caller are worse off than they need to be, for different reasons:
   is prose. To use it, the program — or the model writing the program — parses English. That is the
   least reliable link in the chain.
 - A **model** using `ptc_subagent` gets the same prose and has nowhere else to look. The tool
-  already declares an `outputSchema` (`src/tools/subagent.ts:231`), but ADR-0028 established that
+  already declares an `outputSchema` (`src/tools/subagent.ts:240`), but ADR-0028 established that
   `structuredContent` is "not sent to the model".
   **Amended 2026-10-09:** this bullet used to add _"and in `surface mode: subagents` there is no
   `codemode`, so that channel currently reaches nobody"_, which stopped being true when ADR-0025
@@ -54,7 +56,7 @@ Measured against the installed artifact, not the release notes.
 3. **`tool_execution_end.result.structuredContent` _is_ reachable.** It is the full
    `AgentToolResult` (`pi-agent-core/dist/types.d.ts:370-391`), emitted verbatim at
    `pi-agent-core/dist/agent-loop.js:640-648`. This repo already depends on that mechanism
-   (`src/tools/subagent.ts:576`, `src/tools/ptc-task.ts:281, 637, 870`).
+   (`src/tools/subagent.ts:592`, `src/tools/ptc-task.ts:281, 637, 870`).
 
 So a structured return is reachable exactly two ways, and neither is enforced by pi: prompt the
 child into emitting JSON, or give it a tool whose declared schema the host reads back.

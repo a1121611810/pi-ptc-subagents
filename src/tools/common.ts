@@ -93,7 +93,7 @@ export interface PtcToolOptions {
   parentTaskId?: ULID;
   /**
    * ADR-0022 §9: session-level dispatch deps (TaskRegistry / OutputStorage / lifecycle / one
-   * `DispatchSlotCounter` / clock / logger) the run's `pi.dispatch` binding shares. Read once
+   * `DispatchSlotCounter` / clock / logger) the run's `pi_task_ptc` binding shares. Read once
    * per execute; omitted for direct library use, where the dispatcher's in-memory fallback
    * applies.
    */
@@ -203,12 +203,12 @@ export const PTC_TOOL_GUIDELINES: readonly string[] = [
  * calling convention is already stated in both descriptions, but those sentences address a reader
  * *inside* a program; this note is the one that addresses a reader inside the script.
  *
- * **Measured again 2026-10-20, on the `subagents` surface**, and the finding was sharper than the
- * first one: the note was in the parent's context (it rides in `ptc_run_code`'s description, which
+ * **Measured again 2026-10-20, on the `codemode_ptc` surface**, and the finding was sharper than
+ * the first one: the note was in the parent's context (it rides in `ptc_run_code`'s description, which
  * pi's own `codemode` description enumerates for the script) and the parent STILL wrote
  * `await tools["pi.dispatch"]({ task })` into a `codemode` script, and got
  * `TypeError: tools.pi.dispatch does not exist`. It burned three calls that way before it fell
- * back to `ptc_subagent` and dispatched successfully. So the note's positive half — "call
+ * back to the codemode door and created the task successfully. So the note's positive half — "call
  * `ptc_run_code` and use the binding inside the program" — was true, and it was not enough: the
  * note sat BELOW an example that read `await tools["pi.dispatch"]({ task: "..." })` with no scope
  * on it, and a model copying an example does not check the paragraph under it. Hence two changes
@@ -216,17 +216,19 @@ export const PTC_TOOL_GUIDELINES: readonly string[] = [
  *
  * 1. The example is now scoped to a program ("inside the program"), in both descriptions.
  * 2. This note names the ONE-HOP route first, and points the reader at its own tool table rather
- *    than at a route it has to infer. `ptc_subagent` is registered only on the `subagents` surface,
- *    so the note cannot promise it unconditionally — but a script can SEE its own table, and
- *    `ptc_run_code` / `ptc_workflow` are on every surface.
+ *    than at a route it has to infer. The codemode door is registered only on the `codemode_ptc`
+ *    surface, so the note cannot promise it unconditionally — but a script can SEE its own table,
+ *    and `ptc_run_code` / `ptc_workflow` are on every surface.
  *
  * One shared constant rather than a sentence per surface, so the two cannot drift — the same
- * reason `BINDING_CONTRACT` is a module-owned string (ADR-0024).
+ * reason `BINDING_CONTRACT` is a module-owned string (ADR-0024). ADR-0052 changed the two door
+ * names it names and the word it uses for what a script does: a script CREATES A TASK, and the
+ * model-facing word is never "dispatch".
  */
 export const PTC_BINDING_REACH_NOTE: string =
-  "A `codemode` script cannot call the parallel binding directly: `pi.dispatch` is never in " +
-  "that script's own tool table, on any surface. A script dispatches through the dispatch tools " +
-  "that ARE in its own table: `ptc_subagent` if the session has it, and otherwise `ptc_run_code` " +
+  "A `codemode` script cannot call the PTC binding directly: `pi_task_ptc` is never in " +
+  "that script's own tool table, on any surface. A script creates a task through the door " +
+  "that IS in its own table: `pi_task_codemode` if the session has it, and otherwise `ptc_run_code` " +
   "or `ptc_workflow` with the binding used inside the program.";
 
 /** Tool name per worker surface — the names the model calls and reads in failure messages. */

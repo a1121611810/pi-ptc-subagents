@@ -1,6 +1,6 @@
 /**
- * `ptc_subagent` (ADR-0025, ticket #90). The top-level front over the same `dispatch()` the
- * `pi.dispatch` binding uses, so a session whose orchestration is pi's `codemode` can still
+ * `pi_task_codemode` (ADR-0025, ticket #90). The top-level front over the same `dispatch()` the
+ * `pi_task_ptc` binding uses, so a session whose orchestration is pi's `codemode` can still
  * start a managed subagent.
  *
  * No real `pi` process is spawned here: `MockChildProcessLifecycle` and an in-memory task
@@ -232,7 +232,7 @@ const observed = (result: unknown): ObservedResult => result as ObservedResult;
 function structuredOf(result: ObservedResult): Record<string, unknown> {
   const structured = readStructuredContent(result);
   if (structured === undefined) {
-    throw new Error("ptc_subagent returned no structuredContent");
+    throw new Error("pi_task_codemode returned no structuredContent");
   }
   // The cast is the honest reading of `ObservedResult` above, restated: that interface already
   // declares this channel as `Record<string, unknown> | undefined`, and it is the shape this file's
@@ -362,7 +362,7 @@ const FOREGROUND_USAGE_INPUT = { input: 31_995, output: 5_888, cost: 0.01763178 
 /** The four display fields that feed the transcript row and the projection: `turns` is one. */
 const FOREGROUND_USAGE_VIEW = { ...FOREGROUND_USAGE_INPUT, turns: 1 };
 
-describe("ptc_subagent", () => {
+describe("pi_task_codemode", () => {
   test("a background call spawns a child and hands back a task id the model can use", async () => {
     // Spec testing decision: the IO boundary has BOTH directions, and the spawn direction is
     // the one that matters here. The earlier version wrapped the call in try/catch and
@@ -426,7 +426,7 @@ describe("ptc_subagent", () => {
       } catch (error) {
         message = error instanceof Error ? error.message : String(error);
       }
-      expect(message, "the refusal names the tool").toContain("ptc_subagent");
+      expect(message, "the refusal names the tool").toContain("pi_task_codemode");
       expect(message, "and names the agent that was asked for").toContain("no-such-agent");
     });
   });
@@ -446,7 +446,7 @@ describe("ptc_subagent", () => {
       } catch (error) {
         message = error instanceof Error ? error.message : String(error);
       }
-      expect(message, "the depth ceiling is reported").toContain("ptc_subagent");
+      expect(message, "the depth ceiling is reported").toContain("pi_task_codemode");
       expect(
         h.registry.query !== undefined,
         "the registry is wired, so a spawn would have been recorded",
@@ -496,7 +496,7 @@ describe("ptc_subagent", () => {
     const renderCall = tool.renderCall;
     expect(typeof renderCall).toBe("function");
     if (typeof renderCall !== "function") {
-      throw new Error("ptc_subagent registered no renderCall");
+      throw new Error("pi_task_codemode registered no renderCall");
     }
     const theme = plainTheme();
     /**
@@ -573,7 +573,8 @@ test("the call row states an inherited model when the call names none (ADR-0044)
     getSessionModel: inherited,
   });
   const renderCall = tool.renderCall;
-  if (typeof renderCall !== "function") throw new Error("ptc_subagent registered no renderCall");
+  if (typeof renderCall !== "function")
+    throw new Error("pi_task_codemode registered no renderCall");
   type RenderContext = Parameters<typeof renderCall>[2];
   const collapsed = renderCall({ task: "do the thing" }, theme, context as unknown as RenderContext)
     .render(100)
@@ -601,7 +602,7 @@ test("the call row states an inherited model when the call names none (ADR-0044)
   // A host that cannot read a session model (old pi, library caller) leaves the row as it was.
   const withoutSession = createPtcSubagentTool(baseOptions(".", {}));
   const plain = withoutSession.renderCall;
-  if (typeof plain !== "function") throw new Error("ptc_subagent registered no renderCall");
+  if (typeof plain !== "function") throw new Error("pi_task_codemode registered no renderCall");
   const plainRow = plain(
     { task: "do the thing" },
     theme,
@@ -621,7 +622,8 @@ test("the call row states an inherited model when the call names none (ADR-0044)
     getSessionModel: () => liveModel,
   });
   const captureRender = captureTool.renderCall;
-  if (typeof captureRender !== "function") throw new Error("ptc_subagent registered no renderCall");
+  if (typeof captureRender !== "function")
+    throw new Error("pi_task_codemode registered no renderCall");
   type CaptureContext = Parameters<typeof captureRender>[2];
   const capturedContext = { ...context, state: {} } as unknown as CaptureContext;
   expect(captureRender({ task: "x" }, theme, capturedContext).render(100).join("\n")).toContain(
@@ -651,7 +653,8 @@ test("the call row states an inherited model when the call names none (ADR-0044)
     getSessionModel: inherited,
   });
   const agentRender = agentTool.renderCall;
-  if (typeof agentRender !== "function") throw new Error("ptc_subagent registered no renderCall");
+  if (typeof agentRender !== "function")
+    throw new Error("pi_task_codemode registered no renderCall");
   const agentRow = agentRender(
     { task: "x", agent: "scout" },
     theme,
@@ -669,10 +672,10 @@ test("the call row states an inherited model when the call names none (ADR-0044)
   expect(agentExpanded).not.toContain("inherit →");
 });
 
-describe("ptc_subagent and the dispatch cap", () => {
+describe("pi_task_codemode and the dispatch cap", () => {
   test("a saturated counter refuses a foreground call instead of spawning one", async () => {
     // The defect this closes: the only slot acquire lived at the dispatcher's program call site,
-    // which ptc_subagent bypasses. Measured before the fix -- with every slot held the call
+    // which pi_task_codemode bypasses. Measured before the fix -- with every slot held the call
     // reached lifecycle.spawn and reported a spawn failure, never a concurrency refusal.
     //
     // "No child was launched" is observed through `installRecordingPi`, not through
@@ -905,7 +908,7 @@ describe("ptc_subagent and the dispatch cap", () => {
  * `undefined` compiles fine in spirit, reads identically to "absent" through the obvious check,
  * and then vanishes at `JSON.stringify` -- on the far side of the very boundary being tested.
  */
-describe("ptc_subagent structuredContent", () => {
+describe("pi_task_codemode structuredContent", () => {
   test("a background call hands the script a pollable id and no exit code", async () => {
     await withAgent(async (dir) => {
       const { result, h } = await dispatchBackground(dir);
@@ -1264,7 +1267,7 @@ describe("ptc_subagent structuredContent", () => {
         message = error instanceof Error ? error.message : String(error);
       }
       expect(message, "the refusal is still an error rather than a result").toContain(
-        "ptc_subagent",
+        "pi_task_codemode",
       );
       // Its own test because a `rejected` DispatchResult is the one outcome neither success
       // projection covers, and resolving it as `{ structuredContent: { status: "rejected" } }`
@@ -1288,7 +1291,7 @@ describe("ptc_subagent structuredContent", () => {
  * a child that does not. `docs/testing-constraints.md` #3 says the second must not be silent, and
  * an unmarked gap is exactly that.
  */
-describe("ptc_subagent renders the child report into the text the model reads", () => {
+describe("pi_task_codemode renders the child report into the text the model reads", () => {
   test("a compliant child's report is rendered above its prose, which survives intact", async () => {
     await withAgent(async (dir) => {
       const prose = "I read the dispatcher and traced the gate; here is what I found.";

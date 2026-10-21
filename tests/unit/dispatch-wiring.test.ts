@@ -2,7 +2,7 @@
  * Gap 2 + Gap 4 (BG-12) wiring tests.
  *
  * Gap 2: the dispatcher must own ONE per-run `DispatchSlotCounter` and thread it into the
- * `pi.dispatch` binding through the `DispatchDeps` mechanism, so a background task holds a
+ * `pi_task_ptc` binding through the `DispatchDeps` mechanism, so a background task holds a
  * slot for its whole lifetime (ADR-0022 §9) and the dispatcher must not double-acquire it.
  *
  * Gap 4: the run id (callerId / subscriber) and the session dir must travel
@@ -11,7 +11,7 @@
  * The first test drives the REAL `createBuiltinBindings` dispatch binding with a mock
  * lifecycle, an in-memory registry and an in-memory output store, so no `pi` process and no
  * task-output fs is touched. The other two run the real dispatcher with a stand-in
- * `pi.dispatch` binding that records the context it was handed.
+ * `pi_task_ptc` binding that records the context it was handed.
  */
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -127,7 +127,7 @@ describe("bindings.ts forwards DispatchContext + DispatchDeps (Gap 2 + Gap 4)", 
       };
       const table = createBuiltinBindings({ cwd: dir, includeDispatch: true });
       const binding = table.get(DISPATCH_BINDING_NAME);
-      if (binding === undefined) throw new Error("pi.dispatch binding is missing");
+      if (binding === undefined) throw new Error("pi_task_ptc binding is missing");
 
       const result = await binding.execute(
         { agent: AGENT, task: "wired", background: true, agentScope: "project" },
@@ -185,8 +185,8 @@ describe("dispatcher.ts threads the per-run counter + session identity (Gap 2 + 
     });
     const outcome = await runPtcProgram({
       code:
-        "const r1 = await tools['pi.dispatch']({agent:'a',task:'t1'});\n" +
-        "const r2 = await tools['pi.dispatch']({agent:'a',task:'t2'});\n" +
+        "const r1 = await tools.pi_task_ptc({agent:'a',task:'t1'});\n" +
+        "const r2 = await tools.pi_task_ptc({agent:'a',task:'t2'});\n" +
         "return [r1.ok, r2.ok];",
       surface: "run_code",
       cwd: process.cwd(),
@@ -223,7 +223,7 @@ describe("dispatcher.ts threads the per-run counter + session identity (Gap 2 + 
     });
     const outcome = await runPtcProgram({
       code:
-        "const h = await tools['pi.dispatch']({agent:'a',task:'t',background:true});\n" +
+        "const h = await tools.pi_task_ptc({agent:'a',task:'t',background:true});\n" +
         "return h.taskId;",
       surface: "run_code",
       cwd: process.cwd(),
@@ -248,7 +248,7 @@ describe("dispatcher.ts threads the per-run counter + session identity (Gap 2 + 
 
       const outcome = await runPtcProgram({
         code:
-          "const h = await tools['pi.dispatch']({agent:'" +
+          "const h = await tools.pi_task_ptc({agent:'" +
           AGENT +
           "',task:'injected',background:true,agentScope:'project'});\n" +
           "return h.taskId;",
@@ -293,7 +293,7 @@ describe("dispatcher.ts threads the per-run counter + session identity (Gap 2 + 
       },
     });
     const outcome = await runPtcProgram({
-      code: "return (await tools['pi.dispatch']({agent:'a',task:'t'})).ok;",
+      code: "return (await tools.pi_task_ptc({agent:'a',task:'t'})).ok;",
       surface: "run_code",
       cwd: process.cwd(),
       bindings,
@@ -320,7 +320,7 @@ describe("parentTaskId reaches the nested TaskRecord (reopen R-m12)", () => {
       const slots = new DispatchSlotCounter(4);
       const table = createBuiltinBindings({ cwd: dir, includeDispatch: true });
       const binding = table.get(DISPATCH_BINDING_NAME);
-      if (binding === undefined) throw new Error("pi.dispatch binding is missing");
+      if (binding === undefined) throw new Error("pi_task_ptc binding is missing");
 
       const result = await binding.execute(
         { agent: AGENT, task: "nested", background: true, agentScope: "project" },
@@ -357,7 +357,7 @@ describe("parentTaskId reaches the nested TaskRecord (reopen R-m12)", () => {
       const slots = new DispatchSlotCounter(4);
       const outcome = await runPtcProgram({
         code:
-          "const h = await tools['pi.dispatch']({agent:'" +
+          "const h = await tools.pi_task_ptc({agent:'" +
           AGENT +
           "',task:'nested',background:true,agentScope:'project'});\n" +
           "return h.taskId;",
@@ -392,7 +392,7 @@ describe("parentTaskId reaches the nested TaskRecord (reopen R-m12)", () => {
         "call-parent",
         {
           code:
-            "const h = await tools['pi.dispatch']({agent:'" +
+            "const h = await tools.pi_task_ptc({agent:'" +
             AGENT +
             "',task:'nested',background:true,agentScope:'project'});\n" +
             "return h.taskId;",
@@ -416,7 +416,7 @@ describe("parentTaskId reaches the nested TaskRecord (reopen R-m12)", () => {
 // ---------------------------------------------------------------------------
 
 /**
- * What one foreground `pi.dispatch` call returned, flattened to the three fields the
+ * What one foreground `pi_task_ptc` call returned, flattened to the three fields the
  * admission question is about. `started: false` plus the concurrency message is the gate
  * refusing; anything with `started: true` really put a child on the machine.
  */
@@ -436,7 +436,7 @@ describe("the per-run counter is charged once per foreground dispatch (reopen ro
    * acquire+release at the dispatcher's call site left the whole suite green, and so did
    * restoring the pre-fix split. Nothing could see it because the two halves that would have
    * seen it each look somewhere else -- the dispatcher-level tests hand `runPtcProgram` a
-   * stand-in `pi.dispatch` binding, so they never reach `dispatch()`'s acquire at all, and
+   * stand-in `pi_task_ptc` binding, so they never reach `dispatch()`'s acquire at all, and
    * `tests/unit/ptc-subagent.test.ts` calls `dispatch()` with no dispatcher in the picture.
    *
    * So this is the black-box shape neither of those files can be: a REAL program, the REAL
@@ -462,7 +462,7 @@ describe("the per-run counter is charged once per foreground dispatch (reopen ro
       await withAgent(async (dir) => {
         const outcome = await runPtcProgram({
           code:
-            "const call = (i) => tools['pi.dispatch']({agent:'" +
+            "const call = (i) => tools.pi_task_ptc({agent:'" +
             AGENT +
             "',task:'wave ' + i,agentScope:'project'});\n" +
             "const rs = await Promise.all([0,1,2,3,4,5].map((i) => call(i)));\n" +

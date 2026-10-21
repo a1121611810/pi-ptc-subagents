@@ -6,16 +6,16 @@
  * it dispatch a child to do the searching?** If it does not, the capability is unreachable in
  * practice, whatever the ADR says.
  *
- * **Why this might not happen.** The parent's model reads the description of `pi.dispatch` —
- * "Dispatch a task to a registered pi agent as a child subprocess" — and **nothing in it says the
+ * **Why this might not happen.** The parent's model reads the description of the task door —
+ * "Create a task on a registered pi agent: it runs as a child subprocess" — and **nothing in it says the
  * child can search**. The parent also has no `web_ds_search` of its own, so the search tool's own
  * description never reaches the parent's context. The model is being asked to guess.
  *
  * **What it measures**, off the parent's own transcript and the child's:
  *
- *   1. which tools the parent called (`ptc_run_code` / `ptc_workflow` / `ptc_subagent` / `bash`…);
- *   2. whether the program it wrote went for `pi.dispatch` (a child) or for `tools.bash` + curl
- *      (the parent doing it itself);
+ *   1. which tools the parent called (`ptc_run_code` / `ptc_workflow` / `pi_task_codemode` / `bash`…);
+ *   2. whether the program it wrote went for a task door (`pi_task_ptc` / `pi_task_codemode`, a
+ *      child) or for `tools.bash` + curl (the parent doing it itself);
  *   3. whether a child actually called `web_ds_search` — the only tool the child has and the
  *      parent does not, so its presence in the child's transcript is the proof.
  *
@@ -46,16 +46,20 @@ const AGENT_DIR = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "age
 const MODEL = process.env.PTC_E2E_MODEL ?? "deepseek/deepseek-flash";
 
 /**
- * Which surface the parent runs on.
+ * Which surface the parent runs on (ADR-0051 renamed the values).
  *
- * - `full` — our PTC surfaces are model-facing (`exposure: "direct"`), the builtins are hidden by
- *   `--exclude-tools`. This is the PTC-mode TUI parent's shape.
- * - `subagents` — **pi's OWN codemode is active**: the surface detection (ADR-0029) sees codemode
+ * - `full_ptc` — our PTC surfaces are model-facing (`exposure: "direct"`), the builtins are hidden
+ *   by `--exclude-tools`. This is the PTC-mode TUI parent's shape.
+ * - `codemode_ptc` — **pi's OWN codemode is active**: the surface detection (ADR-0029) sees codemode
  *   present, loaded and active, so our PTC surfaces drop to `codemode` reach and the model-facing
- *   tools become pi's `codemode` plus our `ptc_subagent`. This is the "not our PTC mode" case:
+ *   tools become pi's `codemode` plus our `pi_task_codemode`. This is the "not our PTC mode" case:
  *   the programmable-tool-calling in the room is pi's, not ours.
+ *
+ * The env value is the surface name itself. It was `subagents` / `full` before ADR-0051 and is
+ * `codemode_ptc` / `full_ptc` now — a comparison against the retired value could never match, so
+ * the script silently measured the `full_ptc` branch on every run.
  */
-const SURFACE = process.env["PTC_E2E_SURFACE"] === "subagents" ? "subagents" : "full";
+const SURFACE = process.env["PTC_E2E_SURFACE"] === "codemode_ptc" ? "codemode_ptc" : "full_ptc";
 
 /**
  * Which pi run mode the PARENT runs in. This is the axis the ADR-0010 entry policy turns on
@@ -140,7 +144,7 @@ writeFileSync(
   JSON.stringify({
     defaultModel: MODEL,
     defaultThinkingLevel: "off",
-    ...(SURFACE === "subagents" ? { defaultTools: ["+codemode"] } : {}),
+    ...(SURFACE === "codemode_ptc" ? { defaultTools: ["+codemode"] } : {}),
   }),
   "utf8",
 );
@@ -211,11 +215,11 @@ const parent = await new Promise<{ code: number | null; out: string }>((resolve)
       "off",
       // The PTC-mode parent's surface, reproduced non-interactively: the builtins are gone from
       // the model's direct list, so the only route to the web is a program, and the only binding
-      // in that program is `pi.dispatch` (bash is NOT in the default binding table — ADR-0040).
+      // in that program is `pi_task_ptc` (bash is NOT in the default binding table — ADR-0040).
       //
       // Without this the measurement answers a different question: a plain pi session has `bash`
       // and it curls. That is a true answer about a plain session, and it is not the question.
-      ...(SURFACE === "subagents"
+      ...(SURFACE === "codemode_ptc"
         ? ["--tools", "+codemode"]
         : ["--exclude-tools", "read,bash,edit,write,grep,find,ls"]),
       ...(RUN_MODE === "rpc" ? [] : [TASK]),
@@ -348,7 +352,12 @@ const parentCalls = toolCallsOf(parentEvents);
 const childCalls = childTranscripts.flatMap((t) => toolCallsOf(t.events));
 
 const searched = childCalls.filter((call) => call.name === "web_ds_search");
-const dispatched = parentCalls.filter((call) => JSON.stringify(call.args).includes("pi.dispatch"));
+// Either door counts: on the `full_ptc` surface the program calls `pi_task_ptc`, on the
+// `codemode_ptc` surface the script calls `pi_task_codemode`. Both are "the parent created a
+// child" — which is the fact this measurement is about.
+const dispatched = parentCalls.filter((call) =>
+  /pi_task_(ptc|codemode)/.test(JSON.stringify(call.args)),
+);
 const parentCurled = parentCalls.filter((call) =>
   /curl|wget|http/i.test(JSON.stringify(call.args)),
 );

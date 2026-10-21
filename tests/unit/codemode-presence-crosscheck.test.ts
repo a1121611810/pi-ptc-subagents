@@ -48,7 +48,7 @@ const REGISTRY_CROSSCHECK = "--no-extensions";
 const NOT_ACTIVE = "codemode is not active";
 
 /** The tool set on the `codemode_ptc` surface: the pair at codemode reach, plus the subagent face. */
-const CODEMODE_PTC_TOOLS = ["ptc_run_code", "ptc_workflow", "ptc_subagent", ...TASK_TOOLS];
+const CODEMODE_PTC_TOOLS = ["ptc_run_code", "ptc_workflow", "pi_task_codemode", ...TASK_TOOLS];
 
 /**
  * Build the stub and return the notifications its `session_start` raised.
@@ -129,7 +129,7 @@ test("a codemode_ptc surface built on evidence pi has not applied yet gets the n
     notices.filter((n) => n.message.includes(NOT_ACTIVE)),
     "but the model cannot call it yet, which the decision-4 warning is for",
   ).toHaveLength(1);
-  // The surface itself is the one the detection picked: ptc_subagent beside the task tools, and
+  // The surface itself is the one the detection picked: pi_task_codemode beside the task tools, and
   // the program pair reachable from pi's live codemode without being declared to the model.
   expect(tools).toEqual([...CODEMODE_PTC_TOOLS, "ptc_child_report"]);
 });
@@ -191,5 +191,5 @@ test("a session that did not activate codemode resolves full_ptc and says neithe
   expect(
     tools,
     "and the subagent face is absent, because that is what full_ptc means",
-  ).not.toContain("ptc_subagent");
+  ).not.toContain("pi_task_codemode");
 });

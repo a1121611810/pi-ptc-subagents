@@ -10,11 +10,11 @@ the surface is **detected, not configured** ([ADR-0034](../adr/0034-surface-is-d
 pi's `codemode`. Two values:
 
 - `full_ptc` — **this package's PTC orchestrates.** The model writes a program and runs it
-  with `ptc_run_code` / `ptc_workflow`; the parallel binding lives inside that program.
+  with `ptc_run_code` / `ptc_workflow`; the PTC door lives inside that program.
 - `codemode_ptc` — **pi's `codemode` orchestrates.** The model composes tool calls in a
   `codemode` script, and this package's program is the execution layer underneath it. The
-  top-level `ptc_subagent` face is offered to the model directly, so a child can be started
-  without a script at all.
+  codemode door (`pi_task_codemode`) is reachable from that script, so a child can be started
+  without a PTC program at all.
 
 Renamed on **2026-10-21** from `full` / `subagents`. The old pair named the _inventory_ — which
 tools this package registers — and an inventory is not the question the model faces. `full` also
@@ -81,7 +81,7 @@ inactive and the evidence said otherwise.
 Turning pi's `codemode` **off** — `"extensions": ["-builtin:codemode"]`, or launching with
 `--no-extensions` — brings the PTC surfaces back on its own. Before ADR-0027 it did not: the
 detection asked only whether the extension directory exists, so a pi told not to load it still
-counted as an orchestrator and you got `ptc_subagent` with nothing to compose with. The switch
+counted as an orchestrator and you got the codemode door with nothing to compose with. The switch
 is read from the same three places pi reads it — the command line, `<cwd>/.pi/settings.json`,
 and `<agentDir>/settings.json` — in the same order.
 
@@ -136,7 +136,7 @@ explicit tool restriction (`--tools`, `--exclude-tools`, `--no-builtin-tools`,
 `--no-extensions`) — the extension does not override what you asked for. `--no-extensions`
 does, however, change the **detected surface**: pi's own `codemode` is a built-in extension, so
 turning extensions off means it will not load, and the table resolves to `full_ptc` — you keep
-`ptc_run_code` / `ptc_workflow` rather than a `ptc_subagent` with nothing to compose with. If
+`ptc_run_code` / `ptc_workflow` rather than a codemode door with nothing to compose with. If
 another extension changes the tool set while the mode is on, the mode yields and tells you.
 
 **The important consequence:** in a TUI session, bindings come from the loadout recorded

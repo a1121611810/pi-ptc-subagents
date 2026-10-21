@@ -583,7 +583,7 @@ export interface DispatchResult {
    * `taskId` (ADR-0022 §4), and the two shapes are meant to converge on one object (spec
    * decision 3). But `src/tools/subagent.ts` recognises a background handle by the presence
    * of a STRING `taskId` on the outcome — so a foreground result that carried `taskId` would
-   * make every foreground `ptc_subagent` call report itself as a background handle and hand
+   * make every foreground `pi_task_codemode` call report itself as a background handle and hand
    * the model "Started background task …" instead of the child's answer. This field is named
    * after the RECORD it names (`TaskRecord.id`), which is what it is, and the door-shape
    * work (#238) unifies the two names once that probe is fixed.
@@ -823,12 +823,12 @@ export function appendDepthHint(
     "You are a PTC run at depth " +
       depth +
       " (root is depth 0). You may write PTC programs and you may",
-    "call pi.dispatch(...) to spawn further children, but each level costs a fresh pi subprocess.",
+    "call pi_task_ptc(...) to spawn further children, but each level costs a fresh pi subprocess.",
     "The remaining depth budget is " +
       maxDepth +
       " - " +
       depth +
-      ". Beyond it, pi.dispatch rejects with",
+      ". Beyond it, the PTC door rejects with",
     '{ status: "rejected", errorMessage: "dispatch depth limit reached" }.',
     "You were dispatched by another pi session as a fresh context. You cannot see that session's",
     "conversation and you cannot ask it anything, so if the task you were given is underspecified,",
@@ -2890,10 +2890,11 @@ export async function dispatch(
   }
 
   // One owner gates the rule for both fronts (ADR-0025 decision 7, issue #88 decision 9).
-  // The only previous acquire lived at the dispatcher's own call site, which `ptc_subagent`
-  // bypasses by calling `dispatch()` directly -- a foreground `ptc_subagent` therefore reached the
-  // spawn site with every slot held. Measured: it tried to spawn pi, and a saturated counter said
-  // nothing. Order matches `dispatchBackground`: depth, then missing agent, then acquire.
+  // The only previous acquire lived at the dispatcher's own call site, which the codemode
+  // door bypasses by calling `dispatch()` directly -- a foreground `pi_task_codemode` therefore
+  // reached the spawn site with every slot held. Measured: it tried to spawn pi, and a saturated
+  // counter said nothing. Order matches `dispatchBackground`: depth, then missing agent, then
+  // acquire.
   //
   // ADR-0053: the reservation is now KEYED by the task id, the same way the background front
   // keys it. The anonymous form is gone because it was wrong, not merely imprecise: it counted

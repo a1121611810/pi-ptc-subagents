@@ -104,10 +104,10 @@ test.each(PTC_TOOL_DESCRIPTIONS)(
   ({ tool, description }) => {
     // The positive half, so the rule above cannot be satisfied by deleting the prose wholesale.
     //
-    // Anchored on the opening paren, deliberately. The description contains counter-examples too —
-    // "`tools.pi.dispatch` does not exist" is a dotted path that a bare `tools\.(\w+)` regex reads
-    // as an offer of `pi`. An offer is a CALL, so it is `tools.<name>(`; anything without the paren
-    // is prose about a name, which the negative test above already governs.
+    // Anchored on the opening paren, deliberately. The description contains prose about names that
+    // is not an offer — a dotted path with no call after it, for instance. An offer is a CALL, so
+    // it is `tools.<name>(`; anything without the paren is prose about a name, which the negative
+    // test above already governs.
     const offered = [...description.matchAll(/tools\.([a-z][a-z0-9_]*)\s*\(/g)].map((m) => m[1]);
     for (const name of offered) {
       expect(
@@ -128,10 +128,19 @@ test.each(PTC_TOOL_DESCRIPTIONS)(
     // negative test above gets a chance), and a tool that does not defer MUST offer at least one.
     // Which branch a tool is in is visible in the failure, so a description that quietly stops
     // deferring does not silently opt out of the check.
+    //
+    // **One exemption, and it is the door.** ADR-0052 made the PTC door dot-accessible
+    // (`tools.pi_task_ptc(...)`), so the door's call form is now something the regex can see --
+    // before the rename the same sentence was written `tools["pi.dispatch"](...)` and was
+    // structurally invisible to it. The door is not part of the NARROWING set the rule is about:
+    // it is always bound, so naming it costs no availability promise. The narrowing set is what
+    // must not be enumerated twice, and that is what the exemption leaves guarded — pasting
+    // `tools.read(` into the workflow description still turns this red.
+    const deferringOffers = offered.filter((name) => name !== DISPATCH_BINDING_NAME);
     const defers = description.includes("exactly as in `ptc_run_code`");
     if (defers) {
       expect(
-        offered,
+        deferringOffers,
         `${tool} defers the binding list to ptc_run_code, so it must not offer names of its own`,
       ).toEqual([]);
     } else {
@@ -235,11 +244,11 @@ test(
       );
       expect(textOf(allowed)).toBe("policy-marker");
 
-      // The shipped surface always binds pi.dispatch (ADR-0016), so the curated built-in
+      // The shipped surface always binds the PTC door (ADR-0016), so the curated built-in
       // list is what the restriction removes from the error message.
       await expect(
         executeTool(tool, `return await tools.write({ path: "x.txt", content: "nope" });`, dir),
-      ).rejects.toThrow(/no binding named "write".*available bindings: read, pi\.dispatch/);
+      ).rejects.toThrow(/no binding named "write".*available bindings: read, pi_task_ptc/);
     } finally {
       await removeTempDir(dir);
     }
@@ -256,7 +265,7 @@ test(
 
       await expect(
         executeTool(tool, `return await tools.read({ path: "data.txt" });`, dir),
-      ).rejects.toThrow(/available bindings: pi\.dispatch/);
+      ).rejects.toThrow(/available bindings: pi_task_ptc/);
 
       const bare = await executeTool(tool, `console.log("no-tools"); return 40 + 2;`, dir);
       expect(bare.details.result).toBe(42);
@@ -295,7 +304,7 @@ test(
       // no way to learn that the way to get one is a config key rather than a different tool.
       await expect(
         executeTool(withheld, `return await tools.bash({ command: "echo pwned" });`, dir),
-      ).rejects.toThrow(/available bindings: read, edit, write, grep, find, ls, pi\.dispatch/);
+      ).rejects.toThrow(/available bindings: read, edit, write, grep, find, ls, pi_task_ptc/);
 
       const granted = createPtcRunCodeTool({
         getBindingSourceNames: enabled,
