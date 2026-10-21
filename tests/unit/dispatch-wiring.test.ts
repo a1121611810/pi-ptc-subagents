@@ -60,12 +60,10 @@ const AGENT_MD = "---\nname: wiring-probe\n---\nYou are wired.\n";
 /** Canonical ULID literal (Crockford base32) used as the parent task id. */
 const PARENT_TASK = "01ARZ3NDEKTSV4RRFFQ69G5FAV" as ULID;
 /**
- * The cap's refusal message, written out rather than imported from
- * `src/runtime/dispatch.ts`: a test that reads the production constant cannot notice the
- * constant changing, and this is the string the model is told (constraint 4 -- the expected
- * value is a literal, not the thing under test).
+ * ADR-0056: the cap's refusal message is GONE. The cap is a queue, so an over-cap call is
+ * admitted and waits rather than being turned away — there is no refusal string to pin, and
+ * the test above asserts that every call ran instead.
  */
-const LIMIT_MESSAGE = "dispatch concurrency limit reached";
 
 const TERMINAL: ReadonlySet<TaskStatus> = new Set<TaskStatus>([
   "succeeded",
@@ -453,59 +451,87 @@ describe("the per-run counter is charged once per foreground dispatch (reopen ro
    * A duplicate acquire cannot show up in this test as a *smaller* number than the cap alone
    * would allow -- it shows up as exactly half of it: two slots per call means two admitted
    * calls out of a pool of four. Measured: HEAD admits 4, the duplicate admits 2.
+   *
+   * ADR-0056: the cap is a QUEUE now, not a refusal, so "how many calls were admitted" is no
+   * longer the measurement -- every call is eventually admitted. The measurement is now "how
+   * many children ran AT ONCE", which the run's own counter reports directly: the peak of
+   * `slots.active` is the concurrency the cap actually allowed.
    */
-  test("a burst wider than dispatchConcurrency admits exactly that many foreground children", async () => {
+  test("a burst wider than dispatchConcurrency runs every call, and never more than the cap at once", async () => {
     // Long enough that every admitted child is still running when the sixth call asks for a
     // slot, so the count is an admission measurement rather than a race against startup.
     const pi = await installRecordingPi({ holdMs: 1_500 });
     try {
       await withAgent(async (dir) => {
-        const outcome = await runPtcProgram({
-          code:
-            "const call = (i) => tools.pi_task_ptc({agent:'" +
-            AGENT +
-            "',task:'wave ' + i,agentScope:'project'});\n" +
-            "const rs = await Promise.all([0,1,2,3,4,5].map((i) => call(i)));\n" +
-            "return rs.map((r) => ({started: r.started === true, status: String(r.status)," +
-            " error: String(r.errorMessage === undefined ? '' : r.errorMessage)}));",
-          surface: "run_code",
-          cwd: dir,
-          bindings: createBuiltinBindings({ cwd: dir, includeDispatch: true }),
-          config: { dispatchConcurrency: 4 },
-        });
+        // The run's own counter, handed in through `dispatchDeps` so the test can read the
+        // concurrency the cap actually allowed. Sized to the cap the program is configured with.
+        const slots = new DispatchSlotCounter(4);
+        let peakActive = 0;
+        let peakQueued = 0;
+        const sampler = setInterval(() => {
+          peakActive = Math.max(peakActive, slots.active);
+          peakQueued = Math.max(peakQueued, slots.queued);
+        }, 5);
+        let outcome: Awaited<ReturnType<typeof runPtcProgram>>;
+        try {
+          outcome = await runPtcProgram({
+            code:
+              "const call = (i) => tools.pi_task_ptc({agent:'" +
+              AGENT +
+              "',task:'wave ' + i,agentScope:'project'});\n" +
+              "const rs = await Promise.all([0,1,2,3,4,5].map((i) => call(i)));\n" +
+              "return rs.map((r) => ({started: r.started === true, status: String(r.status)," +
+              " error: String(r.errorMessage === undefined ? '' : r.errorMessage)}));",
+            surface: "run_code",
+            cwd: dir,
+            bindings: createBuiltinBindings({ cwd: dir, includeDispatch: true }),
+            config: { dispatchConcurrency: 4 },
+            dispatchDeps: { slots },
+          });
+        } finally {
+          clearInterval(sampler);
+        }
 
         expect(outcome.error, "the run itself completed").toBeUndefined();
         const results = outcome.value as unknown as AdmissionRecord[];
         expect(results, "all six calls answered").toHaveLength(6);
 
-        const admitted = results.filter((r) => r.started);
-        const refused = results.filter((r) => r.error.includes(LIMIT_MESSAGE));
+        // ADR-0056: every call is admitted. The queue is what the over-cap calls join, so
+        // nothing is turned away -- they wait for a slot and then run.
         expect(
-          admitted.length,
-          "four of six concurrent foreground calls got a child; two did not",
-        ).toBe(4);
+          results.filter((r) => r.started).length,
+          "every call eventually ran: the cap queues, it does not refuse",
+        ).toBe(6);
         expect(
-          refused.length,
-          "the other two were refused by the gate, with the dispatcher's own message",
-        ).toBe(2);
-        expect(
-          results.every((r) => (r.started ? r.error === "" : r.error === LIMIT_MESSAGE)),
-          "every call is one of those two outcomes: none failed some other way",
+          results.every((r) => r.status === "fulfilled"),
+          "each admitted child ran to completion and returned its text",
         ).toBe(true);
         expect(
-          admitted.map((r) => r.status),
-          "each admitted child ran to completion and returned its text",
-        ).toEqual(["fulfilled", "fulfilled", "fulfilled", "fulfilled"]);
+          results.every((r) => r.error === ""),
+          "no call was refused by the gate -- the cap is not a rejection reason any more",
+        ).toBe(true);
 
-        // The same number, counted on the machine rather than inferred from the results: this
-        // is the observation a double could not make. Four children, four DIFFERENT tasks --
-        // so it is four calls that spawned, not one call spawned four times.
+        // The concurrency the cap actually allowed: ONE acquire per dispatch, so four
+        // children ran at once. A duplicate acquire at the dispatcher's call site would
+        // spend two slots per call and cap this at TWO.
+        expect(
+          peakActive,
+          "four children ran at once -- the cap is one slot per dispatch, not two",
+        ).toBe(4);
+        expect(
+          peakQueued,
+          "the two over-cap calls waited in the queue while the first four ran",
+        ).toBe(2);
+
+        // The same number, counted on the machine rather than inferred from the results: six
+        // children, six DIFFERENT tasks -- so it is six calls that spawned, not one call
+        // spawned six times.
         const spawns = await pi.spawns();
-        expect(spawns.length, "exactly four children were actually launched").toBe(4);
+        expect(spawns.length, "exactly six children were actually launched").toBe(6);
         expect(
           new Set(spawns.map((argv) => argv[argv.length - 1])).size,
           "each from a different dispatch, so no single call spawned twice",
-        ).toBe(4);
+        ).toBe(6);
       });
     } finally {
       await pi.restore();

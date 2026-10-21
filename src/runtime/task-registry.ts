@@ -91,7 +91,14 @@ export interface RegistryLogger {
 export interface DispatchHandle {
   taskId: ULID;
   label: string;
-  status: "running";
+  /**
+   * ADR-0056: the state the handle was minted in.
+   *
+   * `"running"` is the ordinary case — the child is up. `"queued"` means the task was admitted
+   * to the concurrency queue and has NOT started a child yet: it is waiting for a slot, and it
+   * will start when it reaches the head of the queue.
+   */
+  status: "running" | "queued";
 }
 
 /**
@@ -126,6 +133,17 @@ export type TaskCommand =
       kind: "spawn";
       parentTaskId?: ULID;
       handle: DispatchHandle;
+      /**
+       * ADR-0056: the state the record is created in.
+       *
+       * `"running"` (the default) is the ordinary spawn — the child is up. `"queued"` is the
+       * admission queue: the task EXISTS but has not started a child, because every
+       * concurrency slot was taken when it asked. Enqueueing CREATES the record, so the queue
+       * is the set of `queued` records rather than a second bookkeeping structure beside them.
+       *
+       * ABSENT means `"running"`, so every pre-ADR-0056 call site keeps its behaviour.
+       */
+      status?: "queued" | "running";
       record: Omit<TaskRecord, "id" | "status" | "createdAt" | "transitionAt">;
     }
   | {
@@ -284,13 +302,20 @@ export interface TaskRegistryOptions {
 // ---------------------------------------------------------------------------
 
 /**
- * The explicit transition table copied from ADR-0022 §2. `running -> stopping` is the model
- * stop; `running -> {succeeded,failed,canceled,lost}` are the child-completion / session
- * signals; `stopping -> {succeeded,failed,canceled}` is the in-flight stop resolving.
+ * The explicit transition table copied from ADR-0022 §2, as amended by ADR-0056.
+ * `running -> stopping` is the model stop; `running -> {succeeded,failed,canceled,lost}` are
+ * the child-completion / session signals; `stopping -> {succeeded,failed,canceled}` is the
+ * in-flight stop resolving.
  * `lost` is deliberately absent from `stopping` here — recovery owns that edge (see
  * `RECOVERY_SOURCES`).
+ *
+ * ADR-0056 adds the `queued` row. `queued -> running` is the dequeue: the task took a
+ * concurrency slot and its child is about to start. `queued -> canceled` is a withdrawn queue
+ * entry (the task left the queue without ever running). `queued -> lost` is the recovery edge,
+ * for a session that died with a task still waiting.
  */
 const ALLOWED_TRANSITIONS: Record<TaskStatus, readonly TaskStatus[]> = {
+  queued: ["running", "canceled", "lost"],
   running: ["stopping", "succeeded", "failed", "canceled", "lost"],
   stopping: ["succeeded", "failed", "canceled"],
   succeeded: [],
@@ -312,8 +337,15 @@ const TERMINAL_STATUSES: ReadonlySet<TaskStatus> = new Set<TaskStatus>([
  * "restart-reconcile" trigger — it intentionally includes `stopping`, because a session
  * killed while a stop was in flight must still be reclaimed rather than left "stopping"
  * forever.
+ *
+ * ADR-0056 adds `queued`: a task that was still WAITING for a concurrency slot when the
+ * session died must be reclaimed too, or it would sit in the queue forever with no owner.
  */
-const RECOVERY_SOURCES: ReadonlySet<TaskStatus> = new Set<TaskStatus>(["running", "stopping"]);
+const RECOVERY_SOURCES: ReadonlySet<TaskStatus> = new Set<TaskStatus>([
+  "queued",
+  "running",
+  "stopping",
+]);
 
 /**
  * The message a `resolve-exit` writes onto the record, or `undefined` for "add nothing".
@@ -348,6 +380,7 @@ function resolveExitErrorMessage(
 /** Runtime narrowing for the runtime-untrusted `to` field of a transition command. */
 function isTaskStatus(value: unknown): value is TaskStatus {
   return (
+    value === "queued" ||
     value === "running" ||
     value === "stopping" ||
     value === "succeeded" ||
@@ -421,10 +454,13 @@ export function isPidAlive(pid: number): boolean {
 /**
  * Emit key per ADR-0022 §2 + §8. Entry states use `task:<id>:<status>`; state changes use
  * `task:<id>:-><status>` (the arrow form appears verbatim in the §8 signal-layering table).
+ *
+ * ADR-0056 adds `queued` to the entry states: a task that joins the concurrency queue enters
+ * the world in that state, exactly as a spawned task enters it in `running`.
  */
 function emitKey(taskId: ULID, status: TaskStatus): string {
   const prefix = `task:${taskId}`;
-  if (status === "running" || status === "stopping") {
+  if (status === "queued" || status === "running" || status === "stopping") {
     return `${prefix}:${status}`;
   }
   return `${prefix}:->${status}`;
@@ -613,7 +649,7 @@ export class DefaultTaskRegistry implements TaskRegistry {
 
   // -- command handlers ------------------------------------------------------
 
-  /** Spawn: mint/adopt the id, persist a `running` record, open the owner subscription. */
+  /** Spawn: mint/adopt the id, persist a `running` (or `queued`) record, open the owner subscription. */
   async #spawn(
     command: Extract<TaskCommand, { kind: "spawn" }>,
     ctx: TransitionContext,
@@ -623,8 +659,11 @@ export class DefaultTaskRegistry implements TaskRegistry {
     if (handle === null || handle === undefined) {
       throw new Error("spawn: handle is required");
     }
-    if (handle.status !== "running") {
-      throw new Error(`spawn: handle.status must be "running", got ${String(handle.status)}`);
+    // ADR-0056: the record's state is the state the handle names. A queued task's handle
+    // says `queued`, and the record agrees — the queue IS the set of `queued` records.
+    const status: "queued" | "running" = command.status ?? "running";
+    if (handle.status !== status) {
+      throw new Error(`spawn: handle.status must be "${status}", got ${String(handle.status)}`);
     }
     const adopted = isUsableTaskId(handle.taskId);
     const taskId: ULID = adopted ? handle.taskId : this.#ulid.next();
@@ -636,7 +675,7 @@ export class DefaultTaskRegistry implements TaskRegistry {
       ...command.record,
       id: taskId,
       label: command.record.label.length > 0 ? command.record.label : handle.label,
-      status: "running",
+      status,
       createdAt: now,
       startedAt: now,
       finishedAt: undefined,
@@ -658,7 +697,7 @@ export class DefaultTaskRegistry implements TaskRegistry {
       handle.taskId = taskId;
     }
     const subscriberId = ctx.callerId as ULID;
-    const event = this.#makeEvent(taskId, subscriberId, "running", now, record);
+    const event = this.#makeEvent(taskId, subscriberId, status, now, record);
     // R-m7: subscription + event first, TaskRecord last. `appendEvents` requires the
     // subscription to exist, and writing the record last means a failed later write cannot
     // leave a persisted `running` orphan behind.
@@ -672,7 +711,9 @@ export class DefaultTaskRegistry implements TaskRegistry {
     await this.#storage.appendEvents(subscriberId, [event]);
     await this.#storage.saveTask(record);
     const logger = ctx.logger ?? this.#logger;
-    logger?.info(`spawn: task ${taskId} (${record.label}) running for subscriber ${subscriberId}`);
+    logger?.info(
+      `spawn: task ${taskId} (${record.label}) ${status} for subscriber ${subscriberId}`,
+    );
     return { record, events: [event], cursor: event.eventId };
   }
 
@@ -840,6 +881,13 @@ export class DefaultTaskRegistry implements TaskRegistry {
   ): Promise<TransitionResult> {
     const now = Math.max(0, Math.floor(ctx.clock()));
     const updated: TaskRecord = { ...record, status: to, transitionAt: now };
+    // ADR-0056: leaving the queue is the moment the child starts, so `startedAt` is rewritten
+    // here. Without it the queue wait would be counted as the child's runtime — `durationMs`
+    // is measured from `startedAt`, and a task that waited twenty minutes for a slot did not
+    // run for twenty minutes.
+    if (to === "running" && record.status === "queued") {
+      updated.startedAt = now;
+    }
     if (TERMINAL_STATUSES.has(to)) {
       updated.finishedAt = now;
       updated.durationMs = now - record.startedAt;

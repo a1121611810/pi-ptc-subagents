@@ -21,7 +21,8 @@
  * The 6-state machine maps one-to-one onto theme slots — `running` is the only "active" state
  * (`accent`), `stopping` is the transient one (`warning`), and the four terminals are
  * success / error / dim / muted. {@link STATUS_COLOR} is the single table; the unit tests pin
- * every row, so swapping two slots is a red test.
+ * every row, so swapping two slots is a red test. ADR-0056 adds the seventh state, `queued`
+ * (waiting for a concurrency slot), with its own slot and glyph.
  *
  * ## Live age
  *
@@ -60,8 +61,12 @@ const TREE_LAST = "└─ ";
  * ADR-0022 §2 status -> theme slot. `running` = accent (the only active state), `stopping` =
  * warning (in transition), `succeeded` = success, `failed` = error, `lost` = dim (the host
  * rebooted, nothing is running), `canceled` = muted (a deliberate, clean stop).
+ *
+ * ADR-0056 adds `queued` = borderMuted: the task exists and is waiting for a concurrency slot,
+ * so it is subtle — but it is NOT one of the terminals, and it must not read like `running`.
  */
 const STATUS_COLOR: Record<TaskStatus, ThemeColor> = {
+  queued: "borderMuted",
   running: "accent",
   stopping: "warning",
   succeeded: "success",
@@ -72,6 +77,7 @@ const STATUS_COLOR: Record<TaskStatus, ThemeColor> = {
 
 /** One distinct glyph per state, so the row is readable with colour stripped. */
 const STATUS_GLYPH: Record<TaskStatus, string> = {
+  queued: "○",
   running: "●",
   stopping: "◐",
   succeeded: "✓",
@@ -174,9 +180,14 @@ function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
 }
 
-/** `running`/`stopping` are the only states whose duration is still growing. */
+/**
+ * `running`/`stopping` are the only states whose duration is still growing.
+ *
+ * ADR-0056 adds `queued`: a queued task is still waiting, so its age is still growing — the
+ * row shows how long it has been in the queue, not a frozen `0ms`.
+ */
 function isLiveStatus(status: TaskStatus): boolean {
-  return status === "running" || status === "stopping";
+  return status === "queued" || status === "running" || status === "stopping";
 }
 
 /**

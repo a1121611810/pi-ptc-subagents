@@ -116,8 +116,17 @@ const TERMINAL_STATUSES: ReadonlySet<TaskStatus> = new Set<TaskStatus>([
   "lost",
 ]);
 
-/** The two non-terminal states the shutdown sweep reclaims (ADR-0022 §2 recovery edge). */
-const NON_TERMINAL_STATUSES: ReadonlySet<TaskStatus> = new Set<TaskStatus>(["running", "stopping"]);
+/**
+ * The non-terminal states the shutdown sweep reclaims (ADR-0022 §2 recovery edge).
+ *
+ * ADR-0056 adds `queued`: a task that was still WAITING for a concurrency slot when the
+ * session ended is reaped too — it has no child to kill, but it must leave the queue.
+ */
+const NON_TERMINAL_STATUSES: ReadonlySet<TaskStatus> = new Set<TaskStatus>([
+  "queued",
+  "running",
+  "stopping",
+]);
 
 /** A query cap large enough to see every record in one session. */
 const ALL_TASKS_LIMIT = Number.MAX_SAFE_INTEGER;
@@ -748,6 +757,10 @@ class DefaultBackgroundTaskRuntime implements BackgroundTaskRuntime {
     }
 
     const lost: TaskRecord[] = [];
+    // ADR-0056: which of the reaped tasks were WAITING in the admission queue rather than
+    // running. A queued task holds no slot, so what it needs is a withdrawal from the queue,
+    // not a release.
+    const reapedFromQueue = new Set<string>();
     for (const record of records) {
       if (!NON_TERMINAL_STATUSES.has(record.status)) continue;
       // ADR-0023 (task ownership): reap ONLY records this runtime instance owns. A record
@@ -756,6 +769,7 @@ class DefaultBackgroundTaskRuntime implements BackgroundTaskRuntime {
       // the parent's still-running siblings to `session_ended_while_running` (field-report
       // pitfall #3).
       if (!isOwnRecord(record, this.#owner)) continue;
+      if (record.status === "queued") reapedFromQueue.add(record.id);
       try {
         const result = await this.registry.transition(
           { kind: "reconcile-lost", taskId: record.id, reason },
@@ -784,7 +798,16 @@ class DefaultBackgroundTaskRuntime implements BackgroundTaskRuntime {
     // id, and BOTH this shutdown sweep and the task's detached pump release that same token.
     // The release is idempotent PER TASK, so whichever runs second is a no-op; without the key
     // a stale pump release could free a slot now held by a different live task.
-    for (const record of lost) this.slots.release(record.id);
+    //
+    // ADR-0056: the queue is drained FIRST. A release hands the freed slot to the oldest
+    // waiter, so a waiter that is being reaped must not still be in the queue when a slot
+    // goes back — otherwise the shutdown would start a child it is about to abandon. The
+    // plain `release` (not the promoting one) is deliberate here: a shutdown starts nothing.
+    for (const id of reapedFromQueue) this.slots.cancelQueued(id);
+    for (const record of lost) {
+      if (reapedFromQueue.has(record.id)) continue;
+      this.slots.release(record.id);
+    }
 
     return lost;
   }

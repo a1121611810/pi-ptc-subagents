@@ -297,30 +297,6 @@ describe("ADR-0053: the foreground child's output is on disk", () => {
 // ---------------------------------------------------------------------------
 
 describe("ADR-0053: the gate is above the record", () => {
-  test("a call refused by the concurrency gate creates no record", async () => {
-    await withAgent(async (dir) => {
-      // A counter with no room: the gate refuses before anything is created.
-      const h = createHarness({ limit: 0 });
-      const result = await dispatch(
-        { agent: AGENT, task: "ping", agentScope: "project" },
-        { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
-        h.deps,
-      );
-
-      expect(result.status, "the gate refused the call").toBe("rejected");
-      expect(result.errorMessage).toBe("dispatch concurrency limit reached");
-      expect(
-        result.recordId,
-        "a refused call names no task, because there is none",
-      ).toBeUndefined();
-      expect(
-        await allTasks(h.storage),
-        "a request the gate refused leaves no record behind",
-      ).toEqual([]);
-      expect(h.lifecycle.spawnCount, "and no child was launched").toBe(0);
-    });
-  });
-
   test("a call refused by the depth gate creates no record", async () => {
     await withAgent(async (dir) => {
       const h = createHarness();
@@ -333,6 +309,40 @@ describe("ADR-0053: the gate is above the record", () => {
       expect(result.status).toBe("rejected");
       expect(result.errorMessage).toBe("dispatch depth limit reached");
       expect(await allTasks(h.storage), "the depth gate is above the record too").toEqual([]);
+    });
+  });
+
+  test("ADR-0056: the cap is a queue, so a request over it leaves a QUEUED record, not none", async () => {
+    await withAgent(async (dir) => {
+      // A counter with no room: the request cannot start now, so it WAITS. ADR-0056 replaced
+      // the refusal with the queue, so the record it leaves says `queued` — the queue IS the
+      // set of queued records.
+      const h = createHarness({ limit: 0 });
+      let settled = false;
+      const queued = dispatch(
+        { agent: AGENT, task: "ping", agentScope: "project" },
+        { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+        h.deps,
+      ).then((result) => {
+        settled = true;
+        return result;
+      });
+
+      const deadline = Date.now() + 2_000;
+      let records: TaskRecord[] = [];
+      while (Date.now() < deadline) {
+        records = await allTasks(h.storage);
+        if (records.length > 0) break;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+
+      expect(records, "the queued request left one record behind").toHaveLength(1);
+      expect(records[0]?.status, "and the record says it is queued").toBe("queued");
+      expect(settled, "the request is waiting, not refused").toBe(false);
+      expect(h.lifecycle.spawnCount, "and no child was launched").toBe(0);
+      // The queue is unbounded and has no timeout, so the request keeps waiting. The test
+      // leaves it waiting: a counter with no room can never hand it a slot.
+      void queued;
     });
   });
 });
@@ -375,18 +385,36 @@ describe("ADR-0053: the concurrency slot is keyed by the task id", () => {
       expect(h.slots.active, "the free slot was taken").toBe(2);
 
       // ...and a fourth does not fit, which is only true if the second task still holds one.
-      const fourth = await dispatch(
+      // ADR-0056: "does not fit" is a QUEUE now, not a refusal.
+      let fourthSettled = false;
+      const fourth = dispatch(
         { agent: AGENT, task: "four", agentScope: "project" },
         { callId: 4, cwd: dir, depth: 0, maxDispatchDepth: 3 },
         h.deps,
-      );
-      expect(fourth.status, "the second task's slot was never released early").toBe("rejected");
-      expect(fourth.errorMessage).toBe("dispatch concurrency limit reached");
+      ).then((result) => {
+        fourthSettled = true;
+        return result;
+      });
+      const deadline = Date.now() + 2_000;
+      let queuedRecords: TaskRecord[] = [];
+      while (Date.now() < deadline) {
+        queuedRecords = (await allTasks(h.storage)).filter((record) => record.status === "queued");
+        if (queuedRecords.length > 0) break;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      expect(queuedRecords, "the fourth call queued instead of being refused").toHaveLength(1);
+      expect(fourthSettled, "the queued call is waiting for a slot, not settled").toBe(false);
+      expect(h.slots.active, "a queued task holds no slot").toBe(2);
 
       answerChild(h.lifecycle, 1, ANSWER);
       answerChild(h.lifecycle, 2, ANSWER);
       await second;
       await third;
+      // The freed slots let the queued call run, and it finishes too.
+      await waitFor(() => h.lifecycle.spawnCount > 3);
+      answerChild(h.lifecycle, 3, ANSWER);
+      const fourthResult = await fourth;
+      expect(fourthResult.status, "the queued call ran once a slot freed").toBe("fulfilled");
     });
   });
 });

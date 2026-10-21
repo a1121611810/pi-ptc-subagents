@@ -134,38 +134,40 @@ test("the codemode door is at `codemode` reach — a script calls it, the model 
 const CALL = { callId: 1, depth: 0, maxDispatchDepth: 3 };
 
 /**
- * A counter with no free slot, so both doors hit the CONCURRENCY gate.
+ * The DEPTH gate, which is the refusal both doors can be made to hit.
  *
- * That gate is the one refusal whose whole value is byte-stable: it is minted before any clock
- * reading, so two calls produce the same object field for field. The unknown-agent refusal is
- * NOT (`durationMs` is a measured elapsed time), which is why the equality below is asserted
- * against this gate and not against a call that happened to be refused.
+ * It is the one refusal whose whole value is byte-stable: it is minted before any clock reading,
+ * so two calls produce the same object field for field. The unknown-agent refusal is NOT
+ * (`durationMs` is a measured elapsed time), which is why the equality below is asserted against
+ * this gate and not against a call that happened to be refused.
+ *
+ * The CONCURRENCY gate would have been the other candidate, and ADR-0056 took it away: a saturated
+ * counter now QUEUES the call instead of refusing it, so it never produces a rejection to compare.
  */
-function saturatedSlots(): DispatchSlotCounter {
-  const slots = new DispatchSlotCounter(1);
-  slots.tryAcquire("someone-else");
-  return slots;
-}
+const AT_DEPTH_LIMIT = { depth: 3, maxDispatchDepth: 3 };
 
 /** The raw result of the PTC door, and the codemode door's `structuredContent`, for one call. */
-async function callBothDoors(args: Record<string, unknown>): Promise<{
+async function callBothDoors(
+  args: Record<string, unknown>,
+  deps: Record<string, unknown> = {},
+): Promise<{
   fromBinding: DispatchResult | DispatchHandle;
   fromTool: unknown;
 }> {
   const dir = await makeTempDir();
   try {
-    const deps = { slots: saturatedSlots() };
     const bindings = createBuiltinBindings({ cwd: dir, names: [], includeDispatch: true });
     const binding = bindings.get(DISPATCH_BINDING_NAME);
     if (binding === undefined) throw new Error("pi_task_ptc binding is missing");
-    const fromBinding = (await binding.execute(args, { ...CALL, dispatchDeps: deps })) as
-      | DispatchResult
-      | DispatchHandle;
+    const fromBinding = (await binding.execute(args, {
+      ...CALL,
+      ...AT_DEPTH_LIMIT,
+      dispatchDeps: deps,
+    })) as DispatchResult | DispatchHandle;
 
     const tool = createPtcSubagentTool({
       cwd: dir,
-      depth: 0,
-      maxDispatchDepth: 3,
+      ...AT_DEPTH_LIMIT,
       getDispatchDeps: () => deps,
     });
     const fromTool = await tool.execute(
@@ -206,7 +208,39 @@ test("the refusal carries the shape the ticket states, on both doors", async () 
     durationMs: 0,
     exitCode: -1,
     reportChannel: "none",
-    errorMessage: "dispatch concurrency limit reached",
+    errorMessage: "dispatch depth limit reached",
+  };
+  expect(fromBinding, "the PTC door's refusal").toEqual(expected);
+  expect(readStructuredContent(fromTool), "and the codemode door's is the same one").toEqual(
+    expected,
+  );
+});
+
+test("the refusal carries the ticket's FULL shape when a tier and a why were asked for", async () => {
+  // The prototype's shape has ten fields, and two of them are conditional: the tier that took
+  // effect (ADR-0041) and the dropped reason (ADR-0043). A call that asked for both gets both —
+  // that is the case the prototype was written from.
+  const { fromBinding, fromTool } = await callBothDoors(
+    {
+      task: "anything",
+      readOnly: "strict",
+      why: "we are preparing a release",
+    },
+    // ADR-0043: the `why` is suppressed only when the session's switch is off, and then the
+    // refusal says so (`whySuppressed: true`).
+    { whyEnabled: false },
+  );
+  const expected = {
+    text: "",
+    status: "rejected",
+    started: false,
+    agentName: "unknown",
+    durationMs: 0,
+    exitCode: -1,
+    reportChannel: "none",
+    errorMessage: "dispatch depth limit reached",
+    readOnlyTier: "strict",
+    whySuppressed: true,
   };
   expect(fromBinding, "the PTC door's refusal").toEqual(expected);
   expect(readStructuredContent(fromTool), "and the codemode door's is the same one").toEqual(

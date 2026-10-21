@@ -9,7 +9,6 @@ import {
   decideCloseOutcome,
   discoverAgent,
   dispatch,
-  dispatchConcurrencyLimitReached,
   DISPATCH_DISABLED_MESSAGE,
   listRegisteredAgentEntries,
   listRegisteredAgents,
@@ -1256,8 +1255,16 @@ describe("dispatch depth propagation (ADR-0016 Recursive section)", () => {
     expect(result.started).toBe(false);
   });
 
-  test("the concurrency-gate refusal is marked 'not started' too", () => {
-    expect(dispatchConcurrencyLimitReached().started).toBe(false);
+  test("the PTC-off refusal is marked 'not started' too", async () => {
+    // ADR-0056: the CONCURRENCY refusal is gone — the cap is a queue now, not a rejection
+    // reason — so the only refusal left on this path is the PTC-off one, and it is marked
+    // "not started" like every other refusal.
+    const result = await dispatch(
+      { agent: "anyone", task: "ping" },
+      { callId: 10, cwd: process.cwd(), depth: 0, maxDispatchDepth: 3 },
+      { dispatchEnabled: false },
+    );
+    expect(result.started).toBe(false);
   });
 
   test("a session with PTC off refuses every NEW dispatch, foreground and background", async () => {

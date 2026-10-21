@@ -394,7 +394,7 @@ describe("shutdown", () => {
     const handle = runtime.lifecycle.spawn(["pi", "--x"], {} as ChildSpawnOptions);
     // One held dispatch slot keyed by the task id that owns it, exactly as the background
     // branch acquires it; shutdown releases the same token (ADR-0022 §9).
-    expect(runtime.slots.tryAcquire(TASK_RUNNING)).toBe(true);
+    expect(runtime.slots.acquire(TASK_RUNNING, () => undefined)).toBe("granted");
     await runtime.registry.transition(
       {
         kind: "spawn",
@@ -464,8 +464,11 @@ describe("shutdown", () => {
         { callId: 5, cwd: dir, depth: 0, maxDispatchDepth: 3, callerId: "run-1" },
         runtime.dispatchDeps,
       );
-      expect(isDispatchHandle(overCap)).toBe(false);
-      expect(runtime.slots.active).toBe(2);
+      // ADR-0056: the over-cap call is QUEUED, not refused. It holds no slot — only the two
+      // running children do.
+      expect(isDispatchHandle(overCap), "the over-cap call is queued, not refused").toBe(true);
+      expect(runtime.slots.active, "a queued task holds no slot").toBe(2);
+      expect(runtime.slots.queued, "the call is waiting in the admission queue").toBe(1);
 
       lifecycle.resolveExit(lifecycle.handleAt(2), 0, null);
       lifecycle.resolveExit(lifecycle.handleAt(3), 0, null);

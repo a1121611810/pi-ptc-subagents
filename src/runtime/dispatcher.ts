@@ -679,12 +679,14 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
       // ADR-0026 / round-3 finding: the dispatch cap moved INTO `dispatch()`, which is now the
       // single owner for both dispatch fronts. A background dispatch already owned its slot in
       // `dispatchBackground`; a foreground one now owns it in the foreground branch, so acquiring
-      // here as well would charge every foreground dispatch TWO slots — `tryAcquire` has no
+      // here as well would charge every foreground dispatch TWO slots — the counter has no
       // dedup for the anonymous form — and halve effective concurrency.
       //
-      // The observable refusal is unchanged: `dispatch()` returns the same settled
-      // `dispatchConcurrencyLimitReached()` DispatchResult the binding never throws (ADR-0016 §3),
-      // so a Promise.all over pi.dispatch calls still sees a settled record, not a throw.
+      // The observable refusal is unchanged for every gate that still refuses: `dispatch()`
+      // returns a settled DispatchResult the binding never throws (ADR-0016 §3), so a
+      // Promise.all over pi.dispatch calls still sees a settled record, not a throw. The
+      // concurrency cap is no longer one of those gates (ADR-0056): over the cap a call is
+      // queued and waits for a slot, so it settles later rather than being refused.
       if (!isDispatch) {
         // Builtin fan-out cap (ADR-0004 consequence): the overflow waits for a slot
         // instead of failing.
