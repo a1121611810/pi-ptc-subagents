@@ -88,13 +88,15 @@ const AGENT_MD = "---\nname: bg-probe\n---\nYou probe.\n";
 const PARENT_TASK = "01ARZ3NDEKTSV4RRFFQ69G5FAV" as ULID;
 
 /**
- * Background refusal copy (issue #68 part 4 / wayfinder T4.4): a refused *background* spawn
- * teaches the model to inspect the management surface. The foreground ADR-0016 wording is pinned
- * independently by tests/dispatch-helpers.test.ts; these literals are authored from the
- * requirement, not read back from the implementation.
+ * The depth refusal's wording (ADR-0055).
+ *
+ * ONE wording for every wait mode. The retired background front carried a second copy that
+ * appended a next step, and that copy broke a promise the child's own prompt makes: the prompt
+ * tells the child the door rejects with exactly `{ status: "rejected", errorMessage:
+ * "dispatch depth limit reached" }`. The literal is authored from that promise, not read back
+ * from the implementation.
  */
-const BG_DEPTH_REFUSAL =
-  "dispatch depth limit reached; next_step: call ptc_task_list to inspect the in-flight background tasks";
+const BG_DEPTH_REFUSAL = "dispatch depth limit reached";
 // ADR-0056: there is no concurrency refusal any more. The cap is a queue, so an over-cap
 // background call is admitted and waits -- it is never turned away.
 
@@ -227,7 +229,7 @@ describe("dispatch background spawn", () => {
         {
           agent: AGENT,
           task: "investigate the thing",
-          background: true,
+          wait: false,
           agentScope: "project",
           label: "research X",
         },
@@ -273,7 +275,7 @@ describe("dispatch background spawn", () => {
       const h = createHarness();
       const longTask = "x".repeat(100);
       const result = await dispatch(
-        { agent: AGENT, task: longTask, background: true, agentScope: "project" },
+        { agent: AGENT, task: longTask, wait: false, agentScope: "project" },
         { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
         h.deps,
       );
@@ -287,7 +289,7 @@ describe("dispatch background spawn", () => {
       const h = createHarness();
       const sessionDir = join(dir, "sessions");
       const result = await dispatch(
-        { agent: AGENT, task: "ping", background: true, agentScope: "project" },
+        { agent: AGENT, task: "ping", wait: false, agentScope: "project" },
         { callId: 3, cwd: dir, depth: 0, maxDispatchDepth: 3, sessionDir },
         h.deps,
       );
@@ -329,7 +331,7 @@ describe("dispatch background spawn", () => {
         {
           agent: AGENT,
           task: "investigate",
-          background: true,
+          wait: false,
           agentScope: "project",
           readOnly: "strict",
         },
@@ -359,7 +361,7 @@ describe("dispatch background spawn", () => {
         {
           agent: AGENT,
           task: "investigate",
-          background: true,
+          wait: false,
           agentScope: "project",
           readOnly: "lenient",
         },
@@ -413,7 +415,7 @@ describe("dispatch background spawn", () => {
           agent: AGENT,
           task: "investigate",
           why: "we are preparing a release",
-          background: true,
+          wait: false,
           agentScope: "project",
         },
         { callId: 11, cwd: dir, depth: 0, maxDispatchDepth: 3 },
@@ -445,7 +447,7 @@ describe("dispatch background spawn", () => {
           agent: AGENT,
           task: "investigate",
           why: "we are preparing a release",
-          background: true,
+          wait: false,
           agentScope: "project",
         },
         { callId: 12, cwd: dir, depth: 0, maxDispatchDepth: 3 },
@@ -471,7 +473,7 @@ describe("dispatch background spawn", () => {
     await withAgent(async (dir) => {
       const h = createHarness();
       const result = await dispatch(
-        { agent: AGENT, task: "investigate", background: true, agentScope: "project" },
+        { agent: AGENT, task: "investigate", wait: false, agentScope: "project" },
         { callId: 13, cwd: dir, depth: 0, maxDispatchDepth: 3 },
         { ...h.deps, whyEnabled: false },
       );
@@ -511,7 +513,7 @@ describe("dispatch background spawn", () => {
             {
               agent: AGENT,
               task: "investigate",
-              background: true,
+              wait: false,
               agentScope: "project",
               readOnly: request,
             },
@@ -571,7 +573,7 @@ describe("dispatch background spawn", () => {
             {
               agent: AGENT,
               task: "investigate",
-              background: true,
+              wait: false,
               agentScope: "project",
               // Cast: `null` is not in `DispatchInput["readOnly"]`, and the fact that the wire can
               // carry it anyway is why the read-point guard has an `unknown` parameter at all.
@@ -595,7 +597,7 @@ describe("dispatch background spawn", () => {
     await withAgent(async (dir) => {
       const h = createHarness();
       const result = await dispatch(
-        { agent: AGENT, task: "ping", background: true, agentScope: "project" },
+        { agent: AGENT, task: "ping", wait: false, agentScope: "project" },
         { callId: 4, cwd: dir, depth: 0, maxDispatchDepth: 3 },
         h.deps,
       );
@@ -619,7 +621,7 @@ describe("dispatch background gates", () => {
   test("over maxDispatchDepth returns the foreground depth-limit shape and never spawns (§9)", async () => {
     const h = createHarness();
     const result = await dispatch(
-      { agent: AGENT, task: "x", background: true },
+      { agent: AGENT, task: "x", wait: false },
       { callId: 1, cwd: process.cwd(), depth: 3, maxDispatchDepth: 3 },
       h.deps,
     );
@@ -639,7 +641,7 @@ describe("dispatch background gates", () => {
       const h = createHarness({ limit: 1 });
       const first = asHandle(
         await dispatch(
-          { agent: AGENT, task: "one", background: true, agentScope: "project" },
+          { agent: AGENT, task: "one", wait: false, agentScope: "project" },
           { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           h.deps,
         ),
@@ -652,7 +654,7 @@ describe("dispatch background gates", () => {
       // waits for a slot; it is not turned away.
       const second = asHandle(
         await dispatch(
-          { agent: AGENT, task: "two", background: true, agentScope: "project" },
+          { agent: AGENT, task: "two", wait: false, agentScope: "project" },
           { callId: 2, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           h.deps,
         ),
@@ -689,7 +691,7 @@ describe("dispatch background gates", () => {
   test("an unknown agent returns the foreground refusal shape and releases the slot", async () => {
     const h = createHarness();
     const result = await dispatch(
-      { agent: "__bg_missing_agent__", task: "x", background: true },
+      { agent: "__bg_missing_agent__", task: "x", wait: false },
       { callId: 9, cwd: process.cwd(), depth: 0, maxDispatchDepth: 3 },
       h.deps,
     );
@@ -708,7 +710,7 @@ describe("dispatch background gates", () => {
     // reads as "malformed" — which makes it the case that proves the split held on this front too.
     const result = asResult(
       await dispatch(
-        { agent: "", task: "x", background: true } as unknown as Parameters<typeof dispatch>[0],
+        { agent: "", task: "x", wait: false } as unknown as Parameters<typeof dispatch>[0],
         { callId: 10, cwd: process.cwd(), depth: 0, maxDispatchDepth: 3 },
         h.deps,
       ),
@@ -736,7 +738,7 @@ describe("dispatch background gates", () => {
        * ABSENCE of a name, not because the directory happened to be empty.
        */
       const result = await dispatch(
-        { task: "x", background: true, agentScope: "project" },
+        { task: "x", wait: false, agentScope: "project" },
         { callId: 10, cwd: dir, depth: 0, maxDispatchDepth: 3 },
         h.deps,
       );
@@ -756,7 +758,7 @@ describe("dispatch background gates", () => {
       const h = createHarness();
       const result = asResult(
         await dispatch(
-          { agent: "__bg_missing_agent__", task: "x", background: true, agentScope: "project" },
+          { agent: "__bg_missing_agent__", task: "x", wait: false, agentScope: "project" },
           { callId: 11, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           h.deps,
         ),
@@ -812,7 +814,7 @@ describe("dispatch background pump persists the child report", () => {
       const h = createHarness({ start: 1000 });
       const handle = asHandle(
         await dispatch(
-          { agent: AGENT, task: "report", background: true, agentScope: "project" },
+          { agent: AGENT, task: "report", wait: false, agentScope: "project" },
           { callId: 30, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           h.deps,
         ),
@@ -855,7 +857,7 @@ describe("dispatch background pump persists the child report", () => {
       const h = createHarness({ start: 1000 });
       const handle = asHandle(
         await dispatch(
-          { agent: AGENT, task: "prose only", background: true, agentScope: "project" },
+          { agent: AGENT, task: "prose only", wait: false, agentScope: "project" },
           { callId: 31, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           h.deps,
         ),
@@ -887,7 +889,7 @@ describe("dispatch background pump persists the child report", () => {
       const h = createHarness({ start: 1000 });
       const handle = asHandle(
         await dispatch(
-          { agent: AGENT, task: "long", background: true, agentScope: "project" },
+          { agent: AGENT, task: "long", wait: false, agentScope: "project" },
           { callId: 32, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           h.deps,
         ),
@@ -926,7 +928,7 @@ describe("dispatch background pump persists the child report", () => {
       const h = createHarness({ start: 1000 });
       const handle = asHandle(
         await dispatch(
-          { agent: AGENT, task: "dies after answering", background: true, agentScope: "project" },
+          { agent: AGENT, task: "dies after answering", wait: false, agentScope: "project" },
           { callId: 33, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           h.deps,
         ),
@@ -962,14 +964,14 @@ describe("dispatch background pump", () => {
       const h = createHarness({ start: 1000 });
       const ok = asHandle(
         await dispatch(
-          { agent: AGENT, task: "ok", background: true, agentScope: "project" },
+          { agent: AGENT, task: "ok", wait: false, agentScope: "project" },
           { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           h.deps,
         ),
       );
       const bad = asHandle(
         await dispatch(
-          { agent: AGENT, task: "bad", background: true, agentScope: "project" },
+          { agent: AGENT, task: "bad", wait: false, agentScope: "project" },
           { callId: 2, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           h.deps,
         ),
@@ -1024,7 +1026,7 @@ describe("dispatch background pump", () => {
       const h = createHarness({ start: 1000 });
       const handle = asHandle(
         await dispatch(
-          { agent: AGENT, task: "silent", background: true, agentScope: "project" },
+          { agent: AGENT, task: "silent", wait: false, agentScope: "project" },
           { callId: 20, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           h.deps,
         ),
@@ -1059,7 +1061,7 @@ describe("dispatch background pump", () => {
       const h = createHarness({ start: 1000 });
       const handle = asHandle(
         await dispatch(
-          { agent: AGENT, task: "rate-limited", background: true, agentScope: "project" },
+          { agent: AGENT, task: "rate-limited", wait: false, agentScope: "project" },
           { callId: 21, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           h.deps,
         ),
@@ -1107,7 +1109,7 @@ describe("dispatch background pump", () => {
       };
       const handle = asHandle(
         await dispatch(
-          { agent: AGENT, task: "rate-limited-logged", background: true, agentScope: "project" },
+          { agent: AGENT, task: "rate-limited-logged", wait: false, agentScope: "project" },
           { callId: 22, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           deps,
         ),
@@ -1130,7 +1132,7 @@ describe("dispatch background pump", () => {
       const record = await waitForTerminal(h.storage, handle.taskId);
       expect(record.status).toBe("failed");
       expect(warnings).toHaveLength(1);
-      expect(warnings[0]).toContain("background dispatch task " + handle.taskId);
+      expect(warnings[0]).toContain("dispatch task " + handle.taskId);
       expect(warnings[0]).toContain(providerError);
     });
   });
@@ -1152,7 +1154,7 @@ describe("dispatch background pump", () => {
       const h = createHarness({ start: 1000 });
       const handle = asHandle(
         await dispatch(
-          { agent: AGENT, task: "truncated", background: true, agentScope: "project" },
+          { agent: AGENT, task: "truncated", wait: false, agentScope: "project" },
           { callId: 23, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           h.deps,
         ),
@@ -1197,7 +1199,7 @@ describe("dispatch background pump", () => {
           {
             agent: AGENT,
             task: "truncated but exited clean",
-            background: true,
+            wait: false,
             agentScope: "project",
           },
           { callId: 40, cwd: dir, depth: 0, maxDispatchDepth: 3 },
@@ -1228,7 +1230,7 @@ describe("dispatch background pump", () => {
       const h = createHarness({ start: 1000 });
       const handle = asHandle(
         await dispatch(
-          { agent: AGENT, task: "auth-failure", background: true, agentScope: "project" },
+          { agent: AGENT, task: "auth-failure", wait: false, agentScope: "project" },
           { callId: 24, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           h.deps,
         ),
@@ -1256,7 +1258,7 @@ describe("dispatch background pump", () => {
       const h = createHarness({ start: 1000 });
       const handle = asHandle(
         await dispatch(
-          { agent: AGENT, task: "healthy", background: true, agentScope: "project" },
+          { agent: AGENT, task: "healthy", wait: false, agentScope: "project" },
           { callId: 22, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           h.deps,
         ),
@@ -1303,7 +1305,7 @@ describe("dispatch background pump", () => {
 
       const handle = asHandle(
         await dispatch(
-          { agent: AGENT, task: "boom", background: true, agentScope: "project" },
+          { agent: AGENT, task: "boom", wait: false, agentScope: "project" },
           { callId: 5, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           deps,
         ),
@@ -1313,7 +1315,7 @@ describe("dispatch background pump", () => {
 
       // The failure path is observable, not silent (docs/testing-constraints.md #3).
       expect(warnings).toHaveLength(1);
-      expect(warnings[0]).toContain("background dispatch pump for task " + handle.taskId);
+      expect(warnings[0]).toContain("dispatch could not close its task record " + handle.taskId);
       expect(h.slots.active).toBe(0);
       // The simulated registry refused the terminal write, so the record stays running.
       expect((await h.storage.loadTask(handle.taskId))?.status).toBe("running");
@@ -1335,7 +1337,7 @@ describe("background stop signal ladder", () => {
         const callerId = "owner-1";
         const handle = asHandle(
           await dispatch(
-            { agent: AGENT, task: "long", background: true, agentScope: "project" },
+            { agent: AGENT, task: "long", wait: false, agentScope: "project" },
             { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3, callerId },
             h.deps,
           ),
@@ -1370,7 +1372,7 @@ describe("background stop signal ladder", () => {
         const callerId = "owner-1";
         const handle = asHandle(
           await dispatch(
-            { agent: AGENT, task: "quick", background: true, agentScope: "project" },
+            { agent: AGENT, task: "quick", wait: false, agentScope: "project" },
             { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3, callerId },
             h.deps,
           ),
@@ -1420,7 +1422,7 @@ describe("background stop signal ladder", () => {
       };
       const handle = asHandle(
         await dispatch(
-          { agent: AGENT, task: "late", background: true, agentScope: "project" },
+          { agent: AGENT, task: "late", wait: false, agentScope: "project" },
           { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3, callerId },
           deps,
         ),
@@ -1451,33 +1453,36 @@ describe("background stop signal ladder", () => {
 //  background failure-path reap escalates too (R-M5)
 // ---------------------------------------------------------------------------
 
-describe("background failure-path reap", () => {
-  test("uses the shared kill ladder: SIGTERM, then SIGKILL after the grace window", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    try {
-      await withAgent(async (dir) => {
-        const h = createHarness();
-        // Registration failure after the child is up drives the failure-path catch.
-        vi.spyOn(h.registry, "transition").mockRejectedValueOnce(
-          new Error("registration exploded"),
-        );
-        const result = await dispatch(
-          { agent: AGENT, task: "boom", background: true, agentScope: "project" },
-          { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3, callerId: "owner-1" },
-          h.deps,
-        );
-        const refused = asResult(result);
-        expect(refused.status).toBe("rejected");
-        expect(refused.started).toBe(true);
-
-        const child = h.lifecycle.handleAt(0);
-        expect(h.lifecycle.getKillSignals(child)).toEqual(["SIGTERM"]);
-        vi.advanceTimersByTime(DISPATCH_KILL_GRACE_MS);
-        expect(h.lifecycle.getKillSignals(child)).toEqual(["SIGTERM", "SIGKILL"]);
-      });
-    } finally {
-      vi.useRealTimers();
-    }
+describe("the failure path", () => {
+  /**
+   * ADR-0055: the record is created BEFORE the child is spawned (ADR-0053's order), so a
+   * registration failure happens BEFORE there is a child to reap. The retired background front
+   * created the record after the spawn and therefore needed a failure-path reap -- a SIGTERM
+   * then SIGKILL ladder against a child that was already up.
+   *
+   * The unified path has no such window: the spawn is the last thing that can fail before the
+   * child runs, and the only failure after it is the terminal transition, which happens once
+   * the child has closed. So the failure is a REFUSAL, the slot comes back, and no child was
+   * ever started. The ladder itself is still exercised -- by the stop watcher and by the
+   * abort path, both above.
+   */
+  test("a registration failure refuses the call, gives the slot back, and starts no child", async () => {
+    await withAgent(async (dir) => {
+      const h = createHarness();
+      // The record registration is the first registry write, and it is the one that fails.
+      vi.spyOn(h.registry, "transition").mockRejectedValueOnce(new Error("registration exploded"));
+      const result = await dispatch(
+        { agent: AGENT, task: "boom", wait: false, agentScope: "project" },
+        { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3, callerId: "owner-1" },
+        h.deps,
+      );
+      const refused = asResult(result);
+      expect(refused.status, "a refusal, not a handle for a task that never ran").toBe("rejected");
+      expect(refused.started).toBe(false);
+      expect(refused.errorMessage).toContain("registration exploded");
+      expect(h.lifecycle.spawnCount, "and no child was ever started").toBe(0);
+      expect(h.slots.active, "the slot came back").toBe(0);
+    });
   });
 });
 
@@ -1494,7 +1499,7 @@ describe("dispatch foreground", () => {
       // the test drives the mock's exit. Before the seam it spawned a real child through the module
       // level lifecycle, which is why this test used to take half a second and needed a real pi.
       const settled = dispatch(
-        { agent: AGENT, task: "ping", agentScope: "project" },
+        { wait: true, agent: AGENT, task: "ping", agentScope: "project" },
         { callId: 3, cwd: dir, depth: 0, maxDispatchDepth: 3 },
         h.deps,
       );
@@ -1524,7 +1529,7 @@ describe("dispatch foreground", () => {
       const records = await allTasks(h.storage);
       expect(records, "the foreground dispatch left exactly one record behind").toHaveLength(1);
       expect(records[0]?.id, "the record carries the id the result handed back").toBe(
-        result.recordId,
+        result.taskId,
       );
       expect(records[0]?.status, "the record was closed by the foreground's own close").toBe(
         "failed",
@@ -1536,11 +1541,11 @@ describe("dispatch foreground", () => {
   test("the depth gate is still the first check for a foreground call", async () => {
     const h = createHarness();
     const result = await dispatch(
-      { agent: AGENT, task: "x" },
+      { wait: true, agent: AGENT, task: "x" },
       { callId: 4, cwd: process.cwd(), depth: 3, maxDispatchDepth: 3 },
       h.deps,
     );
-    expect(result).toEqual(dispatchDepthLimitReached());
+    expect(result).toEqual(dispatchDepthLimitReached(true));
     expect(h.lifecycle.spawnCount).toBe(0);
     expect(await allTasks(h.storage)).toEqual([]);
   });
@@ -1558,7 +1563,7 @@ describe("background output persistence", () => {
       const deps: DispatchDeps = { ...h.deps, outputStorage };
       const handle = asHandle(
         await dispatch(
-          { agent: AGENT, task: "small", background: true, agentScope: "project" },
+          { agent: AGENT, task: "small", wait: false, agentScope: "project" },
           { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           deps,
         ),
@@ -1605,7 +1610,7 @@ describe("background output persistence", () => {
           {
             agent: AGENT,
             task: "survey",
-            background: true,
+            wait: false,
             agentScope: "project",
             readOnly: "strict",
           },
@@ -1664,7 +1669,7 @@ describe("background output persistence", () => {
       const deps: DispatchDeps = { ...h.deps, outputStorage };
       const handle = asHandle(
         await dispatch(
-          { agent: AGENT, task: "survey", background: true, agentScope: "project" },
+          { agent: AGENT, task: "survey", wait: false, agentScope: "project" },
           { callId: 3, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           deps,
         ),
@@ -1699,7 +1704,7 @@ describe("background output persistence", () => {
       const deps: DispatchDeps = { ...h.deps, outputStorage };
       const handle = asHandle(
         await dispatch(
-          { agent: AGENT, task: "big", background: true, agentScope: "project" },
+          { agent: AGENT, task: "big", wait: false, agentScope: "project" },
           { callId: 2, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           deps,
         ),
@@ -1745,7 +1750,7 @@ describe("background output persistence", () => {
       };
       const handle = asHandle(
         await dispatch(
-          { agent: AGENT, task: "persist-fail", background: true, agentScope: "project" },
+          { agent: AGENT, task: "persist-fail", wait: false, agentScope: "project" },
           { callId: 3, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           deps,
         ),
@@ -1924,7 +1929,7 @@ describe("background pump: host-observed usage survives every close (issue #199)
       const h = createHarness({ start: 1000 });
       const handle = asHandle(
         await dispatch(
-          { agent: AGENT, task: "prose only", background: true, agentScope: "project" },
+          { agent: AGENT, task: "prose only", wait: false, agentScope: "project" },
           { callId: 40, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           h.deps,
         ),
@@ -1946,7 +1951,7 @@ describe("background pump: host-observed usage survives every close (issue #199)
       const h = createHarness({ start: 1000 });
       const handle = asHandle(
         await dispatch(
-          { agent: OPTOUT_AGENT, task: "no report asked", background: true, agentScope: "project" },
+          { agent: OPTOUT_AGENT, task: "no report asked", wait: false, agentScope: "project" },
           { callId: 41, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           h.deps,
         ),
@@ -1968,7 +1973,7 @@ describe("background pump: host-observed usage survives every close (issue #199)
       const h = createHarness({ start: 1000 });
       const handle = asHandle(
         await dispatch(
-          { agent: AGENT, task: "dies after answering", background: true, agentScope: "project" },
+          { agent: AGENT, task: "dies after answering", wait: false, agentScope: "project" },
           { callId: 42, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           h.deps,
         ),
@@ -1991,7 +1996,7 @@ describe("background pump: host-observed usage survives every close (issue #199)
       const callerId = "owner-1";
       const handle = asHandle(
         await dispatch(
-          { agent: AGENT, task: "long", background: true, agentScope: "project" },
+          { agent: AGENT, task: "long", wait: false, agentScope: "project" },
           { callId: 43, cwd: dir, depth: 0, maxDispatchDepth: 3, callerId },
           h.deps,
         ),
@@ -2017,7 +2022,7 @@ describe("background pump: host-observed usage survives every close (issue #199)
       const h = createHarness({ start: 1000 });
       const handle = asHandle(
         await dispatch(
-          { agent: AGENT, task: "report", background: true, agentScope: "project" },
+          { agent: AGENT, task: "report", wait: false, agentScope: "project" },
           { callId: 44, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           h.deps,
         ),
@@ -2049,14 +2054,14 @@ describe("background pump: host-observed usage survives every close (issue #199)
     const h = createHarness();
     const gated = asResult(
       await dispatch(
-        { agent: AGENT, task: "x", background: true },
+        { agent: AGENT, task: "x", wait: false },
         { callId: 45, cwd: process.cwd(), depth: 3, maxDispatchDepth: 3 },
         h.deps,
       ),
     );
     const unknown = asResult(
       await dispatch(
-        { agent: "__bg_missing_agent__", task: "x", background: true },
+        { agent: "__bg_missing_agent__", task: "x", wait: false },
         { callId: 46, cwd: process.cwd(), depth: 0, maxDispatchDepth: 3 },
         h.deps,
       ),
@@ -2075,7 +2080,7 @@ describe("background pump: host-observed usage survives every close (issue #199)
       const h = createHarness({ limit: 1 });
       const first = asHandle(
         await dispatch(
-          { agent: AGENT, task: "one", background: true, agentScope: "project" },
+          { agent: AGENT, task: "one", wait: false, agentScope: "project" },
           { callId: 47, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           h.deps,
         ),
@@ -2100,7 +2105,7 @@ describe("background pump: host-observed usage survives every close (issue #199)
       // there is nothing to count.
       const queued = asHandle(
         await dispatch(
-          { agent: AGENT, task: "two", background: true, agentScope: "project" },
+          { agent: AGENT, task: "two", wait: false, agentScope: "project" },
           { callId: 48, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           h.deps,
         ),

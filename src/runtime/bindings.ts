@@ -224,7 +224,7 @@ type DispatchParameters = TObject<{
   agentScope: TOptional<TUnion<[TLiteral<"user">, TLiteral<"project">, TLiteral<"both">]>>;
   model: TOptional<TString>;
   thinkingLevel: TOptional<TString>;
-  background: TOptional<TBoolean>;
+  wait: TOptional<TBoolean>;
   label: TOptional<TString>;
   readOnly: TOptional<TUnion<[TLiteral<"strict">, TLiteral<"lenient">]>>;
 }>;
@@ -288,7 +288,24 @@ export const DISPATCH_PARAMETERS: DispatchParameters = Type.Object({
     }),
   ),
   thinkingLevel: Type.Optional(Type.String()),
-  background: Type.Optional(Type.Boolean()),
+  // ADR-0055: the ONE parameter that says whether the call waits. The retired `background`
+  // flag was a mode switch with no description at all, so a model could not tell what it did;
+  // this one says what it does AND what happens when it is left out, because the default is
+  // the half that surprises.
+  //
+  // The wording is the ticket's own: the question is "does this call site need the result?".
+  // The cost of getting it wrong is Kotlin's "await 遗忘综合征" — a caller that expected a
+  // result gets a handle — so the description names the fallback channel (the task-output
+  // tool) and the handle says what it is.
+  wait: Type.Optional(
+    Type.Boolean({
+      description:
+        "Pass true to wait for the task to finish, so its result comes back in this call. Leave " +
+        "it out and the call returns a handle right away — the task id and its label — the task " +
+        "keeps running, and the session is told when it finishes. Wait when you need the answer " +
+        "before you go on; a task you did not wait for is read with ptc_task_output.",
+    }),
+  ),
   label: Type.Optional(Type.String()),
   // ADR-0041. A union of STRING LITERALS, and that is the whole reason this closes. Measured
   // against pi's `validateToolArguments`: including `Type.Boolean()` makes pi COERCE — `1` and
@@ -311,7 +328,8 @@ export const DISPATCH_PARAMETERS: DispatchParameters = Type.Object({
 const DISPATCH_TOOL_LIKE = {
   name: DISPATCH_BINDING_NAME,
   description:
-    "Create a task on a registered pi agent: it runs as a child subprocess (foreground await or background task).",
+    "Create a task on a registered pi agent: it runs as a child subprocess, and the call hands " +
+    "back a handle right away — pass wait: true to wait for the result instead.",
   parameters: DISPATCH_PARAMETERS,
 };
 

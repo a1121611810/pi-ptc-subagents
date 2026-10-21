@@ -254,7 +254,7 @@ test("neither door throws: a refusal is a result, in both wait modes", async () 
   //
   // COUNTERFACTUAL: restore the throw (`throw new Error(...)` in the codemode door's refusal
   // branch) and this test fails on the rejected promise, not on a shape.
-  for (const args of [{ task: "anything" }, { task: "anything", background: true }]) {
+  for (const args of [{ task: "anything" }, { task: "anything", wait: false }]) {
     const { fromTool } = await callBothDoors(args);
     expect(fromTool, "the codemode door resolves, it does not reject").toBeDefined();
     const structured = readStructuredContent(fromTool) as { status?: string };
@@ -262,24 +262,32 @@ test("neither door throws: a refusal is a result, in both wait modes", async () 
   }
 });
 
-test("the two wait modes differ in the wording, not in the shape", async () => {
-  // The background refusal teaches the model where to look for the in-flight tasks, so its
-  // `errorMessage` differs from the foreground one. The SHAPE does not: the same eight fields, the
-  // same values, on both doors and in both modes.
+test("the two wait modes share ONE refusal wording and ONE shape", async () => {
+  // ADR-0055: the depth gate has ONE generator, keyed by the wait mode, and ONE wording for both
+  // modes. The retired background front carried a second copy that appended a next step, so a
+  // model that hit both had to learn that one refusal reads two ways -- and that copy broke a
+  // promise the child's own prompt makes (the prompt tells the child the door rejects with
+  // exactly `{ status: "rejected", errorMessage: "dispatch depth limit reached" }`).
   //
-  // The wording split is #239's to unify (one generator instead of two parallel sets); what this
-  // pins is that unifying it later cannot change the shape.
-  const foreground = await callBothDoors({ task: "anything" });
-  const background = await callBothDoors({ task: "anything", background: true });
+  // The shape is the same too: the same fields, the same values, on both doors and in both modes.
+  //
+  // COUNTERFACTUAL: give the two modes their own wording again (the retired background copy)
+  // and the first assertion turns red on the message, not on a shape.
+  const waiting = await callBothDoors({ task: "anything", wait: true });
+  const notWaiting = await callBothDoors({ task: "anything" });
   const shapeOf = (value: unknown): Record<string, unknown> => {
     const { errorMessage: _wording, ...rest } = value as Record<string, unknown>;
     return rest;
   };
-  expect(shapeOf(background.fromBinding)).toEqual(shapeOf(foreground.fromBinding));
+  expect(shapeOf(notWaiting.fromBinding)).toEqual(shapeOf(waiting.fromBinding));
   expect(
-    (background.fromBinding as { errorMessage?: string }).errorMessage,
-    "the background refusal names where to look",
-  ).toContain("ptc_task_list");
+    (notWaiting.fromBinding as { errorMessage?: string }).errorMessage,
+    "the not-waiting refusal says the same thing",
+  ).toBe((waiting.fromBinding as { errorMessage?: string }).errorMessage);
+  expect(
+    (waiting.fromBinding as { errorMessage?: string }).errorMessage,
+    "and it is the wording the child's prompt promises",
+  ).toBe("dispatch depth limit reached");
 });
 
 test("a handle and a result are told apart by their status, never by an id field", async () => {
@@ -302,7 +310,7 @@ test("a handle and a result are told apart by their status, never by an id field
     durationMs: 0,
     exitCode: -1,
     reportChannel: "none",
-    recordId: "01ARZ3NDEKTSV4RRFFQ69G5FAV" as ULID,
+    taskId: "01ARZ3NDEKTSV4RRFFQ69G5FAV" as ULID,
   };
   expect(isDispatchHandle(handle), "a handle is a handle").toBe(true);
   expect(isDispatchHandle(result), "a result is not — even with an id of its own").toBe(false);

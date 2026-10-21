@@ -112,7 +112,17 @@ export interface CreatePtcSubagentToolOptions {
  */
 export const SUBAGENT_TOOL_NAME = "pi_task_codemode";
 
-const HANDLE_TEXT = "Started background task ";
+/**
+ * ADR-0055: the handle text, and the tail that says what a handle IS.
+ *
+ * The call did NOT wait — that is the only way a handle is produced — and the model is told so
+ * in the same breath as the id. The ticket names the failure this guards: Kotlin calls it
+ * "await 遗忘综合征", a caller that expected a result and got a handle instead. The description
+ * text, this line, and the task-output channel are the three things that catch it.
+ */
+const HANDLE_TEXT = "Started task ";
+/** What to do with a handle, since it carries no result. */
+const HANDLE_TAIL = " — it runs on; read its result with ptc_task_output";
 
 export type AnyTool = ToolDefinition<any, any, any>;
 
@@ -160,8 +170,6 @@ type SubagentOutputSchema = TObject<{
   errorMessage: TOptional<TString>;
   taskId: TOptional<TString>;
   label: TOptional<TString>;
-  recordId: TOptional<TString>;
-  recordLabel: TOptional<TString>;
   observedProvider: TOptional<TString>;
   observedModel: TOptional<TString>;
   stderr: TOptional<TString>;
@@ -309,25 +317,13 @@ export const SUBAGENT_OUTPUT_SCHEMA: SubagentOutputSchema = Type.Object({
   taskId: Type.Optional(
     Type.String({
       description:
-        'The id of the running task. Present ONLY on a handle (`status: "running"`); a settled call names the record it created under `recordId` instead.',
+        'The id of the task. On a handle (`status: "running"` or `"queued"`) it is the running task\'s id; on a settled call it is the id of the record the call created — the same id, named the same way (ADR-0055).',
     }),
   ),
   label: Type.Optional(
     Type.String({
       description:
-        "The label the task was created with. Present ONLY on a handle; a settled call carries `recordLabel`.",
-    }),
-  ),
-  recordId: Type.Optional(
-    Type.String({
-      description:
-        "The id of the task record this call created — the id `ptc_task_output` and `ptc_task_stop` take, so the caller can look the child up afterwards. Present on a settled call that got as far as creating a record; ABSENT on a refusal, which leaves no record behind.",
-    }),
-  ),
-  recordLabel: Type.Optional(
-    Type.String({
-      description:
-        "The record's label: the caller's `label`, or the task text truncated. Beside `recordId`, because an id alone says nothing about which task it is.",
+        "The label the task was created with — the caller's `label`, or the task text truncated. On both shapes, because both name the same task (ADR-0055).",
     }),
   ),
   observedProvider: Type.Optional(
@@ -403,10 +399,10 @@ export const SUBAGENT_OUTPUT_SCHEMA: SubagentOutputSchema = Type.Object({
 });
 
 // The two shapes are told apart by `status`, never by "does the outcome carry an id" (ADR-0054).
-// ADR-0053 gave a settled result an id of its own (`recordId`), so a handle's `taskId` no longer
-// identifies the shape: a foreground result that carried `taskId` would be read as a handle and
-// every settled call would announce itself as a background task. `isDispatchHandle` discriminates
-// on `status` — a handle is always `"running"`, a result is always `"fulfilled"` or `"rejected"`.
+// ADR-0053 gave a settled result an id of its own, so a handle's `taskId` no longer identifies
+// the shape — and ADR-0055 made the two name the id the SAME way, which is why the presence of
+// an id cannot be the test either. `isDispatchHandle` discriminates on `status`: a handle is
+// always `"running"` or `"queued"`, a result is always `"fulfilled"` or `"rejected"`.
 
 /**
  * Upper bound on the diagnostic a refused call carries, in characters.
@@ -480,6 +476,10 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
     exposure: "codemode",
     description: [
       "Create a task: start a fresh pi agent as a child process — it gets its own context and tools, and it cannot see or change this session except through what it returns. Omit `model` and the child inherits this session's current model (when this pi exposes one; otherwise it falls back to pi's configured default); pass `model`, or let its agent definition pin one, to override that. Use it for work that would otherwise flood this context: a survey, a second opinion, or a task that can run while you do something else.",
+      // ADR-0055: the wait mode is the ONE thing a caller has to decide, and the default is the
+      // half that surprises — the call hands back a handle, not an answer. So the description
+      // says what the default does AND how to ask for the result instead, in the same breath.
+      "The call returns a handle right away — the task id and its label — and the task runs on; pass `wait: true` when you need the result before you go on, and read a task you did not wait for with ptc_task_output.",
       // T4 (#181): the model cannot learn where agent definitions come from by reading a tool
       // list, so it goes looking -- and in the session that motivated this it spent twenty-plus
       // tool calls inspecting the install and guessing at argument values. The two directories
@@ -506,7 +506,7 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
       roster,
     ].join("\n"),
     promptSnippet:
-      "Create a task: start a fresh pi agent as a child process (foreground or background)",
+      "Create a task: start a fresh pi agent as a child process (it runs on; wait: true to wait for the result)",
     promptGuidelines: [
       "Prefer one subagent over many tool calls when the work is a question with an answer rather than a fact you can look up, or when the raw output would be larger than the answer.",
     ],
@@ -576,7 +576,7 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
           content: [
             {
               type: "text" as const,
-              text: [HANDLE_TEXT + outcome.taskId, renderReadOnlyTierText(handleTier)]
+              text: [HANDLE_TEXT + outcome.taskId + HANDLE_TAIL, renderReadOnlyTierText(handleTier)]
                 .filter((part) => part.length > 0)
                 .join("\n\n"),
             },

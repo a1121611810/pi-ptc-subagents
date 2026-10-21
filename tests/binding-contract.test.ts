@@ -87,6 +87,10 @@ const NON_BINDING_VOCABULARY: readonly string[] = [
   "details: null",
   "{ text, status, ... }",
   "status",
+  // ADR-0055: the task-door note names the wait mode and the two fields a handle carries.
+  "wait: true",
+  "taskId",
+  "label",
   'status: "rejected"',
   "errorMessage",
   "diff",

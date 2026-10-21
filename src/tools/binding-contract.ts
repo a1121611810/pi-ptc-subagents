@@ -73,10 +73,17 @@ const SHAPE_LINES = [
  * The refusal half is ADR-0054's: a refusal is a RESULT on both doors — `status: "rejected"` plus
  * an `errorMessage` — and never an exception. The codemode door used to throw, which made a
  * refused call indistinguishable from a broken one.
+ *
+ * ADR-0055: the shape half is the WAIT MODE. A task door resolves with a handle unless the
+ * caller asks it to wait, so a note that said "resolves to `{ text, status, ... }`" was wrong for
+ * the default call. The note now names both shapes and the one parameter that chooses between
+ * them — and it says which one you get by default, because that is the half a reader gets
+ * wrong.
  */
 export const TASK_DOOR_RESULT_NOTE: string =
-  "A task door resolves to `{ text, status, ... }` with no `content`, and it never throws: a " +
-  'refusal comes back as a result with `status: "rejected"` and an `errorMessage`, so read those two.';
+  "A task door never throws and has no `content`: without `wait: true` it resolves with a " +
+  'handle (`taskId`, `label`), and a refusal is a result with `status: "rejected"` and an ' +
+  "`errorMessage`, so read those two.";
 
 /**
  * Per-binding departures from the shared shape, keyed by binding name. A binding

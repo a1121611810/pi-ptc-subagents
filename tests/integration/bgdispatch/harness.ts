@@ -10,7 +10,7 @@
  *   - `DefaultTaskRegistry` (BG-02) over a real `TaskStorage` (BG-01; `InMemoryTaskStorage`
  *     by default, a `FileTaskStorage` for the restart simulation),
  *   - the real `DefaultNotificationPipeline` (BG-05),
- *   - the real `dispatch({ background: true })` branch (BG-04) with a
+ *   - the real `dispatch({ wait: false })` branch (BG-04) with a
  *     `MockChildProcessLifecycle` (BG-03),
  *   - a fake clock for every TaskRecord / Subscription / TaskEvent timestamp,
  *   - an `InMemoryOutputStorage` (BG-07).
@@ -288,7 +288,7 @@ export async function spawnTask(h: Harness, options: SpawnOptions = {}): Promise
     {
       agent: AGENT_NAME,
       task: options.task ?? "integration task",
-      background: true,
+      wait: false,
       agentScope: "project",
       ...(options.label === undefined ? {} : { label: options.label }),
     },

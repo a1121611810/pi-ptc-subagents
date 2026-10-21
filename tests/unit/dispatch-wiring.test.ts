@@ -128,7 +128,7 @@ describe("bindings.ts forwards DispatchContext + DispatchDeps (Gap 2 + Gap 4)", 
       if (binding === undefined) throw new Error("pi_task_ptc binding is missing");
 
       const result = await binding.execute(
-        { agent: AGENT, task: "wired", background: true, agentScope: "project" },
+        { agent: AGENT, task: "wired", wait: false, agentScope: "project" },
         {
           callId: 9,
           depth: 0,
@@ -221,7 +221,7 @@ describe("dispatcher.ts threads the per-run counter + session identity (Gap 2 + 
     });
     const outcome = await runPtcProgram({
       code:
-        "const h = await tools.pi_task_ptc({agent:'a',task:'t',background:true});\n" +
+        "const h = await tools.pi_task_ptc({agent:'a',task:'t',wait:false});\n" +
         "return h.taskId;",
       surface: "run_code",
       cwd: process.cwd(),
@@ -248,7 +248,7 @@ describe("dispatcher.ts threads the per-run counter + session identity (Gap 2 + 
         code:
           "const h = await tools.pi_task_ptc({agent:'" +
           AGENT +
-          "',task:'injected',background:true,agentScope:'project'});\n" +
+          "',task:'injected',wait:false,agentScope:'project'});\n" +
           "return h.taskId;",
         surface: "run_code",
         cwd: dir,
@@ -321,7 +321,7 @@ describe("parentTaskId reaches the nested TaskRecord (reopen R-m12)", () => {
       if (binding === undefined) throw new Error("pi_task_ptc binding is missing");
 
       const result = await binding.execute(
-        { agent: AGENT, task: "nested", background: true, agentScope: "project" },
+        { agent: AGENT, task: "nested", wait: false, agentScope: "project" },
         {
           callId: 11,
           depth: 0,
@@ -357,7 +357,7 @@ describe("parentTaskId reaches the nested TaskRecord (reopen R-m12)", () => {
         code:
           "const h = await tools.pi_task_ptc({agent:'" +
           AGENT +
-          "',task:'nested',background:true,agentScope:'project'});\n" +
+          "',task:'nested',wait:false,agentScope:'project'});\n" +
           "return h.taskId;",
         surface: "run_code",
         cwd: dir,
@@ -392,7 +392,7 @@ describe("parentTaskId reaches the nested TaskRecord (reopen R-m12)", () => {
           code:
             "const h = await tools.pi_task_ptc({agent:'" +
             AGENT +
-            "',task:'nested',background:true,agentScope:'project'});\n" +
+            "',task:'nested',wait:false,agentScope:'project'});\n" +
             "return h.taskId;",
           description: "nested dispatch parent wire",
         },
@@ -478,7 +478,7 @@ describe("the per-run counter is charged once per foreground dispatch (reopen ro
             code:
               "const call = (i) => tools.pi_task_ptc({agent:'" +
               AGENT +
-              "',task:'wave ' + i,agentScope:'project'});\n" +
+              "',task:'wave ' + i,agentScope:'project',wait:true});\n" +
               "const rs = await Promise.all([0,1,2,3,4,5].map((i) => call(i)));\n" +
               "return rs.map((r) => ({started: r.started === true, status: String(r.status)," +
               " error: String(r.errorMessage === undefined ? '' : r.errorMessage)}));",

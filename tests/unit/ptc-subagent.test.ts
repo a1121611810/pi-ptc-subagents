@@ -258,7 +258,7 @@ async function dispatchBackground(
     agent: AGENT,
     agentScope: "project",
     task: "look at the tests",
-    background: true,
+    wait: false,
     ...extra,
   });
   // Asserted here rather than in each test: without a child there is no background outcome at all,
@@ -302,6 +302,9 @@ async function dispatchForegroundSaying(
     agent: AGENT,
     agentScope: "project",
     task: "answer, then stop",
+    // ADR-0055: the foreground front is the WAITING mode -- the call asks for the result and
+    // gets it back. The default is the other one.
+    wait: true,
     ...extra,
   });
   await waitFor(() => h.lifecycle.spawnCount > 0);
@@ -392,7 +395,7 @@ describe("pi_task_codemode", () => {
         agent: AGENT,
         agentScope: "project",
         task: "look at the tests",
-        background: true,
+        wait: false,
       })) as {
         content: { type: string; text: string }[];
         details: { taskId?: string; status?: string };
@@ -503,7 +506,7 @@ describe("pi_task_codemode", () => {
     expect(declared).toEqual(real);
     expect(declared, "and it is not empty").toContain("agent");
     expect(declared).toContain("task");
-    expect(declared).toContain("background");
+    expect(declared).toContain("wait");
     // Everything above compares the schema to itself, so it cannot fail on a RENAME -- and the
     // rename is the breaking change this branch exists to make. COUNTERFACTUAL: put the key back
     // to `goal` in the three places it lives (`bindings.ts`'s schema key, `DispatchInput`'s field,
@@ -735,7 +738,12 @@ describe("pi_task_codemode and the dispatch cap", () => {
           getDispatchDeps: () => ({ ...h.deps, slots }),
         });
         let settled = false;
-        void run(tool, { agent: AGENT, agentScope: "project", task: "no slot is free" })
+        void run(tool, {
+          agent: AGENT,
+          agentScope: "project",
+          task: "no slot is free",
+          wait: true,
+        })
           .then(() => {
             settled = true;
           })
@@ -770,9 +778,12 @@ describe("pi_task_codemode and the dispatch cap", () => {
     await withAgent(async (dir) => {
       const h = createHarness();
       const tool = createPtcSubagentTool(baseOptions(dir, h.deps));
-      const settled = run(tool, { agent: AGENT, agentScope: "project", task: "a free slot" }).catch(
-        () => undefined,
-      );
+      const settled = run(tool, {
+        agent: AGENT,
+        agentScope: "project",
+        task: "a free slot",
+        wait: true,
+      }).catch(() => undefined);
       await waitFor(() => h.lifecycle.spawnCount > 0);
       // Exit 0 with no assistant text, so the dispatch REJECTS ("no final text") and the tool
       // throws. That is irrelevant here and deliberately not asserted: this test is about whether a
@@ -805,7 +816,7 @@ describe("pi_task_codemode and the dispatch cap", () => {
 
       for (let i = 0; i < 3; i += 1) {
         const settled = dispatch(
-          { agent: AGENT, agentScope: "project", task: "live set probe " + i },
+          { wait: true, agent: AGENT, agentScope: "project", task: "live set probe " + i },
           { callId: i, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           runtime.dispatchDeps,
         ).catch(() => undefined);
@@ -826,7 +837,7 @@ describe("pi_task_codemode and the dispatch cap", () => {
     });
   });
 
-  test("a throw between the slot acquire and the spawn gives the slot back", async () => {
+  test("a failure between the slot acquire and the spawn gives the slot back", async () => {
     // Round 5 finding 2: the round-4 R4-1 row is marked FIXED and nothing held it. Removing the
     // `slots.release()` in the catch left all 872 tests green.
     //
@@ -839,20 +850,26 @@ describe("pi_task_codemode and the dispatch cap", () => {
     await withAgent(async (dir) => {
       const h = createHarness();
       const slots = new DispatchSlotCounter(4);
-      let threw = false;
+      let outcome: unknown;
       setPromptFileWriter(() => Promise.reject(new Error("injected: mkdtemp failed")));
       try {
-        await dispatch(
-          { agent: AGENT, agentScope: "project", task: "never gets to spawn" },
+        outcome = await dispatch(
+          { wait: true, agent: AGENT, agentScope: "project", task: "never gets to spawn" },
           { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           { ...h.deps, slots },
-        ).catch(() => {
-          threw = true;
-        });
+        );
       } finally {
         setPromptFileWriter(undefined);
       }
-      expect(threw, "the injected failure really happened").toBe(true);
+      // ADR-0055: one path, one failure shape. The retired foreground front THREW here and the
+      // retired background front refused; the unified path refuses, because "never rejects" is
+      // the contract this function documents and a waiting caller must not be told one thing
+      // while a not-waiting caller is told another.
+      const rejected = outcome as { status?: string; errorMessage?: string };
+      expect(rejected.status, "the injected failure really happened, as a refusal").toBe(
+        "rejected",
+      );
+      expect(rejected.errorMessage).toContain("injected");
       expect(slots.active, "the slot came back, so the next dispatch can still have one").toBe(0);
     });
   });
@@ -865,7 +882,7 @@ describe("pi_task_codemode and the dispatch cap", () => {
       const h = createHarness();
       const slots = new DispatchSlotCounter(1);
       const settled = dispatch(
-        { agent: AGENT, agentScope: "project", task: "writer restored" },
+        { wait: true, agent: AGENT, agentScope: "project", task: "writer restored" },
         { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
         { ...h.deps, slots },
       ).catch(() => undefined);
@@ -892,7 +909,7 @@ describe("pi_task_codemode and the dispatch cap", () => {
       let outcome: unknown;
       try {
         outcome = await dispatch(
-          { agent: AGENT, agentScope: "project", task: "never gets to spawn", background: true },
+          { agent: AGENT, agentScope: "project", task: "never gets to spawn", wait: false },
           { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           { ...h.deps, slots },
         );
@@ -905,7 +922,10 @@ describe("pi_task_codemode and the dispatch cap", () => {
       const rejected = outcome as { status?: string; errorMessage?: string; taskId?: string };
       expect(rejected.status, "a settled rejection, not a throw").toBe("rejected");
       expect(rejected.errorMessage).toContain("injected");
-      expect(rejected.taskId, "and no handle, because nothing was spawned").toBeUndefined();
+      // ADR-0055: `status` is the discriminant, not the presence of an id -- and the id IS
+      // there, because the record was created before the spawn and a spawn that fails reads as
+      // a failed TASK (ADR-0053). What matters is that this is a result, not a handle: the
+      // assertion above already says `status === "rejected"`.
       expect(
         slots.active,
         "the KEYED reservation came back; nothing else would ever release it",
@@ -922,7 +942,7 @@ describe("pi_task_codemode and the dispatch cap", () => {
       h.lifecycle.failNextExit(new Error("injected: exit blew up"));
       const warnings: string[] = [];
       const settled = dispatch(
-        { agent: AGENT, agentScope: "project", task: "exit will reject" },
+        { wait: true, agent: AGENT, agentScope: "project", task: "exit will reject" },
         { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
         {
           ...h.deps,
@@ -933,7 +953,7 @@ describe("pi_task_codemode and the dispatch cap", () => {
       h.lifecycle.resolveExit(h.lifecycle.handleAt(0), 0, null);
       await settled;
       await waitFor(() => warnings.length > 0);
-      expect(warnings.join("\n")).toContain("exit() failed for a foreground child");
+      expect(warnings.join("\n")).toContain("exit() failed for a child");
       expect(warnings.join("\n")).toContain("injected: exit blew up");
     });
   });
@@ -943,7 +963,7 @@ describe("pi_task_codemode and the dispatch cap", () => {
  * The `structuredContent` channel: what a codemode script receives INSTEAD of the text block once
  * the tool declares an `outputSchema` (`ToolDefinition.outputSchema`). This tool is the only way a
  * session that has handed orchestration to pi's `codemode` can start a subagent at all, so before
- * this channel existed the script had to regex the ULID out of `"Started background task 01JABC..."`.
+ * this channel existed the script had to regex the ULID out of `"Started task 01JABC..."`.
  *
  * ADR-0054: what the script receives is the RAW result — the same object the PTC door resolves
  * with, field for field, under the same names. No projection, no renamed keys, no envelope. The
@@ -983,7 +1003,7 @@ describe("pi_task_codemode structuredContent", () => {
     });
   });
 
-  test("a call that already finished hands the script the exit code and no task id", async () => {
+  test("a call that already finished hands the script the exit code and the id it created", async () => {
     await withAgent(async (dir) => {
       const structured = structuredOf(await dispatchForeground(dir));
       expect(structured.status, "the dispatcher's own status, not the word 'background'").toBe(
@@ -999,7 +1019,16 @@ describe("pi_task_codemode structuredContent", () => {
       expect(structured.exitCode, "and it is the code this file closed the child with").toBe(
         FOREGROUND_EXIT_CODE,
       );
-      expect(Object.hasOwn(structured, "taskId"), "and there is nothing to poll").toBe(false);
+      // ADR-0055: the settled result names the task the same way the handle does, so the id IS
+      // there -- it is the id of the record this call created, now terminal. What says there is
+      // nothing left to poll is the STATUS, not the absence of the id.
+      expect(
+        Object.hasOwn(structured, "taskId"),
+        "and it names the record this call created, so the task can still be looked up",
+      ).toBe(true);
+      expect(String(structured.taskId), "which is a ULID, like every task id").toMatch(
+        /^[0-9A-HJKMNP-TV-Z]{26}$/,
+      );
     });
   });
 
@@ -1042,11 +1071,11 @@ describe("pi_task_codemode structuredContent", () => {
         "agentName",
         "durationMs",
         "exitCode",
-        "recordId",
-        "recordLabel",
+        "label",
         "reportChannel",
         "started",
         "status",
+        "taskId",
         "text",
       ]);
       // The discriminant is `status` (ADR-0054), not "does it carry an id": a settled result
@@ -1130,8 +1159,6 @@ describe("pi_task_codemode structuredContent", () => {
         "observedModel",
         "observedProvider",
         "readOnlyTier",
-        "recordId",
-        "recordLabel",
         "report",
         "reportChannel",
         "started",
