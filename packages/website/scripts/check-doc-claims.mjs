@@ -167,13 +167,6 @@ const BINDINGS = [
     render: (v) => `${v / 1000} s`,
   },
   {
-    id: 'foreground-concurrency-message',
-    source: () => namedConst('src/runtime/dispatch.ts', 'DISPATCH_CONCURRENCY_LIMIT_MESSAGE'),
-    doc: 'docs/usage/bgdispatch.md',
-    anchor: 'errorMessage: "',
-    render: (v) => `${v}"`,
-  },
-  {
     // Not a named constant: the foreground depth refusal is an inline literal inside the helper.
     // Binding by function name is what keeps this distinct from BACKGROUND_DEPTH_LIMIT_MESSAGE,
     // which holds a `next_step:`-suffixed string in the same file.
