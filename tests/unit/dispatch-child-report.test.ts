@@ -26,6 +26,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
+  isDispatchHandle,
   DispatchSlotCounter,
   appendDepthHint,
   buildArgv,
@@ -353,7 +354,7 @@ const PLAIN_TRANSCRIPT: readonly string[] = [assistantLine("Here is the answer, 
 
 /** Narrow a background result to its handle, or fail loudly. */
 function asHandle(value: DispatchHandle | DispatchResult): DispatchHandle {
-  if (!("taskId" in value)) {
+  if (!isDispatchHandle(value)) {
     throw new Error("expected a DispatchHandle, got a DispatchResult refusal");
   }
   return value;
@@ -361,7 +362,7 @@ function asHandle(value: DispatchHandle | DispatchResult): DispatchHandle {
 
 /** Narrow a dispatch result to a DispatchResult, or fail loudly. */
 function asResult(value: DispatchHandle | DispatchResult): DispatchResult {
-  if ("taskId" in value) {
+  if (isDispatchHandle(value)) {
     throw new Error("expected a DispatchResult, got a DispatchHandle");
   }
   return value;

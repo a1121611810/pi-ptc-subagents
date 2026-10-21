@@ -240,6 +240,23 @@ export interface TaskRegistry {
    */
   get(taskId: ULID): Promise<TaskRecord | null>;
   /**
+   * ADR-0053: whether the model-facing task face (`ptc_task_list` / `ptc_task_output` /
+   * `ptc_task_stop`) belongs in the model's face right now.
+   *
+   * **The face is a CONSEQUENCE of the session having dispatched, not a rule of its own.** A
+   * task record is the only trace a dispatch leaves, so "the session has a task record" and
+   * "there is something for the task tools to do" are the same question — and the answer is
+   * what decides whether the three tools are offered to the model at all.
+   *
+   * **A HOLDER with no session bound yet answers YES**, and that is a registration-time
+   * necessity rather than a claim about the session: pi reads a tool's `exposure` when the
+   * tool is registered, and a tool registered as hidden never enters the active set — so a
+   * holder with no session yet must let the tools register ACTIVE, and the session's own
+   * first request then hides them if the session has no task record. A BOUND registry
+   * answers from its records; see {@link DefaultTaskRegistry} and the stable holder.
+   */
+  taskFaceVisible(): boolean;
+  /**
    * Subscribe to every successfully persisted state write (spawn included). Returns an
    * idempotent unsubscribe. Observers run synchronously, in-process; see
    * {@link TaskTransitionObserver} for the best-effort contract and single-writer ordering.
@@ -431,6 +448,24 @@ export class DefaultTaskRegistry implements TaskRegistry {
   /** Registered in-process transition observers (issue #68 §1). */
   readonly #observers = new Set<TaskTransitionObserver>();
   /**
+   * ADR-0053: whether this registry has ever seen a task record.
+   *
+   * The task face's visibility follows this, and the flag is one-way: a registry that has
+   * seen a record has seen it forever, because a record is never deleted (a finished task
+   * stays on the list — that is the whole point of the registry being the dispatch's only
+   * trace).
+   *
+   * It is set from three places, and all three are "a record was observed":
+   *   - a `spawn` persisted one,
+   *   - a read (`get` / `query`) found one,
+   *   - the startup reconcile walked the storage and saw one.
+   *
+   * The reconcile is what makes a RESUMED session correct: a session that already has
+   * records from an earlier run has them before anything is dispatched in this one, and the
+   * face has to be visible from the session's first request.
+   */
+  #hasRecords = false;
+  /**
    * Tail of the write queue. Every state write is chained here so a load-check-write cannot
    * interleave with a concurrent command (R-M1). Each task is cheap and this is a session-level
    * registry, so one queue is simpler than per-task locks and keeps the single-writer guarantee.
@@ -496,7 +531,20 @@ export class DefaultTaskRegistry implements TaskRegistry {
   /** O(1) single-record read; the read side of the same storage seam `query` uses. */
   async get(taskId: ULID): Promise<TaskRecord | null> {
     if (!isUsableTaskId(taskId)) return null;
-    return await this.#storage.loadTask(taskId);
+    const record = await this.#storage.loadTask(taskId);
+    if (record !== null) this.#hasRecords = true;
+    return record;
+  }
+
+  /**
+   * ADR-0053: the task face is visible once this registry has seen a task record.
+   *
+   * A registry IS a session's registry (the holder swaps one in on bind), so this answers
+   * from the records rather than from a "is a session bound yet" question — that question
+   * belongs to the holder, which answers YES until a session says otherwise.
+   */
+  taskFaceVisible(): boolean {
+    return this.#hasRecords;
   }
 
   /** Read-only query; storage iteration order is stabilized by an explicit createdAt sort. */
@@ -515,6 +563,9 @@ export class DefaultTaskRegistry implements TaskRegistry {
       }
       matched.push(record);
     }
+    // ADR-0053: a read that saw a record is a record the session HAS, so the task face is
+    // visible from here on. The flag is one-way; nothing turns it off.
+    if (matched.length > 0) this.#hasRecords = true;
     // Array#sort is stable, so equal createdAt values keep storage's insertion order.
     matched.sort((a, b) =>
       orderBy === "createdAt-asc" ? a.createdAt - b.createdAt : b.createdAt - a.createdAt,
@@ -536,6 +587,10 @@ export class DefaultTaskRegistry implements TaskRegistry {
   async reconcileLostTasks(): Promise<TaskRecord[]> {
     const targets: TaskRecord[] = [];
     for await (const record of this.#storage.listTasks()) {
+      // ADR-0053: walking the storage is how a RESUMED session learns it already has records
+      // — the face must be visible from that session's first request, and nothing has been
+      // dispatched yet in it.
+      this.#hasRecords = true;
       if (!RECOVERY_SOURCES.has(record.status)) continue;
       if (!this.#isOwnerDead(record)) continue;
       targets.push(record);
@@ -596,6 +651,8 @@ export class DefaultTaskRegistry implements TaskRegistry {
       record.ownerPid = this.#owner.pid;
       record.ownerBootMs = this.#owner.bootMs;
     }
+    // ADR-0053: a record now exists, so the task face is visible from the next request on.
+    this.#hasRecords = true;
     if (!adopted) {
       // Keep the caller's handle pointing at the canonical record id (ADR-0022 §4).
       handle.taskId = taskId;

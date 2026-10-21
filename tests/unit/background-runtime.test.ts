@@ -18,6 +18,7 @@ import { join } from "node:path";
 import { describe, expect, test, vi } from "vitest";
 import { createBackgroundTaskRuntime } from "../../src/runtime/background-runtime.ts";
 import {
+  isDispatchHandle,
   DISPATCH_KILL_GRACE_MS,
   dispatch,
   type DispatchResult,
@@ -139,7 +140,7 @@ async function withAgent<T>(body: (dir: string) => Promise<T>): Promise<T> {
 }
 
 function asHandle(value: DispatchHandle | DispatchResult): DispatchHandle {
-  if (!("taskId" in value))
+  if (!isDispatchHandle(value))
     throw new Error("expected a DispatchHandle, got " + JSON.stringify(value));
   return value;
 }
@@ -463,7 +464,7 @@ describe("shutdown", () => {
         { callId: 5, cwd: dir, depth: 0, maxDispatchDepth: 3, callerId: "run-1" },
         runtime.dispatchDeps,
       );
-      expect("taskId" in overCap).toBe(false);
+      expect(isDispatchHandle(overCap)).toBe(false);
       expect(runtime.slots.active).toBe(2);
 
       lifecycle.resolveExit(lifecycle.handleAt(2), 0, null);

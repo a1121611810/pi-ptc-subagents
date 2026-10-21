@@ -32,6 +32,7 @@ import {
   type ParsedAgentEvent,
 } from "../../src/runtime/child-process-lifecycle.ts";
 import {
+  isDispatchHandle,
   DispatchSlotCounter,
   buildArgv,
   dispatch,
@@ -182,7 +183,7 @@ async function driveBackground(
     contextFor(dir, sessionModel),
     deps,
   );
-  if (!("taskId" in outcome)) throw new Error("the background fixture was refused");
+  if (!isDispatchHandle(outcome)) throw new Error("the background fixture was refused");
   await waitFor(() => lifecycle.spawned.length > 0);
   const child = lifecycle.handleAt(0);
   const argv = lifecycle.getRecordedArgv(child);

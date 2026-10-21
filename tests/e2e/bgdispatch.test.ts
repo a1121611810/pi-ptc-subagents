@@ -23,6 +23,7 @@ import {
 } from "../../src/runtime/child-process-lifecycle.ts";
 import { createFileTaskStorage } from "../../src/runtime/task-storage-file.ts";
 import {
+  isDispatchHandle,
   DispatchSlotCounter,
   dispatch,
   type DispatchDeps,
@@ -91,7 +92,7 @@ function agentMarkdown(): string {
 
 /** Narrow the background dispatch union without an inline `if (... result ...)` before an expect. */
 function requireHandle(result: DispatchHandle | DispatchResult): DispatchHandle {
-  if (!("taskId" in result)) {
+  if (!isDispatchHandle(result)) {
     throw new Error("background dispatch refused: " + (result.errorMessage ?? "unknown reason"));
   }
   return result;

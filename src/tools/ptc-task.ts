@@ -33,7 +33,7 @@
  */
 
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { defineCompatTool } from "./pi-compat-types.ts";
+import { defineCompatTool, type ToolExposure } from "./pi-compat-types.ts";
 
 import { Type } from "typebox";
 import type { Static } from "typebox";
@@ -86,6 +86,34 @@ export const DEFAULT_STOP_REASON = "model stop";
 
 /** Subscriber fallback when a record's `spawnSource.callerId` is empty (see `#ownerSubscriber`). */
 const STOP_CALLER_FALLBACK = "ptc_task_stop";
+
+/**
+ * ADR-0053: the task face's reach, read LIVE.
+ *
+ * **The face is a consequence of the session having dispatched, not a rule of its own.** A task
+ * record is the only trace a dispatch leaves, so "the session has a task record" and "there is
+ * something for these three tools to do" are one question — and its answer decides whether the
+ * tools are offered to the model at all. Before the session's first dispatch there is nothing
+ * to list, read or stop, so the face is out of the model's face; the moment a record exists it
+ * is back.
+ *
+ * **Why a getter and not a value.** pi reads a tool's `exposure` when the tool is REGISTERED
+ * (to decide whether the tool enters the active set at all) and again on every request (to
+ * decide what the model is shown). A getter answers both from the same live question, so the
+ * registration and the request cannot disagree — which a value written once at registration
+ * time would, because the answer changes in the middle of a session.
+ *
+ * **"Hidden" is the right word for the off state.** pi drops a hidden tool from the
+ * declarations it sends, so the model does not see it and cannot call it. The tool stays
+ * REGISTERED (pi cannot unregister), so it comes back the moment the exposure says "direct"
+ * again.
+ *
+ * The same rule covers ADR-0050's "PTC off must not strand a running task": the off switch is
+ * about what STARTS from here on, and a task that exists is still inspectable and stoppable.
+ */
+function taskFaceExposure(registry: TaskRegistry): ToolExposure {
+  return registry.taskFaceVisible() ? "direct" : "hidden";
+}
 
 /** Shared guidance for the three tools (they are one surface and should read that way). */
 export const PTC_TASK_TOOL_GUIDELINES: readonly string[] = [
@@ -251,6 +279,11 @@ export function createPtcTaskListTool(registry: TaskRegistry): AnyTool {
     promptGuidelines: [...PTC_TASK_TOOL_GUIDELINES],
     parameters: LIST_PARAMETERS,
     outputSchema: LIST_OUTPUT_SCHEMA,
+    // ADR-0053: live reach — the face is in the model's face once the session has a task
+    // record, and out of it before the first dispatch.
+    get exposure(): ToolExposure {
+      return taskFaceExposure(registry);
+    },
     async execute(_toolCallId, params) {
       const records = await registry.query({
         ...(params.status === undefined ? {} : { status: params.status }),
@@ -602,6 +635,11 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
     promptGuidelines: [...PTC_TASK_TOOL_GUIDELINES],
     parameters: OUTPUT_PARAMETERS,
     outputSchema: OUTPUT_OUTPUT_SCHEMA,
+    // ADR-0053: live reach — the face is in the model's face once the session has a task
+    // record, and out of it before the first dispatch.
+    get exposure(): ToolExposure {
+      return taskFaceExposure(registry);
+    },
     async execute(_toolCallId, params) {
       const taskId = params.taskId as ULID;
       const record = await loadTaskOrThrow(registry, taskId, "ptc_task_output");
@@ -830,6 +868,11 @@ export function createPtcTaskStopTool(
     promptGuidelines: [...PTC_TASK_TOOL_GUIDELINES],
     parameters: STOP_PARAMETERS,
     outputSchema: STOP_OUTPUT_SCHEMA,
+    // ADR-0053: live reach — the face is in the model's face once the session has a task
+    // record, and out of it before the first dispatch.
+    get exposure(): ToolExposure {
+      return taskFaceExposure(registry);
+    },
     async execute(_toolCallId, params) {
       const taskId = params.taskId as ULID;
       const existing = await loadTaskOrThrow(registry, taskId, "ptc_task_stop");
