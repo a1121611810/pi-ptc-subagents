@@ -294,20 +294,10 @@ function releaseSlot(slots: DispatchSlotCounter, holder: string, logger?: Regist
 /**
  * ADR-0056 / ADR-0057: withdraw an admitted dispatch that will not run after all. A task
  * that is still WAITING is removed from the queue (and woken); a task that already holds a
- * slot gives it back. Either way it never starts a child.
+ * slot gives it back — through the PROMOTING release, so the next waiter is started.
  */
-function withdrawAdmission(
-  slots: DispatchSlotCounter,
-  holder: string,
-  logger?: RegistryLogger,
-): void {
-  if (slots.cancelQueued(holder)) return;
-  // The holder was already PROMOTED, so it holds a slot. Give it back through the PROMOTING
-  // release: `DispatchSlotCounter.release` hands the freed slot to the oldest waiter and
-  // RETURNS it, and dropping that return value leaves the next waiter holding a slot that
-  // nobody ever starts — the queue stalls behind a task that will never run, and the session
-  // silently loses one slot of concurrency per occurrence.
-  releaseSlot(slots, holder, logger);
+function withdrawAdmission(slots: DispatchSlotCounter, holder: string, log?: RegistryLogger): void {
+  if (!slots.cancelQueued(holder)) releaseSlot(slots, holder, log);
 }
 
 /**
@@ -335,16 +325,6 @@ async function waitForAdmission(
     void withdrawn.then(() => settle("withdrawn"));
   });
 }
-
-/**
- * ADR-0057: the ONE sentence for "this dispatch was withdrawn from the admission queue".
- *
- * The WAITING tail reports it as the rejection's `errorMessage`; the DETACHED tail reports it
- * as its log line, because that tail's caller already holds a handle and the log is the only
- * place the outcome can be seen. One sentence, so the two tails cannot drift apart — and so
- * neither of them can name a failure that did not happen.
- */
-const WITHDRAWN_FROM_ADMISSION_QUEUE = "dispatch was withdrawn from the admission queue";
 
 /**
  * ADR-0056: mark a task that left the admission queue without running.
@@ -3174,6 +3154,16 @@ async function driveChildToTerminal(params: ChildDriveParams): Promise<DispatchR
     })();
   });
 }
+
+/**
+ * ADR-0057: the ONE sentence for "this dispatch was withdrawn from the admission queue".
+ *
+ * The WAITING tail reports it as the rejection's `errorMessage`; the DETACHED tail reports it
+ * as its log line, because that tail's caller already holds a handle and the log is the only
+ * place the outcome can be seen. One sentence, so the two tails cannot drift apart — and so
+ * neither of them can name a failure that did not happen.
+ */
+const WITHDRAWN_FROM_ADMISSION_QUEUE = "dispatch was withdrawn from the admission queue";
 
 /**
  * Spawn one pi subprocess for one dispatch.
