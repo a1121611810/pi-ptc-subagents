@@ -474,15 +474,22 @@ test("the built dist loads under real pi and adds both PTC tools beside the buil
   }
 }, 120_000);
 
-test("the PTC tools reach the request with their prompt snippets and guideline", async () => {
+test("the PTC tools reach the request with their prompt snippets and the road table", async () => {
   const { prompt } = await extended();
   // `promptSnippet` is what puts a custom tool into the prompt's "Available tools" section. Without
   // it the model sees the declarations but the prompt lists nothing usable — which would be
   // especially broken in PTC mode, where these two are the only callable tools.
   expect(prompt).toContain("composes pi's tools in one shot");
   expect(prompt).toContain("structured TypeScript workflow");
-  // Guidelines must name their tool (pi appends them flat, with no tool-name prefix).
-  expect(prompt).toContain("Use ptc_run_code when");
+  // The ROAD TABLE reaches the prompt too (ADR-0061): the `<ptc>` section is the index, and it is
+  // the one place that says which road to take and how to take it on this surface. The routing
+  // half of the guidelines moved into it, so the prompt carries the road's hook instead.
+  expect(prompt).toContain(
+    "a task needs several tool calls whose intermediate output you do not need to see",
+  );
+  // The guidelines keep the FACTUAL half (the image contract), and they name their tool — pi
+  // appends them flat, with no tool-name prefix.
+  expect(prompt).toContain("Image-bearing tool results");
 }, 120_000);
 
 test("narrowing the loadout really does change what the provider is offered (the mechanism PTC mode relies on)", async () => {

@@ -100,11 +100,17 @@ export const WHY_SUPPRESSED_DESCRIPTION: string =
   "one. The dropped value is not stored anywhere, and a handle does not carry this key at all — " +
   "read a task you did not wait for with `ptc_task_output` instead.";
 
-/**
- * How a `codemode` script reaches a child, stated on both PTC surfaces.
+/*
+ * THE REACH NOTE, RETIRED (2026-10-21, ADR-0061).
  *
- * Measured 2026-10-16 (spike round 2, the dispatch-loop e2e note,
- * `docs/research/dispatch-loop-e2e-spike-20261016.md`): a
+ * The note said this:
+ *
+ * > A `codemode` script cannot call the PTC binding directly: `pi_task_ptc` is never in that
+ * > script's own tool table, on any surface. A script creates a task through the door that IS in
+ * > its own table: `pi_task_codemode` if the session has it, and otherwise `ptc_run_code` or
+ * > `ptc_workflow` with the binding used inside the program.
+ *
+ * **Why it existed.** Measured 2026-10-16 (spike round 2, the dispatch-loop e2e note): a
  * `codemode` script that decides to fan out looks in its own tool table, finds no `pi.dispatch`,
  * and nothing model-facing says the two-hop path exists — the script's author then reads the
  * silence as "this install does not register the binding" and falls back. The binding's own
@@ -112,7 +118,7 @@ export const WHY_SUPPRESSED_DESCRIPTION: string =
  * *inside* a program; this note is the one that addresses a reader inside the script.
  *
  * **Measured again 2026-10-20, on the `codemode_ptc` surface**, and the finding was sharper than
- * the first one: the note was in the parent's context (it rides in `ptc_run_code`'s description, which
+ * the first one: the note was in the parent's context (it rode in `ptc_run_code`'s description, which
  * pi's own `codemode` description enumerates for the script) and the parent STILL wrote
  * `await tools["pi.dispatch"]({ task })` into a `codemode` script, and got
  * `TypeError: tools.pi.dispatch does not exist`. It burned three calls that way before it fell
@@ -128,16 +134,44 @@ export const WHY_SUPPRESSED_DESCRIPTION: string =
  *    surface, so the note cannot promise it unconditionally — but a script can SEE its own table,
  *    and `ptc_run_code` / `ptc_workflow` are on every surface.
  *
- * One shared constant rather than a sentence per surface, so the two cannot drift — the same
- * reason `BINDING_CONTRACT` is a module-owned string (ADR-0024). ADR-0052 changed the two door
- * names it names and the word it uses for what a script does: a script CREATES A TASK, and the
- * model-facing word is never "dispatch".
+ * **Why it retired.** Under the model ADR-0052 and ADR-0053 put in place, the door is a
+ * codemode-reachable TOOL — `pi_task_codemode` — not a binding that has to be reached the long way
+ * round. The constraint this note carried ("the two-hop path is the only way") is therefore gone,
+ * and the fact it was protecting is now stated where it belongs: the ROAD for creating a task
+ * says, per surface, how to create one, and on `codemode_ptc` it says the one thing the note was
+ * for — that `pi_task_ptc` is not a tool in a script's table, and calling it from a script fails.
+ *
+ * **The record is kept** because the measurement behind it is what justifies that sentence, and a
+ * record that is deleted with the thing it explains is how the next person re-measures it. The
+ * road that replaced it carries the fact; this paragraph is the record of the sentence.
  */
-export const PTC_BINDING_REACH_NOTE: string =
-  "A `codemode` script cannot call the PTC binding directly: `pi_task_ptc` is never in " +
-  "that script's own tool table, on any surface. A script creates a task through the door " +
-  "that IS in its own table: `pi_task_codemode` if the session has it, and otherwise `ptc_run_code` " +
-  "or `ptc_workflow` with the binding used inside the program.";
+
+/**
+ * The CAPABILITY half of the web route: the parent has no web tool of its own, and a child does.
+ *
+ * One constant, because the fact reaches the model on three surfaces — the two PTC tool
+ * descriptions, the flat guidelines and the mode briefing — and a fact written three times is a
+ * fact that drifts.
+ */
+export const WEB_ROUTE_CAPABILITY: string =
+  "This package gives you no web tool of your own, but a child does: it can search the web with" +
+  " its `web_ds_search` tool (and fetch a page's text).";
+
+/**
+ * The TRIGGER half of the web route: when the web is the only way to answer.
+ *
+ * One constant, because the trigger is stated in two places — the shared note and the ROUTE for
+ * reaching the web — and the two must not drift into saying different things about when a task
+ * needs the web.
+ */
+export const WEB_ROUTE_WHEN: string = "a fact you cannot know, or a page you have to find";
+
+/**
+ * The ACTION half of the web route: how the web is reached.
+ *
+ * One constant, for the same reason as {@link WEB_ROUTE_WHEN}.
+ */
+export const WEB_ROUTE_HOW: string = "create a task and let the child search";
 
 /**
  * The sentence that tells the PARENT that a child can search the web.
@@ -150,10 +184,13 @@ export const PTC_BINDING_REACH_NOTE: string =
  * `web_ds_search`.
  *
  * **It is ONE sentence in ONE place, carried by every model-facing surface that mentions the
- * route**: the two PTC tool descriptions, the `<ptc>` section, and the mode briefing. Those are
- * the places the parent's model reads when it decides what to write, and four copies of one fact
- * are four things that can drift — the `<ptc>` section and the briefing already had their own
- * wording, and the section's had been rewritten while the briefing's had not.
+ * route**: the two PTC tool descriptions and the mode briefing. Those are the places the parent's
+ * model reads when it decides what to write, and three copies of one fact are three things that can
+ * drift — the mode briefing's had been rewritten while the descriptions' had not.
+ *
+ * **It is assembled from three constants** — the capability, the trigger and the action — because
+ * the ROAD for reaching the web states the trigger and the action too, and the road's line and this
+ * sentence must not say different things about the same route.
  *
  * **The vocabulary is TASK, not "dispatch"** (ADR-0052). The thing the model creates is a task;
  * "dispatch" is what the task side does with a task afterwards, and it is not the model's word.
@@ -164,9 +201,12 @@ export const PTC_BINDING_REACH_NOTE: string =
  * that survives that.
  */
 export const PTC_CHILD_SEARCH_NOTE: string =
-  "This package gives you no web tool of your own, but a child does: it can search the web with" +
-  " its `web_ds_search` tool (and fetch a page's text). When the task needs the web — a fact you" +
-  " cannot know, or a page you have to find — create a task and let the child search.";
+  WEB_ROUTE_CAPABILITY +
+  " When the task needs the web — " +
+  WEB_ROUTE_WHEN +
+  " — " +
+  WEB_ROUTE_HOW +
+  ".";
 
 /**
  * What a task door resolves to, and what a refusal looks like (ADR-0054).
@@ -230,30 +270,46 @@ export const CHILD_REPORT_DESCRIPTION: string = [
 ].join("\n");
 
 /**
+ * The IMAGE CONTRACT: what happens to an image-bearing tool result inside a run.
+ *
+ * ONE constant, because the fact reaches the model on four surfaces — the two PTC tool
+ * descriptions, the flat guidelines, and the mode briefing — and it had FOUR wordings before
+ * this (one per surface, each a little different). A fact written four times is a fact that
+ * drifts, and this one is a promise about where the bytes end up.
+ *
+ * DSH states the contract in `run_code`'s own description ("Image-bearing subtool results are
+ * attached after the run."); the model has to know because the images never appear in the value it
+ * returns (ADR-0014).
+ */
+export const IMAGE_HOISTING_NOTE: string =
+  "Image-bearing tool results inside the code you run (a `tools.read` on a PNG, say) are attached " +
+  "to you after the run, so never return image data as the completion value — that only spends " +
+  "your context on base64.";
+
+/**
  * The guidelines the two PTC tools share.
  *
  * Guidelines are appended flat to the `Guidelines` section with no tool-name prefix, so each bullet
  * must name its tool explicitly (pi's docs call this out; "Use this tool when…" is ambiguous).
  * These are the normal-mode hints — in PTC mode the injected briefing supersedes them.
+ *
+ * **Only the FACTUAL half is left here** (ADR-0061). The routing half — which of the two PTC
+ * tools to reach for — moved into the ROUTES zone, where it is one line per road and the tool's
+ * own description gains it back, derived from that zone.
  */
-export const PTC_TOOL_GUIDELINES: readonly string[] = [
-  // DSH states this contract in `run_code`'s own description ("Image-bearing subtool results are
-  // attached after the run."); the model has to know because the images never appear in the value it
-  // returns (ADR-0014).
-  "Image-bearing tool results inside a program (a `tools.read` on a PNG, say) are attached to you after the run — never return image data as the completion value.",
-  "Use ptc_run_code when a task needs several tool calls whose intermediate output you do not need to see — gather it inside the program and return only the final value.",
-  "Use ptc_workflow instead of ptc_run_code when the work has named phases and the user benefits from seeing progress narration.",
-];
+export const PTC_TOOL_GUIDELINES: readonly string[] = [IMAGE_HOISTING_NOTE];
 
 /**
  * The guidelines the three task tools share.
+ *
+ * **Only the FACTUAL half is left here** (ADR-0061). The routing half — which of the three task
+ * tools to reach for — moved into the ROUTES zone; what is left says the one thing none of the
+ * three tools' own descriptions can say, because it is about the SESSION and not about a tool.
  *
  * The stop guideline carries ADR-0057's shared sentence, so a stop reads the same way in the
  * description and in the system prompt.
  */
 export const PTC_TASK_TOOL_GUIDELINES: readonly string[] = [
-  "Use ptc_task_list to see the tasks this session created and their live status.",
-  "Use ptc_task_output to read a task's captured output (it is tail-truncated; the footer names the full-output file). A succeeded task's child report is rendered there, ahead of the prose.",
   "Use ptc_task_stop to stop a task: " + TASK_STOP_SEMANTICS,
   "PTC off stops NEW children from being started, pulls the queued ones out of the queue, and takes these tools out of reach while the session has no task record; a task already running keeps going and stays listed here.",
 ];
@@ -261,32 +317,6 @@ export const PTC_TASK_TOOL_GUIDELINES: readonly string[] = [
 // ---------------------------------------------------------------------------
 //  the `<ptc>` section's body
 // ---------------------------------------------------------------------------
-
-/**
- * How to create a task, per surface.
- *
- * `full_ptc` names the program form because that is the only form the model has: the two PTC
- * tools are offered to it directly. `codemode_ptc` names the codemode door, and says the one
- * thing that is false everywhere else — a `codemode` script's tool table has no `pi_task_ptc`
- * in it.
- *
- * ADR-0052: the model-facing word is TASK, never "dispatch" — the door creates a task, and
- * dispatching is what the task side does with it afterwards. Both names are plain JavaScript
- * identifiers, so both planes call them with a dot.
- *
- * **This is the road the route table will carry.** Ticket #246 fills the `ROUTES` zone with one
- * entry per road and renders the resident index from it; until then the `<ptc>` section renders
- * these two lines directly.
- */
-export const TASK_ROUTE_LINES: Readonly<Record<SurfaceMode, string>> = {
-  full_ptc:
-    "To create a task, write a program and run it with `ptc_run_code`; inside that program the " +
-    "binding is `await tools.pi_task_ptc({ task })`.",
-  codemode_ptc:
-    "To create a task, call `tools.pi_task_codemode` from your `codemode` script. A `codemode` " +
-    "script's tool table does not contain `pi_task_ptc` — that name is not a tool there, and " +
-    "calling it from a script fails.",
-};
 
 /**
  * The one sentence a truncated session says, whichever surface it is (ADR-0058).
@@ -356,11 +386,13 @@ export type DescriptionSlot =
 /**
  * One paragraph of a tool description.
  *
- * Either this registry's own text, or a SLOT — a place where prose this registry does not own
- * goes. The ORDER is part of the prose, so the paragraphs are a list and not a string.
+ * Either this registry's own text, a SLOT — a place where prose this registry does not own goes —
+ * or the ROUTE-derived "when to use me", which the registry asks the ROUTES zone for rather than
+ * writing out here. The ORDER is part of the prose, so the paragraphs are a list and not a string.
  */
 export type DescriptionParagraph =
   | { readonly kind: "text"; readonly text: string }
+  | { readonly kind: "route" }
   | { readonly kind: "slot"; readonly slot: DescriptionSlot };
 
 /** One tool's model-facing prose. */
@@ -405,6 +437,7 @@ export const TOOLS: Readonly<Record<ToolName, ToolEntry>> = {
           "annotations are advisory, the code runs type-stripped) — and `description`, a 5-10 word " +
           "summary of what the program does.",
       },
+      { kind: "route" },
       {
         kind: "text",
         text:
@@ -425,7 +458,6 @@ export const TOOLS: Readonly<Record<ToolName, ToolEntry>> = {
           "not a static list) are on the `ptcBindings` global, so the program never has to guess " +
           "what is bound.",
       },
-      { kind: "text", text: PTC_BINDING_REACH_NOTE },
       { kind: "slot", slot: "bindingContract" },
       {
         kind: "text",
@@ -434,13 +466,7 @@ export const TOOLS: Readonly<Record<ToolName, ToolEntry>> = {
           "has no helpers: `log` / `phase` / `parallel` / `pipeline` exist only in " +
           "`ptc_workflow`.",
       },
-      {
-        kind: "text",
-        text:
-          "Image-bearing tool results inside the program (a `tools.read` on a PNG, say) are " +
-          "attached to you after the run, so never return image data as the completion value — " +
-          "that only spends your context on base64.",
-      },
+      { kind: "text", text: IMAGE_HOISTING_NOTE },
       { kind: "slot", slot: "childSearchNote" },
     ],
     snippet:
@@ -458,6 +484,7 @@ export const TOOLS: Readonly<Record<ToolName, ToolEntry>> = {
           "(`{ name, description, phases? }`, where `phases` is the ordered plan), and optional " +
           "`args` is plain-JSON input bound to the program's `args` global.",
       },
+      { kind: "route" },
       {
         kind: "text",
         text:
@@ -478,14 +505,8 @@ export const TOOLS: Readonly<Record<ToolName, ToolEntry>> = {
           " The run's actual bound names are on the `ptcBindings` global. What comes back is the " +
           "script's return value, its `log`/`phase` narration and its `console.log` output.",
       },
-      { kind: "text", text: PTC_BINDING_REACH_NOTE },
       { kind: "slot", slot: "bindingContract" },
-      {
-        kind: "text",
-        text:
-          "Image-bearing tool results inside the script are attached to you after the run — never " +
-          "return image data as the script's value.",
-      },
+      { kind: "text", text: IMAGE_HOISTING_NOTE },
       { kind: "slot", slot: "childSearchNote" },
     ],
     snippet:
@@ -502,10 +523,9 @@ export const TOOLS: Readonly<Record<ToolName, ToolEntry>> = {
           "tools, and it cannot see or change this session except through what it returns. Omit " +
           "`model` and the child inherits this session's current model (when this pi exposes one; " +
           "otherwise it falls back to pi's configured default); pass `model`, or let its agent " +
-          "definition pin one, to override that. Use it for work that would otherwise flood this " +
-          "context: a survey, a second opinion, or a task that can run while you do something " +
-          "else.",
+          "definition pin one, to override that.",
       },
+      { kind: "route" },
       {
         kind: "text",
         text:
@@ -513,28 +533,26 @@ export const TOOLS: Readonly<Record<ToolName, ToolEntry>> = {
           "on; pass `wait: true` when you need the result before you go on, and read a task you " +
           "did not wait for with ptc_task_output.",
       },
+      { kind: "text", text: AGENT_OPTIONAL_CLAUSE },
       {
         kind: "text",
         text:
-          "`agent` is optional — omit it and the child is a fresh generalist pi, with pi's own " +
-          "system prompt and pi's full toolset. Name one to narrow the child instead: an agent is " +
-          "a markdown file in ~/.pi/agent/agents/ for your machine, or <project>/.pi/agents/ for " +
-          "one project, and naming one can restrict the child's tools, pin its model, or append a " +
-          "role. A name with no definition behind it is refused; the refusal lists what IS " +
-          "registered and how to write one.",
+          "An agent is a markdown file in ~/.pi/agent/agents/ for your machine, or " +
+          "<project>/.pi/agents/ for one project, and naming one can restrict the child's tools, " +
+          "pin its model, or append a role. A name with no definition behind it is refused; the " +
+          "refusal lists what IS registered and how to write one.",
       },
       { kind: "text", text: TASK_DOOR_RESULT_NOTE },
       { kind: "slot", slot: "agentRoster" },
     ],
     snippet:
       "Create a task: start a fresh pi agent as a child process (it runs on; wait: true to wait for the result)",
-    guidelines: [
-      "Prefer one subagent over many tool calls when the work is a question with an answer rather than a fact you can look up, or when the raw output would be larger than the answer.",
-    ],
+    guidelines: [],
   },
   ptc_task_list: {
     name: "ptc_task_list",
     description: [
+      { kind: "route" },
       {
         kind: "text",
         text:
@@ -557,6 +575,7 @@ export const TOOLS: Readonly<Record<ToolName, ToolEntry>> = {
   ptc_task_output: {
     name: "ptc_task_output",
     description: [
+      { kind: "route" },
       { kind: "text", text: "Read a task's captured output." },
       {
         kind: "text",
@@ -589,6 +608,7 @@ export const TOOLS: Readonly<Record<ToolName, ToolEntry>> = {
   ptc_task_stop: {
     name: "ptc_task_stop",
     description: [
+      { kind: "route" },
       { kind: "text", text: "Ask a task to stop." },
       { kind: "text", text: TASK_STOP_SEMANTICS },
       {
@@ -603,6 +623,10 @@ export const TOOLS: Readonly<Record<ToolName, ToolEntry>> = {
   },
   ptc_child_report: {
     name: "ptc_child_report",
+    // **No `route` paragraph here**, and the reason is that this tool's description is its own
+    // contract: the child is told what to report and when in one block, and a "when to use me"
+    // line in front of it would say the same thing twice. The road for reporting is in the road
+    // table, and the child reads that.
     description: [{ kind: "text", text: CHILD_REPORT_DESCRIPTION }],
     snippet: "Hand the host a child report when you finish",
     guidelines: [
@@ -614,6 +638,7 @@ export const TOOLS: Readonly<Record<ToolName, ToolEntry>> = {
   web_ds_search: {
     name: "web_ds_search",
     description: [
+      { kind: "route" },
       {
         kind: "text",
         text: [
@@ -644,12 +669,22 @@ export const TOOLS: Readonly<Record<ToolName, ToolEntry>> = {
 // ---------------------------------------------------------------------------
 
 /**
+ * The model-visible tools, and the one PTC binding, a road can be reached through.
+ *
+ * `pi_task_ptc` is a BINDING, not a declared tool (ADR-0059): the model only ever sees it inside
+ * a program, so it has no description of its own — but it is a way of doing something, and a road
+ * that names it names a real thing.
+ */
+export type RouteToolName = ToolName | "pi_task_ptc";
+
+/**
  * One road: when to take it, how to call it on each surface, the facts, and a
  * pointer to the detail file.
  *
  * The shape is the spec's prototype (spec #234, implementation decision 8). The
- * entries are ticket #246's: this ticket creates the zone and the type, and
- * #246 fills it and renders the resident index from it.
+ * zone and the type were ticket #243's; the entries are ticket #246's, which also
+ * renders the resident index from them and publishes the detail files the index
+ * points at.
  */
 export interface RouteEntry {
   /** The road's stable id; the detail file is `docs/routes/<id>.md`. */
@@ -664,16 +699,301 @@ export interface RouteEntry {
   readonly fact: string;
   /** The detail file this road points at. */
   readonly detail: string;
+  /**
+   * The model-visible tools (and the one binding) this road is reached through.
+   *
+   * **It is a list, not a sentence**, because it is a COVERAGE claim and coverage is mechanical:
+   * every tool the package shows the model is named by at least one road, and every name a road
+   * lists is a tool the package really registers. The prose that says WHEN to reach for a tool is
+   * the road's own `when`, and the tool's description derives its "when to use me" from it.
+   */
+  readonly tools: readonly RouteToolName[];
 }
+
+/**
+ * The codemode surface's road for a PTC program: not a tool the model calls itself.
+ *
+ * ONE constant for both program roads, because the sentence is the same on both of them — and a
+ * sentence written twice for two roads is two things that can drift.
+ */
+const CODEMODE_ORCHESTRATES: string =
+  "not a tool you call yourself here: `codemode` orchestrates, and your script is the program";
+
+/**
+ * The task tools, called the same way on both surfaces.
+ *
+ * ONE constant for both surfaces, because the fact is the same on both of them: the three task
+ * tools are declared to the model on every surface (ADR-0022's always-on face), so there is
+ * nothing surface-specific to say.
+ */
+const MANAGE_A_TASK_CALL: string =
+  "`ptc_task_list` for the live status, `ptc_task_output` for what the task produced, " +
+  "`ptc_task_stop` to stop it";
 
 /**
  * Every road this package offers, one per row.
  *
- * **Empty in this ticket by design.** The zone and its type are here; the entries
- * are ticket #246's, which also renders the resident `<ptc>` index from them and
- * publishes the detail files the index points at.
+ * **A road is a WAY OF DOING SOMETHING, not a tool.** Five of the seven are things a model does
+ * (create a task, run one program, run a phased workflow, reach the built-in tools, manage a
+ * task), one is a capability that lives in a child (the web), and one is what a child does when
+ * it finishes (the report). A road that mapped one-to-one onto a tool would be a tool index, and
+ * a tool index is what the tool descriptions already are.
+ *
+ * **Every road says how it is taken ON EACH SURFACE** (spec #234 decision 10, forcing point 3),
+ * and "not applicable here" is an answer: the two PTC program roads exist on both surfaces but are
+ * reached differently, and the codemode door is not on the `full_ptc` surface at all.
  */
-export const ROUTES: readonly RouteEntry[] = [];
+export const ROUTES: readonly RouteEntry[] = [
+  {
+    id: "create-a-task",
+    name: "Create a task",
+    when:
+      "the work is a question with an answer rather than a fact you can look up, or its output " +
+      "would be larger than the answer",
+    how: {
+      full_ptc:
+        "write a program, run it with `ptc_run_code`, and inside it call " +
+        "`await tools.pi_task_ptc({ task })` — the PTC door lives inside a program, not in your " +
+        "tool list",
+      codemode_ptc:
+        "call `await tools.pi_task_codemode({ task })` from your `codemode` script — a `codemode` " +
+        "script's tool table does not contain `pi_task_ptc`, and calling it from a script fails",
+    },
+    fact:
+      "Without `wait` the call returns a handle right away (`taskId`, `label`) and the task keeps " +
+      "running; pass `wait: true` when you need the result before you go on. A refusal is a " +
+      'result with `status: "rejected"` and an `errorMessage`, never an exception. A task you ' +
+      "did not wait for is read later with `ptc_task_output`, and the child's own report comes " +
+      "back with the result.",
+    detail: "docs/routes/create-a-task.md",
+    tools: ["pi_task_codemode", "pi_task_ptc"],
+  },
+  {
+    id: "run-one-program",
+    name: "Run one program",
+    when:
+      "a task needs several tool calls whose intermediate output you do not need to see — gather " +
+      "it inside the program and return only the final value",
+    how: {
+      full_ptc: "call `ptc_run_code` with the program body — one program, one call",
+      codemode_ptc: CODEMODE_ORCHESTRATES,
+    },
+    fact:
+      "Batch a task's steps into ONE program instead of issuing many tool calls. The run's " +
+      "actual bound names are on the `ptcBindings` global, so a program never has to guess what " +
+      "is bound, and only the program's return value and its `console.log` output come back.",
+    detail: "docs/routes/run-one-program.md",
+    tools: ["ptc_run_code"],
+  },
+  {
+    id: "run-a-phased-workflow",
+    name: "Run a phased workflow",
+    when: "the work has named phases and the user benefits from seeing progress narration",
+    how: {
+      full_ptc:
+        "call `ptc_workflow` with the script body and a `meta` — the same program, plus `log`, " +
+        "`phase`, `parallel` and `pipeline`",
+      codemode_ptc: CODEMODE_ORCHESTRATES,
+    },
+    fact:
+      "What comes back is the script's return value, its `log` and `phase` narration and its " +
+      "`console.log` output. A phase title outside `meta.phases` is reported as a warning, not " +
+      "an error.",
+    detail: "docs/routes/run-a-phased-workflow.md",
+    tools: ["ptc_workflow"],
+  },
+  {
+    id: "use-the-built-in-tools",
+    name: "Use the built-in tools",
+    when: "one or two calls would do, and there is nothing to gather between them",
+    how: {
+      full_ptc:
+        "not directly in PTC mode: the built-in tools are hidden from you and reached from inside " +
+        "a program (`tools.read({ path })` inside `ptc_run_code`)",
+      codemode_ptc:
+        "call them from inside your `codemode` script (`tools.read({ path })`) — pi's orchestrator " +
+        "hands the script this session's tools",
+    },
+    fact:
+      "A program reaches only the built-ins this session has bound, and the run's actual bound " +
+      "names are on the `ptcBindings` global. A binding call resolves to `{ content, details }` — " +
+      "never a bare string. With the PTC mode off the built-in tools are called directly.",
+    detail: "docs/routes/use-the-built-in-tools.md",
+    tools: [],
+  },
+  {
+    id: "manage-a-task",
+    name: "Manage a task",
+    when: "you created a task and want to see it, read what it produced, or stop it",
+    how: {
+      full_ptc: MANAGE_A_TASK_CALL,
+      codemode_ptc: MANAGE_A_TASK_CALL,
+    },
+    fact:
+      "A task that is still waiting for a concurrency slot is withdrawn from the queue and never " +
+      "starts; a task that is already running is signaled and goes through stopping to canceled. " +
+      "The captured output is tail-truncated, and the footer names the file with the whole thing.",
+    detail: "docs/routes/manage-a-task.md",
+    tools: ["ptc_task_list", "ptc_task_output", "ptc_task_stop"],
+  },
+  {
+    id: "reach-the-web",
+    name: "Reach the web",
+    when: "the task needs the web — " + WEB_ROUTE_WHEN,
+    how: {
+      full_ptc: WEB_ROUTE_HOW,
+      codemode_ptc: WEB_ROUTE_HOW,
+    },
+    fact:
+      "The child's own model calls `web_ds_search` directly — one call, no program in between — " +
+      "and the switch that turns the module on is read from the install's config, not from this " +
+      "package.",
+    detail: "docs/routes/reach-the-web.md",
+    tools: ["web_ds_search"],
+  },
+  {
+    id: "report-what-you-did",
+    name: "Report what you did",
+    when: "you are a child agent finishing a run",
+    how: {
+      full_ptc:
+        "call `ptc_child_report` once, at the end — it is your tool in a child session, and it is " +
+        "not active in a parent session",
+      codemode_ptc:
+        "call `ptc_child_report` once, at the end — it is your tool in a child session, and it is " +
+        "not active in a parent session",
+    },
+    fact:
+      "The report carries your summary, your findings, the evidence behind them and the files you " +
+      "touched. Your prose answer is kept alongside it and is never replaced by it.",
+    detail: "docs/routes/report-what-you-did.md",
+    tools: ["ptc_child_report"],
+  },
+];
+
+// ---------------------------------------------------------------------------
+//  the resident index
+// ---------------------------------------------------------------------------
+
+/**
+ * The ceiling for the resident route index, in estimated tokens.
+ *
+ * A DECISION, not a baseline to re-fit — the same rule the binding contract's ceiling follows
+ * (ADR-0024 §5). **560 is a decision about the shape, not about today's text**: the index replaces
+ * four scattered channels of prose (the reach note in two descriptions, the routing half of the
+ * guidelines, the briefing's static half and the section's own body), and those four together
+ * cost about as much as the index does — but they said the same things several times, and the
+ * index says each of them once.
+ *
+ * The index is the one piece of model-facing prose that is rebuilt on every turn, so a road added
+ * without a thought about its cost shows up here as a red test rather than as a slower session.
+ */
+export const ROUTE_INDEX_TOKEN_CEILING = 560;
+
+/**
+ * A floor, because a ceiling-only budget test passes on an empty index. Set below the real cost
+ * (measured at 439 tokens with the web road absent, 483 with it) so a stub cannot clear it and the
+ * real index can.
+ */
+export const ROUTE_INDEX_TOKEN_FLOOR = 380;
+
+/**
+ * The line the index opens with.
+ *
+ * It says what the section IS — a list of roads — and where the detail lives, because the index
+ * is the only thing the model reads every turn and the detail files are the only thing it reads
+ * when it needs more.
+ */
+export const ROUTE_INDEX_HEADER: string =
+  "Routes — one line each: when to take the road, how to take it here, and the file with the whole " +
+  "story.";
+
+/**
+ * The warning the index carries when it is over its budget.
+ *
+ * **It says so; it does not truncate.** A road that silently disappeared from the index is a road
+ * the model cannot take, and it cannot tell that it is missing — that is the failure this whole
+ * record exists to prevent. So the over-budget index keeps every road and tells the model (and
+ * the reader) that the section is over its budget.
+ */
+export const ROUTE_INDEX_OVER_BUDGET_WARNING: string =
+  "> WARNING: this route index is over its token budget, so it is costing more context than it " +
+  "should. Every road is still listed below — read the detail files rather than this section.";
+
+/**
+ * What the index needs to know to render itself.
+ */
+export interface RouteIndexInput {
+  /** The surface the model is on: the road's `how` is per surface (ADR-0051). */
+  readonly surface: SurfaceMode;
+  /**
+   * Whether this session's children can search the web.
+   *
+   * **Read once at extension load**, so it cannot change inside a session — which is what keeps
+   * the rendered index byte-identical from turn to turn. It is the ONE session-shaped input the
+   * index takes, and it takes it because a road to a capability that is switched off is a road to
+   * nowhere.
+   */
+  readonly childCanSearch: boolean;
+  /** The roads to render. Defaults to the registry's own zone. */
+  readonly routes?: readonly RouteEntry[];
+}
+
+/**
+ * The sentence a tool's description gains: WHEN to reach for it, derived from the road it is on.
+ *
+ * **Derived, never written twice.** The description asks the road, and the road answers; so the
+ * two cannot drift, and a road that changes its `when` changes every tool on it at once.
+ */
+export function renderToolRouteHint(tool: RouteToolName): string {
+  const roads = ROUTES.filter((road) => road.tools.includes(tool));
+  if (roads.length === 0) return "";
+  return roads.map((road) => `Reach for this when ${road.when}.`).join(" ");
+}
+
+/**
+ * The estimated token cost of a piece of text, the way this package counts it.
+ *
+ * The same characters-per-token estimate the binding contract's budget uses (ADR-0024 §5), so the
+ * two budgets are measured with one ruler.
+ */
+export function estimatedTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
+/**
+ * Render the resident index: one line per road, and the details never in it.
+ *
+ * **The shape is copied from a live pi extension** (`@tylerho/pi-memory`): its resident file is an
+ * index, one line per entry, and the detail is never in the index. The index is stable for the
+ * whole session, because "changing the system prompt mid-session invalidates the cached prefix" —
+ * so nothing that varies inside a session may enter it.
+ *
+ * **What varies inside a session does not enter it.** The per-session binding list stays in the
+ * session injection (that is what the injection is for), and the surface and the load-time
+ * capability flag cannot change inside a session. What this function takes is therefore the whole
+ * of what it is allowed to know.
+ *
+ * **One line per road**: the road's name, when to take it, how to take it HERE, and the file with
+ * the whole story. The facts the road carries are in that file, not here.
+ */
+export function renderRouteIndex(input: RouteIndexInput): string {
+  const roads = input.routes ?? ROUTES;
+  const lines: string[] = [ROUTE_INDEX_HEADER, ""];
+  for (const road of roads) {
+    // The web road exists only where the capability does: a road to a switched-off tool is a road
+    // to nowhere, and the model cannot tell that from the line.
+    if (road.id === "reach-the-web" && !input.childCanSearch) continue;
+    // The period is added here, so a `how` that already ends in one does not get two.
+    const how = road.how[input.surface].replace(/\\.$/, "");
+    lines.push(`- ${road.name} — ${road.when}: ${how}. Details: ${road.detail}.`);
+  }
+  const index = lines.join("\n");
+  if (estimatedTokens(index) <= ROUTE_INDEX_TOKEN_CEILING) return index;
+  // Over budget: say so, and keep every road. A silent truncation would remove a road the model
+  // cannot know it is missing.
+  return [ROUTE_INDEX_OVER_BUDGET_WARNING, "", index].join("\n");
+}
 
 // ---------------------------------------------------------------------------
 //  rendering
@@ -687,6 +1007,10 @@ export const ROUTES: readonly RouteEntry[] = [];
  * web tool" is expressed by the ABSENCE of the sentence, which is the only
  * honest way to say it.
  *
+ * **A `route` paragraph is DERIVED, not written.** The registry asks the ROUTES zone when this
+ * tool is the one to reach for, and the road answers; so the tool's description and the road
+ * table cannot say different things about the same choice.
+ *
  * The registry owns the order and the text; a caller says which paragraphs this
  * session has. That is the whole division of labour.
  */
@@ -698,6 +1022,11 @@ export function renderDescription(
   for (const part of entry.description) {
     if (part.kind === "text") {
       blocks.push(part.text);
+      continue;
+    }
+    if (part.kind === "route") {
+      const hint = renderToolRouteHint(entry.name as RouteToolName);
+      if (hint !== "") blocks.push(hint);
       continue;
     }
     const value = filled[part.slot];

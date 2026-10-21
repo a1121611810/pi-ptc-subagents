@@ -34,8 +34,8 @@ import { describe, expect, test } from "vitest";
 import {
   AGENT_OPTIONAL_CLAUSE,
   CHILD_REPORT_DESCRIPTION,
+  IMAGE_HOISTING_NOTE,
   PROGRAM_BODY_DESCRIPTION,
-  PTC_BINDING_REACH_NOTE,
   PTC_CHILD_SEARCH_NOTE,
   PTC_TASK_TOOL_GUIDELINES,
   PTC_TOOL_GUIDELINES,
@@ -45,7 +45,6 @@ import {
   renderDescription,
   ROUTES,
   TASK_DOOR_RESULT_NOTE,
-  TASK_ROUTE_LINES,
   TASK_STOP_SEMANTICS,
   TOOLS,
   WHY_SUPPRESSED_DESCRIPTION,
@@ -71,7 +70,6 @@ import { createTaskRegistry } from "../../src/runtime/task-registry.ts";
 import { InMemoryTaskStorage } from "../../src/runtime/task-storage.ts";
 import { InMemoryOutputStorage } from "../../src/runtime/output-storage.ts";
 import { MockChildProcessLifecycle } from "../../src/runtime/child-process-lifecycle.ts";
-import { buildDispatchSection } from "../../src/mode/dispatch-section.ts";
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 
@@ -280,6 +278,7 @@ describe("the route registry holds the model-facing prose", () => {
       "src/tools/web-ds-search.ts",
       "src/tools/binding-contract.ts",
       "src/mode/dispatch-section.ts",
+      "src/mode/ptc-mode.ts",
       "src/search/contract.ts",
     ];
     const sentences: string[] = [];
@@ -294,11 +293,23 @@ describe("the route registry holds the model-facing prose", () => {
         if (guideline.length >= 40) sentences.push(guideline);
       }
     }
+    // The ROUTES zone is the registry's prose too: a road's `when`, its per-surface `how` and its
+    // `fact` are all sentences the model reads, and the mode briefing used to carry its own copy
+    // of the routing half (ADR-0061).
+    for (const road of ROUTES) {
+      if (road.when.length >= 40) sentences.push(road.when);
+      for (const how of Object.values(road.how)) {
+        if (how.length >= 40) sentences.push(how);
+      }
+      for (const sentence of sentencesOf(road.fact)) {
+        if (sentence.length >= 60) sentences.push(sentence);
+      }
+    }
     for (const shared of [
       AGENT_OPTIONAL_CLAUSE,
       PROGRAM_BODY_DESCRIPTION,
       WHY_SUPPRESSED_DESCRIPTION,
-      PTC_BINDING_REACH_NOTE,
+      IMAGE_HOISTING_NOTE,
       PTC_CHILD_SEARCH_NOTE,
       TASK_DOOR_RESULT_NOTE,
       TASK_STOP_SEMANTICS,
@@ -307,7 +318,6 @@ describe("the route registry holds the model-facing prose", () => {
       PTC_TRUNCATED_SECTION_LINE,
       ...PTC_TOOL_GUIDELINES,
       ...PTC_TASK_TOOL_GUIDELINES,
-      ...Object.values(TASK_ROUTE_LINES),
       ...Object.values(PTC_TRUNCATION_SECTION_LINES),
     ]) {
       if (shared.length >= 40) sentences.push(shared);
@@ -375,20 +385,14 @@ describe("the route registry holds the model-facing prose", () => {
     // that became one because of it. The registry owns the copy; these assertions say the two
     // surfaces still carry it.
     //
-    // Counterfactual: drop the reach note from the workflow description — the workflow half
+    // Counterfactual: drop the image contract from the workflow description — the workflow half
     // goes red; the run_code half stays green, which is exactly the drift this catches.
     const built = await buildTools();
     const runCode = (built.prose.get("ptc_run_code") as ToolProse).description;
     const workflow = (built.prose.get("ptc_workflow") as ToolProse).description;
-    expect(runCode, "ptc_run_code carries the reach note").toContain(PTC_BINDING_REACH_NOTE);
-    expect(workflow, "ptc_workflow carries the reach note").toContain(PTC_BINDING_REACH_NOTE);
+    expect(runCode, "ptc_run_code carries the image contract").toContain(IMAGE_HOISTING_NOTE);
+    expect(workflow, "ptc_workflow carries the image contract").toContain(IMAGE_HOISTING_NOTE);
 
-    const section = buildDispatchSection({
-      surfaceMode: "full_ptc",
-      childCanSearch: true,
-      dispatchEnabled: true,
-    });
-    expect(section, "the <ptc> section carries the web sentence").toContain(PTC_CHILD_SEARCH_NOTE);
     // The web sentence reaches the PTC descriptions only in a session whose children can
     // search — so this reads the tools built WITH that capability, not the ones built without.
     const searching = await buildTools(true);

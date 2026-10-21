@@ -97,7 +97,14 @@ test("the description still describes the tool, and the guidance survives", () =
   // The original description earned its place: it explains what a subagent IS and when to reach
   // for one. Adding the registry location must not crowd that out.
   expect(tool.description).toContain("Create a task: start a fresh pi agent as a child process");
-  expect(tool.promptGuidelines?.join(" ")).toMatch(/prefer one subagent/i);
+  // ADR-0061: the ROUTING half of the guidelines moved into the route registry, and the
+  // description gained the "when to use me" back FROM it. So the guidance is gone from the
+  // guidelines and present in the description — the same sentence, one home.
+  //
+  // Counterfactual: drop the road paragraph from the description (or leave the routing sentence
+  // in the guidelines as well) — one of the two assertions goes red.
+  expect(tool.promptGuidelines?.join(" ") ?? "").not.toMatch(/prefer one subagent/i);
+  expect(tool.description).toMatch(/Reach for this when the work is a question with an answer/);
 });
 
 test("the registered name is one constant, not a string repeated per file", () => {

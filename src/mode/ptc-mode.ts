@@ -1695,6 +1695,12 @@ export function resolveBaseOnStart(
  * Generated from the *actual* binding list rather than hardcoded, because bindings vary by session
  * (`base` is whatever the session was launched with) and a stale list would have the model calling
  * names that are not bound.
+ *
+ * **What is in here is the DYNAMIC half** (ADR-0061): what this session has bound, and the
+ * examples built from it. The STATIC half — which road to take, the fact that a task's steps
+ * belong in ONE program, and the image contract — moved into the route registry, where the
+ * resident index carries the roads on every turn instead of once per mode entry, and the tool's
+ * own description and guidelines carry the image contract.
  */
 export function buildModeInstruction(
   bindings: readonly string[],
@@ -1721,29 +1727,19 @@ export function buildModeInstruction(
     "[PTC MODE ACTIVE]",
     "This session runs in PTC mode. " + builtinNote,
     "",
-    "Work by writing one TypeScript program per task and running it:",
-    "  - ptc_run_code for a plain program (its return value and console.log come back to you)",
-    "  - ptc_workflow when the task has named phases and you want narration (log / phase /",
-    "    parallel / pipeline are available there)",
-    "",
     `The program body is an async function. Available inside it: ${callable.join(", ")}, plus the`,
     "PTC door `tools.pi_task_ptc(args)` — always bound, and reached with a dot. The run's actual",
     "bound names are on the `ptcBindings` global, so a program never has to guess what is bound",
     "this run.",
     examples.length > 0 ? `Examples:\n${examples}` : "",
     "",
-    "Batch a task's steps into ONE program instead of issuing many tool calls — gathering",
-    "intermediate output yourself and returning only what matters is the point of this mode.",
-    "Image-bearing tool results inside a program are attached to you after the run — never return",
-    "base64 image data as your program's value.",
     // The parent has no web tool of its own (the search module lives in the CHILD), so the only
     // route to the web is a task whose child searches. Saying so is what turns "I need the web"
     // into "create a task and let the child search" — and it is conditional, because a child
     // with the switch off cannot search either.
     //
     // ADR-0052: the sentence is the search module's own constant, carried by the two PTC tool
-    // descriptions and the `<ptc>` section as well. Three surfaces, one wording — a copy here
-    // would be a fourth.
+    // descriptions as well. Three surfaces, one wording — a copy here would be a fourth.
     options.childCanSearch === true ? PTC_CHILD_SEARCH_NOTE : "",
     "If the PTC surfaces cannot express what you need, say so and the user can run /ptc off.",
   ]

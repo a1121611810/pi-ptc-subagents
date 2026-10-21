@@ -21,16 +21,14 @@
  *
  * ## What it says, and why it is not a summary of the tool descriptions
  *
- * One fact per surface, phrased as the CALL the model makes, not as a description of a tool:
+ * **It is the ROAD INDEX** (ADR-0061): one line per road — when to take it, how to take it on
+ * THIS surface, and the file with the whole story. The details are never in the index, and the
+ * index carries nothing that varies inside a session, so it is byte-identical from turn to turn
+ * (a changed system prompt invalidates the cached prefix).
  *
- * - `full_ptc` — the model writes a program, and the PTC door lives inside that program.
- * - `codemode_ptc` — the model calls the codemode door from its script, and the PTC door is NOT
- *   in a `codemode` script's tool table. That last sentence is the whole point of this section:
- *   it is the one thing the model gets wrong without it, and the error costs three wasted tool
- *   calls.
- *
- * The search sentence is shared by both surfaces, so it is one constant (the same rule the binding
- * contract follows for the two surfaces' copy of one sentence).
+ * The road for creating a task is the one this section was built for, and it says the one thing
+ * the model gets wrong without it: on `codemode_ptc` the PTC door is not in a script's tool table,
+ * and the codemode door is.
  *
  * ## The truncated session
  *
@@ -41,10 +39,9 @@
  */
 import type { SurfaceMode } from "./ptc-mode.ts";
 import {
-  PTC_CHILD_SEARCH_NOTE,
   PTC_TRUNCATED_SECTION_LINE,
   PTC_TRUNCATION_SECTION_LINES,
-  TASK_ROUTE_LINES,
+  renderRouteIndex,
 } from "../routes/registry.ts";
 
 /**
@@ -85,9 +82,14 @@ export { PTC_TRUNCATION_SECTION_LINES };
  * Returns `""` when there is nothing to say, which is the caller's cue to remove the section
  * rather than leave an empty one behind.
  *
- * The body is the route registry's: the per-surface route line, the shared web sentence, and
- * the truncation lines. What this module owns is the ORDER and the decision about which of
- * them this session has.
+ * **The body is the ROUTE INDEX** (ADR-0061): one line per road — when to take it, how to take
+ * it on THIS surface, and the file with the whole story. The details are never in the index, and
+ * the index carries nothing that varies inside a session, so it is byte-identical from turn to
+ * turn (a changed system prompt invalidates the cached prefix).
+ *
+ * What this module owns is the ORDER and the decision about which of them this session has: the
+ * truncated session gets the truncation lines instead of the index, because a model that cannot
+ * create a task must not be handed the calling convention for creating one.
  */
 export function buildDispatchSection(input: {
   surfaceMode: SurfaceMode;
@@ -101,7 +103,8 @@ export function buildDispatchSection(input: {
   if (!input.dispatchEnabled) {
     return [PTC_TRUNCATED_SECTION_LINE, PTC_TRUNCATION_SECTION_LINES[input.surfaceMode]].join("\n");
   }
-  const lines: string[] = [TASK_ROUTE_LINES[input.surfaceMode]];
-  if (input.childCanSearch) lines.push(PTC_CHILD_SEARCH_NOTE);
-  return lines.join("\n");
+  return renderRouteIndex({
+    surface: input.surfaceMode,
+    childCanSearch: input.childCanSearch,
+  });
 }

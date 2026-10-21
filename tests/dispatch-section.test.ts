@@ -22,6 +22,7 @@ import {
   PTC_TRUNCATION_SECTION_LINES,
 } from "../src/mode/dispatch-section.ts";
 import { PTC_CHILD_SEARCH_NOTE } from "../src/search/contract.ts";
+import { WEB_ROUTE_HOW } from "../src/routes/registry.ts";
 import { buildModeInstruction } from "../src/mode/ptc-mode.ts";
 import { createPtcRunCodeTool } from "../src/tools/run-code.ts";
 import { createPtcWorkflowTool } from "../src/tools/workflow.ts";
@@ -87,23 +88,32 @@ test("the model-facing word is task, never dispatch", () => {
   }
 });
 
-test("the search sentence is shared by both surfaces, so it cannot drift between them", () => {
+test("the web route is one phrase, and the road and the shared sentence are built from it", () => {
   // One sentence in one place — the same rule the binding contract follows for the sentence it
   // puts in both descriptions. The assertion is on the CONSTANT, so a copy of it in either
   // surface's text turns red.
+  //
+  // ADR-0061: the section is the ROAD INDEX now, and the web road's line carries the route
+  // ("create a task and let the child search") while the tool descriptions and the briefing
+  // carry the shared sentence. Both are built from the SAME constant, so the two cannot drift
+  // into saying different things about how to reach the web.
   for (const surfaceMode of ["full_ptc", "codemode_ptc"] as const) {
     const section = buildDispatchSection({
       surfaceMode,
       childCanSearch: true,
       dispatchEnabled: true,
     });
-    expect(section).toContain(PTC_CHILD_SEARCH_NOTE);
+    expect(section, `${surfaceMode} carries the route phrase`).toContain(WEB_ROUTE_HOW);
+    expect(PTC_CHILD_SEARCH_NOTE, "the shared sentence carries the same phrase").toContain(
+      WEB_ROUTE_HOW,
+    );
   }
 });
 
-test("the search sentence is absent when the search module is off", () => {
+test("the web road is absent when the search module is off", () => {
   // The claim is about a capability that only exists when the operator turned it on. Saying it
-  // otherwise sends a parent looking for a tool the child does not have.
+  // otherwise sends a parent looking for a tool the child does not have — so the whole ROAD goes,
+  // not just the sentence about it.
   const section = buildDispatchSection({
     surfaceMode: "full_ptc",
     childCanSearch: false,
@@ -111,6 +121,7 @@ test("the search sentence is absent when the search module is off", () => {
   });
   expect(section).not.toContain("web_ds_search");
   expect(section).not.toContain(PTC_CHILD_SEARCH_NOTE);
+  expect(section).not.toContain("Reach the web");
 });
 
 test("the section name is one pi will accept, and it is not one of pi's own", () => {
@@ -199,14 +210,9 @@ test('the section never says "sandbox"', () => {
  *
  * The assertion is on the CONSTANT, so a copy on any surface turns red.
  */
-test("the two tool descriptions, the section and the briefing all carry the same constant", () => {
+test("the two tool descriptions and the briefing all carry the same constant", () => {
   const runCode = createPtcRunCodeTool({ childCanSearch: true });
   const workflow = createPtcWorkflowTool({ childCanSearch: true });
-  const section = buildDispatchSection({
-    surfaceMode: "full_ptc",
-    childCanSearch: true,
-    dispatchEnabled: true,
-  });
   const briefing = buildModeInstruction(["read"], "builtins-only", { childCanSearch: true });
 
   expect(runCode.description, "ptc_run_code carries the shared sentence").toContain(
@@ -215,7 +221,6 @@ test("the two tool descriptions, the section and the briefing all carry the same
   expect(workflow.description, "ptc_workflow carries the shared sentence").toContain(
     PTC_CHILD_SEARCH_NOTE,
   );
-  expect(section, "the section carries the shared sentence").toContain(PTC_CHILD_SEARCH_NOTE);
   expect(briefing, "the briefing carries the shared sentence").toContain(PTC_CHILD_SEARCH_NOTE);
 });
 
