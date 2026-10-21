@@ -41,6 +41,7 @@ import {
 import {
   createTaskRegistry,
   type DispatchHandle,
+  type RegistryLogger,
   type TaskRegistry,
 } from "../../src/runtime/task-registry.ts";
 import {
@@ -91,10 +92,24 @@ class RecordingLifecycle extends MockChildProcessLifecycle {
   }
 }
 
+/** A logger that KEEPS what it was told, so a test can read the runtime's own report. */
+class RecordingLogger implements RegistryLogger {
+  readonly warnings: string[] = [];
+
+  info(): void {
+    // The `info` channel is not what these tests are about.
+  }
+
+  warn(msg: string): void {
+    this.warnings.push(msg);
+  }
+}
+
 interface Harness {
   registry: TaskRegistry;
   lifecycle: RecordingLifecycle;
   slots: DispatchSlotCounter;
+  logger: RecordingLogger;
   deps: DispatchDeps;
 }
 
@@ -109,12 +124,14 @@ function createHarness(options: { limit?: number } = {}): Harness {
   const slots = new DispatchSlotCounter(options.limit ?? 8);
   const registry = createTaskRegistry(storage, { clock: () => 1_000, queue: slots });
   const lifecycle = new RecordingLifecycle();
+  const logger = new RecordingLogger();
   const outputStorage = new InMemoryOutputStorage();
   return {
     registry,
     lifecycle,
     slots,
-    deps: { taskRegistry: registry, lifecycle, slots, outputStorage, clock: () => 1_000 },
+    logger,
+    deps: { taskRegistry: registry, lifecycle, slots, outputStorage, clock: () => 1_000, logger },
   };
 }
 
@@ -239,6 +256,72 @@ describe("ADR-0057: stopping a task that is still waiting for a slot withdraws i
       const result = await queued;
       expect(result.status, "the withdrawn foreground call is refused").toBe("rejected");
       expect(result.errorMessage).toBe("dispatch was withdrawn from the admission queue");
+
+      // Freeing the slot must NOT start the withdrawn child.
+      answerChild(h.lifecycle, 0, ANSWER);
+      await running;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(h.lifecycle.spawnCount, "the withdrawn request never launched a child").toBe(1);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+//  1 + 3, the DETACHED tail: a withdrawal is reported as a withdrawal
+// ---------------------------------------------------------------------------
+
+describe("ADR-0057: a DETACHED task withdrawn from the queue reports the withdrawal", () => {
+  test("the log names the withdrawal, and claims no transition failure that did not happen", async () => {
+    await withAgent(async (dir) => {
+      // One slot, and it is taken: the cap is reached by the very next call.
+      const h = createHarness({ limit: 1 });
+      const running = dispatch(
+        { wait: true, agent: AGENT, task: "first", agentScope: "project" },
+        { ...ctx(1), cwd: dir },
+        h.deps,
+      );
+      await waitFor(() => h.lifecycle.spawnCount > 0);
+
+      // The DETACHED dispatch: it hands back a handle at once and waits for its slot in the
+      // background, so its caller is never told about a withdrawal.
+      const handle = await dispatch(
+        { agent: AGENT, task: "second", agentScope: "project" },
+        { ...ctx(2), cwd: dir },
+        h.deps,
+      );
+      expect(isDispatchHandle(handle), "the detached dispatch returned a handle").toBe(true);
+      if (!isDispatchHandle(handle))
+        throw new Error("the detached dispatch did not return a handle");
+      expect(handle.status, "the detached dispatch is queued behind the running child").toBe(
+        "queued",
+      );
+      const queuedRecords = await waitForStatus(h.registry, "queued");
+      const queuedId = queuedRecords[0]?.id as ULID;
+
+      // The model stops the task that has not started yet.
+      const stop = createPtcTaskStopTool(h.registry, h.lifecycle, { clock: () => 1_000 });
+      const details = await callStop(stop, queuedId, STOP_REASON);
+      expect(details.fromStatus, "the stop started from `queued`").toBe("queued");
+      expect(details.task.status, "a task that never started is canceled").toBe("canceled");
+
+      // The detached tail's only report is its log line, so it has to name the RIGHT cause.
+      // Attempting `queued -> running` on a canceled record throws, and reporting THAT as a
+      // failed transition claims a failure that never happened.
+      await waitFor(() => h.logger.warnings.length > 0);
+      const warnings = h.logger.warnings.join("\n");
+      expect(
+        warnings,
+        "the log names the withdrawal — the same sentence the waiting tail refuses with",
+      ).toContain("dispatch was withdrawn from the admission queue");
+      expect(warnings, "and it claims no transition failure that did not happen").not.toContain(
+        "could not leave the admission queue",
+      );
+
+      // The trace is still on the record, and no child was ever started for it.
+      const record = await h.registry.get(queuedId);
+      expect(record?.status, "the record says the task was canceled").toBe("canceled");
+      expect(record?.stopReason, "the caller's reason is on the record").toBe(STOP_REASON);
+      expect(h.slots.queued, "and it occupies no queue position").toBe(0);
 
       // Freeing the slot must NOT start the withdrawn child.
       answerChild(h.lifecycle, 0, ANSWER);

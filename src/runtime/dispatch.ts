@@ -294,10 +294,10 @@ function releaseSlot(slots: DispatchSlotCounter, holder: string, logger?: Regist
 /**
  * ADR-0056 / ADR-0057: withdraw an admitted dispatch that will not run after all. A task
  * that is still WAITING is removed from the queue (and woken); a task that already holds a
- * slot gives it back. Either way it never starts a child.
+ * slot gives it back — through the PROMOTING release, so the next waiter is started.
  */
-function withdrawAdmission(slots: DispatchSlotCounter, holder: string): void {
-  if (!slots.cancelQueued(holder)) slots.release(holder);
+function withdrawAdmission(slots: DispatchSlotCounter, holder: string, log?: RegistryLogger): void {
+  if (!slots.cancelQueued(holder)) releaseSlot(slots, holder, log);
 }
 
 /**
@@ -439,7 +439,7 @@ export interface DispatchDeps {
 /**
  * Lazy session-level fallback registry for background dispatches that were not handed one.
  * Production passes the session registry through {@link DispatchDeps.taskRegistry}; the
- * fallback exists so a direct `dispatch(..., { background: true })` call without DI still
+ * fallback exists so a direct `dispatch(..., { wait: false })` call without DI still
  * registers and advances a task instead of dropping it (ADR-0022 §3, "no silent failure").
  */
 let fallbackTaskRegistry: DefaultTaskRegistry | undefined;
@@ -3156,6 +3156,16 @@ async function driveChildToTerminal(params: ChildDriveParams): Promise<DispatchR
 }
 
 /**
+ * ADR-0057: the ONE sentence for "this dispatch was withdrawn from the admission queue".
+ *
+ * The WAITING tail reports it as the rejection's `errorMessage`; the DETACHED tail reports it
+ * as its log line, because that tail's caller already holds a handle and the log is the only
+ * place the outcome can be seen. One sentence, so the two tails cannot drift apart — and so
+ * neither of them can name a failure that did not happen.
+ */
+const WITHDRAWN_FROM_ADMISSION_QUEUE = "dispatch was withdrawn from the admission queue";
+
+/**
  * Spawn one pi subprocess for one dispatch.
  *
  * Behavioural contract (ADR-0016 sections 1, 3, 4; ADR-0022; ADR-0055):
@@ -3388,8 +3398,14 @@ export async function dispatch(
   } catch (error) {
     // The record IS the dispatch's trace, so a session that cannot write one cannot honestly
     // run a dispatch: the call is refused rather than run unrecorded. The refusal names the
-    // reason (testing-constraints #3 -- no silent failure), and the slot goes back.
-    releaseSlot(slots, taskId, logger);
+    // reason (testing-constraints #3 -- no silent failure), and the admission goes back.
+    //
+    // ADR-0056: the admission is WITHDRAWN, not merely released. A task that is still QUEUED
+    // holds no slot, so `release` finds no holder to free and does nothing at all — the waiter
+    // would stay in the queue for ever, holding a slot nobody is ever going to free, and the
+    // session's effective concurrency would drop by one per occurrence, silently. The
+    // withdrawal takes it OUT of the queue.
+    withdrawAdmission(slots, taskId, logger);
     const message = error instanceof Error ? error.message : String(error);
     logger.warn("dispatch could not register its task record: " + message);
     return finish({
@@ -3446,7 +3462,7 @@ export async function dispatch(
       // ADR-0057 adds the third outcome: the task was pulled out of the queue.
       const outcome = await waitForAdmission(granted.promise, withdrawn.promise, ctx.signal);
       if (outcome === "aborted") {
-        withdrawAdmission(slots, taskId);
+        withdrawAdmission(slots, taskId, logger);
         await markQueuedTaskCanceled(registry, taskId, clock, callerId, logger);
         return finish({
           text: "",
@@ -3471,7 +3487,7 @@ export async function dispatch(
           durationMs: Date.now() - start,
           exitCode: -1,
           reportChannel: "none",
-          errorMessage: "dispatch was withdrawn from the admission queue",
+          errorMessage: WITHDRAWN_FROM_ADMISSION_QUEUE,
         });
       }
       // The slot is ours: the task leaves the queue and becomes `running` BEFORE the child
@@ -3508,8 +3524,22 @@ export async function dispatch(
   if (admission === "queued") {
     void (async (): Promise<void> => {
       // ADR-0057: the wait ends two ways -- a slot arrives, or the task is withdrawn. The
-      // withdrawal is caught by the transition below, which is illegal on a `canceled` record.
-      await Promise.race([granted.promise, withdrawn.promise]);
+      // OUTCOME is read, not merely the fact that the wait ended: a withdrawal is a NORMAL
+      // outcome with its own report, and continuing past it is what made this path attempt
+      // an illegal `queued -> running` and then warn about a transition failure that never
+      // happened.
+      const outcome = await Promise.race([
+        granted.promise.then(() => "granted" as const),
+        withdrawn.promise.then(() => "withdrawn" as const),
+      ]);
+      if (outcome === "withdrawn") {
+        // The task was pulled OUT of the queue: the record already says `canceled` (or
+        // `lost`), no child will ever start, and the holder holds NO slot -- it was never
+        // promoted -- so there is nothing to release. This tail's caller already holds a
+        // handle, so the log is the only place the outcome can be reported.
+        logger.warn(WITHDRAWN_FROM_ADMISSION_QUEUE + " (task " + taskId + ")");
+        return;
+      }
       // The slot is ours: the task leaves the queue and turns `running` BEFORE the child
       // starts. A task WITHDRAWN while it waited is `canceled` — an illegal edge, no child.
       try {
