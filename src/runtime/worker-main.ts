@@ -445,9 +445,23 @@ export function workerMain(deps: WorkerMainDeps): void {
    * annotations (DSH's "type annotations are advisory, the code runs type-stripped").
    * JavaScript the TypeScript parser rejects falls back to the unstripped source; a
    * genuine syntax error then surfaces from the `Function` constructor instead.
+   *
+   * **The wrapper's body opens with a `"use strict";` directive** (ADR-0060), so the
+   * program — and every function it defines — runs in strict mode. Upstream DSH
+   * materialises every program the same way, with the directive at the head of the
+   * program body; this repository's parity audit never registered that row, so the two
+   * had silently diverged. Strict mode is what turns an undeclared assignment into a
+   * `ReferenceError` instead of a quiet global, and what makes the program's top-level
+   * `this` `undefined` instead of the global object.
+   *
+   * The directive sits *inside* the body rather than around it, which is what keeps a
+   * program that writes its own `"use strict";` legal: the second directive is a no-op,
+   * not a duplicate-directive failure. The fallback path keeps it too — the unstripped
+   * source is the same wrapper, so a program the TypeScript parser rejects is still
+   * strict.
    */
   const compileProgram = (code: string): (() => unknown) => {
-    const wrapped = `async function ${programName}() {\n${code}\n}`;
+    const wrapped = `async function ${programName}() {\n"use strict";\n${code}\n}`;
     let source = wrapped;
     try {
       source = deps.stripTypes(wrapped, { mode: "strip" });
