@@ -255,10 +255,12 @@ registration — and what is withheld from the model is a different question now
 > A resumed session that already has records shows them from its first request.
 
 The tools stay **registered** either way (pi cannot unregister a tool); what changes is whether the
-model is offered them. `/ptc off` still stops new spawns, and an in-flight task still has to stay
-readable and stoppable — and it now also pulls the QUEUED tasks out of the queue
+model is offered them. `/ptc off` truncates this package's segment of the chain — on `full_ptc`
+the whole orchestration layer goes, on `codemode_ptc` this package's segment under pi's `codemode`
+goes ([ADR-0058](../adr/0058-ptc-off-truncates-the-chain.md)) — and an in-flight task still has to
+stay readable and stoppable. It also pulls the QUEUED tasks out of the queue
 ([ADR-0057](../adr/0057-cancellation-only-reaches-queued-tasks.md)): a task that has not
-started is withdrawn rather than signaled, so `/ptc off` means "stop accepting new dispatches, pull
+started is withdrawn rather than signaled, so `/ptc off` means "stop accepting new tasks, pull
 the queued ones out, let the running ones continue".
 
 **`ptc_task_list`** — list this session's background tasks.

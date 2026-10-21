@@ -129,6 +129,32 @@ three `--print` runs that each emit one of these notices, stdout and stderr rece
 each. That makes this page the only channel on which a `--print` user learns why they got the
 surface they got.
 
+## What `/ptc off` truncates on each surface
+
+`/ptc off` is a **truncation** of this package's place in the chain, not a switch that leaves a
+door in place to refuse ([ADR-0058](../adr/0058-ptc-off-truncates-the-chain.md)). The cut lands
+at the start of the segment this package controls, and **the two surfaces cut at different
+places for exactly one reason: pi's `codemode` is not ours to withdraw.**
+
+- **`full_ptc`** — the orchestrator is this package's own PTC, so the whole orchestration layer
+  (`ptc_run_code` / `ptc_workflow`) is withdrawn and the model is back to calling the built-in
+  tools directly. The task door (`pi_task_ptc`) lives inside a program, so withdrawing the
+  program makes the door unreachable — there is no separate registration to take away.
+- **`codemode_ptc`** — the orchestrator is pi's `codemode`, and it **stays**: `codemode` keeps
+  orchestrating and can still call the built-in tools. What goes is this package's segment
+  _underneath_ it — the execution layer (`ptc_run_code` / `ptc_workflow`) and the task door
+  (`pi_task_codemode`).
+
+The withdrawal itself is a same-name re-registration with `exposure: "hidden"`: pi cannot
+unregister a tool, but `registerTool` is a `Map.set` on the tool name, so re-registering the same
+name replaces the entry — and a hidden tool is in neither the set declared to the model nor the
+set a `codemode` script may call.
+
+**The model sees it from the next turn.** pi recomputes the declared set per model request, so the
+request a model already sent still carries the old declaration; a call made in that window is
+**refused** rather than silently accepted. The switch is session-scoped, and a resumed session
+that carries the "off" record is truncated too.
+
 ## Where it does not run
 
 Print / JSON / RPC sessions are left exactly as launched, and so is a session started with an

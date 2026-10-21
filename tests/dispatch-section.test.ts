@@ -18,9 +18,13 @@ import { expect, test } from "vitest";
 import {
   buildDispatchSection,
   DISPATCH_SECTION_NAME,
-  PTC_CHILD_SEARCH_SECTION_LINE,
-  PTC_DISPATCH_DISABLED_SECTION_LINE,
+  PTC_TRUNCATED_NO_NEW_TASK,
+  PTC_TRUNCATION_SECTION_LINES,
 } from "../src/mode/dispatch-section.ts";
+import { PTC_CHILD_SEARCH_NOTE } from "../src/search/contract.ts";
+import { buildModeInstruction } from "../src/mode/ptc-mode.ts";
+import { createPtcRunCodeTool } from "../src/tools/run-code.ts";
+import { createPtcWorkflowTool } from "../src/tools/workflow.ts";
 
 test("each surface says how to create a task THERE, in the call form that surface has", () => {
   // The `full_ptc` surface offers the program tools to the model directly, so the calling convention
@@ -76,8 +80,11 @@ test("the model-facing word is task, never dispatch", () => {
       );
     }
   }
-  expect(PTC_CHILD_SEARCH_SECTION_LINE, "the shared search sentence").not.toMatch(/dispatch/i);
-  expect(PTC_DISPATCH_DISABLED_SECTION_LINE, "the off line").not.toMatch(/dispatch/i);
+  expect(PTC_CHILD_SEARCH_NOTE, "the shared search sentence").not.toMatch(/dispatch/i);
+  expect(PTC_TRUNCATED_NO_NEW_TASK, "the shared truncated sentence").not.toMatch(/dispatch/i);
+  for (const line of Object.values(PTC_TRUNCATION_SECTION_LINES)) {
+    expect(line, "a per-surface truncated line").not.toMatch(/dispatch/i);
+  }
 });
 
 test("the search sentence is shared by both surfaces, so it cannot drift between them", () => {
@@ -90,7 +97,7 @@ test("the search sentence is shared by both surfaces, so it cannot drift between
       childCanSearch: true,
       dispatchEnabled: true,
     });
-    expect(section).toContain(PTC_CHILD_SEARCH_SECTION_LINE);
+    expect(section).toContain(PTC_CHILD_SEARCH_NOTE);
   }
 });
 
@@ -103,7 +110,7 @@ test("the search sentence is absent when the search module is off", () => {
     dispatchEnabled: true,
   });
   expect(section).not.toContain("web_ds_search");
-  expect(section).not.toContain(PTC_CHILD_SEARCH_SECTION_LINE);
+  expect(section).not.toContain(PTC_CHILD_SEARCH_NOTE);
 });
 
 test("the section name is one pi will accept, and it is not one of pi's own", () => {
@@ -116,23 +123,55 @@ test("the section name is one pi will accept, and it is not one of pi's own", ()
   }
 });
 
-test("a session that may not start a child is told so, and NOT how to create a task", () => {
-  // ADR-0050: when PTC is off, handing the model the calling convention is handing it an
-  // instruction it cannot follow — the call it makes next would be refused. It gets the one fact
-  // that matters instead, and the search sentence is withheld with it: "create a task and let it
-  // search" is exactly the thing that cannot happen right now.
+test("a truncated session is told the shared fact, and what THIS surface lost", () => {
+  // ADR-0058: the two surfaces truncate at different places — on `full_ptc` the whole
+  // orchestration layer goes, on `codemode_ptc` only this package's segment under pi's
+  // `codemode` does — so the section says different things. The one fact they SHARE is one
+  // constant, and the assertion is on that constant, so a reword on one side without the other
+  // turns this red.
   for (const surfaceMode of ["full_ptc", "codemode_ptc"] as const) {
     const section = buildDispatchSection({
       surfaceMode,
       childCanSearch: true,
       dispatchEnabled: false,
     });
-    expect(section).toContain(PTC_DISPATCH_DISABLED_SECTION_LINE);
-    expect(section).not.toContain("pi_task_codemode");
-    expect(section).not.toContain("pi_task_ptc");
-    expect(section).not.toContain("ptc_run_code");
-    expect(section).not.toContain(PTC_CHILD_SEARCH_SECTION_LINE);
+    expect(section, `${surfaceMode} carries the shared sentence`).toContain(
+      PTC_TRUNCATED_NO_NEW_TASK,
+    );
+    expect(section, `${surfaceMode} carries its own line`).toContain(
+      PTC_TRUNCATION_SECTION_LINES[surfaceMode],
+    );
+    // The calling convention is NOT given: a model cannot create a task here, and handing it
+    // the call form is handing it an instruction it cannot follow (ADR-0050 decision 6).
+    expect(section, `${surfaceMode} gives no call form`).not.toContain("tools.pi_task_codemode");
+    expect(section, `${surfaceMode} gives no call form`).not.toContain("pi_task_ptc");
+    // And the search sentence goes with it: "create a task and let the child search" is exactly
+    // the thing that cannot happen right now.
+    expect(section, `${surfaceMode} withholds the search sentence`).not.toContain(
+      PTC_CHILD_SEARCH_NOTE,
+    );
   }
+});
+
+test("the two surfaces say different things about what was lost, and the difference is the point", () => {
+  // ADR-0058: the reason the two surfaces truncate at different places is that pi's `codemode`
+  // is not this package's to withdraw. A section that said the same thing on both would be
+  // claiming the model lost its orchestrator on `codemode_ptc` too — which is false.
+  const full = buildDispatchSection({
+    surfaceMode: "full_ptc",
+    childCanSearch: false,
+    dispatchEnabled: false,
+  });
+  const codemode = buildDispatchSection({
+    surfaceMode: "codemode_ptc",
+    childCanSearch: false,
+    dispatchEnabled: false,
+  });
+  expect(full, "full_ptc has no orchestrator left").toContain("no orchestrator left");
+  expect(codemode, "codemode_ptc keeps its orchestrator").toContain(
+    "`codemode` still orchestrates",
+  );
+  expect(full, "and the two lines are not the same line").not.toBe(codemode);
 });
 
 test('the section never says "sandbox"', () => {
@@ -140,9 +179,65 @@ test('the section never says "sandbox"', () => {
   // reads "sandbox" may believe it is contained when it is not.
   for (const surfaceMode of ["full_ptc", "codemode_ptc"] as const) {
     for (const childCanSearch of [true, false]) {
-      expect(
-        buildDispatchSection({ surfaceMode, childCanSearch, dispatchEnabled: true }),
-      ).not.toMatch(/sandbox/i);
+      for (const dispatchEnabled of [true, false]) {
+        expect(buildDispatchSection({ surfaceMode, childCanSearch, dispatchEnabled })).not.toMatch(
+          /sandbox/i,
+        );
+      }
     }
   }
+});
+
+/**
+ * ADR-0052: the web fact is ONE sentence on THREE model-facing surfaces.
+ *
+ * The parent's model reads this fact in three places when it decides what to write: the two PTC
+ * tool descriptions, the `<ptc>` section, and the mode briefing. They used to be three
+ * wordings — the section's had been rewritten to the task vocabulary while the briefing's had
+ * not, and the two tool descriptions carried a third copy — and the word that drifted was the
+ * one the model must not read: "dispatch" for the thing the model calls a task.
+ *
+ * The assertion is on the CONSTANT, so a copy on any surface turns red.
+ */
+test("the two tool descriptions, the section and the briefing all carry the same constant", () => {
+  const runCode = createPtcRunCodeTool({ childCanSearch: true });
+  const workflow = createPtcWorkflowTool({ childCanSearch: true });
+  const section = buildDispatchSection({
+    surfaceMode: "full_ptc",
+    childCanSearch: true,
+    dispatchEnabled: true,
+  });
+  const briefing = buildModeInstruction(["read"], "builtins-only", { childCanSearch: true });
+
+  expect(runCode.description, "ptc_run_code carries the shared sentence").toContain(
+    PTC_CHILD_SEARCH_NOTE,
+  );
+  expect(workflow.description, "ptc_workflow carries the shared sentence").toContain(
+    PTC_CHILD_SEARCH_NOTE,
+  );
+  expect(section, "the section carries the shared sentence").toContain(PTC_CHILD_SEARCH_NOTE);
+  expect(briefing, "the briefing carries the shared sentence").toContain(PTC_CHILD_SEARCH_NOTE);
+});
+
+test("the shared sentence is in the task vocabulary, and never says dispatch", () => {
+  // ADR-0052: the model-facing word is TASK. "Dispatch" is what the task side does with a task
+  // afterwards, and it is not the model's word.
+  expect(PTC_CHILD_SEARCH_NOTE, "the sentence never says dispatch").not.toMatch(/dispatch/i);
+  expect(PTC_CHILD_SEARCH_NOTE, "it says what to create").toContain("create a task");
+  expect(PTC_CHILD_SEARCH_NOTE, "it says who searches").toContain("let the child search");
+});
+
+test("the search module is off and the sentence is nowhere", () => {
+  // The claim is about a capability that only exists when the operator turned it on, so it is
+  // withheld everywhere it is not true — not just in the section.
+  const runCode = createPtcRunCodeTool({ childCanSearch: false });
+  const section = buildDispatchSection({
+    surfaceMode: "full_ptc",
+    childCanSearch: false,
+    dispatchEnabled: true,
+  });
+  const briefing = buildModeInstruction(["read"], "builtins-only", { childCanSearch: false });
+  expect(runCode.description).not.toContain(PTC_CHILD_SEARCH_NOTE);
+  expect(section).not.toContain(PTC_CHILD_SEARCH_NOTE);
+  expect(briefing).not.toContain(PTC_CHILD_SEARCH_NOTE);
 });

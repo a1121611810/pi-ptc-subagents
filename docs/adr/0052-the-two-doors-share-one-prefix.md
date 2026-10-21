@@ -26,6 +26,8 @@ Status: accepted (2026-10-21). Spec #234 决定 2。修订：[ADR-0013](./0013-p
 [ADR-0050](./0050-ptc-off-stops-new-dispatch.md)、
 [ADR-0053](./0053-every-dispatch-is-a-task.md)——修订的只有**名字**，决定本身不变（逐篇的指针在各记录正文顶部）。
 
+> **Amended by [ADR-0058](./0058-ptc-off-truncates-the-chain.md) (2026-10-21): decision 6's shared search sentence now reaches a THIRD surface — the mode briefing — and its one home is the search module's own constant (`PTC_CHILD_SEARCH_NOTE` in `src/search/contract.ts`), which the `<ptc>` section, the briefing and the two PTC tool descriptions all carry. The decision itself is unchanged: one sentence, one constant, and a test that asserts every surface contains that constant. The old name is not aliased — it is gone, and this record's line was corrected to the new one.**
+
 ## Context
 
 本包有**两扇门**，一个实现：PTC 程序里的那个绑定，和 `codemode` 脚本能调的那个工具。它们的旧名是
@@ -80,7 +82,7 @@ PTC 门仍然只作为程序里的绑定存在，从来没有被注册成一个 
 
 **6. 同一句话在两个平面上只写一次。** 共享的散文是**一个常量**：reach note（`common.ts` 里的
 `PTC_BINDING_REACH_NOTE`）同时出现在 `ptc_run_code` 与 `ptc_workflow` 的描述里，`<ptc>` 段的搜索句
-（`PTC_CHILD_SEARCH_SECTION_LINE`）同时出现在两个表面上。测试断言**两边都含那个常量本身**，所以漂移
+（`PTC_CHILD_SEARCH_NOTE`）同时出现在两个表面上。测试断言**两边都含那个常量本身**，所以漂移
 在结构上不可能发生。
 
 ## Evidence
@@ -114,6 +116,11 @@ PTC 门仍然只作为程序里的绑定存在，从来没有被注册成一个 
   `readSurfaceModeConfig` 的先例同一条机制。那条清单有两条反向守护：名字一旦重新出现在 `src/` 里
   就必须从清单里删掉，**所以 `src/` 里的旧名连注释都不能留**；没人再提的名字则是死条目，要删掉。
   被修订的记录继续提着它，所以这条条目是活的。
+  —— **这一条只对 `ptc_subagent` 成立。** 两个旧名里只有它符合门禁的符号形态（snake_case），
+  才进得了清单、才受那两条反向守护。带点的 `pi.dispatch` 被形态过滤器整个挡在判定面之外，
+  门禁看不见它，所以它仍留在 `src/` 的注释与日志前缀里——其中「模型当时真的看到了什么」的历史
+  引述刻意不改（改了记录就假了），而**描述当前绑定的活引用**（日志前缀、当前代码的注释）由
+  ADR-0055 改成新名。两条旧名的命运不同，是形态过滤器的结果，不是两套规矩。
 - **工具名长度变了。** `pi_task_codemode`（16 个字符）比 `ptc_subagent`（13 个）长，TUI 的行宽要
   重新看；`pi_task_ptc` 与 `pi.dispatch` 同为 11 个字符，绑定那几行不变。
 

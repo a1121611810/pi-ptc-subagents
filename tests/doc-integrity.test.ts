@@ -459,6 +459,14 @@ const EXTERNAL_VOCABULARY: ReadonlyMap<string, string> = new Map([
     "selectCatalog",
     "pi 内建 codemode 扩展的内部函数，本仓不声明（ADR-0054 引用它是为了陈述目录的预算代价）",
   ],
+  // A2c. pi 会话内部重算「声明给模型的那一套工具」的那一步。ADR-0058 引用它是为了陈述**实测的
+  // 生效时机**：撤掉一个工具对**下一个模型请求**生效，而在翻转开关的那一个 turn 里，模型已经
+  // 发出的请求仍然带着旧的声明——所以那次调用必须靠闸拒绝。它是宿主实现细节，本仓既不声明
+  // 也不复制（ADR-0058 走的是同名重注册为 `hidden` 这条路，不是调用它）。
+  [
+    "_applyToolLoadout",
+    "pi 会话内部重算声明集的那一步，本仓不声明；ADR-0058 引用它是为了陈述撤工具的生效时机",
+  ],
   [
     "ALL_TOOLS",
     "pi 内建 codemode 沙箱的全局量，本仓不声明；ADR-0025 §3 引用它是为了陈述实测结果，不是调用它",
@@ -1576,17 +1584,28 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // Confirmed line by line 2026-10-12 (re-checked after #187 moved it): line 505 is
     // `pi.registerTool(createChildReportTool(ptcDepth > 0));` -- the depth gate the ADR cites to
     // explain why a generalist still gets the report tool.
-    "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:117 -> src/index.ts:644":
+    //
+    // 2026-10-21（#242 · ADR-0058：`/ptc off` 改成截断）：下面五条目标行因本轮实现整体下移，
+    // 逐条**按内容**核对后重钉（不做算术平移）：
+    //   index.ts:644 → 740（`registerSessionTool(createChildReportTool(ptcDepth > 0));` ——
+    //   注册改走「记住定义」的那层包装，调用点本身没动，标识符逐字相同）
+    //   index.ts:1272 → 1393（`if (detected.present && !known) {`）
+    //   index.ts:1323 → 1444（`if (surface.surfaceMode === "codemode_ptc" && !pi.getActiveTools()
+    //   .includes("codemode")) {` —— 同一行里的标识符逐字相同）
+    //   index.ts:784 → 880（缺凭据告警的 `ctx.ui.notify(`）
+    //   ptc-mode.ts:1331 → 1360（`export function detectedSurfaceMode(`）
+    // PIN_TOKENS 的 value 一个未变。
+    "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:117 -> src/index.ts:740":
       "createChildReportTool(ptcDepth > 0)",
-    "docs/adr/0029-surface-follows-codemode-activation.md:33 -> ptc-mode.ts:1331":
+    "docs/adr/0029-surface-follows-codemode-activation.md:33 -> ptc-mode.ts:1360":
       "export function detectedSurfaceMode(",
-    "docs/adr/0029-surface-follows-codemode-activation.md:36 -> src/index.ts:1323":
+    "docs/adr/0029-surface-follows-codemode-activation.md:36 -> src/index.ts:1444":
       'getActiveTools().includes("codemode")',
-    "docs/adr/0029-surface-follows-codemode-activation.md:147 -> src/index.ts:1323":
+    "docs/adr/0029-surface-follows-codemode-activation.md:147 -> src/index.ts:1444":
       'getActiveTools().includes("codemode")',
     "docs/adr/0029-surface-follows-codemode-activation.md:178 -> ptc-mode.ts:32":
       "## Fail-safe on external loadout changes",
-    "docs/adr/0029-surface-follows-codemode-activation.md:215 -> src/index.ts:1272":
+    "docs/adr/0029-surface-follows-codemode-activation.md:215 -> src/index.ts:1393":
       "if (detected.present && !known) {",
     "docs/adr/0030-surface-switch-reloads.md:96 -> ptc-mode.ts:32":
       "## Fail-safe on external loadout changes",
@@ -1621,14 +1640,14 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       "`ToolDefinition.exposure` field",
     "docs/adr/0047-deepseek-search-is-program-internal.md:107 -> docs/agents/pi-compat-matrix.md:63":
       "`ToolDefinition.exposure` field",
-    "docs/adr/0048-deepseek-search-gate.md:44 -> src/index.ts:784": "ctx.ui.notify(",
+    "docs/adr/0048-deepseek-search-gate.md:44 -> src/index.ts:880": "ctx.ui.notify(",
     "docs/adr/0048-deepseek-search-gate.md:72 -> src/runtime/limits.ts:154":
       "WORKER_ENV_ALLOW_LIST",
     "docs/adr/0049-the-search-lives-in-the-child.md:15 -> docs/agents/pi-compat-matrix.md:63":
       "`ToolDefinition.exposure` field",
     "docs/specs/0044-deepseek-search-module.md:98 -> docs/agents/pi-compat-matrix.md:63":
       "`ToolDefinition.exposure` field",
-    "docs/specs/0044-deepseek-search-module.md:146 -> src/index.ts:784": "ctx.ui.notify(",
+    "docs/specs/0044-deepseek-search-module.md:146 -> src/index.ts:880": "ctx.ui.notify(",
     "docs/specs/0044-deepseek-search-module.md:173 -> src/runtime/limits.ts:154":
       "WORKER_ENV_ALLOW_LIST",
     "docs/specs/0044-deepseek-search-module.md:298 -> docs/agents/pi-compat-matrix.md:63":
@@ -1765,12 +1784,16 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     //  32  → 962→856  = decision-4 的 `if (surface.surfaceMode === "subagents" && !pi.getActiveTools()…`
     //  105 → 962→856  = 同一处（ADR-0029 正文第二次引用它）
     //  129 → 27 保持    = ` * ## Fail-safe on external loadout changes`，本轮未移动
-    "docs/adr/0029-surface-follows-codemode-activation.md:33 -> ptc-mode.ts:1331",
-    "docs/adr/0029-surface-follows-codemode-activation.md:36 -> src/index.ts:1323",
-    "docs/adr/0029-surface-follows-codemode-activation.md:147 -> src/index.ts:1323",
+    // 2026-10-21（#242 · ADR-0058）：这四条与下面两条 ADR-0039 / ADR-0048 / spec-0044 的目标行
+    // 因本轮实现整体下移，逐条**按内容**核对后重钉（不按算术平移）：
+    //   ptc-mode.ts:1331 → 1360、index.ts:1272 → 1393、index.ts:1323 → 1444、
+    //   index.ts:644 → 740、index.ts:784 → 880（两处）。逐条打开核对：内容逐字未变，只是行号。
+    "docs/adr/0029-surface-follows-codemode-activation.md:33 -> ptc-mode.ts:1360",
+    "docs/adr/0029-surface-follows-codemode-activation.md:36 -> src/index.ts:1444",
+    "docs/adr/0029-surface-follows-codemode-activation.md:147 -> src/index.ts:1444",
     "docs/adr/0029-surface-follows-codemode-activation.md:178 -> ptc-mode.ts:32",
     //  166 → 920→807 = `if (detected.present && !known) {`，即交叉核对那一条
-    "docs/adr/0029-surface-follows-codemode-activation.md:215 -> src/index.ts:1272",
+    "docs/adr/0029-surface-follows-codemode-activation.md:215 -> src/index.ts:1393",
     // 2026-10-03 第四次复核（ADR-0030）：0030 引 ptc-mode.ts:27-31 那段「loadout 被外部改写
     // 时模式如何退让」，27 行是段首。本轮该引用在**文档里**的行号因撤回声明从 68 前移到 83，
     // 引用目标（ptc-mode.ts:27）未动。ADR-0030 另外四处引用写的是 pi 宿主的行号而非本仓文件，
@@ -1878,7 +1901,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     "docs/adr/0032-child-report.md:134 -> src/runtime/dispatch.ts:2154",
     // 新增 1 条（2026-10-12，ADR-0039）：目标行已逐条核对。
     // 2026-10-20（搜索模块改形）：目标行随 src/index.ts 的改动从 620 移到 598，逐条核对内容未变。
-    "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:117 -> src/index.ts:644",
+    "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:117 -> src/index.ts:740",
     // 2026-10-20（DeepSeek 搜索模块）：新增 7 条，逐条核对过目标行的内容。
     // 2026-10-20 第二次（形状改成「只在子代理里」）：7 条变 11 条，理由见 PIN_TOKENS 上方那段。
     // 2026-10-21（订正 `/ptc off` 的说法）：src/index.ts 改了 `/ptc off` 与 `/ptc` 查询的通知文案，
@@ -1892,11 +1915,11 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // 1124→1269、608→643、748→783（两处）；ptc-task.ts 236→253、587→604、815→832。
     "docs/adr/0047-deepseek-search-is-program-internal.md:72 -> docs/agents/pi-compat-matrix.md:63",
     "docs/adr/0047-deepseek-search-is-program-internal.md:107 -> docs/agents/pi-compat-matrix.md:63",
-    "docs/adr/0048-deepseek-search-gate.md:44 -> src/index.ts:784",
+    "docs/adr/0048-deepseek-search-gate.md:44 -> src/index.ts:880",
     "docs/adr/0048-deepseek-search-gate.md:72 -> src/runtime/limits.ts:154",
     "docs/adr/0049-the-search-lives-in-the-child.md:15 -> docs/agents/pi-compat-matrix.md:63",
     "docs/specs/0044-deepseek-search-module.md:98 -> docs/agents/pi-compat-matrix.md:63",
-    "docs/specs/0044-deepseek-search-module.md:146 -> src/index.ts:784",
+    "docs/specs/0044-deepseek-search-module.md:146 -> src/index.ts:880",
     "docs/specs/0044-deepseek-search-module.md:173 -> src/runtime/limits.ts:154",
     "docs/specs/0044-deepseek-search-module.md:298 -> docs/agents/pi-compat-matrix.md:63",
   ];
