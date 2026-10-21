@@ -437,7 +437,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
   /**
    * ADR-0022 §3/reopen R-m12: this process's own background task id, read once from the child
    * environment `dispatch()` stamped (`PI_PTC_TASK_ID`). A top-level pi session has none. It
-   * travels with each PTC run so a nested `pi_task_ptc({ background: true })` records its parent.
+   * travels with each PTC run so a nested `pi_task_ptc({ wait: false })` records its parent.
    */
   const parentTaskId = resolveParentTaskIdFromEnv();
 
