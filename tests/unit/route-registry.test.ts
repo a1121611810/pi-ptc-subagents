@@ -27,6 +27,8 @@
  * the file system itself: the sentence must not be there.
  */
 import { readFileSync } from "node:fs";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import {
@@ -48,6 +50,7 @@ import {
   TOOLS,
   WHY_SUPPRESSED_DESCRIPTION,
   type DescriptionParagraph,
+  type DescriptionSlot,
   type ToolEntry,
   type ToolName,
 } from "../../src/routes/registry.ts";
@@ -105,6 +108,40 @@ function blocks(description: string): string[] {
 }
 
 /**
+ * The sentences inside one paragraph.
+ *
+ * A copy of a whole paragraph is the drift this file exists to catch; a copy of ONE SENTENCE is
+ * the same drift with less of it, and it is just as invisible when the model reads the two
+ * surfaces. So the scan looks for both: the paragraph, and each of its sentences.
+ *
+ * The split is deliberately crude — a period followed by a space and a capital letter, or a
+ * period at the end. A period inside an abbreviation ("e.g.") does not split, because the next
+ * character is not a capital; that is a false negative in the splitter, not in the guard, and the
+ * paragraph-level check still covers the whole text.
+ */
+function sentencesOf(paragraph: string): string[] {
+  const out: string[] = [];
+  let start = 0;
+  for (let index = 0; index < paragraph.length; index += 1) {
+    const char = paragraph[index];
+    if (char !== "." && char !== "!" && char !== "?") continue;
+    const rest = paragraph.slice(index + 1);
+    if (rest.startsWith(" ") && /^[A-Z`]/.test(rest.slice(1))) {
+      out.push(paragraph.slice(start, index + 1));
+      start = index + 2;
+    }
+  }
+  if (start < paragraph.length) out.push(paragraph.slice(start));
+  return out;
+}
+
+/** What one build produced: the prose each tool renders, and the slots that were filled. */
+interface BuiltTools {
+  readonly prose: ReadonlyMap<ToolName, ToolProse>;
+  readonly filled: ReadonlyMap<ToolName, Partial<Record<DescriptionSlot, string>>>;
+}
+
+/**
  * Build one tool of each kind, so the registry can be compared against what the package
  * actually registers.
  *
@@ -112,39 +149,74 @@ function blocks(description: string): string[] {
  * are registered only where the session cannot see them (`web_ds_search` lives in the child;
  * `pi_task_codemode` is the codemode door). The prose is the same either way, and the
  * factories are the seam that builds it.
+ *
+ * The agent directories are EMPTY temp dirs, wired through the `homeDir` seam rather than by
+ * mutating `process.env` — a test that could see the developer's real agents would pass or
+ * fail depending on whose machine it ran on.
  */
-function buildTools(childCanSearch = false): ReadonlyMap<ToolName, ToolProse> {
-  const registry = createTaskRegistry(new InMemoryTaskStorage(), { clock: () => 1_000 });
-  const outputs = new InMemoryOutputStorage();
-  const lifecycle = new MockChildProcessLifecycle();
-  const agentOptions = {
-    cwd: REPO_ROOT,
-    depth: 0,
-    maxDispatchDepth: 3,
-    homeDir: join(REPO_ROOT, "tests", "fixtures", "no-agents-home"),
-  };
-  return new Map<ToolName, ToolProse>([
-    ["ptc_run_code", proseOf(createPtcRunCodeTool({ childCanSearch }))],
-    ["ptc_workflow", proseOf(createPtcWorkflowTool({ childCanSearch }))],
-    ["pi_task_codemode", proseOf(createPtcSubagentTool(agentOptions))],
-    ["ptc_task_list", proseOf(createPtcTaskListTool(registry))],
-    ["ptc_task_output", proseOf(createPtcTaskOutputTool(registry, outputs))],
-    ["ptc_task_stop", proseOf(createPtcTaskStopTool(registry, lifecycle))],
-    ["ptc_child_report", proseOf(createChildReportTool(true))],
-    [
-      "web_ds_search",
-      proseOf(
-        createWebDsSearchTool({
-          deps: { quota: createSearchQuota({ maxCallsPerSession: 0 }), maxCallsPerSession: 0 },
-          unavailable: false,
-        }),
-      ),
-    ],
-  ]);
+async function buildTools(childCanSearch = false): Promise<BuiltTools> {
+  const root = await mkdtemp(join(tmpdir(), "ptc-registry-"));
+  const home = join(root, "home");
+  const project = join(root, "project");
+  await mkdir(join(home, ".pi", "agent", "agents"), { recursive: true });
+  await mkdir(join(project, ".pi", "agents"), { recursive: true });
+  try {
+    const registry = createTaskRegistry(new InMemoryTaskStorage(), { clock: () => 1_000 });
+    const outputs = new InMemoryOutputStorage();
+    const lifecycle = new MockChildProcessLifecycle();
+    const agentOptions = {
+      cwd: project,
+      depth: 0,
+      maxDispatchDepth: 3,
+      homeDir: home,
+    };
+    const roster = describeRegisteredAgentRoster({
+      cwd: project,
+      agentScope: "both",
+      homeDir: home,
+    });
+    const prose = new Map<ToolName, ToolProse>([
+      ["ptc_run_code", proseOf(createPtcRunCodeTool({ childCanSearch }))],
+      ["ptc_workflow", proseOf(createPtcWorkflowTool({ childCanSearch }))],
+      ["pi_task_codemode", proseOf(createPtcSubagentTool(agentOptions))],
+      ["ptc_task_list", proseOf(createPtcTaskListTool(registry))],
+      ["ptc_task_output", proseOf(createPtcTaskOutputTool(registry, outputs))],
+      ["ptc_task_stop", proseOf(createPtcTaskStopTool(registry, lifecycle))],
+      ["ptc_child_report", proseOf(createChildReportTool(true))],
+      [
+        "web_ds_search",
+        proseOf(
+          createWebDsSearchTool({
+            deps: { quota: createSearchQuota({ maxCallsPerSession: 0 }), maxCallsPerSession: 0 },
+            unavailable: false,
+          }),
+        ),
+      ],
+    ]);
+    const filled = new Map<ToolName, Partial<Record<DescriptionSlot, string>>>([
+      [
+        "ptc_run_code",
+        {
+          bindingContract: BINDING_CONTRACT,
+          ...(childCanSearch ? { childSearchNote: PTC_CHILD_SEARCH_NOTE } : {}),
+        },
+      ],
+      ["ptc_workflow", { bindingContract: BINDING_CONTRACT }],
+      ["pi_task_codemode", { agentRoster: roster }],
+      ["ptc_task_list", {}],
+      ["ptc_task_output", {}],
+      ["ptc_task_stop", {}],
+      ["ptc_child_report", {}],
+      ["web_ds_search", {}],
+    ]);
+    return { prose, filled };
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 }
 
 describe("the route registry holds the model-facing prose", () => {
-  test("a tool's description, snippet and guidelines ARE the registry's entry", () => {
+  test("a tool's description, snippet and guidelines ARE the registry's entry", async () => {
     // The forcing point the ticket names: the tool's three blocks must be a CALL to the
     // registry, not a copy of it.
     //
@@ -152,13 +224,20 @@ describe("the route registry holds the model-facing prose", () => {
     // registry never sees) — the rendered tool stops equalling the rendered registry, and this
     // goes red. The other direction is guarded too: the registry's own paragraphs are checked
     // to be present, so a renderer that silently dropped one cannot make the comparison vacuous.
-    const tools = buildTools();
+    const built = await buildTools();
     for (const [name, entry] of Object.entries(TOOLS) as [ToolName, ToolEntry][]) {
-      const prose = tools.get(name);
+      const prose = built.prose.get(name);
       expect(prose, `${name} is built by a factory`).toBeDefined();
       const registered = prose as ToolProse;
       expect(registered.promptSnippet, `${name}'s snippet`).toBe(entry.snippet);
       expect(registered.promptGuidelines, `${name}'s guidelines`).toEqual([...entry.guidelines]);
+      // The comparison is EXACT, not a containment: a tool that added a sentence of its own
+      // would still contain every registry paragraph, and would still be prose in two places —
+      // the registry's and the tool's. So the tool's description must BE the registry's rendering.
+      expect(
+        registered.description,
+        `${name}'s description is the registry's rendering, word for word`,
+      ).toBe(renderDescription(entry, built.filled.get(name) ?? {}));
       for (const paragraph of ownParagraphs(entry)) {
         expect(registered.description, `${name} carries the registry's paragraph`).toContain(
           paragraph,
@@ -167,15 +246,15 @@ describe("the route registry holds the model-facing prose", () => {
     }
   });
 
-  test("the registry's paragraphs are in the order the model reads them", () => {
+  test("the registry's paragraphs are in the order the model reads them", async () => {
     // The order is part of the prose: the binding contract sits between "how to call" and
     // "what comes back", and a description whose paragraphs were reordered reads differently.
     //
     // Counterfactual: swap two paragraphs in the registry — the indices stop increasing and
     // this goes red.
-    const tools = buildTools();
+    const built = await buildTools();
     for (const [name, entry] of Object.entries(TOOLS) as [ToolName, ToolEntry][]) {
-      const description = (tools.get(name) as ToolProse).description;
+      const description = (built.prose.get(name) as ToolProse).description;
       let previous = -1;
       for (const paragraph of ownParagraphs(entry)) {
         const at = description.indexOf(paragraph, previous + 1);
@@ -207,6 +286,9 @@ describe("the route registry holds the model-facing prose", () => {
     for (const entry of Object.values(TOOLS)) {
       for (const paragraph of ownParagraphs(entry)) {
         if (paragraph.length >= 40) sentences.push(paragraph);
+        for (const sentence of sentencesOf(paragraph)) {
+          if (sentence.length >= 60) sentences.push(sentence);
+        }
       }
       for (const guideline of entry.guidelines) {
         if (guideline.length >= 40) sentences.push(guideline);
@@ -243,16 +325,16 @@ describe("the route registry holds the model-facing prose", () => {
     }
   });
 
-  test("the three duplicated sentences are ONE constant, carried by both sides", () => {
+  test("the three duplicated sentences are ONE constant, carried by both sides", async () => {
     // The three the inventory found. Each was a fix made once and copied, which is the shape
     // that drifts.
     //
     // Counterfactual: reword ONE side in place (the agent clause in the workflow description
     // only, the program-body sentence in one parameter schema only, the whySuppressed text in
     // one output schema only) — the other side's assertion goes red.
-    const tools = buildTools();
-    const runCode = (tools.get("ptc_run_code") as ToolProse).description;
-    const workflow = (tools.get("ptc_workflow") as ToolProse).description;
+    const built = await buildTools();
+    const runCode = (built.prose.get("ptc_run_code") as ToolProse).description;
+    const workflow = (built.prose.get("ptc_workflow") as ToolProse).description;
     expect(runCode, "ptc_run_code carries the agent clause").toContain(AGENT_OPTIONAL_CLAUSE);
     expect(workflow, "ptc_workflow carries the agent clause").toContain(AGENT_OPTIONAL_CLAUSE);
 
@@ -288,16 +370,16 @@ describe("the route registry holds the model-facing prose", () => {
     ).toBe(WHY_SUPPRESSED_DESCRIPTION);
   });
 
-  test("every sentence two surfaces carry reaches BOTH of them", () => {
+  test("every sentence two surfaces carry reaches BOTH of them", async () => {
     // The shared sentences that were already one constant before this ticket, and the ones
     // that became one because of it. The registry owns the copy; these assertions say the two
     // surfaces still carry it.
     //
     // Counterfactual: drop the reach note from the workflow description — the workflow half
     // goes red; the run_code half stays green, which is exactly the drift this catches.
-    const tools = buildTools();
-    const runCode = (tools.get("ptc_run_code") as ToolProse).description;
-    const workflow = (tools.get("ptc_workflow") as ToolProse).description;
+    const built = await buildTools();
+    const runCode = (built.prose.get("ptc_run_code") as ToolProse).description;
+    const workflow = (built.prose.get("ptc_workflow") as ToolProse).description;
     expect(runCode, "ptc_run_code carries the reach note").toContain(PTC_BINDING_REACH_NOTE);
     expect(workflow, "ptc_workflow carries the reach note").toContain(PTC_BINDING_REACH_NOTE);
 
@@ -309,8 +391,8 @@ describe("the route registry holds the model-facing prose", () => {
     expect(section, "the <ptc> section carries the web sentence").toContain(PTC_CHILD_SEARCH_NOTE);
     // The web sentence reaches the PTC descriptions only in a session whose children can
     // search — so this reads the tools built WITH that capability, not the ones built without.
-    const searching = buildTools(true);
-    const searchingRunCode = (searching.get("ptc_run_code") as ToolProse).description;
+    const searching = await buildTools(true);
+    const searchingRunCode = (searching.prose.get("ptc_run_code") as ToolProse).description;
     expect(searchingRunCode, "ptc_run_code carries the web sentence").toContain(
       PTC_CHILD_SEARCH_NOTE,
     );
@@ -318,17 +400,16 @@ describe("the route registry holds the model-facing prose", () => {
     expect(BINDING_CONTRACT, "the binding contract carries the door note").toContain(
       TASK_DOOR_RESULT_NOTE,
     );
-    const codemodeDescription = (tools.get("pi_task_codemode") as ToolProse).description;
+    const codemodeDescription = (built.prose.get("pi_task_codemode") as ToolProse).description;
     expect(codemodeDescription, "the codemode door carries the door note").toContain(
       TASK_DOOR_RESULT_NOTE,
     );
 
-    const stopDescription = (tools.get("ptc_task_stop") as ToolProse).description;
-    expect(stopDescription, "the stop tool's description").toContain(TASK_STOP_SEMANTICS);
-    expect(
-      (tools.get("ptc_task_stop") as ToolProse).promptGuidelines ?? [],
-      "the stop tool's guidelines",
-    ).toContain(`Use ptc_task_stop to stop a task: ${TASK_STOP_SEMANTICS}`);
+    const stopProse = built.prose.get("ptc_task_stop") as ToolProse;
+    expect(stopProse.description, "the stop tool's description").toContain(TASK_STOP_SEMANTICS);
+    expect(stopProse.promptGuidelines ?? [], "the stop tool's guidelines").toContain(
+      `Use ptc_task_stop to stop a task: ${TASK_STOP_SEMANTICS}`,
+    );
   });
 
   test("no description says sandbox", () => {
@@ -403,22 +484,22 @@ describe("the route registry holds the model-facing prose", () => {
     expect(base.includes(PTC_CHILD_SEARCH_NOTE), "the unfilled slot carries nothing").toBe(false);
   });
 
-  test("the codemode door's roster is the session's own, appended after the registry's prose", () => {
+  test("the codemode door's roster is the session's own, appended after the registry's prose", async () => {
     // The roster is the one slot whose text is NOT in the registry: it is rendered from the
     // live agent files, so it is a fact about this install rather than about the tool. The
     // registry's static prose still comes first, and the roster still reaches the model.
     //
     // Counterfactual: a registry entry that swallowed the roster (or the tool that dropped it)
     // changes the block count, and this goes red.
-    const tools = buildTools();
-    const description = (tools.get("pi_task_codemode") as ToolProse).description;
+    const built = await buildTools();
+    const description = (built.prose.get("pi_task_codemode") as ToolProse).description;
     const base = renderDescription(TOOLS.pi_task_codemode);
     expect(description.startsWith(base), "the registry's prose leads").toBe(true);
-    const roster = describeRegisteredAgentRoster({
-      cwd: REPO_ROOT,
-      agentScope: "both",
-      homeDir: join(REPO_ROOT, "tests", "fixtures", "no-agents-home"),
-    });
-    expect(description.endsWith(roster), "the roster is the session's own last block").toBe(true);
+    const roster = (built.filled.get("pi_task_codemode") ?? {})["agentRoster"];
+    expect(roster, "the roster was filled for this session").toBeDefined();
+    expect(
+      description.endsWith(roster as string),
+      "the roster is the session's own last block",
+    ).toBe(true);
   });
 });
