@@ -294,6 +294,16 @@ function ownerOf(record: TaskRecord): ULID {
 class StableTaskRegistry implements TaskRegistry {
   #current: TaskRegistry;
   /**
+   * ADR-0053: whether a session has been bound yet.
+   *
+   * The task face's visibility follows the session's records, and a session that has not
+   * been bound has none to follow — but the three task tools must still REGISTER as active,
+   * because pi reads a tool's `exposure` at registration and a tool registered as hidden
+   * never enters the active set. So the answer is YES until a session says otherwise, and
+   * the session's first request then hides the face if the session has no record.
+   */
+  #bound = false;
+  /**
    * Owning registry per task, captured at spawn. A task's later transitions (notably the detached
    * pump's resolve-exit) route to the registry that persisted it, so a session rebind cannot
    * re-route an in-flight terminal write to a registry that never knew the task (S9). Reads
@@ -313,6 +323,10 @@ class StableTaskRegistry implements TaskRegistry {
 
   setCurrent(next: TaskRegistry): void {
     this.#current = next;
+    // ADR-0053: a bound session is the point where "does this session have a task record"
+    // becomes a question with an answer, so the face's visibility starts following the
+    // session from here on.
+    this.#bound = true;
   }
 
   async transition(command: TaskCommand, ctx: TransitionContext): Promise<TransitionResult> {
@@ -331,6 +345,15 @@ class StableTaskRegistry implements TaskRegistry {
 
   get(taskId: ULID): Promise<TaskRecord | null> {
     return this.#current.get(taskId);
+  }
+
+  /**
+   * ADR-0053: the task face follows the bound session's records; before a session is bound
+   * the answer is YES, because the tools have to register active (see {@link StableTaskRegistry}).
+   */
+  taskFaceVisible(): boolean {
+    if (!this.#bound) return true;
+    return this.#current.taskFaceVisible();
   }
 
   onTransition(observer: TaskTransitionObserver): () => void {
@@ -662,6 +685,11 @@ class DefaultBackgroundTaskRuntime implements BackgroundTaskRuntime {
     const sink = this.pipeline.current();
     for (const record of records) {
       if (record.spawnSource.callerId !== subscriberId) continue;
+      // ADR-0053: a task whose result was delivered INLINE has no completion to push — the
+      // caller is already holding the answer, so a push would cost the model a turn to be
+      // told what it knows. The record stays on the list (the task face reads it), it just
+      // never becomes a message.
+      if (record.spawnSource.awaited === true) continue;
       let events: TaskEvent[];
       try {
         events = await sink.drainPending(subscriberId, record.id);

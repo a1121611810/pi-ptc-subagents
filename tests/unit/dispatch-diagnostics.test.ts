@@ -30,6 +30,7 @@ import {
   type ParsedAgentEvent,
 } from "../../src/runtime/child-process-lifecycle.ts";
 import {
+  isDispatchHandle,
   DispatchSlotCounter,
   accumulateChildModel,
   decideCloseOutcome,
@@ -781,7 +782,7 @@ async function runBackground(
       foregroundContext(dir),
       harness.deps,
     );
-    if (!("taskId" in outcome)) {
+    if (!isDispatchHandle(outcome)) {
       throw new Error("the background fixture was refused: " + JSON.stringify(outcome));
     }
     await driveChild(harness.lifecycle, events, exitCode);
@@ -949,7 +950,7 @@ describe("a canceled close still records the observed model", () => {
         foregroundContext(dir),
         harness.deps,
       );
-      if (!("taskId" in outcome)) throw new Error("the background fixture was refused");
+      if (!isDispatchHandle(outcome)) throw new Error("the background fixture was refused");
       await waitFor(() => harness.lifecycle.spawned.length > 0);
       const child = harness.lifecycle.handleAt(0);
       harness.lifecycle.pushEvent(

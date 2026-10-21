@@ -1477,7 +1477,14 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       "The failure text is the reason",
     "docs/adr/0016-ptc-dispatch-binding.md:43 -> src/runtime/dispatcher.ts:447":
       "new DispatchSlotCounter(",
-    "docs/adr/0026-surface-default-is-detected.md:260 -> dispatch.ts:2480":
+    // 2026-10-21（ADR-0053：前台也建任务记录）：下面 7 条的目标行因本次实现整体下移，正文引用
+    // 与本表同步。目标行逐条按内容核对过——内容未变，只是行号变了：
+    //   dispatch.ts:2480 → 2521（`spawnOptions.sessionId = taskId;`）
+    //   dispatch.ts:2063 → 2104（`function assistantText(`）
+    //   dispatch.ts:2086 → 2127（`function accumulateUsage(`）
+    //   dispatch.ts:1905 → 1946（`export function childToolList(`）
+    //   ptc-task.ts:253/604/832 → 281/637/870（三处 `outputSchema:` 声明）
+    "docs/adr/0026-surface-default-is-detected.md:260 -> dispatch.ts:2521":
       "spawnOptions.sessionId = taskId;",
     // Confirmed line by line 2026-10-12 (re-checked after #187 moved it): line 505 is
     // `pi.registerTool(createChildReportTool(ptcDepth > 0));` -- the depth gate the ADR cites to
@@ -1498,21 +1505,21 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
       "## Fail-safe on external loadout changes",
     "docs/adr/0031-open-source-and-publish-authority.md:129 -> src/runtime/limits.ts:4":
       "The numbers are DSH's",
-    "docs/adr/0032-child-report.md:13 -> src/runtime/dispatch.ts:2063": "function assistantText(",
+    "docs/adr/0032-child-report.md:13 -> src/runtime/dispatch.ts:2104": "function assistantText(",
     "docs/adr/0032-child-report.md:22 -> src/tools/subagent.ts:231":
       "export const SUBAGENT_OUTPUT_SCHEMA",
-    "docs/adr/0032-child-report.md:35 -> src/runtime/dispatch.ts:2086": "function accumulateUsage(",
+    "docs/adr/0032-child-report.md:35 -> src/runtime/dispatch.ts:2127": "function accumulateUsage(",
     "docs/adr/0032-child-report.md:57 -> src/tools/subagent.ts:576":
       "structuredContent: structured,",
-    "docs/adr/0032-child-report.md:57 -> src/tools/ptc-task.ts:253":
+    "docs/adr/0032-child-report.md:57 -> src/tools/ptc-task.ts:281":
       "outputSchema: LIST_OUTPUT_SCHEMA,",
     // 2026-10-19（#219-#222 · retro）：抽取器现在展开逗号后的数字，这两行才第一次进入判定面。
     // 它们一直是对的，只是以前没有任何东西检查；在这里补上，从此漂移会红。
-    "docs/adr/0032-child-report.md:57 -> src/tools/ptc-task.ts:604":
+    "docs/adr/0032-child-report.md:57 -> src/tools/ptc-task.ts:637":
       "outputSchema: OUTPUT_OUTPUT_SCHEMA,",
-    "docs/adr/0032-child-report.md:57 -> src/tools/ptc-task.ts:832":
+    "docs/adr/0032-child-report.md:57 -> src/tools/ptc-task.ts:870":
       "outputSchema: STOP_OUTPUT_SCHEMA,",
-    "docs/adr/0032-child-report.md:132 -> src/runtime/dispatch.ts:1905":
+    "docs/adr/0032-child-report.md:132 -> src/runtime/dispatch.ts:1946":
       "export function childToolList(",
     // 2026-10-20（DeepSeek 搜索模块改形，ADR-0047 撤销 / ADR-0049 现行）：下面 11 条是该模块
     // 的 ADR 与 spec 带进来的引用，目标行逐条核对过内容——矩阵那一行讲的是 `exposure` 字段在
@@ -1561,6 +1568,9 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
   const IN_REPO_PIN_BASELINE: readonly string[] = [
     // 2026-10-21（ADR-0051 · 表面值改名）：15 篇记录在正文顶部各加了一行修订指针（`> Amended by ADR-0051 …`），这 15 条引用的**文档侧**行号整体 +2（0026 258→260、0029 五条 29→31 / 32→34 / 143→145 / 174→176 / 211→213、0030 94→96、0032 五条 11→13 / 20→22 / 33→35 / 55→57 / 130→132、0047 68→70 / 103→105、0049 11→13）。
     // **目标侧一个都没有动**：每一行的内容逐条打开核对过，与改前逐字相同 —— `ptc-mode.ts:1331` 仍是 `export function detectedSurfaceMode(`（本轮刻意让 `detectedSurfaceMode` 留在 1331 行，免得连目标侧也位移），`src/index.ts:1322` / `:1271` / `:783` / `:643` 与 `dispatch.ts` / `subagent.ts` / `ptc-task.ts` / `limits.ts` 的目标行也都未移动。PIN_TOKENS 的 value 一个未变。
+    // 2026-10-19 第十八次复核（ADR-0044 · P0 foreground 子进程错误 / P1 实际模型可观测 /
+    // P2 会话模型继承）。10 条 pin 位移，全部逐条打开目标行按**内容**核对后改正，PIN_TOKENS
+    // 的 value 一个未变；位移量在各锚点之间**不一致**，所以没有做算术平移：
     // 2026-10-19 第十八次复核（ADR-0044 · P0 foreground 子进程错误 / P1 实际模型可观测 /
     // P2 会话模型继承）。10 条 pin 位移，全部逐条打开目标行按**内容**核对后改正，PIN_TOKENS
     // 的 value 一个未变；位移量在各锚点之间**不一致**，所以没有做算术平移：
@@ -1641,7 +1651,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // 锚点之前，所以四条恰好等量。**等量不等于可以算**：算术平移只在本轮成立，下一轮锚点
     // 分布在两个函数的两侧时就不成立。四条都按内容逐条核对后改正。
     // 上面这组是**当时值**（读法见本数组的头部说明）。
-    "docs/adr/0026-surface-default-is-detected.md:260 -> dispatch.ts:2480",
+    "docs/adr/0026-surface-default-is-detected.md:260 -> dispatch.ts:2521",
     // 2026-10-10 第七次复核：四条全部因本轮删除 surfaceMode 而位移，逐条核对内容后改正。
     //  29  → 628→1160 = `export function detectedSurfaceMode(`
     //  32  → 962→856  = decision-4 的 `if (surface.surfaceMode === "subagents" && !pi.getActiveTools()…`
@@ -1750,14 +1760,14 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     //   569 → 584 = `outputSchema: OUTPUT_OUTPUT_SCHEMA,`
     //   766 → 803 = `outputSchema: STOP_OUTPUT_SCHEMA,`
     // 233 = `outputSchema: LIST_OUTPUT_SCHEMA,` 未动。ADR-0032 正文同一行的引用同步改为 233, 584, 803。
-    "docs/adr/0032-child-report.md:13 -> src/runtime/dispatch.ts:2063",
+    "docs/adr/0032-child-report.md:13 -> src/runtime/dispatch.ts:2104",
     "docs/adr/0032-child-report.md:22 -> src/tools/subagent.ts:231",
-    "docs/adr/0032-child-report.md:35 -> src/runtime/dispatch.ts:2086",
+    "docs/adr/0032-child-report.md:35 -> src/runtime/dispatch.ts:2127",
     "docs/adr/0032-child-report.md:57 -> src/tools/subagent.ts:576",
-    "docs/adr/0032-child-report.md:57 -> src/tools/ptc-task.ts:253",
-    "docs/adr/0032-child-report.md:57 -> src/tools/ptc-task.ts:604",
-    "docs/adr/0032-child-report.md:57 -> src/tools/ptc-task.ts:832",
-    "docs/adr/0032-child-report.md:132 -> src/runtime/dispatch.ts:1905",
+    "docs/adr/0032-child-report.md:57 -> src/tools/ptc-task.ts:281",
+    "docs/adr/0032-child-report.md:57 -> src/tools/ptc-task.ts:637",
+    "docs/adr/0032-child-report.md:57 -> src/tools/ptc-task.ts:870",
+    "docs/adr/0032-child-report.md:132 -> src/runtime/dispatch.ts:1946",
     // 新增 1 条（2026-10-12，ADR-0039）：目标行已逐条核对。
     // 2026-10-20（搜索模块改形）：目标行随 src/index.ts 的改动从 620 移到 598，逐条核对内容未变。
     "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:115 -> src/index.ts:643",

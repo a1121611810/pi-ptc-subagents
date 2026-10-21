@@ -55,6 +55,7 @@ ADRs for pi-ptc-subagents, per `docs/agents/domain.md` (single-context repo).
 | [0049](./0049-the-search-lives-in-the-child.md)            | The search lives in the dispatched child, and the child's own model calls it                                  | accepted              |
 | [0050](./0050-ptc-off-stops-new-dispatch.md)               | PTC off stops new children; the ones already running are unaffected, and the user is told so                  | accepted              |
 | [0051](./0051-the-surface-names-the-orchestrator.md)       | The surface names the orchestrator: `full_ptc` / `codemode_ptc`, renamed from `full` / `subagents`            | accepted              |
+| [0053](./0053-every-dispatch-is-a-task.md)                 | Every dispatch is a task: the foreground front registers a record, persists its output, and the face follows  | accepted              |
 | [0060](./0060-ptc-programs-run-in-strict-mode.md)          | PTC programs run in strict mode, matching upstream DSH                                                        | accepted              |
 
 Numbering gaps are deliberate: 0001/0006 were reserved while wayfinder map #7 was charting and dropped when G1 resolved; keeping their slots means every cross-reference in the map and its tickets stays valid.

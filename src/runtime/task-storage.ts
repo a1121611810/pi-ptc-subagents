@@ -73,6 +73,21 @@ export interface TaskSpawnSource {
   kind: "ptc-program" | "ptc-batch";
   /** Caller id (PTC run id for `ptc-program`; batch id for `ptc-batch`). */
   callerId: string;
+  /**
+   * ADR-0053: this task's result was delivered to its caller INLINE — the caller waited for
+   * it, so the outcome is already in the caller's hands.
+   *
+   * **Why the record needs to say so.** A task record is also what drives the completion
+   * push: the delivery layer drains the events of every owner (`spawnSource.callerId`) and
+   * turns a terminal event into a message to the model. A foreground dispatch does not need
+   * that push — the model is holding the answer — so a record with this marker is skipped by
+   * the delivery layer. Without the marker, every foreground dispatch would cost the model
+   * an extra turn saying "the task you already have the answer for has finished".
+   *
+   * ABSENT means the task was NOT waited for (the background front), so its completion IS
+   * pushed. The flag is one-way on purpose: a record that was waited for is never pushed.
+   */
+  awaited?: true;
 }
 
 /**

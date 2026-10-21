@@ -21,7 +21,12 @@ import {
   createBuiltinBindings,
   type BindingContext,
 } from "../../src/runtime/bindings.ts";
-import { DispatchSlotCounter, type DispatchDeps } from "../../src/runtime/dispatch.ts";
+import {
+  DispatchSlotCounter,
+  isDispatchHandle,
+  type DispatchDeps,
+  type DispatchResult,
+} from "../../src/runtime/dispatch.ts";
 import {
   MockChildProcessLifecycle,
   type ChildHandle,
@@ -135,7 +140,11 @@ describe("bindings.ts forwards DispatchContext + DispatchDeps (Gap 2 + Gap 4)", 
           dispatchDeps: deps,
         },
       );
-      if (result === null || typeof result !== "object" || !("taskId" in result)) {
+      if (
+        result === null ||
+        typeof result !== "object" ||
+        !isDispatchHandle(result as DispatchHandle | DispatchResult)
+      ) {
         throw new Error("expected a DispatchHandle from the background binding");
       }
       const handle = result as DispatchHandle;
@@ -324,7 +333,11 @@ describe("parentTaskId reaches the nested TaskRecord (reopen R-m12)", () => {
           dispatchDeps: { taskRegistry: registry, lifecycle, slots, clock: () => 1000 },
         },
       );
-      if (result === null || typeof result !== "object" || !("taskId" in result)) {
+      if (
+        result === null ||
+        typeof result !== "object" ||
+        !isDispatchHandle(result as DispatchHandle | DispatchResult)
+      ) {
         throw new Error("expected a DispatchHandle from the background binding");
       }
       const handle = result as DispatchHandle;
