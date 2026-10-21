@@ -40,6 +40,16 @@
  * constant, carried by this section and by the user's notice alike.
  */
 import type { SurfaceMode } from "./ptc-mode.ts";
+/**
+ * The search module's own sentence: the parent has no web tool of this package's own, and the
+ * child is where the web is.
+ *
+ * **It is the search module's constant, not a copy of it**, and that is the point: the same fact
+ * reaches the model through three surfaces — the two PTC tool descriptions, this section, and the
+ * mode briefing — and a copy here would be a fourth wording of a sentence that has to mean one
+ * thing. The module owns the claim, and it states it as what this package PROVIDES, not as what
+ * the model can reach by any means (a session that still has `bash` can always curl).
+ */
 import { PTC_CHILD_SEARCH_NOTE } from "../search/contract.ts";
 
 /**
@@ -49,20 +59,6 @@ import { PTC_CHILD_SEARCH_NOTE } from "../search/contract.ts";
  * inside the package's own namespace and collides with none of pi's sections.
  */
 export const DISPATCH_SECTION_NAME = "ptc";
-
-/**
- * The sentence both surfaces share: the parent has no web tool of this package's own, and the
- * child is where the web is.
- *
- * **It is the search module's own constant, not a copy of it** (`PTC_CHILD_SEARCH_NOTE`), and
- * that is the point: the same fact reaches the model through three surfaces — the two PTC tool
- * descriptions, this section, and the mode briefing — and a copy here would be a fourth wording
- * of a sentence that has to mean one thing.
- *
- * The wording is the search module's because the module owns the claim: it is stated as what
- * this package PROVIDES, not as what the model can reach by any means (a session that still has
- * `bash` can always curl).
- */
 
 /**
  * How to create a task, per surface.
