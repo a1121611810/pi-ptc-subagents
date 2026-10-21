@@ -118,7 +118,7 @@ export function resolveDepthFromEnv(source: NodeJS.ProcessEnv = process.env): nu
 /**
  * Read the parent background-task id pi-ptc was started with inside a child pi process.
  *
- * `dispatch({ background: true })` stamps `PI_PTC_TASK_ID` (the child's own task id) onto the
+ * `dispatch({ wait: false })` stamps `PI_PTC_TASK_ID` (the child's own task id) onto the
  * spawned subprocess's environment, so a nested background dispatch inside that child can record
  * `TaskRecord.parentTaskId` and the session registry can reconstruct the task tree. Only a
  * 26-char Crockford-base32 ULID is accepted; a missing or malformed value means "not a dispatched

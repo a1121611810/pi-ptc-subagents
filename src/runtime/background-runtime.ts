@@ -12,7 +12,7 @@
  *
  *   - the three `ptc_task_*` tools take a `TaskRegistry` / `OutputStorage` in their constructors;
  *   - the two PTC tools forward a `DispatchDeps` bag to `runPtcProgram` so a program's
- *     `pi_task_ptc({ background: true })` writes into the real session registry instead of the
+ *     `pi_task_ptc({ wait: false })` writes into the real session registry instead of the
  *     process-global in-memory fallback in `dispatch.ts`.
  *
  * A pi session, however, starts later (`session_start`) and can be re-bound (resume / fork). This
@@ -818,8 +818,13 @@ class DefaultBackgroundTaskRuntime implements BackgroundTaskRuntime {
     //
     // ADR-0056: the queue is drained FIRST. A release hands the freed slot to the oldest
     // waiter, so a waiter that is being reaped must not still be in the queue when a slot
-    // goes back — otherwise the shutdown would start a child it is about to abandon. The
-    // plain `release` (not the promoting one) is deliberate here: a shutdown starts nothing.
+    // goes back — otherwise the shutdown would start a child it is about to abandon.
+    //
+    // `DispatchSlotCounter.release` IS the promoting release: it hands the freed slot to the
+    // oldest waiter and returns it. The shutdown calls it directly and deliberately does NOT
+    // start the waiter it promotes — a shutdown starts nothing — so the two are separate
+    // steps here on purpose, and the queue is drained first so the waiters this runtime
+    // owns are not the ones a release could hand the slot to.
     for (const id of reapedFromQueue) this.slots.cancelQueued(id);
     for (const record of lost) {
       if (reapedFromQueue.has(record.id)) continue;

@@ -16,9 +16,9 @@
  * - route `tools.*` calls to the binding table — concurrently, with DSH's
  *   `maxPendingCalls` admission control, the `maxParallelSubCalls` builtin
  *   forwarding cap (ADR-0004 consequence: the overflow FIFO-queues for a
- *   slot), and the per-run `dispatchConcurrency` hard cap on in-flight
- *   `pi_task_ptc` calls (ADR-0016 §2: the overflow resolves immediately as
- *   rejected, it is never queued). The two caps have independent counters:
+ *   slot), and the per-run `dispatchConcurrency` cap on in-flight
+ *   `pi_task_ptc` calls (ADR-0056: the overflow QUEUES for a slot, it is
+ *   never refused). The two caps have independent counters:
  *   neither throttles the other.
  * - collect logs / narration / phases and enforce the joint output budget,
  * - enforce the deadline, honour caller cancellation, and settle the run: hand the worker
@@ -90,7 +90,7 @@ export interface RunPtcProgramOptions {
   depth?: number;
   /**
    * ADR-0022 §3/reopen R-m12: this process's own background task id, when the run is inside a
-   * child spawned by `pi_task_ptc({ background: true })`. The entrypoint reads it from
+   * child spawned by `pi_task_ptc({ wait: false })`. The entrypoint reads it from
    * `PI_PTC_TASK_ID` and threads it to the binding context so a nested spawn records
    * `TaskRecord.parentTaskId`. Absent for a top-level session.
    */
@@ -99,7 +99,7 @@ export interface RunPtcProgramOptions {
   runId?: string;
   /**
    * ADR-0022 R1: the session dir background children persist into, when the host has one.
-   * Threaded to the binding context so `pi_task_ptc({ background: true })` can stamp the R1
+   * Threaded to the binding context so `pi_task_ptc({ wait: false })` can stamp the R1
    * session flags; absent means the background spawn keeps the foreground no-session shape.
    */
   sessionDir?: string;
@@ -431,10 +431,10 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
     let pendingCalls = 0;
     let outputBytes = 0;
     /**
-     * Concurrently in-flight `pi_task_ptc` calls, counted so the per-run hard cap
-     * (ADR-0016 §2) can reject the overflow immediately. There is deliberately no
-     * waiter queue behind this counter: the N+1th concurrent call resolves as
-     * rejected instead of waiting for a slot. Independent of `activeBuiltinCalls`.
+     * Concurrently in-flight `pi_task_ptc` calls, counted so the per-run cap
+     * (ADR-0056) can hand the overflow a slot when one frees up. There IS a
+     * waiter queue behind this counter: the N+1th concurrent call waits for a
+     * slot instead of being refused. Independent of `activeBuiltinCalls`.
      *
      * ADR-0022 §9, as amended at review round 4: this is the FALLBACK counter, not the owner.
      * Since the acquire moved into `dispatch()` there is one session counter (built at
