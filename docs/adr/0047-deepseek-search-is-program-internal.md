@@ -7,6 +7,8 @@ status: **withdrawn 2026-10-20** by
 改成**只活在被派出去的子代理里**，在子代理里由**子代理自己的模型**直接调用（`exposure: "direct"`），
 父会话里**完全不存在**（不注册，也不解析凭据）。
 
+> **修订：[ADR-0051](./0051-the-surface-names-the-orchestrator.md)（2026-10-21）：两个表面值改名——`full` → `full_ptc`、`subagents` → `codemode_ptc`——且「表面」现在指**哪个编排器对模型负责**。本记录的决定不变；读到它的 `full` / `subagents` 时，读作那两个新名字。**
+
 本记录的前提大体还在——「检索源固定、不做可插拔」、「名字里带 `ds`」、「错误文案一份共享常量」、
 「结果原样透传」这四条**全部继续成立**，见 ADR-0049。**不再成立**的是形状本身：codemode 面与 PTC
 binding 面这两个载体，以及「模型看不见」这条承诺——`tool_search` 本来就能把 `codemode` 档工具翻到
@@ -17,6 +19,8 @@ binding 面这两个载体，以及「模型看不见」这条承诺——`tool_
 status (original): accepted (2026-10-20). Ticket #227 (map #226). 配套记录：[ADR-0048](./0048-deepseek-search-gate.md)（门禁契约）。
 **Amended 2026-10-20（实测后）**：桥接已由真机观测确认；同时「不面向模型」由「永不」修正为「**默认**」——
 `tool_search` 能把 `codemode` 档工具激活进模型声明。见文末 §修订。
+
+> **Amended by [ADR-0052](./0052-the-two-doors-share-one-prefix.md) (2026-10-21): the two task doors are renamed — `pi.dispatch` → `pi_task_ptc` (the PTC door, a binding inside a program) and `ptc_subagent` → `pi_task_codemode` (the codemode door, reachable from a `codemode` script) — with no alias and no compatibility shim. This record's decisions stand unchanged; read its `pi.dispatch` / `ptc_subagent` as those names.**
 
 ## Context
 

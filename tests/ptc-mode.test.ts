@@ -82,12 +82,12 @@ const ALL_BINDABLE = [...BUILTIN_BINDING_NAMES, ...PTC_TOOLS];
  * The two answers `detectSurfaceMode` has to give for a fixed pi, keyed to the presence it is
  * reasoning about (ADR-0026 decision 5).
  *
- * Stated as a pair rather than as one expectation so that neither a hardcoded `full` nor a
- * hardcoded `subagents` can satisfy the tests below.
+ * Stated as a pair rather than as one expectation so that neither a hardcoded `full_ptc` nor a
+ * hardcoded `codemode_ptc` can satisfy the tests below.
  */
 const DETECTED_SURFACE_CASES = [
-  [PRESENT_CODEMODE, "subagents"],
-  [{ present: false, how: "not-found" } as const, "full"],
+  [PRESENT_CODEMODE, "codemode_ptc"],
+  [{ present: false, how: "not-found" } as const, "full_ptc"],
 ] as const;
 
 /**
@@ -120,8 +120,8 @@ async function withAgentDir(fn: (dir: string) => Promise<void>): Promise<void> {
 test("detectSurfaceMode answers from the three axes, and reports every probe it used", async () => {
   // The whole contract of the function in one expectation. It is a pure function of its arguments
   // and nothing else — no `ptc.json` is read, and there is no `source` / `detected` / `error`
-  // field left to carry one. Both directions are stated so that neither a hardcoded `full` nor a
-  // hardcoded `subagents` can satisfy it.
+  // field left to carry one. Both directions are stated so that neither a hardcoded `full_ptc` nor a
+  // hardcoded `codemode_ptc` can satisfy it.
   await withAgentDir(async (dir) => {
     expect(
       detectSurfaceMode(
@@ -132,7 +132,7 @@ test("detectSurfaceMode answers from the three axes, and reports every probe it 
         ACTIVE_CODEMODE,
       ),
     ).toEqual({
-      surfaceMode: "full",
+      surfaceMode: "full_ptc",
       codemode: { present: false, how: "not-found" },
       codemodeSwitch: ABSENT_SWITCH,
       codemodeActivation: ACTIVE_CODEMODE,
@@ -146,7 +146,7 @@ test("detectSurfaceMode answers from the three axes, and reports every probe it 
         ACTIVE_CODEMODE,
       ),
     ).toEqual({
-      surfaceMode: "subagents",
+      surfaceMode: "codemode_ptc",
       codemode: PRESENT_CODEMODE,
       codemodeSwitch: ABSENT_SWITCH,
       codemodeActivation: ACTIVE_CODEMODE,
@@ -157,9 +157,9 @@ test("detectSurfaceMode answers from the three axes, and reports every probe it 
 test("a present, loadable codemode that the model cannot call resolves to full (ADR-0029)", async () => {
   // The cell the previous table did not have, and the DEFAULT on a real 1.0.0 install: pi ships
   // codemode, loads it, registers it with `defaultActive: false`, and the model still cannot call
-  // it. Delegating here is what produced a session with `ptc_subagent` and no orchestrator.
+  // it. Delegating here is what produced a session with the codemode door and no orchestrator.
   //
-  // The activation argument is the ONLY difference from the `subagents` expectation above, so
+  // The activation argument is the ONLY difference from the `codemode_ptc` expectation above, so
   // dropping the third check from `detectedSurfaceMode` turns both of these red.
   await withAgentDir(async (dir) => {
     const detected = detectSurfaceMode(
@@ -169,7 +169,7 @@ test("a present, loadable codemode that the model cannot call resolves to full (
       ABSENT_SWITCH,
       INACTIVE_CODEMODE,
     );
-    expect(detected.surfaceMode).toBe("full");
+    expect(detected.surfaceMode).toBe("full_ptc");
     expect(detected.codemodeActivation).toEqual(INACTIVE_CODEMODE);
   });
 });
@@ -195,7 +195,7 @@ test("activation is read from the loadout pi reports, not from settings files", 
       dir,
     );
     expect(absent.surfaceMode, "a loadout without codemode leaves the session to orchestrate").toBe(
-      "full",
+      "full_ptc",
     );
     expect(absent.codemodeActivation, "and the answer says where it was read from").toEqual({
       activation: "inactive",
@@ -211,7 +211,7 @@ test("activation is read from the loadout pi reports, not from settings files", 
       dir,
     );
     expect(present.surfaceMode, "naming codemode in the loadout is the whole difference").toBe(
-      "subagents",
+      "codemode_ptc",
     );
     expect(present.codemodeActivation).toEqual({ activation: "active", source: "loadout" });
   });
@@ -220,7 +220,7 @@ test("activation is read from the loadout pi reports, not from settings files", 
 test("SURFACE_MODES is exactly the two surfaces, and `off` is not one of them", () => {
   // The literal, not a length. `"off"` shipped in v1.6.0 and a value that came back would put a
   // surface in the type that nothing can produce, so the constant is pinned against the name.
-  expect([...SURFACE_MODES]).toEqual(["subagents", "full"]);
+  expect([...SURFACE_MODES]).toEqual(["full_ptc", "codemode_ptc"]);
 });
 
 test("a ptc.json holding a stale surfaceMode does not reach the surface, whatever the axes say", async () => {
@@ -229,8 +229,8 @@ test("a ptc.json holding a stale surfaceMode does not reach the surface, whateve
   // thing the package does with the key is report it (`readLegacySurfaceKey`, below) — so the
   // claim needing a test is the refusal.
   //
-  // Both directions are stated: a factory that hardcoded `full` passes the first pair and fails
-  // the second, and one that hardcoded `subagents` does the reverse.
+  // Both directions are stated: a factory that hardcoded `full_ptc` passes the first pair and fails
+  // the second, and one that hardcoded `codemode_ptc` does the reverse.
   for (const stale of [
     { surfaceMode: "off" },
     { surfaceMode: "subagents" },
@@ -501,9 +501,10 @@ test("the injected briefing lists the bindings of this session, not a hardcoded 
   for (const name of BUILTIN_BINDING_NAMES) expect(full).toContain(`tools.${name}(args)`);
   expect(full).toContain("[PTC MODE ACTIVE]");
   expect(full).toContain("/ptc off");
-  // Pitfall #1: the briefing must surface the always-bound parallel binding in its
-  // string-indexed form, plus the per-run manifest global (pitfall #5).
-  expect(full).toContain('tools["pi.dispatch"](args)');
+  // Pitfall #1: the briefing must surface the always-bound PTC door, plus the per-run manifest
+  // global (pitfall #5). ADR-0052: the door is dot-accessible, so the briefing names the dot
+  // form — there is no string-indexed form to show any more.
+  expect(full).toContain("tools.pi_task_ptc(args)");
   expect(full).toContain("ptcBindings");
 
   const restricted = buildModeInstruction(["read"], "builtins-only");
@@ -860,7 +861,9 @@ describe("probeCodemodePresence", () => {
       // ADR-0027: the switch is the second question now, and ADR-0029 added a third. An absent
       // switch means pi's default, which is to load codemode; an absent activation means it is
       // not callable. Passing both explicitly keeps the test honest about which input decided.
-      expect(detectedSurfaceMode(presence, "absent", "active"), JSON.stringify(argv)).toBe("full");
+      expect(detectedSurfaceMode(presence, "absent", "active"), JSON.stringify(argv)).toBe(
+        "full_ptc",
+      );
     }
   });
 });

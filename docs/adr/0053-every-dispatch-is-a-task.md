@@ -2,6 +2,8 @@
 
 Status: accepted (2026-10-21). 修订：[ADR-0022](./0022-background-dispatch.md) §"What we add" 3 与 6、[ADR-0023](./0023-background-task-ownership.md) 的记录归属范围、[ADR-0050](./0050-ptc-off-stops-new-dispatch.md) 决定 3。
 
+> **Amended by [ADR-0052](./0052-the-two-doors-share-one-prefix.md) (2026-10-21): the two task doors are renamed — `pi.dispatch` → `pi_task_ptc` (the PTC door, a binding inside a program) and `ptc_subagent` → `pi_task_codemode` (the codemode door, reachable from a `codemode` script) — with no alias and no compatibility shim. This record's decisions stand unchanged; read its `pi.dispatch` / `ptc_subagent` as those names.**
+
 ## Context
 
 到 2026-10-21 为止，本包里有**两件**叫「派发」的事，而它们只在后台那件上留下痕迹：

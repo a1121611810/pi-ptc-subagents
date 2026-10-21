@@ -557,8 +557,8 @@ test.skipIf(!AVAILABLE)(
     //
     // So the floor asserts the COMBINATION that is real there, and that combination is exactly
     // what keeps this package safe on such a pi: pi never loads codemode, and
-    // `detectedSurfaceMode` returns `full` on row one because nothing can be present. Both halves
-    // are asserted, neither accepts two answers, and a mutant that made `subagents` reachable on a
+    // `detectedSurfaceMode` returns `full_ptc` on row one because nothing can be present. Both halves
+    // are asserted, neither accepts two answers, and a mutant that made `codemode_ptc` reachable on a
     // floor pi fails here.
     const divergences: string[] = [];
     const hasBuiltins = await piHasBuiltinExtensionConcept();

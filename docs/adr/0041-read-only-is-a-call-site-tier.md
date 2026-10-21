@@ -3,6 +3,10 @@
 status: accepted (2026-10-15). Spec #198. **§"The strict set is derived, not a constant" amended
 2026-10-20 by ADR-0049**: a strict child keeps the web-search tool when the search module is on.
 
+> **Amended by [ADR-0051](./0051-the-surface-names-the-orchestrator.md) (2026-10-21): the two surface values are renamed — `full` → `full_ptc`, `subagents` → `codemode_ptc` — and the surface now means _which orchestrator is responsible to the model_. This record's decisions stand unchanged; read its `full` / `subagents` as those names.**
+
+> **Amended by [ADR-0052](./0052-the-two-doors-share-one-prefix.md) (2026-10-21): the two task doors are renamed — `pi.dispatch` → `pi_task_ptc` (the PTC door, a binding inside a program) and `ptc_subagent` → `pi_task_codemode` (the codemode door, reachable from a `codemode` script) — with no alias and no compatibility shim. This record's decisions stand unchanged; read its `pi.dispatch` / `ptc_subagent` as those names.**
+
 ## Context
 
 A caller who wants a child that cannot touch the workspace had exactly one route: write an agent

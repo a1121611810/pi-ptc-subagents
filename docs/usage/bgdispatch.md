@@ -1,6 +1,6 @@
 # Background dispatch
 
-`pi.dispatch` is a PTC **binding**: a program calls it, the extension spawns a fresh `pi`
+`pi_task_ptc` is a PTC **binding**: a program calls it, the extension spawns a fresh `pi`
 subprocess for a named agent, and the program gets a structured result. The foreground form
 ([ADR-0016](../adr/0016-ptc-dispatch-binding.md)) resolves only when the child exits — the child
 has no life beyond that `await`. Background dispatch
@@ -23,7 +23,7 @@ something else, a batch of children fanned out from one program.
 
 ## Foreground vs. background
 
-|                    | foreground `pi.dispatch`                | `pi.dispatch({ background: true })`                                                                                                            |
+|                    | foreground `pi_task_ptc`                | `pi_task_ptc({ background: true })`                                                                                                            |
 | ------------------ | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | return             | `DispatchResult`, after the child exits | `DispatchHandle`, immediately after spawn                                                                                                      |
 | blocks the program | yes, until the child exits              | no                                                                                                                                             |
@@ -43,7 +43,7 @@ absent on a refusal, because a refused call left no record.
 
 ## Spawning
 
-A binding is reached as `tools["<name>"]` inside a program; this binding's name is `pi.dispatch`.
+A binding is reached as `tools.<name>` inside a program; this binding's name is `pi_task_ptc`.
 
 ### Prerequisites
 
@@ -82,7 +82,7 @@ roster listing is the same; only the signal differs.
 writing as a trigger condition rather than a title. `tools:` restricts the child to that list; a
 definition that omits it leaves pi's full toolset in place, exactly as the generalist has it.
 
-Two places list what is registered. The `ptc_subagent` tool description carries a **roster** —
+Two places list what is registered. The `pi_task_codemode` tool description carries a **roster** —
 every registered definition with its description and the scope that reaches it — so a model can see
 what is available before trying anything. A name that resolves to nothing still produces a refused
 `DispatchResult` whose `errorMessage` names what _is_ registered under the effective scope, both
@@ -91,7 +91,7 @@ empty registry is not an error: it means everything dispatches as a generalist.
 
 ```ts
 // ptc_run_code
-const handle = await tools["pi.dispatch"]({
+const handle = await tools.pi_task_ptc({
   task: "survey the peer implementations", // required: the child's task text
   background: true, // switch to the long-lived path
   label: "peer survey", // optional; defaults to task.slice(0, 64)
@@ -156,7 +156,7 @@ that does not expose one, falls through to pi's configured default exactly as be
 That is an orchestration fact, not only an implementation one. In the 2026-10-19 field report the
 parent had switched provider, and the child it dispatched afterwards resolved to pi's default
 provider and died on a **429** before writing a byte. The failure notification, `ptc_task_output`
-and a rejected `ptc_subagent` call now carry the cause (see
+and a rejected `pi_task_codemode` call now carry the cause (see
 [Notification delivery](#notification-delivery) and [The child report](#the-child-report)), and the
 model the child actually ran is reported on the result and the record — so the class of mismatch is
 visible even when the call site did not pin it.
@@ -165,7 +165,7 @@ visible even when the call site did not pin it.
 assistant turns (last turn wins) and states it on every surface that carries the child's facts:
 `observedProvider` / `observedModel` on a foreground `DispatchResult`, the same optional pair on the background
 `TaskRecord`, as a `model: provider/id` line on this page's `ptc_task_output` text and on a
-successful `ptc_subagent` result, and as a `model=` fact in a rejected `ptc_subagent` call's
+successful `pi_task_codemode` result, and as a `model=` fact in a rejected `pi_task_codemode` call's
 diagnostic. Either half may be absent when the transcript named only the other; both absent means
 no observed assistant turn named the pair — no turn, a supported pi that does not report it, or an
 old record — never "unknown model".
@@ -176,7 +176,7 @@ The concurrency cap is **not** one of them any more: over the cap a call is queu
 The binding never throws, so branch on the shape:
 
 ```ts
-const result = await tools["pi.dispatch"]({
+const result = await tools.pi_task_ptc({
   agent: "researcher",
   task: "survey the peer implementations",
   background: true,
@@ -518,13 +518,13 @@ Two caps apply to dispatch; both are `PtcConfig` fields, and the first is no lon
   the queue is FIFO, unbounded and has no timeout, and the call runs when it reaches the head
   ([ADR-0056](../adr/0056-admission-queues-instead-of-rejecting.md)). A background task
   **counts against the cap for its whole lifetime**, from spawn to its terminal transition, not
-  just until `pi.dispatch` returns.
+  just until `pi_task_ptc` returns.
 
   Three things follow:
 
   - **Foreground and background draw on the same 8.** A session with eight long background children
     running has no foreground dispatch headroom left _right now_, so a program issuing
-    `Promise.all([...pi.dispatch])` in that state gets every call **queued** rather than refused —
+    `Promise.all([...pi_task_ptc])` in that state gets every call **queued** rather than refused —
     they run as the background children finish. The queue is what makes this usable at all: the
     caller was going to wait for its children anyway.
   - **Two concurrent programs share it.** They also share the queue, so a call from one program
@@ -539,7 +539,7 @@ Two caps apply to dispatch; both are `PtcConfig` fields, and the first is no lon
   a background-only knob: it is the session's whole dispatch budget. The `dispatchConcurrency` a
   caller passes to `runPtcProgram({ config })` sizes the dispatcher's own per-run counter, and that
   counter is only reached when no session counter is supplied; in a pi session one always is, so the
-  per-run one is not what enforces the cap you are looking at. `ptc_subagent` spends this same
+  per-run one is not what enforces the cap you are looking at. `pi_task_codemode` spends this same
   counter, so two of those calls contend with a program's dispatches for the same slots.
 
 - **`maxDispatchDepth` — default 3.** Each dispatch computes `childDepth = parentDepth + 1` and is
@@ -646,9 +646,9 @@ Deferred deliberately; the map items and reasons are in ADR-0022 §8/§10.
 - **Handoff** (`ptc_task_handoff`) — redirect a task mid-flight by spawning a successor.
 - **Reverse query** (`ptc_parent_query` / `ptc_query_response`) — a child asking its parent a question.
 - **Per-task timeout** — no individual deadline on a task beyond the run's own limits.
-- **`outputSchema`** — `pi.dispatch` itself declares none: the binding resolves to `{ text, status, ... }`
+- **`outputSchema`** — `pi_task_ptc` itself declares none: the binding resolves to `{ text, status, ... }`
   and has no structured form (see the exception in the binding contract). The `ptc_task_*` tools and
-  `ptc_subagent` DO declare one, for a different consumer — see
+  `pi_task_codemode` DO declare one, for a different consumer — see
   [Structured results for codemode](./structured-results.md).
 - **Foreground → background promotion** — spawn-or-reject only; a running foreground call cannot be
   moved to the background.
@@ -660,7 +660,7 @@ Deferred deliberately; the map items and reasons are in ADR-0022 §8/§10.
 - [ADR-0022 — background dispatch](../adr/0022-background-dispatch.md) — the full design and decisions.
 - [ADR-0023 — background task ownership](../adr/0023-background-task-ownership.md) — owner-tagged
   records and owner-scoped reaping (why sibling processes no longer reap your tasks).
-- [ADR-0016 — the `pi.dispatch` binding](../adr/0016-ptc-dispatch-binding.md) — the foreground binding this extends.
+- [ADR-0016 — the `pi_task_ptc` binding](../adr/0016-ptc-dispatch-binding.md) — the foreground binding this extends.
 - [ADR-0041 — the read-only dispatch tier](../adr/0041-read-only-is-a-call-site-tier.md) — why `readOnly` is a narrowing and not a boundary.
 - [ADR-0015 — the pi truncation contract](../adr/0015-pi-truncation-contract.md) — the 50 KB / 2000-line rule.
 - [`GLOSSARY.md`](../../GLOSSARY.md) — canonical terms (background dispatch, TaskRecord, TaskStatus, TaskRegistry, Subscription, DispatchHandle, `ptc_task_*`, `<bg-task-notification>`).

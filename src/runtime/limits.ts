@@ -62,7 +62,7 @@ export interface PtcConfig {
    * Cap on how many dispatch children run AT ONCE in ONE pi session, not per
    * run. Enforced inside `dispatch()` by a single
    * `DispatchSlotCounter`, so every front spends it: concurrent programs,
-   * the `ptc_subagent` tool, and background children (which hold their
+   * the `pi_task_codemode` tool, and background children (which hold their
    * slot for the task's whole lifetime).
    *
    * **ADR-0056: over the cap a request is QUEUED, never rejected.** The

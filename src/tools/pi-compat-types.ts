@@ -31,7 +31,7 @@
  * rather than a loosening.** A pi that does not read `outputSchema` cannot turn a result into a
  * codemode script, and 0.86.0 ships no `codemode` at all, so nothing can call an
  * `exposure: "codemode"`-reach tool — the tools there fall back to being declared to the model,
- * which is the behaviour `full` mode wants anyway. That fallback is the floor's own behaviour,
+ * which is the behaviour `full_ptc` mode wants anyway. That fallback is the floor's own behaviour,
  * not a branch this package takes: the field is simply unread, and the two callers below still
  * register and run.
  *

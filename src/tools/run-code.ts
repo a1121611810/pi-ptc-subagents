@@ -6,8 +6,9 @@
  * ADR-0040, whose §What this costs names this exact surface; the registered `description` states
  * that rule and points at the `ptcBindings` global, which is the per-run truth, not the description
  * itself), plus
- * the parallel binding `pi.dispatch` under its literal dot name (`tools["pi.dispatch"](args)`,
- * ADR-0016 — the shipped surface always binds it), and the program's return value plus
+ * the PTC door `pi_task_ptc` (`tools.pi_task_ptc(args)`, ADR-0016 — the shipped surface always
+ * binds it; ADR-0052 renamed it so both planes reach it with a dot), and the program's return
+ * value plus
  * `console.log` output are what come back. There are no helpers
  * on this surface: `log` / `phase` / `parallel` / `pipeline` belong to `ptc_workflow` (G1 #13 →
  * decision B; a call to a helper that does not exist is a plain `ReferenceError` through the
@@ -56,13 +57,13 @@ const DESCRIPTION_BASE = [
   "explicitly opted in — this surface is narrower than the session's tool list on purpose;",
   "independent calls may overlap under `Promise.all`.",
   "",
-  "The parallel binding `pi.dispatch` is always available, registered under its literal dot name —",
-  'inside the program, call it with string indexing, e.g. `await tools["pi.dispatch"]({ task: "..." })`;',
+  "The PTC door `pi_task_ptc` is always available — inside the program, call it with a dot,",
+  'e.g. `await tools.pi_task_ptc({ task: "..." })`;',
   "**the `agent` name is optional** — omit it and the child is a fresh generalist pi with pi's own",
   'prompt and toolset; add `agent: "reviewer"` only to narrow it to a registered definition,',
-  "because a name with no definition behind it is refused. `tools.pi.dispatch` does not exist. It",
+  "because a name with no definition behind it is refused. It",
   "fans work out to child pi agents, and independent",
-  "foreground dispatches compose under `Promise.all` exactly like the built-in calls. The run's",
+  "foreground tasks compose under `Promise.all` exactly like the built-in calls. The run's",
   "actual bound names (this run, not a static list) are on the `ptcBindings` global, so the program",
   "never has to guess what is bound.",
   "",
@@ -112,7 +113,7 @@ const PARAMETERS: RunCodeParameters = Type.Object({
         `Elapsed deadline in milliseconds for the whole run, including tool calls. ` +
         `Omit it (or pass 0) for the default of ${DEFAULT_CONFIG.timeoutMs / 1000} s; ` +
         `anything above ${DEFAULT_CONFIG.maxTimeoutMs / 1000} s is capped. ` +
-        `The deadline bounds the whole run: if it expires, in-flight foreground dispatches ` +
+        `The deadline bounds the whole run: if it expires, in-flight foreground tasks ` +
         `spawned by the program are terminated with it.`,
     }),
   ),
@@ -227,7 +228,7 @@ export function createPtcRunCodeTool(
           // entrypoint from PI_PTC_TASK_ID; stamps a nested spawn's TaskRecord.parentTaskId.
           ...(options.parentTaskId === undefined ? {} : { parentTaskId: options.parentTaskId }),
           // ADR-0044: the session tier of the dispatch model precedence, threaded to the
-          // `pi.dispatch` binding through the dispatcher's binding context.
+          // `pi_task_ptc` binding through the dispatcher's binding context.
           ...(sessionModel === undefined ? {} : { sessionModel }),
           ...(params.timeoutMs === undefined ? {} : { timeoutMs: params.timeoutMs }),
           ...(signal === undefined ? {} : { signal }),

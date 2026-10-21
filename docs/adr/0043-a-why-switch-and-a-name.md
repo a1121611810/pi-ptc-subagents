@@ -4,6 +4,8 @@ status: accepted (2026-10-19)
 
 # `goal` was the wrong name, and the switch that hides it fails on
 
+> **Amended by [ADR-0052](./0052-the-two-doors-share-one-prefix.md) (2026-10-21): the two task doors are renamed — `pi.dispatch` → `pi_task_ptc` (the PTC door, a binding inside a program) and `ptc_subagent` → `pi_task_codemode` (the codemode door, reachable from a `codemode` script) — with no alias and no compatibility shim. This record's decisions stand unchanged; read its `pi.dispatch` / `ptc_subagent` as those names.**
+
 ## Context
 
 Two things are corrected here, and both are corrections rather than extensions: the name ADR-0042

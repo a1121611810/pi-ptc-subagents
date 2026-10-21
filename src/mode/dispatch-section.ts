@@ -1,17 +1,18 @@
 /**
- * The dispatch section: how to reach a child agent, written where the model reads it.
+ * The task section: how to create a task, written where the model reads it.
  *
  * ## Why a section and not a tool description
  *
- * Everything this package tells the model about dispatching used to live in the tool
- * descriptions — `ptc_run_code`'s, `ptc_workflow`'s, `ptc_subagent`'s. That works only while the
- * tool carrying the text is itself offered to the model, and on the `subagents` surface it is not:
- * `ptc_run_code` and `ptc_workflow` are registered at `codemode` reach there, so pi does not declare
- * them to the model, and pi's prompt builder collects a tool's guidelines from the DECLARED tools
- * only. Measured 2026-10-20 on that surface: the model's `rules` section carried the guidance for
- * `ptc_subagent` and the three task tools, and carried NOTHING for the pair — so a parent that
- * needed a child had no way to learn the calling convention, wrote `await tools["pi.dispatch"]`
- * into a `codemode` script, and got `TypeError: tools.pi.dispatch does not exist`.
+ * Everything this package tells the model about creating a task used to live in the tool
+ * descriptions — `ptc_run_code`'s, `ptc_workflow`'s, and the codemode door's. That works only
+ * while the tool carrying the text is itself offered to the model, and on the `codemode_ptc`
+ * surface it is not: `ptc_run_code` and `ptc_workflow` are registered at `codemode` reach there,
+ * so pi does not declare them to the model, and pi's prompt builder collects a tool's guidelines
+ * from the DECLARED tools only. Measured 2026-10-20 on that surface: the model's `rules` section
+ * carried the guidance for the codemode door and the three task tools, and carried NOTHING for
+ * the pair — so a parent that needed a child had no way to learn the calling convention, wrote
+ * `await tools["pi.dispatch"]` into a `codemode` script, and got
+ * `TypeError: tools.pi.dispatch does not exist`.
  *
  * A section does not have that dependency. pi merges every custom section into the system prompt
  * unconditionally (`dist/core/system-prompt.js`: the custom sections are copied over the built-in
@@ -22,10 +23,11 @@
  *
  * One fact per surface, phrased as the CALL the model makes, not as a description of a tool:
  *
- * - `full` — the model writes a program, and the parallel binding lives inside that program.
- * - `subagents` — the model calls the top-level face, and the parallel binding is NOT in a
- *   `codemode` script's tool table. That last sentence is the whole point of this section: it is
- *   the one thing the model gets wrong without it, and the error costs three wasted tool calls.
+ * - `full_ptc` — the model writes a program, and the PTC door lives inside that program.
+ * - `codemode_ptc` — the model calls the codemode door from its script, and the PTC door is NOT
+ *   in a `codemode` script's tool table. That last sentence is the whole point of this section:
+ *   it is the one thing the model gets wrong without it, and the error costs three wasted tool
+ *   calls.
  *
  * The search sentence is shared by both surfaces, so it is one constant (the same rule the binding
  * contract follows for the two surfaces' copy of one sentence).
@@ -50,23 +52,29 @@ export const DISPATCH_SECTION_NAME = "ptc";
  * can always curl, and a sentence claiming the model has no way to the web would be false there.
  */
 export const PTC_CHILD_SEARCH_SECTION_LINE: string =
-  "This package gives you no web tool of your own: to look something up on the web, dispatch a child " +
-  "and let it search — the child has the `web_ds_search` tool.";
+  "This package gives you no web tool of your own: to look something up on the web, create a task " +
+  "and let the child search — the child has the `web_ds_search` tool.";
 
 /**
- * How to dispatch a child, per surface.
+ * How to create a task, per surface.
  *
- * `full` names the program form because that is the only form the model has: the two PTC tools are
- * offered to it directly. `subagents` names the top-level face, and says the one thing that is
- * false everywhere else — a `codemode` script's tool table has no `pi.dispatch` in it.
+ * `full_ptc` names the program form because that is the only form the model has: the two PTC
+ * tools are offered to it directly. `codemode_ptc` names the codemode door, and says the one
+ * thing that is false everywhere else — a `codemode` script's tool table has no `pi_task_ptc`
+ * in it.
+ *
+ * ADR-0052: the model-facing word is TASK, never "dispatch" — the door creates a task, and
+ * dispatching is what the task side does with it afterwards. Both names are plain JavaScript
+ * identifiers, so both planes call them with a dot.
  */
 const DISPATCH_LINES: Record<SurfaceMode, string> = {
-  full:
-    "To dispatch a child, write a program and run it with `ptc_run_code`; inside that program the " +
-    'parallel binding is `await tools["pi.dispatch"]({ task })`.',
-  subagents:
-    "To dispatch a child, call the `ptc_subagent` tool. A `codemode` script's tool table does not " +
-    "contain `pi.dispatch` — that name is not a tool there, and calling it from a script fails.",
+  full_ptc:
+    "To create a task, write a program and run it with `ptc_run_code`; inside that program the " +
+    "binding is `await tools.pi_task_ptc({ task })`.",
+  codemode_ptc:
+    "To create a task, call `tools.pi_task_codemode` from your `codemode` script. A `codemode` " +
+    "script's tool table does not contain `pi_task_ptc` — that name is not a tool there, and " +
+    "calling it from a script fails.",
 };
 
 /**
@@ -77,7 +85,7 @@ const DISPATCH_LINES: Record<SurfaceMode, string> = {
  * was told up front does not try.
  */
 export const PTC_DISPATCH_DISABLED_SECTION_LINE: string =
-  "PTC is off in this session: you cannot start a new child, so do not try to dispatch one.";
+  "PTC is off in this session: you cannot start a new task, so do not try to create one.";
 
 /**
  * Build the dispatch section body (pi wraps it in `<ptc>…</ptc>` itself).

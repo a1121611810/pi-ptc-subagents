@@ -6,6 +6,8 @@ status: accepted (2026-10-19)
 
 > **Amended by [ADR-0045](./0045-observed-model-field-names.md) (2026-10-19): the result/record fields are named `observedProvider` / `observedModel`. This record's Decision 2 keeps the semantics; only the names change.**
 
+> **Amended by [ADR-0052](./0052-the-two-doors-share-one-prefix.md) (2026-10-21): the two task doors are renamed — `pi.dispatch` → `pi_task_ptc` (the PTC door, a binding inside a program) and `ptc_subagent` → `pi_task_codemode` (the codemode door, reachable from a `codemode` script) — with no alias and no compatibility shim. This record's decisions stand unchanged; read its `pi.dispatch` / `ptc_subagent` as those names.**
+
 ## Context
 
 A dispatched child is a fresh `pi` subprocess: it has its own session, its own context, and its

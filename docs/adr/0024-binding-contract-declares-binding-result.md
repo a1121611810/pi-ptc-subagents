@@ -15,6 +15,8 @@ untouched, `{ content, details }` still crosses the wire exactly as it did, and
 every existing program keeps working unchanged. Everything is additive -- text
 the model did not previously receive.
 
+> **Amended by [ADR-0052](./0052-the-two-doors-share-one-prefix.md) (2026-10-21): the two task doors are renamed — `pi.dispatch` → `pi_task_ptc` (the PTC door, a binding inside a program) and `ptc_subagent` → `pi_task_codemode` (the codemode door, reachable from a `codemode` script) — with no alias and no compatibility shim. This record's decisions stand unchanged; read its `pi.dispatch` / `ptc_subagent` as those names.**
+
 ## Context
 
 The binding table re-wraps each pi tool's own result into `{ content, details }`

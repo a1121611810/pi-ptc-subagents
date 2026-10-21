@@ -4,6 +4,8 @@ status: accepted (2026-10-19)
 
 # A dispatch may carry the caller's reason, as context rather than authority
 
+> **Amended by [ADR-0052](./0052-the-two-doors-share-one-prefix.md) (2026-10-21): the two task doors are renamed — `pi.dispatch` → `pi_task_ptc` (the PTC door, a binding inside a program) and `ptc_subagent` → `pi_task_codemode` (the codemode door, reachable from a `codemode` script) — with no alias and no compatibility shim. This record's decisions stand unchanged; read its `pi.dispatch` / `ptc_subagent` as those names.**
+
 ## Context
 
 A dispatched child receives one piece of task content: `task`. Everything else it is told is policy —

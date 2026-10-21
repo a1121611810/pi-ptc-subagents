@@ -37,7 +37,7 @@ import { makeExtensionStub, makeTempDir, removeTempDir, stubContext } from "../h
 const FILE = PTC_MODE_CONFIG_FILE;
 
 /**
- * The three probes that resolve `full` (`detectedSurfaceMode`'s table, `src/mode/ptc-mode.ts:1046`).
+ * The three probes that resolve `full_ptc` (`detectedSurfaceMode`'s table, `src/mode/ptc-mode.ts:1046`).
  *
  * Pinned because nothing short-circuits the detection any more: with the key gone, an unpinned
  * switch or activation axis runs the real probe over the developer's own
@@ -90,7 +90,7 @@ async function staleKeyNotices(): Promise<{ message: string; type?: string }[]> 
 describe("the legacy surfaceMode key is inert", () => {
   test("every value it ever took registers exactly what no key at all registers", async () => {
     // The differential IS the claim. An implementation that read the key back -- returning early
-    // for `"off"`, or registering the `subagents` line for `"subagents"` -- makes one of these
+    // for `"off"`, or registering the `codemode_ptc` line for `"codemode_ptc"` -- makes one of these
     // three disagree with the baseline, and the assertion is on the tool NAMES rather than on a
     // hand-written list, so it cannot be satisfied by a list that happens to still match.
     await withAgentDir(async (dir) => {

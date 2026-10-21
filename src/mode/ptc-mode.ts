@@ -444,30 +444,30 @@ export function readWebSearchConfig(agentDir: string): WebSearchConfig {
 }
 
 /**
- * Which model-facing tools this package registers, independent of PTC mode (which decides
- * which registered tools are *active*).
+ * Which orchestrator is responsible to the model: this package's own PTC, or pi's `codemode` —
+ * independent of PTC mode (which decides which registered tools are *active*).
  *
  * These are DETECTED values, not settings. The list is two long because detection is the only
- * thing that produces them: `subagents` keeps the subagent face and lets pi's `codemode`
- * orchestrate, `full` keeps the whole set. There was a third, `off`, and a `surfaceMode` key
+ * thing that produces them: `codemode_ptc` keeps the subagent face and lets pi's `codemode`
+ * orchestrate, `full_ptc` keeps the whole set. There was a third, `off`, and a `surfaceMode` key
  * that could pin any of the three (ADR-0025); both are gone, and
  * {@link detectSurfaceMode} is now a pure function of what pi is — see its doc for why the
  * escape hatch the setting provided is not one this package can replace.
  */
-export const SURFACE_MODES = ["subagents", "full"] as const;
+export const SURFACE_MODES = ["full_ptc", "codemode_ptc"] as const;
 export type SurfaceMode = (typeof SURFACE_MODES)[number];
 
 /**
  * Where a pi that could not be asked resolves to. Every way the probe can come back wrong -- no
  * argv, a shim that will not resolve, a pi packaged somewhere unguessable, a permission error --
- * lands here, and `full` is today's behaviour. `subagents` as a failure mode would silently take
- * away the orchestration tool a session was relying on, so the direction is the design
- * (ADR-0026 decision 3).
+ * lands here, and `full_ptc` is today's behaviour. `codemode_ptc` as a failure mode would
+ * silently take away the orchestration tool a session was relying on, so the direction is the
+ * design (ADR-0026 decision 3).
  *
  * Named rather than inlined at the one place that computes it, because `session_start` reports
  * the resolved value and two spellings of "the fallback" would be two things to drift.
  */
-export const FALLBACK_SURFACE_MODE: SurfaceMode = "full";
+export const FALLBACK_SURFACE_MODE: SurfaceMode = "full_ptc";
 
 /**
  * Whether the pi that launched us will actually LOAD its `codemode` extension.
@@ -816,8 +816,8 @@ export const CODEMODE_TOOL_NAME = "codemode";
  *   (`dist/extensions/codemode/index.js:26`).
  *
  * `"inactive"` is what every failure of this probe on the positive side resolves to, and that is
- * the design rather than a fallback: `subagents` is chosen only on positive evidence that the tool
- * is callable. See ADR-0029, "The bound that makes the weaker guarantee sufficient".
+ * the design rather than a fallback: `codemode_ptc` is chosen only on positive evidence that the
+ * tool is callable. See ADR-0029, "The bound that makes the weaker guarantee sufficient".
  */
 export type CodemodeActivation = "active" | "inactive";
 
@@ -1310,17 +1310,17 @@ export function applyMcpAutoEnableEvidence(
 /**
  * The surface to use when the user has expressed no preference. Not a constant: a pi that ships
  * `codemode` already offers the model a second way to orchestrate, and answering that by
- * handing our orchestration surface away is the whole point of `subagents` mode (ADR-0026) —
+ * handing our orchestration surface away is the whole point of `codemode_ptc` (ADR-0026) —
  * but only while that `codemode` is actually going to run (ADR-0027).
  *
  * The four cases, as a table (ADR-0029 adds the last row):
  *
- * | codemode on disk | switch         | activation | surface     | why                                        |
- * | ---------------- | -------------- | ---------- | ----------- | ------------------------------------------ |
- * | no               | any            | any        | `full`      | nothing to hand it to                      |
- * | yes              | disabled       | any        | `full`      | the extension we would hand away is not loading |
- * | yes              | enabled/absent | active     | `subagents` | loaded, and the model can call it           |
- * | yes              | enabled/absent | inactive   | `full`      | loaded but not callable — do not delegate  |
+ * | codemode on disk | switch         | activation | surface       | why                                        |
+ * | ---------------- | -------------- | ---------- | ------------- | ------------------------------------------ |
+ * | no               | any            | any        | `full_ptc`    | nothing to hand it to                      |
+ * | yes              | disabled       | any        | `full_ptc`    | the extension we would hand away is not loading |
+ * | yes              | enabled/absent | active     | `codemode_ptc`| loaded, and the model can call it           |
+ * | yes              | enabled/absent | inactive   | `full_ptc`    | loaded but not callable — do not delegate  |
  *
  * The fourth row is the default on a real install, and it is the reason this takes three
  * arguments: pi registers `codemode` with `defaultActive: false`, so "pi ships it" and "pi loads
@@ -1336,7 +1336,7 @@ export function detectedSurfaceMode(
   if (!presence.present) return FALLBACK_SURFACE_MODE;
   if (codemodeSwitch === "disabled") return FALLBACK_SURFACE_MODE;
   if (codemodeActivation !== "active") return FALLBACK_SURFACE_MODE;
-  return "subagents";
+  return "codemode_ptc";
 }
 
 /**
@@ -1393,7 +1393,7 @@ export function probeCodemodePresence(argv: readonly string[] = process.argv): C
  * their coverage is uneven: the third has a test, but that test builds the layout by hand rather
  * than observing an install, so "a test caught it" would be a claim nobody can check; the second
  * has no test at all. They are here because a miss on either calls a pi that does ship codemode a
- * pi that does not and flips the default to full, and the real-pi e2e probe test is where such a
+ * pi that does not and flips the default to `full_ptc`, and the real-pi e2e probe test is where such a
  * miss would surface. The cost of guessing is one extra `statSync` on a path that is normally
  * absent; the cost of missing the layout is a silent fallback.
  */
@@ -1425,6 +1425,13 @@ export interface DetectedSurface {
 /**
  * Decide the surface by asking the pi. A pure function of the three probes and nothing else.
  *
+ * **ADR-0051 renamed the two answers on 2026-10-21, and the rename is the definition.** The
+ * values used to name the INVENTORY — which tools this package registers — which is not the
+ * question the model faces, and the old first name read as "everything is available", which was
+ * false: on that surface the PTC pair IS registered and is NOT model-facing. The answers say
+ * WHO orchestrates now. The detection itself did not move: the same pi still lands on the same
+ * surface, and only the name of that surface changed.
+ *
  * This used to read a `surfaceMode` key first and only fall back to the probes, and the argument
  * for that was an escape hatch: pi has `registerTool` but no `unregisterTool`, so a surface chosen
  * wrongly cannot be corrected once the factory has returned — a session that got the wrong answer
@@ -1436,8 +1443,8 @@ export interface DetectedSurface {
  *   value used to suppress.
  * - **The direction that actually hurts is not reachable by a setting anyway.** A pin can only
  *   make the surface *more* capable than detection, never less: every way the probes come back
- *   wrong (`subagents` chosen for a `codemode` that cannot run) resolves to `full`, and no value
- *   the file could hold would have produced a better outcome than the one already chosen.
+ *   wrong (`codemode_ptc` chosen for a `codemode` that cannot run) resolves to `full_ptc`, and no
+ *   value the file could hold would have produced a better outcome than the one already chosen.
  * - **Disabling is pi's job now.** The `off` value existed because a package that cannot be
  *   switched off is a package that stays loaded forever. `pi config` turns a package's extensions
  *   off without loading them — measured, not assumed: on pi 1.1.0 a `packages` entry whose
@@ -1691,9 +1698,9 @@ export function buildModeInstruction(
     "    parallel / pipeline are available there)",
     "",
     `The program body is an async function. Available inside it: ${callable.join(", ")}, plus the`,
-    'parallel binding `tools["pi.dispatch"](args)` — always bound, and its dot name needs string',
-    "indexing (`tools.pi.dispatch` does not exist). The run's actual bound names are on the",
-    "`ptcBindings` global, so a program never has to guess what is bound this run.",
+    "PTC door `tools.pi_task_ptc(args)` — always bound, and reached with a dot. The run's actual",
+    "bound names are on the `ptcBindings` global, so a program never has to guess what is bound",
+    "this run.",
     examples.length > 0 ? `Examples:\n${examples}` : "",
     "",
     "Batch a task's steps into ONE program instead of issuing many tool calls — gathering",

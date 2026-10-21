@@ -54,14 +54,32 @@ const BUILT_INDEX = join(HERE, '..', '.vitepress', 'dist', 'index.html');
 const WILDCARD = /\*$/;
 
 /**
+ * The name families this package registers.
+ *
+ * `ptc_*` is the long-standing family. `pi_task_*` arrived with ADR-0052, which renamed the two
+ * task doors to `pi_task_ptc` (the PTC door, a binding inside a program) and `pi_task_codemode`
+ * (the codemode door, a registered tool). Both share the prefix, so the page can claim the family
+ * the same way it claims `ptc_task_*`.
+ *
+ * The PTC door is a BINDING rather than a registered pi tool, and this check does not know the
+ * difference: it reads the name out of the source, and the source declares it in a constant. That
+ * is the same looseness the `viaConstant` style already has (it accepts "a name behind a
+ * constant" without proving the constant is wired to a tool), and the consequence is the same one
+ * the check already accepts: a name on the page is checked for being backed by the source, not
+ * for being a tool.
+ */
+const NAME_FAMILY = "(?:ptc|pi_task)_[a-z0-9_]+";
+
+/**
  * What the landing page is required to show.
  *
  * A trailing `*` is a family claim and covers every registered name under it, so
  * `ptc_task_*` stands for `ptc_task_list`, `ptc_task_output` and `ptc_task_stop`
  * without listing them twice. Removing one of the three from the page does **not**
- * fail the build; removing the family claim does.
+ * fail the build; removing the family claim does. `pi_task_*` is the same kind of claim
+ * over the two doors.
  */
-const MUST_APPEAR = ["ptc_run_code", "ptc_subagent", "ptc_workflow", "ptc_task_*"];
+const MUST_APPEAR = ["ptc_run_code", "ptc_task_*", "ptc_workflow", "pi_task_*"];
 
 /**
  * Registered tools the landing page deliberately does not mention, each with its reason.
@@ -104,7 +122,7 @@ function registeredToolNames() {
 
   // Style 1 — the name inline in the tool definition object:
   //   name: "ptc_run_code"
-  const inline = /\bname:\s*"(ptc_[a-z0-9_]+)"/g;
+  const inline = new RegExp(`\\bname:\\s*"(${NAME_FAMILY})"`, "g");
 
   // Style 2 — the name behind a constant, which is how `ptc_child_report`
   // registers: `name: CHILD_REPORT_TOOL_NAME` over
@@ -126,7 +144,16 @@ function registeredToolNames() {
   // out of the source. The optional group below accepts `NAME = "…"` and
   // `NAME: <type> = "…"` alike; the type text may not contain `=` or `;`, so
   // it cannot run past the assignment.
-  const viaConstant = /\b[A-Z][A-Z0-9_]*(?:\s*:\s*[^=;\n]+)?\s*=\s*"(ptc_[a-z0-9_]+)"/g;
+  //
+  // ADR-0052 widened the family from `ptc_` to `ptc_` or `pi_task_`, because
+  // the two task doors are named `pi_task_ptc` and `pi_task_codemode` and the
+  // page shows them. A pattern that only knew `ptc_` would have read the
+  // page as claiming nothing about the doors, and the retired `ptc_subagent`
+  // row would have gone unnoticed.
+  const viaConstant = new RegExp(
+    `\\b[A-Z][A-Z0-9_]*(?:\\s*:\\s*[^=;\\n]+)?\\s*=\\s*"(${NAME_FAMILY})"`,
+    "g",
+  );
 
   for (const file of tsFiles(SRC_DIR)) {
     const source = stripComments(readFileSync(file, 'utf8'));
@@ -148,7 +175,8 @@ function registeredToolNames() {
 function claimedToolNames(html) {
   const text = html.replace(/<[^>]*>/g, ' ');
   const claims = new Set();
-  for (const match of text.matchAll(/\b(ptc_[a-z0-9_]+\*?)(?![a-z0-9_])/g)) {
+  const claim = new RegExp(`\\b(${NAME_FAMILY}\\*?)(?![a-z0-9_])`, "g");
+  for (const match of text.matchAll(claim)) {
     claims.add(match[1]);
   }
   return claims;

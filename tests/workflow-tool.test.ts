@@ -68,9 +68,9 @@ test("the description lists the four helpers and says there is no agent()", asyn
   expect(description, "states the binding form shared with ptc_run_code").toMatch(
     /tools\.<name>\(args\)/,
   );
-  // Pitfalls #1/#5: same guidance as ptc_run_code — string-indexed dispatch name, per-run
-  // binding manifest.
-  expect(description, "shows the string-indexed dispatch form").toContain('tools["pi.dispatch"]');
+  // Pitfalls #1/#5: same guidance as ptc_run_code — the dot-accessible door name, per-run
+  // binding manifest. ADR-0052: the door no longer needs string indexing on any plane.
+  expect(description, "shows the dot call form").toContain("await tools.pi_task_ptc(");
   expect(description, "names the introspection global").toContain("ptcBindings");
   expect(description, "carries the same reach note as ptc_run_code").toContain(
     PTC_BINDING_REACH_NOTE,
@@ -246,7 +246,7 @@ test(
 );
 
 test(
-  "the workflow surface binds every builtin tool and `pi.dispatch` (ADR-0016)",
+  "the workflow surface binds every builtin tool and the PTC door (ADR-0016)",
   async () => {
     const result = await call(createPtcWorkflowTool(), {
       script: "return Object.keys(tools).sort();",
@@ -257,7 +257,7 @@ test(
       "find",
       "grep",
       "ls",
-      "pi.dispatch",
+      "pi_task_ptc",
       "read",
       "write",
     ]);
