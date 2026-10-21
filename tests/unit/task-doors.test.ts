@@ -26,7 +26,7 @@
 import { expect, test } from "vitest";
 
 import { createBuiltinBindings, DISPATCH_BINDING_NAME } from "../../src/runtime/bindings.ts";
-import { DispatchSlotCounter, isDispatchHandle } from "../../src/runtime/dispatch.ts";
+import { isDispatchHandle } from "../../src/runtime/dispatch.ts";
 import type { DispatchResult } from "../../src/runtime/dispatch.ts";
 import type { DispatchHandle } from "../../src/runtime/task-registry.ts";
 import type { ULID } from "../../src/runtime/task-storage.ts";
