@@ -116,7 +116,17 @@ function registeredToolNames() {
   // This widens the accepted set, which is the safe direction: a tool name
   // that is declared but not wired up would pass this gate, whereas a tool
   // that IS wired up but missed here would fail it and cry wolf.
-  const viaConstant = /\b[A-Z][A-Z0-9_]*\s*=\s*"(ptc_[a-z0-9_]+)"/g;
+  //
+  // The type annotation is part of the shape: the three task tools declare
+  // `export const PTC_TASK_LIST_TOOL_NAME: string = "ptc_task_list";`, and a
+  // pattern that insists on `NAME =` therefore missed two of the three. The
+  // one it did see (`ptc_task_stop`) it saw through an unrelated constant
+  // (`STOP_CALLER_FALLBACK`), which is how the miss stayed invisible for as
+  // long as it did: the page named a tool the gate had never actually read
+  // out of the source. The optional group below accepts `NAME = "…"` and
+  // `NAME: <type> = "…"` alike; the type text may not contain `=` or `;`, so
+  // it cannot run past the assignment.
+  const viaConstant = /\b[A-Z][A-Z0-9_]*(?:\s*:\s*[^=;\n]+)?\s*=\s*"(ptc_[a-z0-9_]+)"/g;
 
   for (const file of tsFiles(SRC_DIR)) {
     const source = stripComments(readFileSync(file, 'utf8'));

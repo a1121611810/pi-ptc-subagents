@@ -67,6 +67,13 @@ const DOCUMENTS = [
     blurb: '`content` / `details` / `structuredContent`, and what each is not.',
     order: 4,
   },
+  {
+    source: 'docs/usage/web-ds-search.md',
+    slug: 'web-search',
+    title: 'Web search',
+    blurb: "The DeepSeek search module: the switch, the credential, and what a child gets.",
+    order: 5,
+  },
 ];
 
 /**
