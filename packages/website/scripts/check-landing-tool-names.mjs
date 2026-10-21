@@ -19,16 +19,22 @@
  *     the pipeline. Comments are stripped first, so prose that merely names a
  *     tool cannot make this pass.
  *
- * It checks three directions, not one.
+ * It checks four directions, not one.
  *
- * 1. **Nothing invented.** Every `ptc_*` the page shows must be registered. A
- *    visitor has no way to check a landing page, so advertising something that
- *    does not exist is the dangerous direction.
+ * 1. **Nothing invented.** Every name in the package's own naming families the
+ *    page shows must be registered, or be a name somebody declared is not a
+ *    tool of this package. A visitor has no way to check a landing page, so
+ *    advertising something that does not exist is the dangerous direction.
  * 2. **Nothing required is missing.** Every entry in MUST_APPEAR must appear on
  *    the built page, so a redesign that quietly drops a tool fails the build.
  * 3. **Nothing is unaccounted for.** Every registered `ptc_*` must be in
  *    MUST_APPEAR **or** DECLARED_ABSENT, so adding a tool fails until someone
  *    says which side it is on.
+ * 4. **Nothing retired is still advertised.** A name this package renamed away
+ *    is not a tool any more, and a page that still shows it teaches an API
+ *    that no longer exists. This is direction 1 with a message that says what
+ *    to write instead — the failure names the replacement, not just the dead
+ *    name.
  *
  * Direction 3 is what this gate was missing, and it is deliberately **not**
  * "the page must list every tool". `ptc_child_report` is what a dispatched
@@ -54,12 +60,24 @@ const BUILT_INDEX = join(HERE, '..', '.vitepress', 'dist', 'index.html');
 const WILDCARD = /\*$/;
 
 /**
- * The name families this package registers.
+ * The name families this package registers — and the one shape it used to.
  *
  * `ptc_*` is the long-standing family. `pi_task_*` arrived with ADR-0052, which renamed the two
  * task doors to `pi_task_ptc` (the PTC door, a binding inside a program) and `pi_task_codemode`
  * (the codemode door, a registered tool). Both share the prefix, so the page can claim the family
  * the same way it claims `ptc_task_*`.
+ *
+ * ADR-0052 also retired the PTC door's OLD name, `pi.dispatch` — and the dot in it is exactly
+ * why this gate stayed blind to it. `pi.dispatch` matched neither family, so the page could name a
+ * door the package had renamed away and this check still reported "8 claim(s) against 8
+ * registered tool(s)" and passed. The dotted shape is therefore part of the family now: a name in
+ * it is a claim, and a claim has to be backed by the source or declared below.
+ *
+ * The family is anchored on this package's own prefixes (`ptc_`, `pi_task_`, `pi.`). It is NOT
+ * "any dotted word": the built page carries VitePress's own inline scripts, whose payloads are
+ * full of names like `document.documentElement` and `navigator.platform`, and a family that
+ * matched those would turn the gate into noise. `pi.` is the prefix this package's doors live
+ * under, so it is the prefix worth watching.
  *
  * The PTC door is a BINDING rather than a registered pi tool, and this check does not know the
  * difference: it reads the name out of the source, and the source declares it in a constant. That
@@ -68,7 +86,43 @@ const WILDCARD = /\*$/;
  * the check already accepts: a name on the page is checked for being backed by the source, not
  * for being a tool.
  */
-const NAME_FAMILY = "(?:ptc|pi_task)_[a-z0-9_]+";
+const NAME_FAMILY = "(?:(?:ptc|pi_task)_[a-z0-9_]+|pi\\.[a-z0-9_]+)";
+
+/**
+ * Names this package has used and retired, and what replaced them.
+ *
+ * This is not the mechanism that turns them red — the widened family above already does that,
+ * because a retired name is a name the source does not define. This map is here so the failure
+ * message can name the replacement instead of only the dead name, which is what "every failure
+ * names what to change" asks for: the reader of the message learns `pi_task_ptc`, not a list of
+ * names that does not contain it.
+ */
+const RETIRED_NAMES = new Map([
+  [
+    "pi.dispatch",
+    "`pi_task_ptc` (ADR-0052 renamed the two task doors to the shared `pi_task_` prefix)",
+  ],
+]);
+
+/**
+ * Names the landing page may mention that this package does NOT register, each with its reason.
+ *
+ * The reason is not decoration, and neither is the entry. The widened family above treats every
+ * `pi.`-shaped name on the page as a claim, and a claim has to be accounted for — so a name this
+ * package does not own has to be declared here, with a reason, rather than left to be noticed by
+ * whoever reads the failure next. An allowance without one is how an invented name stays invisible.
+ *
+ * The dotted names in this package's own prefixes are the ones that need a decision. Names in
+ * somebody else's namespace (`navigator.platform`, `document.documentElement`) are not claims at
+ * all — the family does not reach them, so they are not listed here.
+ */
+const NOT_A_TOOL_NAMES = new Map([
+  [
+    "pi.extensions",
+    "pi's own manifest field, not a name this package registers; the install note says " +
+      "`pi` reads the `pi.extensions` manifest",
+  ],
+]);
 
 /**
  * What the landing page is required to show.
@@ -165,7 +219,7 @@ function registeredToolNames() {
 }
 
 /**
- * Every `ptc_*` token visible in the rendered page, wildcards included.
+ * Every token in the package's name families visible in the rendered page, wildcards included.
  *
  * The trailing boundary is a negative lookahead rather than `\b`: a `\b` after
  * an optional `*` backtracks — for `ptc_task_*` the engine drops the `*`, finds
@@ -209,16 +263,41 @@ function main() {
     process.exit(1);
   }
 
-  const unbacked = claims.filter((claim) =>
-    WILDCARD.test(claim)
+  // Direction 4 — a retired name the page still shows. Checked before the generic
+  // "not registered" failure so the message names the replacement: the reader learns
+  // what to write, not only what to delete.
+  const retired = claims.filter((claim) => RETIRED_NAMES.has(claim));
+
+  if (retired.length > 0) {
+    console.error('✗ the landing page names tools this package retired:\n');
+    for (const claim of retired) console.error(`   ${claim} — use ${RETIRED_NAMES.get(claim)}`);
+    console.error(
+      '\n  The name is gone from the source, so the page is teaching an API that no longer\n' +
+        '  exists. Rename it on the page, or — if the package really does have this name\n' +
+        '  again — take it out of RETIRED_NAMES here in the same change.',
+    );
+    process.exit(1);
+  }
+
+  // Direction 1 — a name the page shows that the source does not define.
+  //
+  // A name in NOT_A_TOOL_NAMES is accounted for and passes; it is a mention, not a claim.
+  const unbacked = claims.filter((claim) => {
+    if (NOT_A_TOOL_NAMES.has(claim)) return false;
+    return WILDCARD.test(claim)
       ? ![...registered].some((name) => name.startsWith(claim.slice(0, -1)))
-      : !registered.has(claim)
-  );
+      : !registered.has(claim);
+  });
 
   if (unbacked.length > 0) {
     console.error('✗ the landing page advertises tools this package does not register:\n');
     for (const claim of unbacked) console.error(`   ${claim}`);
     console.error(`\n  registered: ${[...registered].sort(byName).join(', ')}`);
+    console.error(
+      '\n  A name is either a tool this package registers, or a name somebody declared as\n' +
+        '  not one of ours (NOT_A_TOOL_NAMES in this script, with a reason). A name nobody\n' +
+        '  decided about is the drift this check exists to catch.',
+    );
     process.exit(1);
   }
 
@@ -283,12 +362,49 @@ function main() {
     process.exit(1);
   }
 
+  // An allowance naming a name this package DOES register is a stale record, not a spare.
+  // The exclusion above is stale the other way round — it names a tool that is gone.
+  const staleAllowance = [...NOT_A_TOOL_NAMES.keys()]
+    .filter((name) => registered.has(name))
+    .sort(byName);
+
+  if (staleAllowance.length > 0) {
+    console.error('✗ NOT_A_TOOL_NAMES names tools this package does register:\n');
+    for (const name of staleAllowance) console.error(`   ${name}`);
+    console.error(
+      '\n  The allowance is now wrong: the package registers this name, so the page may\n' +
+        '  show it as a tool. Delete the allowance in the same change that registered it —\n' +
+        '  a spare allowance hides the next rename.',
+    );
+    process.exit(1);
+  }
+
+  // A retired name the source defines again is not retired. The same staleness rule as the
+  // allowance above, on the other registry: the record has to follow the source.
+  const revived = [...RETIRED_NAMES.keys()].filter((name) => registered.has(name)).sort(byName);
+
+  if (revived.length > 0) {
+    console.error('✗ RETIRED_NAMES names tools this package does register:\n');
+    for (const name of revived) console.error(`   ${name}`);
+    console.error(
+      '\n  The name is back in the source, so it is not retired. Delete the entry in the\n' +
+        '  same change that brought the name back.',
+    );
+    process.exit(1);
+  }
+
+  const toolClaims = claims.filter((claim) => !NOT_A_TOOL_NAMES.has(claim));
+
   console.log(
-    `✓ landing page tool names — ${claims.length} claim(s) against ${registered.size} ` +
-      `registered tool(s); ${MUST_APPEAR.length} required, ` +
-      `${DECLARED_ABSENT.size} declared absent, 0 unaccounted`,
+    `✓ landing page tool names — ${toolClaims.length} tool claim(s) against ${registered.size} ` +
+      `registered tool(s), ${claims.length - toolClaims.length} declared non-tool mention(s); ` +
+      `${MUST_APPEAR.length} required, ${DECLARED_ABSENT.size} declared absent, 0 unaccounted`,
   );
-  for (const claim of claims) console.log(`    ${claim}`);
+  for (const claim of claims) {
+    console.log(
+      NOT_A_TOOL_NAMES.has(claim) ? `    ${claim}  (not a tool of this package)` : `    ${claim}`,
+    );
+  }
 }
 
 main();
