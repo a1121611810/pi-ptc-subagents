@@ -10,8 +10,9 @@ the wayfinder map issue (`wayfinder:map` label).
 DSH PTC mode. The repo name carries `-subagents` for historical reasons (a
 previous `pi-subagents` peer existed); **subagents are explicitly not in scope
 for the current PTC-mode effort** (see wayfinder map, 2026-09-21 grill round 3).
-A separate effort (ADR-0016, 2026-09-23) added **pi.dispatch** — a binding that
-lets a PTC program explicitly fan out to per-call pi sessions. The word
+A separate effort (ADR-0016, 2026-09-23) added the **parallel binding** — today
+the PTC door `pi_task_ptc` — which lets a PTC program explicitly fan out to
+per-call pi sessions. The word
 _subagent_ is not used for that mechanism (see _parallel binding_ below); use
 precise terms.
 
@@ -86,11 +87,11 @@ result.
 #### The binding family
 
 **binding** — a function callable from within a PTC program as
-`tools["<name>"](args)`. Every binding lives in the one `tools` table —
+`tools.<name>(args)`. Every binding lives in the one `tools` table —
 there is no `pi` global in the worker — so the parallel binding named
-`pi.dispatch` is reached as `tools["pi.dispatch"](args)` and takes a single
-object (`{ task, agent?, cwd?, agentScope?, model?, thinkingLevel?, background?, label?,
-readOnly? }`),
+`pi_task_ptc` is reached as `tools.pi_task_ptc(args)` and takes a single
+object (`{ task, agent?, why?, cwd?, agentScope?, model?, thinkingLevel?, wait?,
+label?, readOnly? }`),
 not a positional argument list. Two
 kinds:
 
@@ -108,7 +109,7 @@ kinds:
   thing.
 - _parallel binding_ — a non-builtin binding whose semantics are independent
   of pi's parallel-tool execution and which is explicitly designed for
-  fan-out. Currently: `pi.dispatch(...)` (see ADR-0016). It spawns a
+  fan-out. Currently: `pi_task_ptc(...)` (see ADR-0016, renamed by ADR-0052). It spawns a
   fresh `pi` subprocess per call, so the PTC program gets session-level
   isolation without inventing a new task state machine.
 
@@ -136,7 +137,7 @@ default set is `DEFAULT_BINDING_NAMES`).
 — it REPLACES the default set rather than adding to it, the opt-in gate does
 not apply to it (an opt-in name inside it is taken at face value), and
 `includeDispatch` defaults to "did the caller curate the surface", so
-`pi.dispatch` stays out unless the caller asks for it explicitly. The name
+`pi_task_ptc` stays out unless the caller asks for it explicitly. The name
 comes from the R3 research branch (`research/R3-isolation-tradeoff`): ADR-0016
 §3 and `tests/bindings.test.ts` both name this pattern, and it is what the
 "explicit subset" in the _binding_ entry means. It is the **binding-table**
@@ -189,7 +190,7 @@ emitted).
 **binding note** — a per-binding clause of the _binding contract_ stating where
 one binding departs from the shared _binding result_ shape: `bash` rejects on a
 non-zero exit, `write` always reports `details: null`, `edit` always reports
-a diff, `pi.dispatch` carries `text` instead of `content`. Written only where
+a diff, `pi_task_ptc` carries `text` instead of `content`. Written only where
 behaviour genuinely differs, so the common case stays one sentence. ADR-0024.
 _Avoid_: "per-binding documentation" (the contract is the block; a note is one
 exception inside it).
@@ -237,8 +238,8 @@ since pi 0.99.0 a user can disable a built-in extension, so a pi can ship
 registers `codemode` inactive, and
 since pi 1.0.0 the MCP extension may activate it at runtime (see
 _MCP auto-enable evidence_). Shipped **and** loading **and** active
-resolves to `subagents`; any other combination resolves to `full` -- and a
-probe that cannot answer also resolves to `full` in the safe direction. The
+resolves to `codemode_ptc`; any other combination resolves to `full_ptc` -- and a
+probe that cannot answer also resolves to `full_ptc` in the safe direction. The
 session names that outcome at startup rather than defaulting in silence,
 because a detection that cannot be seen is indistinguishable from a pi that
 moved its `dist`. ADR-0025 (withdrawn by ADR-0034), ADR-0026, ADR-0027,
@@ -412,7 +413,7 @@ evidence said otherwise, and that case is now reachable in a way it was not
 before — pi activates `codemode` from its own `session_start`, after ours has
 read. Both classes resolve to `inactive` by default, deliberately: pi
 registers `codemode` with `defaultActive: false`, so "nobody configured
-anything" is a decision and lands on the safe surface (`full`). ADR-0029,
+anything" is a decision and lands on the safe surface (`full_ptc`). ADR-0029,
 ADR-0033, ADR-0035. _Avoid_: "the activation probe" (the probe is the whole
 question; this term is the question), "codemode enabled" (that is the switch, a
 different question), "codemode loaded" (that is presence plus the switch), "the
@@ -451,9 +452,9 @@ that term's answer is actually computed. Exported from the package root, so the
 decision can be driven from a **built artifact** rather than only from the
 source module. It reads exactly three arguments and nothing else — the three
 probes, already resolved: `CodemodePresence`, `CodemodeSwitch`,
-`CodemodeActivation`. It returns `"subagents"` only when all three hold (the
+`CodemodeActivation`. It returns `"codemode_ptc"` only when all three hold (the
 directory is on disk, the extension is not switched off, the tool is
-**active**), and returns the named `FALLBACK_SURFACE_MODE` — `"full"` — in
+**active**), and returns the named `FALLBACK_SURFACE_MODE` — `"full_ptc"` — in
 every other case, a probe that could not answer included. The answer is a
 `SurfaceMode`, one of `SURFACE_MODES`. `detectSurfaceMode` is the wrapper
 around it: that one runs the probes and returns them alongside the result, which
@@ -467,8 +468,10 @@ alongside its `content`, declared by an `outputSchema`, for **programmatic
 callers only**: pi's `codemode` scripts receive it instead of the text, and it
 is never sent to the model. It is a **projection**, not a mirror of `details` --
 lean, stable, and shaped to match what the model was shown in the text block, so
-a script and the transcript agree. `ptc_task_*` and `ptc_subagent` declare one;
-`pi.dispatch` does not. ADR-0028. _Avoid_: "structured output" (pi's
+a script and the transcript agree. `ptc_task_*` and `pi_task_codemode` declare one;
+`pi_task_ptc` does not — it is a binding inside a program, not a registered
+tool, so it declares no `outputSchema`.
+ADR-0028. _Avoid_: "structured output" (pi's
 `outputSchema` describes the result, it does not validate it — nothing checks
 the two agree), "details" (that is the TUI's own richer channel, and the two are
 allowed to drift), "the result" (ambiguous between `content`, `details` and this;
@@ -481,45 +484,49 @@ QuickJS). The _surface mode_ decides which one the **model** is offered, and
 that is what this term means: having both live in a request is a measured
 defect, not a feature — it is two programming models to choose between.
 
-**Registration is not the same question as being offered.** On the `subagents`
+**Registration is not the same question as being offered.** On the `codemode_ptc`
 line the PTC pair IS registered, at `codemode` reach, which makes it callable
 from a pi `codemode` script without declaring it to the model. So the pairing
 there is an orchestrator plus its execution layer, not two orchestrators, and
-it is what makes `pi.dispatch` — which a QuickJS sandbox cannot reach at all —
-available underneath `codemode`. `full` declares the pair instead. The surface
+it is what makes `pi_task_ptc` — which a QuickJS sandbox cannot reach at all —
+available underneath `codemode`. `full_ptc` declares the pair instead. The surface
 mode decides which; exposure is how. ADR-0025 §3 as amended 2026-10-09, which
 survives ADR-0034. _Avoid_:
 "the PTC tool" (there are two, and which one is a surface-mode decision),
 "code
 execution" (both are that; the word says nothing about the shape).
 
-**subagent surface** — the top-level tool the model calls directly to
-start a fresh pi subprocess, without writing a program. This is what the
-detected `subagents` surface keeps, and it is the reason that line exists: the
-_parallel binding_ `pi.dispatch` can only be reached from inside a program,
-so a line that handed the program face to `codemode` needs a top-level entry
-point or the subagent capability would be deleted rather than handed over.
-It stays at `direct` reach on that line, and that asymmetry is deliberate —
-the pair underneath is for scripts, this one is for the model itself. An
+**subagent surface** — the codemode door's reach: the tool a `codemode`
+script calls to start a fresh pi subprocess, without a PTC program in between.
+This is what the detected `codemode_ptc` surface keeps, and it is the reason
+that line exists: the PTC door `pi_task_ptc` can only be reached from inside a
+program, so a line that handed the program face to `codemode` needs an entry
+point of its own or the subagent capability would be deleted rather than handed
+over. It sits at `codemode` reach, **not** `direct` — it is NOT declared to the
+model (ADR-0052): on that line the orchestrator responsible to the model is
+pi's own `codemode`, so the model composes and the script calls. (See
+_subagent door_ for the two doors and their names.) An
 omitted `model` follows the _dispatch model inheritance_ rule (ADR-0044): the
-surface requests nothing, so the child runs the caller's _session model_
+door requests nothing, so the child runs the caller's _session model_
 unless the call site or the agent definition pins a _requested model_.
-ADR-0025 §3 as amended 2026-10-09. _Avoid_: "dispatch tool" (that is the
+ADR-0025 §3 as amended 2026-10-09, ADR-0052. _Avoid_: "dispatch tool" (that is the
 _parallel binding_ inside
 a program), "subagent" (see Out-of-glossary: DSH's subagent is a
 different thing), "background task" (that is the `ptc_task_*` lifecycle
 face, which can inspect and stop tasks but cannot start one).
 
 **lifecycle face** — the `ptc_task_list` / `ptc_task_output` /
-`ptc_task_stop` trio. Registered on **every** surface mode, `subagents` included,
+`ptc_task_stop` trio. Registered on **every** surface mode, `codemode_ptc` included,
 and outside the _narrowing mode_ loadout on purpose:
 turning the _narrowing mode_ off must never hide the lifecycle of a task that is
-still in flight. Since ADR-0050 they are withheld from the MODEL exactly when
-the _dispatch switch_ is off and no task is in flight — with nothing to manage
-there is nothing for them to do — and they come back the moment a task is
-running, so that task stays inspectable and stoppable. ADR-0022, ADR-0025
+still in flight. Since ADR-0053 their model-facing reach follows the RECORDS,
+not the in-flight count: they are withheld from the MODEL exactly when the
+session has **no task record** — a record is the only trace a dispatch leaves,
+so "is there anything for them to manage" and "has this session dispatched" are
+one question — and they come back the moment a record exists, so a task that
+has already finished stays inspectable and stoppable. ADR-0022, ADR-0025
 (withdrawn by ADR-0034, which removed the `off` value this entry used to
-except), ADR-0050. _Avoid_: "task tools", "subagent
+except), ADR-0050, ADR-0053, ADR-0057. _Avoid_: "task tools", "subagent
 tools" (they manage tasks other things started).
 
 **worker surface** — which of the two PTC program surfaces a worker was spawned
@@ -549,7 +556,7 @@ pi-ptc worker split mirrors this:
   workflow helpers `log / phase / parallel / pipeline` (real in this map).
   There is no `agent()` helper (G1 #13 decision B — the DSH helper is
   deferred to a future map). For fan-out to per-call pi sessions today,
-  the program uses the `pi.dispatch(...)` _binding_ (see _binding_), not
+  the program uses the `pi_task_ptc(...)` _binding_ (see _binding_), not
   a helper. The `result(value)` form in `ptc_workflow` is the script's
   async return, materialized lossless-JSON.
 
@@ -561,14 +568,15 @@ are `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls` — all seven in
 `BUILTIN_BINDING_NAMES`, which is the set of names that can be bound, not what
 any one session binds. The default table exposes all but the _opt-in binding_
 `bash` (ADR-0040). A builtin binding resolves to a _binding result_; a
-_parallel binding_ does not — it resolves to a `DispatchResult` that carries
-`text` and `status` and has no `content` at all. _Avoid_: "tool binding" (a
+_parallel binding_ does not — it resolves to a `DispatchResult` (the call
+waited) or a `DispatchHandle` (it did not), and neither shape has a `content`
+at all. _Avoid_: "tool binding" (a
 pi built-in tool and a binding are different objects, and the glossary uses
 "tool" for the former), "internal binding" (the call is in-process, not
 internal — it is the same tool a session would call directly).
 
 **parallel binding** — a binding whose call spawns a per-call runtime
-unit (a pi subprocess for `pi.dispatch`; potentially other backends in the
+unit (a pi subprocess for `pi_task_ptc`; potentially other backends in the
 future). The term contrasts with _builtin binding_, whose call is
 in-process. See ADR-0016. _Avoid_: "subagent" (DSH subagent is a different
 thing; see Out-of-glossary).
@@ -580,10 +588,12 @@ concurrently); the PTC program composes with `Promise.all` /
 `Promise.allSettled` and the binding return-value shape. See ADR-0016
 §3.
 
-**pi.dispatch** — the only _parallel binding_ shipped today. Spawns a
-fresh `pi` subprocess (`--mode json -p` plus session-file flags from R1
-when `{ background: true }` is set) and returns a structured result
-(see _DispatchResult_ for foreground, _DispatchHandle_ for background).
+**pi_task_ptc** — the PTC door: the only _parallel binding_ shipped today.
+Spawns a
+fresh `pi` subprocess (`--mode json -p`, plus the R1 session-file flags when
+the call does not wait) and returns a structured result
+(see _DispatchResult_ when the call waited, _DispatchHandle_ when it did not —
+ADR-0055).
 Its child's model resolves as the _requested model_ (the dispatch's `model`
 argument, else the agent definition's frontmatter `model:`), the caller's
 _session model_, then the _configured default model_ — see _dispatch model
@@ -591,9 +601,14 @@ inheritance_ and ADR-0044 — and the result states the _observed model_, not
 just the requested one.
 Subject to a session-wide _dispatch concurrency_ cap (default 8, matches pi's
 `subagent` extension `MAX_PARALLEL_TASKS`): one counter per pi session,
-spent by programs, by the `ptc_subagent` front, and by background children.
-The spawn surface is binding-only (the model cannot call `pi.dispatch`);
-but the **lifecycle face** for background tasks is model-facing via
+spent by programs, by the `pi_task_codemode` front, and by children that
+outlive their call. Over the cap the call is QUEUED, never refused
+(ADR-0056) — see _dispatch concurrency_.
+The PTC door itself is binding-only (the model cannot call `pi_task_ptc`
+directly); the codemode door `pi_task_codemode` is a registered tool at
+`codemode` reach, so a `codemode` script can call it — neither is declared to
+the model (ADR-0052). See _subagent door_.
+The **lifecycle face** for tasks is model-facing via
 `ptc_task_*` tools and `<bg-task-notification>` events (see ADR-0022).
 _Avoid_: `agent()` (DSH helper stub, deferred), `subagent` (DSH / pi
 extension).
@@ -644,8 +659,10 @@ installs), "narrowed child" (a definition is what narrows; the generalist is the
 unnarrowed case), "subagent" (see Out-of-glossary: DSH's subagent is a different
 thing).
 
-**DispatchResult** — the structured return type of `pi.dispatch(...)`.
-Fifteen fields. `text` (final assistant text), `status` (`fulfilled` /
+**DispatchResult** — the structured return type of `pi_task_ptc(...)` (and of
+`pi_task_codemode(...)`, which hands the same raw object to a `codemode`
+script — ADR-0054).
+Seventeen fields. `text` (final assistant text), `status` (`fulfilled` /
 `rejected`), `started` (whether the child process was actually brought up —
 `status: "rejected"` covers two different things, the harness declining to start
 and a child that ran and failed, and this is what tells them apart; the
@@ -659,7 +676,10 @@ assistant turn NAMED the pair — no turn, a pi within the declared floor that
 does not report it, or an old record — not "unknown"), `stderr?` (best-effort,
 never promised), `errorMessage?` (the structured failure channel — the
 _child-reported error_, verbatim, when there is one; otherwise the exit-code /
-truncation diagnosis, or absent when there is none), `report?` (the _child
+truncation diagnosis, or absent when there is none), `taskId?` (the id of the
+task record this dispatch created — **absent means the dispatch left no
+record**, i.e. a refusal that never got past a gate), `label?` (the label that
+record was created with), `report?` (the _child
 report_, when one arrived over either channel), `reportChannel` (TOTAL — always
 present, including on every refusal, so a degradation the caller cannot see is
 not a silent failure; the four values are `tool` / `prompt-json` / `none` /
@@ -671,12 +691,12 @@ call resolved to), and `whySuppressed?` (`true` when the caller's _why_ was
 dropped — the fact that a suppression happened is recorded, never the value).
 Shape matches `Promise.allSettled`
 settled records, so PTC programs compose without `try/catch`. See
-ADR-0016, ADR-0032, ADR-0041, ADR-0043, ADR-0044.
+ADR-0016, ADR-0032, ADR-0041, ADR-0043, ADR-0044, ADR-0053, ADR-0055.
 
 Four model words are in play in dispatch, and they are different facts rather than synonyms: the _requested model_ (what the caller asked for), the _session model_ (what the caller's session is on), the _configured default model_ (pi's fallback), and the _observed model_ (what the host saw run). A result can name the first and the fourth, and have them differ — that difference is the point of ADR-0044.
 
 **requested model** — the model a dispatch ASKS for: the `model` argument on
-`pi.dispatch` / `ptc_subagent`, else the agent definition's frontmatter
+`pi_task_ptc` / `pi_task_codemode`, else the agent definition's frontmatter
 `model:`. It is an instruction, not an observation: it outranks the _session
 model_, and when neither it nor a definition names one, the session model
 applies instead (ADR-0044 §Decision 1). A call-site value and a definition
@@ -701,7 +721,7 @@ _Avoid_: "default model" unqualified (it is the configured fallback, not the ses
 **observed model** — the provider/model a dispatched child was actually seen running, read by the host off the child's own assistant turns (last turn wins; either half may be missing). It is a measurement, never a child claim — the same authority rule as a record's `usage`, which the child also cannot declare (ADR-0032). Reported on `DispatchResult` / `TaskRecord` as `observedProvider` + `observedModel` (renamed by ADR-0045), rendered as a `model:` line on the model-facing surfaces, and stated in a refusal diagnostic. Absence means no observed assistant turn NAMED the pair — no turn, a pi within the declared floor that does not report it, or a record written before the fields existed — never "unknown model"; callers do not substitute the _requested model_ for it. ADR-0044 §Decision 2.
 _Avoid_: "actual model" (there is no ground truth beyond the measurement), "child model" (ambiguous between the requested, inherited and observed model), "the model" unqualified.
 
-**child-reported error** — the failure a dispatched child itself reports on an assistant turn: pi writes `stopReason: "error"` plus an `errorMessage` (empty content, zero usage) when a model call fails, retries a few times, exits 0. It is the child's own claim of WHY it failed, and a different channel from the host's inferences: `stderr` is best-effort and often empty, the exit code carries no signal here, and a dispatch _refusal_ means the harness declined to start a child at all. Both dispatch fronts put it on the result / record as `errorMessage`, verbatim; a `ptc_subagent` refusal renders it as a bounded diagnostic. Issue #70 (ADR-0022's silent-failure amendment) and ADR-0044 §Decision 3 are why a child that exits 0 with no text is no longer described as "produced no final text" alone.
+**child-reported error** — the failure a dispatched child itself reports on an assistant turn: pi writes `stopReason: "error"` plus an `errorMessage` (empty content, zero usage) when a model call fails, retries a few times, exits 0. It is the child's own claim of WHY it failed, and a different channel from the host's inferences: `stderr` is best-effort and often empty, the exit code carries no signal here, and a dispatch _refusal_ means the harness declined to start a child at all. Both dispatch fronts put it on the result / record as `errorMessage`, verbatim; a `pi_task_codemode` refusal renders it as a bounded diagnostic. Issue #70 (ADR-0022's silent-failure amendment) and ADR-0044 §Decision 3 are why a child that exits 0 with no text is no longer described as "produced no final text" alone.
 _Avoid_: "model error" (a cause, not the channel — the same channel carries rate limits and transport failures), "stderr" (a different, best-effort channel), "refusal" (the harness declining to start; a child that ran and failed is not a refusal).
 
 **dispatch model inheritance** — the rule that a dispatch which names no _requested model_ runs on
@@ -764,13 +784,14 @@ this is one), "child report API" (it is a pi tool, and the shape lives in the
 child's prompt, not in a schema the child reads at runtime).
 
 **why** — the caller's reason for one dispatch slice, carried as an optional argument named `why`
-on `pi.dispatch` / `ptc_subagent` and delivered to the child as its own `<pi-ptc-why>` block **after**
+on `pi_task_ptc` / `pi_task_codemode` and delivered to the child as its own `<pi-ptc-why>` block **after**
 the policy block. It is context, not authority: the task stays the deliverable, and a disagreement
 between the two is reported as a finding rather than acted on. Absent or blank emits no block at
 all. ADR-0042, renamed by ADR-0043: the term was `goal` until then, and the agent ecosystem already
 spends `goal` on an objective or a loop, so the name cost a reader more than it carried. `background`
-was the other candidate and is unavailable — `pi.dispatch` already has a `background` argument
-meaning "detach the child", one schema away. _Avoid_: "goal" (elsewhere that names an objective or a
+was the other candidate and was unavailable — the schema already carried a `background` argument
+meaning "detach the child", one schema away (ADR-0055 later retired that argument in favour of
+`wait`, so the reason the name was unavailable is now historical). _Avoid_: "goal" (elsewhere that names an objective or a
 loop), "context" (that is the host's `pi-ptc-context` policy block), "instructions" (it is not one),
 "prompt" (it is one input to it).
 
@@ -795,28 +816,34 @@ caller context, not caller data), "per-dispatch" (there is no per-call
 override), and reading the flag as a failure — the call still succeeds, it
 just says the reason was not carried.
 
-**dispatch concurrency** — the hard cap on concurrently in-flight
+**dispatch concurrency** — the cap on concurrently in-flight
 dispatch in one pi session. Default 8, configurable via
 `PtcConfig.dispatchConcurrency`; the live control is the
 `createBackgroundTaskRuntime({ concurrency })` call that sizes the
 session's one `DispatchSlotCounter`, which is acquired inside
 `dispatch()`. The cap is session-scoped, **not per-run**: every front
-spends it, and a background child holds its slot for its whole
+spends it, and a **running** child holds its slot for its whole
 lifetime. So two concurrent programs in one session share 8 rather
 than 8 each, and a program sharing a session with eight live
-background children can be refused every foreground slot. The 9th
-concurrent call resolves immediately with `{ status: "rejected",
-errorMessage: "dispatch concurrency limit reached" }` — a hard
-reject, never a queue, so an over-cap call is not parked behind a
-long-running child. Distinct from the soft hint for ordinary tool-call
+children can find every slot taken.
+**Over the cap the call QUEUES; it is never refused** (ADR-0056). The
+admission queue is FIFO, unbounded and has no timeout — the shape of
+libuv's thread pool — and **the queue IS the set of `queued` task
+records**: a request that joins it gets a record immediately, so a
+task that is waiting for a slot is as visible and as cancellable as one
+that is running. A slot is held only by a child that is actually up; a
+queued task holds none (it has no process yet). The two concurrency
+refusal messages are gone with the refusal. Distinct from the soft hint
+for ordinary tool-call
 concurrency (where pi's own parallel-tool limits are the real ceiling)
 and from `maxParallelSubCalls`, which has its own counter for builtin
 fan-out.
 
-**dispatch depth** — the per-run depth in a recursive `pi.dispatch` chain.
-The parent turn's PTC run is depth 0; a child spawned by `pi.dispatch`
-is depth 1; a grand-child is depth 3. Configurable via
-`PtcConfig.maxDispatchDepth` (default 3). A `pi.dispatch(...)` call whose
+**dispatch depth** — the per-run depth in a recursive `pi_task_ptc` chain.
+The parent turn's PTC run is depth 0; a child spawned by `pi_task_ptc`
+is depth 1; a grand-child is depth 2. Configurable via
+`PtcConfig.maxDispatchDepth` (default 3) — a `(depth+1)`-th dispatch is
+allowed only while `childDepth <= maxDispatchDepth`. A `pi_task_ptc(...)` call whose
 `childDepth = currentDepth + 1` would exceed `maxDispatchDepth` resolves
 immediately with `{ status: "rejected", errorMessage: "dispatch depth
 limit reached" }`. Aligns with dsh's `SubagentCapabilities.depthLimit`
@@ -833,7 +860,7 @@ the whole of what the prompt file adds, with pi's own prompt still underneath. S
 DSH's `subagent-context` injection; the only difference is the depth /
 max-depth attributes, which are pi-ptc-specific. ADR-0016 Recursive section, ADR-0039.
 
-**read-only tier** — the optional `readOnly` argument on a `pi.dispatch` call, in two tiers:
+**read-only tier** — the optional `readOnly` argument on a `pi_task_ptc` call, in two tiers:
 `"strict"` narrows the dispatched **child pi process's** tool list to the read set — the tools that
 **cannot write** — so a child that can search the web keeps that ability (ADR-0049: reading is not
 writing, and a narrowing that silently removed the only route to the web left the child with no
@@ -882,7 +909,7 @@ declared floor. `AgentToolResult.isError`, pi's own `codemode` extension,
 `ToolExposure` and the `exposure` field, and the `structuredContent` forward
 are all present in 0.99.0 and absent below it. Below that line the gap is a
 **capability absence, not a defect** — there is no `codemode` to hand
-orchestration to, so _surface mode_ detection resolves to `full` anyway, and
+orchestration to, so _surface mode_ detection resolves to `full_ptc` anyway, and
 this package compiles and runs there without any of the four. _Avoid_: "floor"
 unqualified (both terms are floors), "minimum pi version" (that is the declared
 floor), "0.99.0 is the floor" (true of these four capabilities, false of
@@ -1041,19 +1068,21 @@ instruction the section carries, not the section).
 **`<ptc>` section** — the custom system-prompt section this package writes on
 every turn, carrying how to reach a child on the surface in play. It exists
 because a tool's own description reaches the model only while that tool is
-offered to it, and on the `subagents` surface the pair that carried the calling
+offered to it, and on the `codemode_ptc` surface the pair that carried the calling
 convention was offered to a SCRIPT rather than to the model: measured
 2026-10-20, a parent there had no way to learn that a `codemode` script's tool
-table holds no `pi.dispatch`, wrote `await tools["pi.dispatch"]({ task })` into
+table holds no `pi_task_ptc`, wrote `await tools["pi.dispatch"]({ task })` into
 a script, and got `TypeError: tools.pi.dispatch does not exist` three times
-before falling back to `ptc_subagent`. A section does not have that dependency:
+before falling back to the codemode door (then named `ptc_subagent`). A section does not have that dependency:
 pi merges every custom section into the system prompt unconditionally, so the
 text reaches the model on every surface and in every run mode. Its content
-follows the surface — the program form on `full`, the top-level face on
-`subagents` — and when the _dispatch switch_ is off it says only that
+follows the surface — it is the _route registry_'s resident index, one line per
+road, and each road's "how to take it" line is written for the surface in play
+(the program form on `full_ptc`, the codemode door on `codemode_ptc`) — and when
+the _dispatch switch_ is off it says only that
 dispatching is off, because handing a model a convention it cannot follow is a
 wasted call. Distinct from the _skills section_, which is pi's own block and
-this package's duty to keep. ADR-0029, ADR-0050.
+this package's duty to keep. ADR-0029, ADR-0050, ADR-0058, ADR-0061.
 _Avoid_: "the PTC prompt" (it is one section of the system prompt), "dispatch
 section" (that is ADR-0016's recursive-dispatch section, a different thing).
 
@@ -1117,7 +1146,7 @@ flight (`isPartial: true`). Three visible parts: a shimmered description on
 the parent row, a sub-call tree under it, and right-aligned meta not yet
 present. The _subagent surface_'s call row joins the same partial/settled
 distinction with two differences: there is no sub-call tree under it, and its
-right-aligned meta states the dispatch **request** (`foreground`/`background`,
+right-aligned meta states the dispatch **request** (`waited`/`not waited`,
 the read-only tier, a _requested model_ when the call site pinned one) rather
 than the run's measured facts — so that meta is present from the first frame
 and only the shimmer band separates partial from settled. A **generalist** dispatch (no agent
@@ -1208,9 +1237,12 @@ binding's own concept, not the record we surface to the renderer).
 `"running" | "ok" | "error" | "cancelled" | "rejected"`. `running` is the
 moment between `call`-frame arrival and binding resolve; `ok` / `error`
 follow `binding.execute` resolution; `cancelled` is set when the run's
-`AbortSignal` fired before the binding resolved; `rejected` is set when
-the `pi.dispatch` capacity gate (ADR-0016 §2) declined the call before
-it started. ADR-0021 §6. _Avoid_: three-state collapsing (DSH has
+`AbortSignal` fired before the binding resolved; `rejected` is set when the
+dispatch was **refused** — `started: false` — by the depth gate, the
+_dispatch switch_, an unusable or unknown agent name, or a spawn that never
+happened.
+The concurrency cap is NOT among them: it queues now (ADR-0056), so an
+over-cap call is not a refusal. ADR-0021 §6. _Avoid_: three-state collapsing (DSH has
 running/ok/error; we add `cancelled` + `rejected` because the dispatcher
 already knows them).
 
@@ -1252,21 +1284,26 @@ cast. _Avoid_: "UUID" (a different format, and not lexically sortable), "id"
 unqualified (the format matters: it is what makes the ordering claim true).
 
 **dispatch task** — the instruction prose a caller passes as `task` to
-`pi.dispatch(...)` or `ptc_subagent`: what the child is asked to do, sent as its
+`pi_task_ptc(...)` or `pi_task_codemode(...)`: what the child is asked to do, sent as its
 user message (`Task: …`). It is not the whole assembled prompt (the appended
 system prompt carries the policy context), not the caller's reason (that is the
-dispatch `why`, ADR-0043), and not a **background task** (the _TaskRecord_
-lifecycle row a `{ background: true }` dispatch creates). _Avoid_: "task"
+dispatch `why`, ADR-0043), and not the **task record** (the _TaskRecord_
+lifecycle row every dispatch creates, ADR-0053). _Avoid_: "task"
 unqualified (ambiguous between this and the lifecycle row), "prompt" (the
 assembled whole), "goal" (the retired name of `why`, ADR-0043).
 
-**DispatchHandle** — the thin 3-field snapshot returned by background
-`pi.dispatch(...)` when `{ background: true }` is set:
-`{ taskId: ULID, label: string, status: "running" }`. Spawn-time projection
-of the TaskRecord; not updated on transition. Programs that need live
-state call `ptc_task_list` instead. See ADR-0022.
+**DispatchHandle** — the thin 3-field snapshot returned by
+`pi_task_ptc(...)` when `wait` is omitted (ADR-0055):
+`{ taskId: ULID, label: string, status: "running" | "queued" }`. Spawn-time projection
+of the TaskRecord; not updated on transition. `status` is `"running"` when the
+child is up and `"queued"` when the task is still waiting for a concurrency
+slot. Programs that need live
+state call `ptc_task_list` instead. See ADR-0022, ADR-0055, ADR-0056.
 
-**background dispatch** — the long-lived variant of `pi.dispatch`. The
+**background dispatch** — the machinery behind a child that OUTLIVES its call.
+The word is retired at the model-facing level (ADR-0055): there is no "background"
+mode any more, only the `wait` parameter — a call that omits `wait` gets a
+handle and its child keeps running. The
 spawning program's model observes the spawned child via `<bg-task-notification>`
 events delivered through the TaskRegistry subscription buffer, and via
 model-facing tools `ptc_task_list` / `ptc_task_output` / `ptc_task_stop`.
@@ -1283,7 +1320,8 @@ _narrowing mode_ (which decides what the model may CALL directly) and not
 _surface mode_ (which decides what is REGISTERED); it decides what may be
 STARTED. It never reaches a child that is already running: a child is its own
 process, so a refusal to start a new one cannot touch it — which is also why
-the _lifecycle face_ stays in front of the model while a task is in flight, and
+the _lifecycle face_ stays in front of the model while the session has a task
+record, and
 why the user is told at the moment of the switch that the running ones are NOT
 affected. A refused call comes back as `{ status: "rejected", started: false }`
 with the message `PTC is off in this session: no new child can be started (run /ptc on to allow them again)` — it names the
@@ -1296,7 +1334,7 @@ _dispatch depth_ caps, which refuse for capacity rather than for policy),
 "narrowing mode" (the other switch), "PTC mode" (the technology).
 
 **TaskRecord** — session-level _TaskRegistry_ row tracking the full
-lifecycle of one background child. 28 fields today: ADR-0022 §3's code block lists
+lifecycle of one dispatched child. 28 fields today: ADR-0022 §3's code block lists
 22 of them — its 19 originals (the block's "21 fields" heading is the authoring
 miscount it always was), the 2026-10-16 top-level `usage`, and the ADR-0044
 _observed model_ pair (`observedProvider`, `observedModel`, written at the same terminal close as
@@ -1317,22 +1355,25 @@ Independent of `DispatchResult` and `SubCallRecord` — the _child report_'s
 four-field `usage` view is derived from the record's own counter, not a second
 one. See ADR-0022 + ADR-0023 + ADR-0032 + ADR-0041 + ADR-0044.
 
-**TaskStatus** — the 6-state enum for `TaskRecord.status`:
-`running / stopping / succeeded / failed / canceled / lost`. The `queued`
-state is deliberately absent in v1 (spawn-or-reject, no in-task queue).
-See ADR-0022.
+**TaskStatus** — the 7-state enum for `TaskRecord.status`:
+`queued / running / stopping / succeeded / failed / canceled / lost`. The
+`queued` state was added by ADR-0056: a task waiting for a concurrency slot is
+already a task (the admission queue IS the set of `queued` records), so it is
+in the model face and can be withdrawn (`queued -> canceled`) without ever
+having had a process. See ADR-0022, ADR-0056, ADR-0057.
 
 **TaskRegistry** — session-level singleton holding `TaskRecord` rows and
 their per-subscriber `Subscription` cursors. On session restart,
 replays events whose cursor is ahead of the highest-scanned position.
-Its startup reconcile marks a `running`/`stopping` record `lost` (reason
+Its startup reconcile marks a `queued`/`running`/`stopping` record `lost` (reason
 `lost_on_session_restart`) only when the record's owner process is dead
 (or the record predates ownership); its shutdown sweep marks only its own
-still-running records `lost` (reason `session_ended_while_running`).
+not-yet-terminal records `lost` (reason `session_ended_while_running`) — a
+`queued` one is withdrawn from the queue rather than signalled.
 Reaping is owner-scoped — see _task owner_. See ADR-0022 + ADR-0023.
 
 **BackgroundTaskRuntime** — the session-scoped holder for everything the
-`ptc_task_*` tools and the background branch of `pi.dispatch` need: the
+`ptc_task_*` tools and the `wait`-less branch of `pi_task_ptc` need: the
 `TaskRegistry`, the `OutputStorage`, the notification pipeline, and the ONE
 `DispatchSlotCounter` that sizes the session's _dispatch concurrency_. It is
 constructed once in the extension factory, BEFORE any session exists, because
@@ -1342,7 +1383,7 @@ the holder closes that gap by exposing STABLE delegating objects whose
 per-session delegate is swapped underneath them. Before the first bind they
 delegate to an in-memory pair, so a session-less context (direct library use,
 unit tests) is fully usable. The slot counter lives HERE rather than per-run
-precisely so that a long-lived background child keeps counting against
+precisely so that a long-lived child (one that outlives its call) keeps counting against
 `dispatchConcurrency` across program boundaries; the task id is the slot
 token, and the release is idempotent per task, so exactly one slot is freed no
 matter which party (the detached pump or the shutdown reclaim) runs first.
@@ -1354,8 +1395,8 @@ distinctive), "task service" (it holds state, it does not serve anything).
 created a `TaskRecord`: `{ ownerPid, ownerBootMs }` (process pid + the
 runtime instance's start ms, minted once per _BackgroundTaskRuntime_).
 A record belongs to exactly one owner; only the owning runtime reaps or
-terminates it, so a sibling pi process sharing the session dir (every
-background `pi.dispatch` child does) neither reaps nor kills another
+terminates it, so a sibling pi process sharing the session dir (every child
+that outlives its call does) neither reaps nor kills another
 owner's tasks. Listing stays cross-owner. See ADR-0023.
 
 **Subscription** — per-subscriber cursor for one `TaskRecord`.
@@ -1366,7 +1407,7 @@ post-fork events only) and it names an explicit-reset surface
 tool ships in v1 — the caller supplies `since` and a resubscribe tool is
 deferred to v2. See ADR-0022.
 
-**output storage** — the persistence seam for a background task's captured
+**output storage** — the persistence seam for a task's captured
 output. The `TaskRecord` deliberately does NOT carry the child's result body:
 it keeps only a small projection — `outputRef` (the path), `outputBytes` (the
 size) and `outputPreview` (≤ 2 KB of inline text) — and the raw text is
@@ -1387,15 +1428,17 @@ contract is not the same as a log rotation).
 
 **`ptc_task_*` (model-facing management tools)** — the _lifecycle face_: three
 tools, offered to the model whenever a task may need managing, and withheld
-from it only while the _dispatch switch_ is off and no task is in flight
-(ADR-0050; before that they were never gated at all):
+from it only while the session has NO task record (ADR-0053, ADR-0057; before
+that they were never gated at all):
 `ptc_task_list({ status?, limit? })` returns matching TaskRecords
 (newest first, default limit 100); `ptc_task_output({ taskId, sinceBytes? })`
 dereferences `outputRef`, applies ADR-0015 truncateTail, and renders the
 persisted _child report_ ahead of the prose when the record reached
 `succeeded` (ADR-0032); `ptc_task_stop({ taskId, reason? })` triggers
-`running → stopping → canceled` (the dispatcher delivers the signal).
-See ADR-0022.
+`running → stopping → canceled` (the dispatcher delivers the signal), or
+`queued → canceled` for a task that is still waiting for a slot — it is
+withdrawn from the queue and never starts a child (ADR-0057).
+See ADR-0022, ADR-0056, ADR-0057.
 
 **`<bg-task-notification>` (event schema)** — user-role XML emitted to
 the model when a `TaskRecord` changes. Batch parent `<bg-task-notifications>`
@@ -1408,13 +1451,15 @@ cut, and XML-escaped), optional `<report-channel>` on a `succeeded` event (`tool
 `prompt-json` / `none` / `opted-out` — the record's declared channel, ADR-0032), optional
 `<output-ref>`, optional `<output-preview>` (only when outputBytes <= 2048). See ADR-0022.
 
-**dispatch sub-row** — the variant of a sub-row for `pi.dispatch(...)`
+**dispatch sub-row** — the variant of a sub-row for `pi_task_ptc(...)`
 calls. Uses the binding's `agent` argument for the args preview and reads
 its state from `DispatchResult`: a refusal (`status: "rejected"` with
-`started: false` — depth or concurrency gate, the _dispatch switch_, unknown
+`started: false` — the depth gate, the _dispatch switch_, an unknown
 agent, a spawn that
 never happened) is `rejected`, a child that ran and failed
-(`started: true`) is `error`, and everything else is `ok`. One per dispatch call; no recursion into the child PTC run's
+(`started: true`) is `error`, and everything else is `ok`. The concurrency
+cap is not among the refusals: over the cap the call queues (ADR-0056).
+One per dispatch call; no recursion into the child PTC run's
 tree (ADR-0021 §7).
 
 ## DeepSeek search module (ADR-0049, ADR-0048)
@@ -1494,7 +1539,7 @@ when to revisit. _Avoid_: "draft release" (that is a GitHub Releases concept).
 
 - **pi `subagent` extension** (`examples/extensions/subagent/index.ts` in
   `@earendil-works/pi-coding-agent`) is the user-installable extension that
-  spawns pi subprocesses. It is a separate object from `pi.dispatch`; the
+  spawns pi subprocesses. It is a separate object from `pi_task_ptc`; the
   latter is implemented inside this package and is _behaviour-compatible_
   with the former but not _cooperative_ (does not require the extension to
   be installed).
