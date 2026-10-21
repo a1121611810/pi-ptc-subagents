@@ -966,7 +966,7 @@ export interface SubagentRenderOptions extends PtcRenderOptions {
 
 /**
  * The `pi_task_codemode` call row: a heading, then the task preview (collapsed) or the task block
- * (expanded with ctrl+e).
+ * (expanded with ctrl+e). ADR-0054: the heading says what the call creates — a task.
  *
  * This row is a REQUEST view. It states the pinned `model` / `agentScope` the caller passed, and
  * `model=inherit` when the call names no model and no agent (the generalist child, where ADR-0044's
@@ -976,7 +976,7 @@ export interface SubagentRenderOptions extends PtcRenderOptions {
  * claim. The model the child ACTUALLY ran is a result fact and appears in the tool-result text,
  * never here: the row is rendered before the run has a result.
  *
- * Collapsed: `└─ subagent → (generalist)` with the state flags right-aligned, one task line and
+ * Collapsed: `└─ task → (generalist)` with the state flags right-aligned, one task line and
  * `… 还有 N 行（ctrl+e 展开）`. Expanded: `label` / `why` children and the task block. The task
  * row carries the first line; the continuation shows at most {@link MAX_LOG_LINES_EXPANDED} more,
  * the same expanded-block line budget the out/log blocks use, so a long task cannot make an
@@ -1014,7 +1014,7 @@ export function renderSubagentToolCall(
     flags.push("model=inherit");
   }
   if (args.agentScope !== undefined) flags.push("scope=" + args.agentScope);
-  const title = `${TREE_ROOT}${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("accent", "→ " + who)}`;
+  const title = `${TREE_ROOT}${theme.fg("toolTitle", theme.bold("task"))} ${theme.fg("accent", "→ " + who)}`;
   const items: RowLine[] = [{ left: title, right: theme.fg("dim", flags.join(" · ")) }];
   if (options.expanded !== true) {
     const first = taskLines[0];

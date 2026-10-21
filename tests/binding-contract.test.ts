@@ -87,6 +87,8 @@ const NON_BINDING_VOCABULARY: readonly string[] = [
   "details: null",
   "{ text, status, ... }",
   "status",
+  'status: "rejected"',
+  "errorMessage",
   "diff",
   "patch",
 ];
@@ -206,7 +208,10 @@ function namesBinding(text: string, name: string): boolean {
  * itself would pass even if the two surfaces shipped different text.
  */
 const CONTRACT_START = "Return value: every ";
-const CONTRACT_END = "read `status`.";
+// ADR-0054: the dispatch note ends with the shared task-door sentence, so the slice ends with
+// that sentence's last words. It is stated here as a literal rather than derived from the
+// constant, so a reword of the constant cannot quietly move the slice's end with it.
+const CONTRACT_END = "so read those two.";
 
 async function contractOf(surface: string, description?: string): Promise<string> {
   const text = description ?? (await descriptionOf(surface));
@@ -344,6 +349,42 @@ describe("a note exists only where behaviour genuinely differs", () => {
     expect(contract.BINDING_NOTES.get("bash"), "the exit case is stated once").toContain(
       "non-zero exit",
     );
+  });
+});
+
+/**
+ * The task door's result shape is ONE sentence on TWO surfaces (ADR-0054).
+ *
+ * The PTC plane's model reads it in the binding contract's note; the codemode plane's model reads
+ * it in the door's own description. Same object, same statement — and a statement written twice is
+ * a statement that will drift, which is the failure this whole module exists to prevent.
+ *
+ * The assertion is on the CONSTANT, not on a wording: both sides must contain that exact string,
+ * so a reword on one side without the other turns this red.
+ */
+describe("the task door's result shape is one sentence on two surfaces", () => {
+  test("the binding contract's note carries the shared sentence", () => {
+    expect(
+      contract.BINDING_NOTES.get(DISPATCH_BINDING_NAME),
+      "the PTC door's note carries the shared sentence",
+    ).toContain(contract.TASK_DOOR_RESULT_NOTE);
+  });
+
+  test("the codemode door's description carries the same shared sentence", async () => {
+    const { createPtcSubagentTool } = await import("../src/tools/subagent.ts");
+    const tool = createPtcSubagentTool({ cwd: "/repo", depth: 0, maxDispatchDepth: 3 });
+    expect(
+      tool.description,
+      "the codemode door says the same thing, from the same constant",
+    ).toContain(contract.TASK_DOOR_RESULT_NOTE);
+  });
+
+  test("the shared sentence states the refusal as a result, not an exception", () => {
+    // The claim the sentence makes, spelled out so a reword that loses it turns this red.
+    const note = contract.TASK_DOOR_RESULT_NOTE;
+    expect(note, "it says a refusal is a result").toContain("never throws");
+    expect(note, "and names the status a refusal carries").toContain('status: "rejected"');
+    expect(note, "and the message that says why").toContain("errorMessage");
   });
 });
 

@@ -4,6 +4,8 @@ Status: accepted (2026-10-21). 修订：[ADR-0022](./0022-background-dispatch.md
 
 > **Amended by [ADR-0052](./0052-the-two-doors-share-one-prefix.md) (2026-10-21): the two task doors are renamed — `pi.dispatch` → `pi_task_ptc` (the PTC door, a binding inside a program) and `ptc_subagent` → `pi_task_codemode` (the codemode door, reachable from a `codemode` script) — with no alias and no compatibility shim. This record's decisions stand unchanged; read its `pi.dispatch` / `ptc_subagent` as those names.**
 
+> **Amended by [ADR-0054](./0054-the-two-doors-give-one-object.md) (2026-10-21): the reason this record gave for NOT calling the foreground result's id `taskId` is gone — the door now tells a handle from a result by `status` (`isDispatchHandle`), not by the presence of an id, so the two shapes can no longer be confused. The fields keep the names this record gave them (`recordId` / `recordLabel` on the result, `taskId` / `label` on the handle); unifying the two names is now two lines in `src/runtime/dispatch.ts` and rides along with the ticket that owns that file.**
+
 ## Context
 
 到 2026-10-21 为止，本包里有**两件**叫「派发」的事，而它们只在后台那件上留下痕迹：

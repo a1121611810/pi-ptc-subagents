@@ -444,6 +444,21 @@ const EXTERNAL_VOCABULARY: ReadonlyMap<string, string> = new Map([
   // A2. pi 0.99.1 内建 codemode 扩展的沙箱全局函数，本仓只是文档层面提及，
   // 从不声明也从不调用（QuickJS 侧无 fs / 无网络，无法实现等价物）。
   ["describeTool", "pi 内建 codemode 沙箱的全局函数，本仓不声明（ADR-0025）"],
+  // A2b. pi 1.3.0 内建 codemode 扩展的三个内部函数。ADR-0054 引用它们是为了陈述**实测**：声明的
+  // `outputSchema` 决定脚本拿到文本还是结构化值（`describeOutput` / `describeFields`），而目录有
+  // 预算、放不下的条目会被丢掉（`selectCatalog`）。它们是宿主实现细节，本仓既不声明也不复制。
+  [
+    "describeOutput",
+    "pi 内建 codemode 扩展的内部函数，本仓不声明（ADR-0054 引用它是为了陈述实测的输出形状）",
+  ],
+  [
+    "describeFields",
+    "pi 内建 codemode 扩展的内部函数，本仓不声明（ADR-0054 引用它是为了陈述实测的输出形状）",
+  ],
+  [
+    "selectCatalog",
+    "pi 内建 codemode 扩展的内部函数，本仓不声明（ADR-0054 引用它是为了陈述目录的预算代价）",
+  ],
   [
     "ALL_TOOLS",
     "pi 内建 codemode 沙箱的全局量，本仓不声明；ADR-0025 §3 引用它是为了陈述实测结果，不是调用它",
@@ -1515,11 +1530,11 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     "docs/adr/0031-open-source-and-publish-authority.md:129 -> src/runtime/limits.ts:4":
       "The numbers are DSH's",
     "docs/adr/0032-child-report.md:15 -> src/runtime/dispatch.ts:2104": "function assistantText(",
-    "docs/adr/0032-child-report.md:24 -> src/tools/subagent.ts:240":
+    "docs/adr/0032-child-report.md:24 -> src/tools/subagent.ts:263":
       "export const SUBAGENT_OUTPUT_SCHEMA",
     "docs/adr/0032-child-report.md:37 -> src/runtime/dispatch.ts:2127": "function accumulateUsage(",
-    "docs/adr/0032-child-report.md:59 -> src/tools/subagent.ts:592":
-      "structuredContent: structured,",
+    "docs/adr/0032-child-report.md:59 -> src/tools/subagent.ts:646":
+      "structuredContent: outcome as unknown as OutcomeJson,",
     "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:281":
       "outputSchema: LIST_OUTPUT_SCHEMA,",
     // 2026-10-19（#219-#222 · retro）：抽取器现在展开逗号后的数字，这两行才第一次进入判定面。
@@ -1575,6 +1590,11 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
    * 而分散的规则读起来像各自的例外——包括一次真的按注释里的旧数字去"修正"数组。
    */
   const IN_REPO_PIN_BASELINE: readonly string[] = [
+    // 2026-10-21（ADR-0054 · 两扇门同形）：`src/tools/subagent.ts` 的 schema 声明与 settled 路径的
+    // `structuredContent` 赋值各移了一行——ADR-0054 把那个投影换成原始结果，那一段重写了。两条按
+    // **内容**逐条核对后改正：schema 那条仍然落在 `export const SUBAGENT_OUTPUT_SCHEMA` 上；settled
+    // 那条落在新的 `structuredContent: outcome as unknown as OutcomeJson,` 上——**handle 分支的同名
+    // 那一行在它上面**，取错就会钉到另一条（ADR-0052 那一轮记过同一条教训）。正文引用与本表同步。
     // 2026-10-21（ADR-0052 · 两扇门改名）：26 篇记录在正文顶部各加了一行修订指针
     // （`> Amended by ADR-0052 …`），这 26 条引用的**文档侧**行号整体 +2（0013 146→148、
     // 0016 43→45、0026 260→262、0029 五条 31→33 / 34→36 / 145→147 / 176→178 / 213→215、
@@ -1786,9 +1806,9 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     //   766 → 803 = `outputSchema: STOP_OUTPUT_SCHEMA,`
     // 233 = `outputSchema: LIST_OUTPUT_SCHEMA,` 未动。ADR-0032 正文同一行的引用同步改为 233, 584, 803。
     "docs/adr/0032-child-report.md:15 -> src/runtime/dispatch.ts:2104",
-    "docs/adr/0032-child-report.md:24 -> src/tools/subagent.ts:240",
+    "docs/adr/0032-child-report.md:24 -> src/tools/subagent.ts:263",
     "docs/adr/0032-child-report.md:37 -> src/runtime/dispatch.ts:2127",
-    "docs/adr/0032-child-report.md:59 -> src/tools/subagent.ts:592",
+    "docs/adr/0032-child-report.md:59 -> src/tools/subagent.ts:646",
     "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:281",
     "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:637",
     "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:870",

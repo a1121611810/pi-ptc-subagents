@@ -6,7 +6,7 @@ Every model-facing tool this package registers returns **two** result channels:
 | ------------------- | ------------------------- | ----------------------------------------------- |
 | `content`           | the model, and the TUI    | the text block(s) — unchanged by anything below |
 | `details`           | the TUI renderers         | this package's own richer structure, per tool   |
-| `structuredContent` | **codemode scripts only** | a lean projection, declared by `outputSchema`   |
+| `structuredContent` | **codemode scripts only** | the result object, declared by `outputSchema`   |
 
 `structuredContent` is the one that is easy to get wrong by assumption, so this page states what it
 is for and what it is not.
@@ -28,7 +28,7 @@ the string `"Started background task 01JABC…"` and had to regex the id out.
 ```js
 // pi 0.99.1+ / 1.0.0
 const started = await tools.pi_task_codemode({ task: "survey the auth module", background: true });
-text(`spawned ${started.task_id}`); // an object, not a string
+text(`spawned ${started.taskId}`); // an object, not a string
 
 const rows = await tools.ptc_task_list({ status: ["running"] });
 for (const t of rows.tasks) {
@@ -41,18 +41,24 @@ for (const t of rows.tasks) {
 | `ptc_task_list`    | `{ tasks: [{ id, status, agent, depth, label, output_bytes?, error_message? }], count }`                                                             |
 | `ptc_task_output`  | `{ task_id, status, output, output_bytes, output_preview?, output_truncated, output_full_path?, report_channel?, read_only_tier?, report?, usage? }` |
 | `ptc_task_stop`    | `{ task_id, status, from_status, stop_reason? }`                                                                                                     |
-| `pi_task_codemode` | `{ task_id?, status, exit_code?, report_channel, read_only_tier?, report?, usage? }`                                                                 |
+| `pi_task_codemode` | the **raw** task result: `{ text, status, started, agentName, durationMs, exitCode, reportChannel, recordId?, recordLabel?, … }`                     |
 
 Optional keys are **omitted**, never present-and-null, so `Object.hasOwn(t, "error_message")` is
 the test for "this task had an error", not `t.error_message !== undefined`.
 
 Two fields carry the useful asymmetry:
 
-- `pi_task_codemode`: `task_id` is present only for a **background** spawn and `exit_code` only for a
-  foreground one, so a script can tell "I have a handle, poll it" from "this already finished"
-  without parsing prose.
+- `pi_task_codemode`: `status` is the discriminant. `"running"` is a handle to poll with
+  `ptc_task_output`; `"fulfilled"` is a child that already answered; `"rejected"` is a call that was
+  refused, with `errorMessage` saying which gate said no. A settled call names the task it created
+  under `recordId`, and a handle names the task it is polling under `taskId`.
 - `ptc_task_output`: `status` is the task's current state, so a polling script does not need a
   second `ptc_task_list` call.
+
+`pi_task_codemode` is the **same object** the PTC door resolves with — the raw result, field for
+field, under the same names. The `pi_task_ptc` binding hands a PTC program exactly this value, so
+a script and a program read one vocabulary instead of two, and the child's own working text
+(`text`) is in it either way.
 
 `usage` (issue #199) is the host's own count — `input`, `output`, `cost`, `turns`, the same four
 fields `report.usage` carries — and it is sourced from the record's / result's own accumulator
@@ -75,11 +81,16 @@ channels never disagree about a measurement.
   `outputPreview` of up to 2 KB; a 100-row `ptc_task_list` mirroring it would push ~200 KB into a
   sandbox whose purpose is to keep intermediate data away from the model. The two channels are
   allowed to drift, deliberately.
-- **Not a failure channel.** The `ptc_task_*` and `pi_task_codemode` error paths throw. A script gets a
-  rejected promise, not a structured error object — pi has no channel for that on this API.
+- **Not a failure channel — for the task doors.** The `ptc_task_*` error paths throw: a script gets
+  a rejected promise, not a structured error object. The two **task** doors are the exception
+  (ADR-0054): a refused `pi_task_codemode` or `pi_task_ptc` call comes back as a result whose
+  `status` is `"rejected"` and whose `errorMessage` says which gate said no. A gate that said no is
+  not a broken call, and one child's refusal must not take its siblings down with it.
 
 `pi_task_ptc` declares no `structuredContent` and is unchanged: it resolves to `{ text, status, … }`
-with no `content` at all, and the binding contract already names it as the exception.
+with no `content` at all, and the binding contract already names it as the exception. That value is
+the same one `pi_task_codemode` hands a script, so the two doors are one object seen from two
+planes.
 
 ## Which surface am I on?
 

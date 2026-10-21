@@ -6,6 +6,8 @@ status: accepted (2026-10-02). §Context amended 2026-10-09: `ptc_subagent` is n
 
 > **Amended by [ADR-0052](./0052-the-two-doors-share-one-prefix.md) (2026-10-21): the two task doors are renamed — `pi.dispatch` → `pi_task_ptc` (the PTC door, a binding inside a program) and `ptc_subagent` → `pi_task_codemode` (the codemode door, reachable from a `codemode` script) — with no alias and no compatibility shim. This record's decisions stand unchanged; read its `pi.dispatch` / `ptc_subagent` as those names.**
 
+> **Amended by [ADR-0054](./0054-the-two-doors-give-one-object.md) (2026-10-21): the codemode door's `structuredContent` is no longer a projection — it is the RAW result, field for field, under the same names the PTC door resolves with, so the child's own text is in it and the two doors give one object. The `outputSchema` stays (dropping it would cost the script `status`, the task id and `report`), and it is now the full result shape. This record's decisions for the OTHER tools stand unchanged; read its `ptc_subagent` row as the codemode door's new raw shape.**
+
 # The model-facing tools declare a structured result for codemode, and it is a projection rather than a mirror
 
 ## Context

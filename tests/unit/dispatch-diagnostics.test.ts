@@ -554,42 +554,49 @@ describe("describeSettledFailure", () => {
 // ---------------------------------------------------------------------------
 
 describe("pi_task_codemode refuses with the bounded diagnostic", () => {
-  interface Thrown {
-    message: string;
+  interface Refusal {
+    /** The text a reader sees; the diagnostic lives here. */
+    text: string;
+    /** The raw result the two doors both hand back (ADR-0054). */
+    result: { status?: string; errorMessage?: string; started?: boolean };
   }
 
-  /** One tool call driven by the mock lifecycle; the call must REJECT. */
-  async function callAndExpectThrow(
+  /**
+   * One tool call driven by the mock lifecycle.
+   *
+   * ADR-0054: a refusal RESOLVES, it does not reject. The diagnostic is still the bounded one and
+   * it is still in the same wording — only the delivery changed, from an exception to a result the
+   * caller can read. So the helper reads the text the tool resolved with, and the raw result
+   * beside it.
+   */
+  async function callAndExpectRefusal(
     dir: string,
     harness: Harness,
     events: readonly ParsedAgentEvent[],
     exitCode: number,
     options: { depth?: number } = {},
-  ): Promise<Thrown> {
+  ): Promise<Refusal> {
     const tool = createPtcSubagentTool({
       cwd: dir,
       depth: options.depth ?? 0,
       maxDispatchDepth: DEFAULT_CONFIG.maxDispatchDepth,
       getDispatchDeps: () => harness.deps,
     });
-    const execution = tool
-      .execute(
-        "call-diagnostic",
-        { task: "probe the child" },
-        undefined,
-        undefined,
-        undefined as never,
-      )
-      .then(
-        (value: unknown) => ({ ok: true as const, value }),
-        (error: unknown) => ({ ok: false as const, error }),
-      );
+    const execution = tool.execute(
+      "call-diagnostic",
+      { task: "probe the child" },
+      undefined,
+      undefined,
+      undefined as never,
+    );
     await driveChild(harness.lifecycle, events, exitCode);
-    const outcome = await execution;
-    if (outcome.ok) throw new Error("pi_task_codemode resolved a refused call");
-    return {
-      message: outcome.error instanceof Error ? outcome.error.message : String(outcome.error),
+    const value = (await execution) as {
+      content: { type: string; text: string }[];
+      structuredContent?: unknown;
     };
+    const result = (value.structuredContent ?? {}) as Refusal["result"];
+    expect(result.status, "the refusal is a result, not an exception").toBe("rejected");
+    return { text: value.content[0]?.text ?? "", result };
   }
 
   async function withDir<T>(body: (dir: string) => Promise<T>): Promise<T> {
@@ -604,8 +611,8 @@ describe("pi_task_codemode refuses with the bounded diagnostic", () => {
   test("the refusal carries the 429 text, the exit code, the turn count and the model", async () => {
     await withDir(async (dir) => {
       const harness = createHarness();
-      const { message } = await callAndExpectThrow(dir, harness, FIXTURE_EVENTS, 0);
-      expect(message).toBe(
+      const { text, result } = await callAndExpectRefusal(dir, harness, FIXTURE_EVENTS, 0);
+      expect(text).toBe(
         "pi_task_codemode refused the call: " +
           FINAL_RATE_LIMIT_ERROR +
           " (child ran, exit=0, turns=4, reportChannel=none, model=" +
@@ -614,7 +621,10 @@ describe("pi_task_codemode refuses with the bounded diagnostic", () => {
           CAPTURED_MODEL +
           ")",
       );
-      expect(message).not.toContain("undefined");
+      expect(text).not.toContain("undefined");
+      // The same cause, on the channel a script reads: the result's own `errorMessage`, not a
+      // string the front composed.
+      expect(result.errorMessage).toContain(FINAL_RATE_LIMIT_ERROR);
     });
   });
 
@@ -623,18 +633,18 @@ describe("pi_task_codemode refuses with the bounded diagnostic", () => {
     // front concatenated it. The fixture for it is "no events at all".
     await withDir(async (dir) => {
       const harness = createHarness();
-      const { message } = await callAndExpectThrow(dir, harness, [], 1);
-      expect(message).toBe(
+      const { text } = await callAndExpectRefusal(dir, harness, [], 1);
+      expect(text).toBe(
         "pi_task_codemode refused the call: the child failed without an error message " +
           "(child ran, exit=1, turns=0, reportChannel=none)",
       );
-      expect(message).not.toContain("undefined");
+      expect(text).not.toContain("undefined");
     });
   });
 
   test("a pre-spawn refusal is described as the harness declining", async () => {
     // No child reaches the lifecycle here — the depth gate refuses first — so this test awaits
-    // the rejection directly rather than driving a spawn that must never happen.
+    // the result directly rather than driving a spawn that must never happen.
     await withDir(async (dir) => {
       const tool = createPtcSubagentTool({
         cwd: dir,
@@ -642,16 +652,17 @@ describe("pi_task_codemode refuses with the bounded diagnostic", () => {
         maxDispatchDepth: DEFAULT_CONFIG.maxDispatchDepth,
         getDispatchDeps: () => createHarness().deps,
       });
-      const outcome = await tool
-        .execute("call-depth", { task: "too deep" }, undefined, undefined, undefined as never)
-        .then(
-          (value: unknown) => ({ ok: true as const, value }),
-          (error: unknown) => ({ ok: false as const, error }),
-        );
-      if (outcome.ok) throw new Error("pi_task_codemode resolved a refused call");
-      const message =
-        outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
-      expect(message).toBe(
+      const value = (await tool.execute(
+        "call-depth",
+        { task: "too deep" },
+        undefined,
+        undefined,
+        undefined as never,
+      )) as { content: { type: string; text: string }[]; structuredContent?: unknown };
+      const result = (value.structuredContent ?? {}) as Refusal["result"];
+      expect(result.status, "the refusal is a result, not an exception").toBe("rejected");
+      expect(result.started, "and no child was started").toBe(false);
+      expect(value.content[0]?.text).toBe(
         "pi_task_codemode refused the call: dispatch depth limit reached " +
           "(harness declined to start, exit=-1, turns=0, reportChannel=none)",
       );
