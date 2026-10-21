@@ -1,5 +1,6 @@
 /**
- * `pi_task_codemode` (ADR-0025, renamed by ADR-0052): the codemode door for creating a task.
+ * `pi_task_codemode` (ADR-0025, renamed by ADR-0052, reshaped by ADR-0054): the codemode door for
+ * creating a task.
  *
  * Why it exists: the PTC door `pi_task_ptc` can only be reached from *inside* a PTC program. A
  * session that hands orchestration to pi's `codemode` still needs a way in -- the pair sits at
@@ -14,39 +15,41 @@
  * Layering, per spec decision 9: this tool is a front and owns no lifecycle. It builds the
  * same DispatchContext the binding builds and calls the same `dispatch()`. Depth, concurrency,
  * the six-state task record and `ptc_task_*` visibility all come from the dispatcher, so a
- * fix in one place fixes both call sites. The one thing it adds is a difference the binding
- * could not have: a refused call surfaces as a tool error rather than as a DispatchResult the
- * model has to learn to read.
+ * fix in one place fixes both call sites.
+ *
+ * **The two doors give the same object** (ADR-0054, spec decision 3). The PTC door resolves with
+ * the raw `DispatchResult` -- or the raw `DispatchHandle` when the caller did not wait -- and this
+ * door hands a `codemode` script that same raw value as its `structuredContent`. No projection, no
+ * envelope, no renamed keys: a script and a PTC program read the same field names, so what a
+ * model learned on one plane it writes on the other.
+ *
+ * **Neither door throws** (ADR-0054). A refusal is a result, not an exception: `status:
+ * "rejected"` plus an `errorMessage`, in the shape the dispatcher already produces. This door used
+ * to throw, which made a refused call indistinguishable from a broken one and cost a sibling
+ * result with it.
  *
  * The argument schema is the binding's own, imported -- not a second copy that could drift.
  * A test pins the two key sets equal.
  *
- * The RESULT is declared twice, on purpose: `content` is what a model reads, `structuredContent`
- * is what a codemode script reads. A script creating a task through `ptc_run_code` reads its own
- * result over there instead, so this second channel is for the direct call -- and without it that
- * caller has to regex the ULID out of `"Started background task 01JABC..."`. See
- * {@link SUBAGENT_OUTPUT_SCHEMA} for why that projection is not a mirror of `details`.
- *
- * A child also produces a **child report** (ADR-0032). It is rendered into the text the
- * model reads -- see `renderChildReportText` -- with the report key in {@link SUBAGENT_OUTPUT_SCHEMA}
- * for callers that have a structured channel. (ADR-0032 once argued this surface had no
- * `codemode` and therefore no reader for `structuredContent`; as of 2026-10-09 the `codemode_ptc`
- * surface ships `codemode` and this tool is at `codemode` reach, so a script reaches the
- * structured side through `ctx.executeTool()`. The rendering below is unchanged and is what the
- * model reads either way.)
+ * The RESULT travels on three channels, on purpose: `content` is the text a reader sees, `details`
+ * is this package's own structure, and `structuredContent` is what a `codemode` script reads.
+ * The last two carry the SAME raw object (ADR-0054) -- one result, two channels to it, not two
+ * results.
  */
 
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { defineCompatTool } from "./pi-compat-types.ts";
 import { Type } from "typebox";
-import type { TArray, TNumber, TObject, TOptional, TString } from "typebox";
+import type { TArray, TBoolean, TNumber, TObject, TOptional, TString } from "typebox";
 import { DISPATCH_PARAMETERS } from "../runtime/bindings.ts";
 import type { DispatchDeps, DispatchInput, DispatchResult } from "../runtime/dispatch.ts";
 import {
   dispatch,
   describeRegisteredAgentRoster,
+  isDispatchHandle,
   resolveReadOnlyTier,
 } from "../runtime/dispatch.ts";
+import type { PtcJsonObject } from "../runtime/protocol.ts";
 import {
   formatObservedModel,
   readContextModel,
@@ -55,6 +58,7 @@ import {
 import type { DispatchHandle } from "../runtime/task-registry.ts";
 import type { ULID } from "../runtime/task-storage.ts";
 import { renderChildReportText, renderSubagentToolCall, type SubagentCallArgs } from "./render.ts";
+import { TASK_DOOR_RESULT_NOTE } from "./binding-contract.ts";
 import { renderReadOnlyTierText } from "./read-only-tier-text.ts";
 import { renderWhySuppressedText } from "./why-suppressed-text.ts";
 
@@ -110,28 +114,80 @@ export const SUBAGENT_TOOL_NAME = "pi_task_codemode";
 
 const HANDLE_TEXT = "Started background task ";
 
-/** One shape for both dispatch outcomes, so the tool's result type has a single form. */
-export interface SubagentDetails {
-  /** The background task's id; set only for a background spawn. */
-  taskId: string | undefined;
-  /** `background` when the call returned a handle, else the dispatcher's own status. */
-  status: string;
-  /** The child's exit code; undefined for a background spawn that has not finished. */
-  exitCode: number | undefined;
-}
 export type AnyTool = ToolDefinition<any, any, any>;
 
-/** Written out explicitly for `isolatedDeclarations`, as `DISPATCH_PARAMETERS` is. */
+/**
+ * The raw outcome, as the JSON value `structuredContent` has to be (ADR-0054).
+ *
+ * `structuredContent` is typed as pi's `JsonValue`, whose object branch is an index signature
+ * `{ [key: string]: JsonValue }`. An INTERFACE never gets that implicitly, and `DispatchResult`
+ * is an interface whose optional fields are `X | undefined` -- a value `JsonValue` does not
+ * admit. So the outcome is carried as this shape instead.
+ *
+ * The cast is sound because the dispatcher builds the object with ABSENT optional keys, never
+ * `undefined`-valued ones: a key that does not apply is missing, and a missing key is what the
+ * JSON boundary would have dropped anyway. `PtcJsonObject` is this package's own JSON type
+ * (`src/runtime/protocol.ts`), used here so the cast does not depend on which pi version
+ * exports which name.
+ */
+type OutcomeJson = PtcJsonObject;
+
+/**
+ * The declared shape of what a `codemode` script receives (ADR-0054).
+ *
+ * It is the RAW result shape, field for field, under the SAME names the PTC door's value carries
+ * — so the two doors are one object seen from two planes. The projection this replaces renamed
+ * the fields (`report_channel`, `exit_code`, `task_id`) and kept only the ones that applied to
+ * the branch it was projecting, which is how the child's own text (`text`) went missing while
+ * the declared schema said nothing about it.
+ *
+ * ONE flat object rather than a union of the two shapes: pi renders the declared schema into the
+ * `codemode` catalogue by its `properties`, and a union has none, so it would render as an opaque
+ * type. `status` is the only field BOTH shapes carry, so it is the only required one — and it is
+ * also the discriminant: `"running"` is a handle, `"fulfilled"` or `"rejected"` is a result. Every
+ * other field's description says which shape carries it.
+ *
+ * Written out explicitly for `isolatedDeclarations`, as `DISPATCH_PARAMETERS` is.
+ */
 type SubagentOutputSchema = TObject<{
-  task_id: TOptional<TString>;
+  text: TOptional<TString>;
   status: TString;
-  exit_code: TOptional<TNumber>;
-  report_channel: TString;
+  started: TOptional<TBoolean>;
+  agentName: TOptional<TString>;
+  durationMs: TOptional<TNumber>;
+  exitCode: TOptional<TNumber>;
+  reportChannel: TOptional<TString>;
+  errorMessage: TOptional<TString>;
+  taskId: TOptional<TString>;
+  label: TOptional<TString>;
+  recordId: TOptional<TString>;
+  recordLabel: TOptional<TString>;
+  observedProvider: TOptional<TString>;
+  observedModel: TOptional<TString>;
+  stderr: TOptional<TString>;
+  readOnlyTier: TOptional<TString>;
+  whySuppressed: TOptional<TBoolean>;
+  usage: TOptional<SubagentUsageSchema>;
   report: TOptional<SubagentReportSchema>;
 }>;
 
 /**
- * The child report as the projection carries it (ADR-0032 §`child report`).
+ * The host's own counter, as `DispatchResult.usage` carries it (ADR-0044 / issue #199).
+ *
+ * Six fields, not the four the report's own `usage` block carries: this is the accumulator the
+ * host measured, and it counts the cache reads and writes the report block does not mention.
+ */
+type SubagentUsageSchema = TObject<{
+  input: TNumber;
+  output: TNumber;
+  cacheRead: TNumber;
+  cacheWrite: TNumber;
+  cost: TNumber;
+  turns: TNumber;
+}>;
+
+/**
+ * The child report as the raw result carries it (ADR-0032 §`child report`).
  *
  * Structurally identical to `ChildReport` — `summary` / `findings[{what,evidence}]` /
  * `files_touched` / `usage` — and named apart from it so the two can be held together in one
@@ -139,9 +195,8 @@ type SubagentOutputSchema = TObject<{
  * host-stamped `usage` and all, because a child cannot measure its own tokens (see
  * `ChildReportPayload`).
  *
- * A `type` alias rather than an `interface`: `structuredContent` has to satisfy
- * `JsonObject`'s `[key: string]: JsonValue` index signature, and only an object TYPE gets the
- * implicit one an interface never has.
+ * `files_touched` stays snake_case because that is the child's OWN wire spelling (ADR-0032): the
+ * raw object is carried verbatim, and renaming one key of it would be a projection again.
  */
 type SubagentReportProjection = {
   summary: string;
@@ -164,110 +219,162 @@ type SubagentReportSchema = TObject<{
 }>;
 
 /**
- * What `structuredContent` may be: one branch per dispatch outcome, and NO key is optional.
- *
- * The branches are written out rather than declared as `{ task_id?: string; ... }` for a concrete
- * reason, not a stylistic one. An optional property has type `string | undefined`, which is not a
- * `JsonValue`, so `AgentToolResult.structuredContent?: JsonValue` rejects it -- and so does an
- * optional-shaped union, because TypeScript normalises the union of two object literals by adding
- * `?: undefined` to whichever key the other branch lacks. Naming the branches keeps every property
- * present, which is also what makes "this key is absent" a property of the VALUE rather than of a
- * type.
- *
- * The status-only branch is defensive: `DispatchResult.exitCode` is a required `number`, so a
- * foreground outcome always carries one. `SubagentDetails.exitCode` is not required, and this
- * projection reads the details rather than the outcome, so the no-exit-code case is spelled out
- * rather than assumed away.
- *
- * `report` is a fourth branch rather than a key on the other three for the same reason: the key is
- * ABSENT whenever the child produced no report, and a background handle has not finished yet, so
- * neither of those outcomes has a report to carry.
- */
-type SubagentStructuredContent =
-  | { task_id: string; status: string; report_channel: string }
-  | { status: string; exit_code: number; report_channel: string }
-  | { status: string; report_channel: string }
-  | {
-      status: string;
-      exit_code: number;
-      report_channel: string;
-      report: SubagentReportProjection;
-    };
-
-/**
  * The machine-readable result, declared as the tool's `outputSchema` so pi hands a codemode script
  * this object *instead of* the text block (`ToolDefinition.outputSchema`: "codemode scripts then
  * receive it instead of the text content"). It never reaches the model: `structuredContent` is
  * documented as not sent to the model, so declaring it changes nothing for a direct tool call.
  *
- * NOT a mirror of {@link SubagentDetails}. `details` is the TUI's structure and can hold `undefined`;
- * `structuredContent` is JSON, and `JsonValue` has no `undefined` -- so the half of each outcome
- * that does not apply is OMITTED rather than set. That omission IS the contract: `task_id` present
- * means "here is a handle, poll it", `exit_code` present means "this one already ran to completion",
- * and a script can tell the two apart without parsing a word of the text.
+ * **It is the raw result, declared field for field** (ADR-0054). The projection it replaces
+ * renamed the keys (`report_channel`, `exit_code`, `task_id`) and kept only the ones that applied
+ * to the branch it was projecting — which is how the child's own text (`text`) went missing: the
+ * script got a structured value in place of the text block, and that value had no prose in it.
+ * The two doors are one object seen from two planes, so the names here are the names the PTC
+ * door's value carries.
  *
- * snake_case, like pi's own builtin tools, so a script reading our declared schema does not have to
- * learn a second spelling for the same concept. `details` keeps its camelCase: it is a different
- * channel with its own consumers.
+ * `status` is the only required key, because it is the only one BOTH shapes carry — and it is
+ * also the discriminant between them: `"running"` is a handle (poll it with `ptc_task_output`),
+ * `"fulfilled"` is a child that answered, `"rejected"` is a gate that said no (read
+ * `errorMessage`). Every other key's description says which shape carries it, so a script can
+ * tell the two apart from the schema alone.
  *
- * `report` is the child report (ADR-0032) at FULL length, not the rendered view: a program is not a
+ * `report` is the child report (ADR-0032) at FULL length, not the rendered view: a script is not a
  * display surface, and the 20-finding bound is a rendering bound, applied in the text block by
- * `renderChildReportText`. Absent when no report arrived -- including on a background handle, which
- * has not finished and therefore has nothing to report yet.
+ * `renderChildReportText`. Absent when no report arrived — including on a handle, which has not
+ * finished and therefore has nothing to report yet.
  *
- * `report_channel` is projected, and it is present on EVERY branch rather than alongside `report`.
- * Without it a caller reading this channel cannot tell a child that ignored the contract from a
- * handle that has not finished yet -- both arrive as "no `report` key" -- and that is exactly the
- * invisible degradation ADR-0032 forbids. The channel is the total field; `report` is the optional
- * one, and the pair is what makes the pair readable. ("A second spelling of `reportChannel`" is not
- * an objection: `exit_code` and `task_id` are already snake_case projections, per ADR-0028.)
+ * `reportChannel` is present on EVERY settled result rather than alongside `report`. Without it a
+ * caller reading this channel cannot tell a child that ignored the contract from a handle that
+ * has not finished yet — both arrive as "no `report` key" — and that is exactly the invisible
+ * degradation ADR-0032 forbids. The channel is the total field; `report` is the optional one, and
+ * the pair is what makes the pair readable.
  *
- * `read_only_tier` is ADR-0041's "the tier that took effect is reported", projected for the same
- * reason `report_channel` is: call-site precedence is total, so the value cannot differ from the
- * request, and that is precisely why stating it is worth a key -- it is what makes an override of
+ * `readOnlyTier` is ADR-0041's "the tier that took effect is reported", for the same reason
+ * `reportChannel` is: call-site precedence is total, so the value cannot differ from the
+ * request, and that is precisely why stating it is worth a key — it is what makes an override of
  * a definition's declared `tools:` visible to a script instead of something the script has to
- * infer from an agent file it may never have read. ABSENT when no tier was asked for, on every
- * branch, including the background handle's.
+ * infer from an agent file it may never have read. ABSENT when no tier was asked for.
  *
- * `usage` (issue #199) is the host's own counter, and it is projected from `DispatchResult.usage`
- * rather than from `report.usage` -- which is the whole point: before this key, a child that
- * delivered no report (`none`, `opted-out`, or a settled call with no report at all) had no token
- * accounting anywhere a script could read. Four fields, the same ones the rendered `usage` row
- * prints, so the two channels state the same numbers. ABSENT for a background handle, whose child
- * has not been measured yet, and for a child that emitted no usage block; never zeroed to say
- * "not measured".
+ * `usage` (issue #199) is the host's own counter, and it is the `DispatchResult.usage`
+ * accumulator rather than `report.usage` — which is the whole point: before this key, a child
+ * that delivered no report (`none`, `opted-out`, or a settled call with no report at all) had no
+ * token accounting anywhere a script could read. ABSENT for a handle, whose child has not been
+ * measured yet, and for a child that emitted no usage block; never zeroed to say "not measured".
  */
 export const SUBAGENT_OUTPUT_SCHEMA: SubagentOutputSchema = Type.Object({
-  task_id: Type.Optional(
+  text: Type.Optional(
     Type.String({
       description:
-        "Id of the background task to poll with ptc_task_output. Present ONLY for a background call; absent once the call has already finished.",
+        "The child's own final words — its working output. Present on every settled call, and EMPTY on a refusal (nothing ran). ABSENT on a handle, whose child has not finished.",
     }),
   ),
   status: Type.String({
     description:
-      '"background" when this call returned a handle to poll, otherwise the dispatcher\'s own outcome status ("fulfilled").',
+      'What the call produced: "fulfilled" (the child ran and answered), "rejected" (a gate said no, or the child failed — read `errorMessage`), or "running" (a handle: the child is still going, poll it with `ptc_task_output`). This is the ONE key every shape carries, and it is also how the two shapes are told apart.',
   }),
-  report_channel: Type.String({
-    description:
-      'Which channel delivered the child report: "prompt-json" (a fenced JSON block on the child\'s final message), "tool" (the child called the report tool), "none" (no report arrived — either the child did not comply with the contract, or this is a background handle that has not finished), or "opted-out" (the agent\'s frontmatter set `childReport: false`, so it was never asked). ALWAYS present, so an absent `report` key is never ambiguous — "none" and "opted-out" are different claims about the child.',
-  }),
-  exit_code: Type.Optional(
-    Type.Number({
-      description: "The child's exit code. Present ONLY for a call that already finished.",
+  started: Type.Optional(
+    Type.Boolean({
+      description:
+        "Whether the child was actually brought up. FALSE on every refusal: the harness declined to start it.",
     }),
   ),
-  read_only_tier: Type.Optional(
+  agentName: Type.Optional(
+    Type.String({
+      description:
+        'The agent definition the child ran under, or "" for the generalist child (no definition named).',
+    }),
+  ),
+  durationMs: Type.Optional(
+    Type.Number({
+      description: "How long the child ran, in milliseconds. 0 on a refusal: nothing ran.",
+    }),
+  ),
+  exitCode: Type.Optional(
+    Type.Number({
+      description:
+        "The child's exit code. -1 on a refusal (nothing ran); 0 on a child that exited cleanly. ABSENT on a handle, which has not finished.",
+    }),
+  ),
+  reportChannel: Type.Optional(
+    Type.String({
+      description:
+        'Which channel delivered the child report: "prompt-json" (a fenced JSON block on the child\'s final message), "tool" (the child called the report tool), "none" (no report arrived — either the child did not comply with the contract, or this is a background handle that has not finished), or "opted-out" (the agent\'s frontmatter set `childReport: false`, so it was never asked). ALWAYS present on a settled call, so an absent `report` key is never ambiguous — "none" and "opted-out" are different claims about the child.',
+    }),
+  ),
+  errorMessage: Type.Optional(
+    Type.String({
+      description:
+        'Why the call was refused or failed. Present whenever `status` is "rejected": which gate said no, and what the dispatcher knew.',
+    }),
+  ),
+  taskId: Type.Optional(
+    Type.String({
+      description:
+        'The id of the running task. Present ONLY on a handle (`status: "running"`); a settled call names the record it created under `recordId` instead.',
+    }),
+  ),
+  label: Type.Optional(
+    Type.String({
+      description:
+        "The label the task was created with. Present ONLY on a handle; a settled call carries `recordLabel`.",
+    }),
+  ),
+  recordId: Type.Optional(
+    Type.String({
+      description:
+        "The id of the task record this call created — the id `ptc_task_output` and `ptc_task_stop` take, so the caller can look the child up afterwards. Present on a settled call that got as far as creating a record; ABSENT on a refusal, which leaves no record behind.",
+    }),
+  ),
+  recordLabel: Type.Optional(
+    Type.String({
+      description:
+        "The record's label: the caller's `label`, or the task text truncated. Beside `recordId`, because an id alone says nothing about which task it is.",
+    }),
+  ),
+  observedProvider: Type.Optional(
+    Type.String({
+      description:
+        "The provider that actually served the child, observed off its assistant messages. ABSENT means no turn named one — not that the model is unknown.",
+    }),
+  ),
+  observedModel: Type.Optional(
+    Type.String({
+      description: "The model id the child actually ran. Observed like `observedProvider`.",
+    }),
+  ),
+  stderr: Type.Optional(
+    Type.String({
+      description: "The child's stderr, when it produced any.",
+    }),
+  ),
+  readOnlyTier: Type.Optional(
     Type.String({
       description:
         'The read-only tier the dispatch resolved to: "strict" or "lenient" (ADR-0041). Absent when no tier was asked for, so an absent key means "no tier" rather than "tier unknown".',
     }),
   ),
-  why_suppressed: Type.Optional(
+  whySuppressed: Type.Optional(
     Type.Boolean({
       description:
-        "`true` when you passed a `why` and this session's `whyEnabled` switch was off, so the child's prompt carried no <pi-ptc-why> block (ADR-0043). ABSENT means no `why` was passed — that is the distinction the key exists to make. The child was never told your reason; it did not ignore one. A background call returns a handle and does not carry this key; read it from `ptc_task_output` instead.",
+        "`true` when you passed a `why` and this session's `whyEnabled` switch was off, so the child's prompt carried no <pi-ptc-why> block (ADR-0043). ABSENT means no `why` was passed — that is the distinction the key exists to make. The child was never told your reason; it did not ignore one. A handle does not carry this key; read it from `ptc_task_output` instead.",
     }),
+  ),
+  usage: Type.Optional(
+    Type.Object(
+      {
+        input: Type.Number({ description: "Input tokens, counted by the host." }),
+        output: Type.Number({ description: "Output tokens, counted by the host." }),
+        cacheRead: Type.Number({ description: "Cached input tokens read, counted by the host." }),
+        cacheWrite: Type.Number({
+          description: "Cached input tokens written, counted by the host.",
+        }),
+        cost: Type.Number({ description: "Total cost, counted by the host." }),
+        turns: Type.Number({ description: "Assistant turns, counted by the host." }),
+      },
+      {
+        description:
+          "The host's own count for this child, read from the `DispatchResult.usage` accumulator (ADR-0032, issue #199). ABSENT for a handle, which has measured nothing yet, and for a child that emitted no usage block. Present on every settled call REGARDLESS of `reportChannel`, so a child that reported nothing still accounts for what it cost — the text render states the same numbers on its `usage` row.",
+      },
+    ),
   ),
   report: Type.Optional(
     Type.Object({
@@ -293,30 +400,13 @@ export const SUBAGENT_OUTPUT_SCHEMA: SubagentOutputSchema = Type.Object({
       }),
     }),
   ),
-  usage: Type.Optional(
-    Type.Object(
-      {
-        input: Type.Number({ description: "Input tokens, counted by the host." }),
-        output: Type.Number({ description: "Output tokens, counted by the host." }),
-        cost: Type.Number({ description: "Total cost, counted by the host." }),
-        turns: Type.Number({ description: "Assistant turns, counted by the host." }),
-      },
-      {
-        description:
-          "The host's own count for this child: the same four fields `report.usage` carries, projected from the `DispatchResult.usage` accumulator (ADR-0032, issue #199). ABSENT for a background handle, which has measured nothing yet, and for a child that emitted no usage block. Present on every settled call REGARDLESS of `report_channel`, so a child that reported nothing still accounts for what it cost — the text render states the same four numbers on its `usage` row.",
-      },
-    ),
-  ),
 });
 
-// `DispatchResult` and `DispatchHandle` both carry `status` with different literal types, so a
-// type predicate on their union produces a never intersection in the negative branch. The
-// dispatcher only returns a handle for `background: true`, and a handle always has a `taskId`,
-// so the field itself is the discriminator -- read defensively rather than asserted.
-function handleTaskId(outcome: SubagentOutcome): string | undefined {
-  const taskId = (outcome as { taskId?: unknown }).taskId;
-  return typeof taskId === "string" ? taskId : undefined;
-}
+// The two shapes are told apart by `status`, never by "does the outcome carry an id" (ADR-0054).
+// ADR-0053 gave a settled result an id of its own (`recordId`), so a handle's `taskId` no longer
+// identifies the shape: a foreground result that carried `taskId` would be read as a handle and
+// every settled call would announce itself as a background task. `isDispatchHandle` discriminates
+// on `status` — a handle is always `"running"`, a result is always `"fulfilled"` or `"rejected"`.
 
 /**
  * Upper bound on the diagnostic a refused call carries, in characters.
@@ -377,7 +467,13 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
   });
   return defineCompatTool({
     name: SUBAGENT_TOOL_NAME,
-    label: "PTC Subagent",
+    // ADR-0054: the door creates a TASK, and "subagent" is retired from the vocabulary the model
+    // reads (ADR-0052). This label is a USER-FACING row, not model-facing text -- the model never
+    // sees this tool declared -- but the words a user reads should be the same words the rest of
+    // the surface uses, and the task family is already "PTC Task List" / "PTC Task Output" /
+    // "PTC Task Stop". Shorter than the name it replaces, too, which is what the wider tool name
+    // (16 characters against the 13 of the one it replaced) asked to be looked at.
+    label: "PTC Task",
     // ADR-0052: the codemode door is at `codemode` reach, so it is NOT declared to the model.
     // On the `codemode_ptc` surface the orchestrator responsible to the model is pi's own
     // `codemode`; this door sits underneath it, and only a `codemode` script can call it.
@@ -399,6 +495,10 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
       // `describeRegisteredAgents` from the same resolver a dispatch uses. A copy here would be
       // the copy that goes stale. Same one-home rule the child-report work established.
       "`agent` is optional — omit it and the child is a fresh generalist pi, with pi's own system prompt and pi's full toolset. Name one to narrow the child instead: an agent is a markdown file in ~/.pi/agent/agents/ for your machine, or <project>/.pi/agents/ for one project, and naming one can restrict the child's tools, pin its model, or append a role. A name with no definition behind it is refused; the refusal lists what IS registered and how to write one.",
+      // ADR-0054: what the call resolves to, and what a refusal looks like. The SAME sentence the
+      // PTC plane's binding contract carries (one constant, two surfaces) — a script and a program
+      // read one statement about one object, so the two cannot drift apart.
+      TASK_DOOR_RESULT_NOTE,
       // The pre-decision view (see describeRegisteredAgentRoster): names alone only help
       // someone who already suspects a name, and this reaches the model BEFORE any refusal.
       // Both this and the refusal render from listRegisteredAgentEntries — one traversal, one
@@ -435,7 +535,12 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
       // context; dispatch resolves it at spawn, so a model switch after this call cannot
       // retro-change a child that is already running.
       const sessionModel = readContextModel(ctx);
-      const outcome = await dispatch(
+      // The union is asserted, not inferred: `dispatch()`'s overloads narrow by a LITERAL
+      // `{ background: true }`, and this tool's parameters are dynamic, so the call resolves
+      // against the general overload whose declared type is `DispatchResult` alone. At runtime the
+      // dispatcher returns a handle exactly when `input.background` is true, so the union is the
+      // truth of the call. Narrowing it afterwards is `isDispatchHandle`'s job, not a cast's.
+      const outcome = (await dispatch(
         params as DispatchInput,
         {
           callId: 0,
@@ -446,135 +551,69 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
           ...(sessionModel === undefined ? {} : { sessionModel }),
         },
         options.getDispatchDeps?.() ?? {},
-      );
-      // One details shape for both outcomes. Two literals with different keys infer a union,
-      // and `defineCompatTool` (like the `defineTool` it wraps) then binds to whichever branch it
-      // saw first -- so the second return stops typechecking against the tool's own result type.
-      const taskId = handleTaskId(outcome);
-      const details: SubagentDetails =
-        taskId === undefined
-          ? { taskId: undefined, status: outcome.status, exitCode: outcome.exitCode }
-          : { taskId, status: "background", exitCode: undefined };
-      // `structuredContent` is projected from the SAME three values `details` was built from, not
-      // re-derived from `outcome`: one outcome, one reading. Each literal carries only the keys
-      // that apply to it, because JsonValue has no `undefined` -- see SUBAGENT_OUTPUT_SCHEMA.
-      if (taskId !== undefined) {
+      )) as DispatchResult | DispatchHandle;
+      // ADR-0054: the two doors give the SAME object, and this door gives it to a script
+      // unchanged. `details` and `structuredContent` both carry the raw outcome -- no projection,
+      // no envelope, no renamed keys -- so a script reads the same field names a PTC program
+      // reads, and the two doors cannot drift apart in shape.
+      //
+      // The shape of the two outcomes differs, and `status` is what tells them apart: a handle is
+      // `"running"`, a result is `"fulfilled"` or `"rejected"`. `isDispatchHandle` is that
+      // discriminant; it is NOT "does the outcome carry an id", because a settled result carries
+      // an id of its own (ADR-0053) and reading THAT as a handle would make every settled call
+      // announce itself as a background task.
+      const details: SubagentOutcome = outcome;
+      if (isDispatchHandle(outcome)) {
         // ADR-0041: a background dispatch returns a DispatchHandle, which carries no
         // `readOnlyTier` to read -- the field this front states is on the DispatchResult and on
         // the TaskRecord (`ptc_task_output`). The tier that took effect is nevertheless known
         // here and IS known for this call: reaching this branch means `dispatch()` returned a
         // handle, and `dispatch()` returns a handle only after its read-point guard passed, so
         // this is the tier the child was actually spawned with. Stated rather than omitted, for
-        // the same reason `report_channel: "none"` is stated on this branch below.
+        // the same reason `reportChannel: "none"` is stated on a settled call.
         const handleTier = resolveReadOnlyTier((params as DispatchInput).readOnly);
-        const structured: SubagentStructuredContent = {
-          task_id: taskId,
-          status: details.status,
-          // A handle has not finished, so it has nothing to report YET -- and a handle is a
-          // `DispatchHandle`, not a `DispatchResult`, so it carries no `reportChannel` to read.
-          // The literal "none" is the claim: nothing was reported, because nothing could be yet.
-          // It must be a STRING and not `undefined`: `structuredContent` crosses a JSON boundary,
-          // and an undefined-valued key vanishes there, leaving a script a projection its own
-          // schema does not describe.
-          report_channel: "none",
-          ...(handleTier === undefined ? {} : { read_only_tier: handleTier }),
-        };
         return {
           content: [
             {
               type: "text" as const,
-              text: [HANDLE_TEXT + taskId, renderReadOnlyTierText(handleTier)]
+              text: [HANDLE_TEXT + outcome.taskId, renderReadOnlyTierText(handleTier)]
                 .filter((part) => part.length > 0)
                 .join("\n\n"),
             },
           ],
           details,
-          structuredContent: structured,
+          structuredContent: outcome as unknown as OutcomeJson,
         };
       }
-      if (outcome.status === "rejected") {
-        // The bounded diagnostic, not the bare `errorMessage`: see `describeSettledFailure` for
-        // the `refused the call: undefined` failure this replaced. The prefix is unchanged so
-        // existing readers that match it keep working.
-        throw new Error(
-          SUBAGENT_TOOL_NAME + " refused the call: " + describeSettledFailure(outcome),
-        );
-      }
-      // The report is projected verbatim, never rebuilt: `usage` in it was stamped by the host
+      // The report is carried verbatim, never rebuilt: `usage` in it was stamped by the host
       // at settle, and a value this tool could recompute would be a second, unauthoritative
       // reading of the same number.
       const report: SubagentReportProjection | undefined = outcome.report;
-      // ADR-0041: spread rather than a plain property, so an untiered dispatch emits NO key --
-      // the same value-level absence every other optional key on this surface uses.
-      const tierField =
-        outcome.readOnlyTier === undefined ? {} : { read_only_tier: outcome.readOnlyTier };
-      // ADR-0043, same value-level absence as the tier field above: a dispatch whose `why` was
-      // never suppressed emits NO key, so a script reading this surface can tell "you passed a why
-      // and it was dropped" from "you passed no why" — the one distinction the field exists for.
-      const suppressedField =
-        outcome.whySuppressed === undefined ? {} : { why_suppressed: outcome.whySuppressed };
-      // Issue #199: the host's counter on its own key, sourced from the `DispatchResult`
-      // accumulator rather than from `report.usage` -- that is what makes it present on a child
-      // that delivered NO report. The four display fields are the ones the text render prints, so
-      // a script reading this key and a model reading that row see the same numbers. Spread, so a
-      // child the host never measured emits no key at all. A background handle never reaches this
-      // branch, and has nothing measured yet -- its absence is correct.
-      const usageField =
-        outcome.usage === undefined
-          ? {}
-          : {
-              usage: {
-                input: outcome.usage.input,
-                output: outcome.usage.output,
-                cost: outcome.usage.cost,
-                turns: outcome.usage.turns,
-              },
-            };
-      const structured: SubagentStructuredContent =
-        details.exitCode === undefined
-          ? {
-              status: details.status,
-              report_channel: outcome.reportChannel,
-              ...tierField,
-              ...suppressedField,
-              ...usageField,
-            }
-          : report === undefined
-            ? {
-                status: details.status,
-                exit_code: details.exitCode,
-                report_channel: outcome.reportChannel,
-                ...tierField,
-                ...suppressedField,
-                ...usageField,
-              }
-            : {
-                status: details.status,
-                exit_code: details.exitCode,
-                report_channel: outcome.reportChannel,
-                report,
-                ...tierField,
-                ...suppressedField,
-                ...usageField,
-              };
       // ADR-0032 §Rendering: the report has to be IN the text, not only in `structuredContent`. That
       // reason was once stated as "on this surface there is no `codemode`", which stopped being true
-      // on 2026-10-09 — but the conclusion is unchanged and does not depend on it: this tool is
-      // `direct`, so a model reading the text is the primary channel whatever a script does with
-      // the structured half. The rendered block goes first
-      // and the child's prose after it, so the model reads the conclusion before the reasoning --
-      // and the block is emitted whether or not a report arrived, because an unmarked gap reads as
-      // an empty result.
-      const reportBlock = renderChildReportText(report, outcome.reportChannel, outcome.usage);
+      // on 2026-10-09 — but the conclusion is unchanged and does not depend on it: a reader of the
+      // text is the primary channel whatever a script does with the structured half. The rendered
+      // block goes first and the child's prose after it, so the conclusion is read before the
+      // reasoning -- and the block is emitted whether or not a report arrived, because an unmarked
+      // gap reads as an empty result.
+      //
+      // EXCEPT on a refusal, and the exception is a wording one: the block's "the child did not
+      // comply with the contract, so its prose below is unbacked by a report" is a claim about a
+      // child that RAN. A refusal that never started a child has no report story to tell, and the
+      // diagnostic beside it already states the channel (`reportChannel=none` is in it), so nothing
+      // is left unmarked. A child that ran and failed is the same case: the refusal line says
+      // what happened, and the block's "its prose below" would point at a prose that is not there.
+      const reportBlock =
+        outcome.started && (outcome.status === "fulfilled" || report !== undefined)
+          ? renderChildReportText(report, outcome.reportChannel, outcome.usage)
+          : "";
       // ADR-0041: the tier goes FIRST, above the report block and the child's prose. It is a fact
-      // about what the child was allowed to do, so the model should read it before anything it
-      // might attribute to the child -- and it is the only surface that reaches the model at all,
-      // because `structuredContent` has no reader for a `direct` tool.
+      // about what the child was allowed to do, so the reader should see it before anything it
+      // might attribute to the child.
       const tierText = renderReadOnlyTierText(outcome.readOnlyTier);
-      // ADR-0043 on the same surface and for the same reason: `structuredContent` has no reader
-      // for a `direct` tool, so a caller that invoked `pi_task_codemode` learns about a suppressed `why`
-      // from this text or not at all. It sits beside the tier rather than after the report,
-      // because it is a fact about what the child was TOLD — the report describes what it did.
+      // ADR-0043 on the same surface and for the same reason: the suppressed `why` is a fact about
+      // what the child was TOLD — the report describes what it did. It sits beside the tier rather
+      // than after the report.
       const suppressedText = renderWhySuppressedText(outcome.whySuppressed);
       // ADR-0044: the model the child ACTUALLY ran is a host observation, stated after the
       // report block and before the child's prose. After the report because the report is the
@@ -582,14 +621,29 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
       // produced by the process whose model this line names. Absent when no assistant turn was
       // observed -- a missing line is the honest claim "we saw no model", never `model: undefined`.
       const observedModel = formatObservedModel(outcome.observedProvider, outcome.observedModel);
-      const modelText = observedModel === undefined ? "" : "model: " + observedModel;
-      const text = [tierText, suppressedText, reportBlock, modelText, outcome.text]
+      // The model line is the SETTLED path's. On a refusal the diagnostic already names the model
+      // it observed (`model=` is one of its facts), so a second statement of the same fact would be
+      // noise rather than information.
+      const modelText =
+        observedModel === undefined || outcome.status === "rejected"
+          ? ""
+          : "model: " + observedModel;
+      // ADR-0054: a REFUSAL is a result, not an exception. The bounded diagnostic, not the bare
+      // `errorMessage`: see `describeSettledFailure` for the `refused the call: undefined` failure
+      // the bare message produced. The wording is unchanged from the throw it replaces, so a
+      // reader that matched it keeps matching it -- only the DELIVERY changed: a gate that said no
+      // is now a result the caller can read, not an exception that took its siblings down with it.
+      const refusalText =
+        outcome.status === "rejected"
+          ? SUBAGENT_TOOL_NAME + " refused the call: " + describeSettledFailure(outcome)
+          : "";
+      const text = [tierText, suppressedText, refusalText, reportBlock, modelText, outcome.text]
         .filter((part) => part.length > 0)
         .join("\n\n");
       return {
         content: [{ type: "text" as const, text }],
         details,
-        structuredContent: structured,
+        structuredContent: outcome as unknown as OutcomeJson,
       };
     },
     renderCall(args, theme, context) {

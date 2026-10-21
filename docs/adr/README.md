@@ -57,6 +57,7 @@ ADRs for pi-ptc-subagents, per `docs/agents/domain.md` (single-context repo).
 | [0051](./0051-the-surface-names-the-orchestrator.md)       | The surface names the orchestrator: `full_ptc` / `codemode_ptc`, renamed from `full` / `subagents`            | accepted              |
 | [0052](./0052-the-two-doors-share-one-prefix.md)           | The two task doors share one prefix: `pi_task_ptc` / `pi_task_codemode`, renamed with no alias                | accepted              |
 | [0053](./0053-every-dispatch-is-a-task.md)                 | Every dispatch is a task: the foreground front registers a record, persists its output, and the face follows  | accepted              |
+| [0054](./0054-the-two-doors-give-one-object.md)            | The two task doors give one object: the raw result, no projection, and neither door throws                    | accepted              |
 | [0056](./0056-admission-queues-instead-of-rejecting.md)    | Admission queues instead of refusing: FIFO, unbounded, and the queue creates the record                       | accepted              |
 | [0060](./0060-ptc-programs-run-in-strict-mode.md)          | PTC programs run in strict mode, matching upstream DSH                                                        | accepted              |
 
