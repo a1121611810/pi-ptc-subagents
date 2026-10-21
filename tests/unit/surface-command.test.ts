@@ -31,6 +31,7 @@ import {
   PTC_MODE_ENTRY_TYPE,
   PTC_MODE_STATUS_KEY,
 } from "../../src/mode/ptc-mode.ts";
+import { PTC_TRUNCATED_NO_NEW_TASK } from "../../src/mode/dispatch-section.ts";
 import type { ExtensionStub } from "../helpers/ptc.ts";
 import { makeExtensionStub, makeTempDir, removeTempDir, stubContext } from "../helpers/ptc.ts";
 
@@ -271,7 +272,9 @@ describe("the /ptc surface subcommand is gone", () => {
       expect(
         stub.notifications.at(-1)?.message,
         "and what off means is said, not just that it happened",
-      ).toContain("no new child can be started");
+        // ADR-0058: "off" is a truncation, so what it means is the shared sentence — the same
+        // one the model's section carries, so the two cannot drift.
+      ).toContain(PTC_TRUNCATED_NO_NEW_TASK);
     });
   });
 });

@@ -26,6 +26,8 @@ Status: accepted (2026-10-21). Spec #234 决定 2。修订：[ADR-0013](./0013-p
 [ADR-0050](./0050-ptc-off-stops-new-dispatch.md)、
 [ADR-0053](./0053-every-dispatch-is-a-task.md)——修订的只有**名字**，决定本身不变（逐篇的指针在各记录正文顶部）。
 
+> **Amended by [ADR-0058](./0058-ptc-off-truncates-the-chain.md) (2026-10-21): decision 6's shared search sentence now reaches a THIRD surface — the mode briefing — and its one home is the search module's own constant (`PTC_CHILD_SEARCH_NOTE` in `src/search/contract.ts`), which the `<ptc>` section, the briefing and the two PTC tool descriptions all carry. The decision itself is unchanged: one sentence, one constant, and a test that asserts every surface contains that constant. The old name is not aliased — it is gone, and this record's line was corrected to the new one.**
+
 ## Context
 
 本包有**两扇门**，一个实现：PTC 程序里的那个绑定，和 `codemode` 脚本能调的那个工具。它们的旧名是
@@ -80,7 +82,7 @@ PTC 门仍然只作为程序里的绑定存在，从来没有被注册成一个 
 
 **6. 同一句话在两个平面上只写一次。** 共享的散文是**一个常量**：reach note（`common.ts` 里的
 `PTC_BINDING_REACH_NOTE`）同时出现在 `ptc_run_code` 与 `ptc_workflow` 的描述里，`<ptc>` 段的搜索句
-（`PTC_CHILD_SEARCH_SECTION_LINE`）同时出现在两个表面上。测试断言**两边都含那个常量本身**，所以漂移
+（`PTC_CHILD_SEARCH_NOTE`）同时出现在两个表面上。测试断言**两边都含那个常量本身**，所以漂移
 在结构上不可能发生。
 
 ## Evidence

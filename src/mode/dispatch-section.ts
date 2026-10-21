@@ -31,8 +31,16 @@
  *
  * The search sentence is shared by both surfaces, so it is one constant (the same rule the binding
  * contract follows for the two surfaces' copy of one sentence).
+ *
+ * ## The truncated session
+ *
+ * ADR-0058: `/ptc off` is a truncation of this package's place in the chain, not a switch that
+ * leaves a door in place to refuse. The two surfaces lose different things, so this section says
+ * two different things — but the one fact they share (no task can be created any more) is ONE
+ * constant, carried by this section and by the user's notice alike.
  */
 import type { SurfaceMode } from "./ptc-mode.ts";
+import { PTC_CHILD_SEARCH_NOTE } from "../search/contract.ts";
 
 /**
  * The section name pi renders as `<ptc>…</ptc>`.
@@ -46,14 +54,15 @@ export const DISPATCH_SECTION_NAME = "ptc";
  * The sentence both surfaces share: the parent has no web tool of this package's own, and the
  * child is where the web is.
  *
- * One constant for both surfaces, because it is ONE sentence in one place — the same rule the
- * binding contract follows for the sentence it puts in both descriptions. It is stated as what this
- * package provides, not as what the model can reach by any means: a session that still has `bash`
- * can always curl, and a sentence claiming the model has no way to the web would be false there.
+ * **It is the search module's own constant, not a copy of it** (`PTC_CHILD_SEARCH_NOTE`), and
+ * that is the point: the same fact reaches the model through three surfaces — the two PTC tool
+ * descriptions, this section, and the mode briefing — and a copy here would be a fourth wording
+ * of a sentence that has to mean one thing.
+ *
+ * The wording is the search module's because the module owns the claim: it is stated as what
+ * this package PROVIDES, not as what the model can reach by any means (a session that still has
+ * `bash` can always curl).
  */
-export const PTC_CHILD_SEARCH_SECTION_LINE: string =
-  "This package gives you no web tool of your own: to look something up on the web, create a task " +
-  "and let the child search — the child has the `web_ds_search` tool.";
 
 /**
  * How to create a task, per surface.
@@ -78,14 +87,39 @@ const DISPATCH_LINES: Record<SurfaceMode, string> = {
 };
 
 /**
- * The sentence for a session that may not start a new child (ADR-0050).
+ * The one sentence a truncated session says, whichever surface it is (ADR-0058).
  *
- * One constant, because it is one sentence in one place. It exists so the model does not spend
- * calls discovering the switch by failing: the refusal carries the same fact, but a model that
- * was told up front does not try.
+ * One constant, because it is ONE sentence in one place — and it is carried by BOTH the model's
+ * section and the user's notice, so the two cannot drift into telling the model one thing and the
+ * user another.
+ *
+ * It states the fact and nothing about how it happened: the switch withdraws this package's
+ * segment of the chain, and what that means for the model is the same on both surfaces — no task
+ * can be created any more.
  */
-export const PTC_DISPATCH_DISABLED_SECTION_LINE: string =
-  "PTC is off in this session: you cannot start a new task, so do not try to create one.";
+export const PTC_TRUNCATED_NO_NEW_TASK: string = "No new task can be created from here on.";
+
+/**
+ * What each surface lost, and what is left (ADR-0058).
+ *
+ * The two lines differ because the two surfaces truncate at different places, and the difference
+ * is not cosmetic: on `full_ptc` there is no orchestrator left at all, while on `codemode_ptc`
+ * pi's `codemode` keeps orchestrating and only this package's segment under it is gone.
+ *
+ * The withdrawn tools are NAMED, because a model that saw them a turn ago needs to know they are
+ * gone rather than keep calling into a tool that is no longer there. What is not given is the
+ * calling convention — telling a model HOW to create a task in a session where it cannot is an
+ * instruction it cannot follow (ADR-0050 decision 6).
+ */
+export const PTC_TRUNCATION_SECTION_LINES: Record<SurfaceMode, string> = {
+  full_ptc:
+    "The PTC program tools (`ptc_run_code`, `ptc_workflow`) are withdrawn — there is no " +
+    "orchestrator left, so the built-in tools are what the model calls now.",
+  codemode_ptc:
+    "The PTC execution layer (`ptc_run_code`, `ptc_workflow`) and the task door " +
+    "(`pi_task_codemode`) are withdrawn — `codemode` still orchestrates, but it can no longer " +
+    "create a task.",
+};
 
 /**
  * Build the dispatch section body (pi wraps it in `<ptc>…</ptc>` itself).
@@ -98,11 +132,17 @@ export function buildDispatchSection(input: {
   childCanSearch: boolean;
   dispatchEnabled: boolean;
 }): string {
-  // ADR-0050: a session that may not start a child gets the one line that matters, and NOT the
-  // calling convention — telling a model how to dispatch when dispatching is refused is an
-  // instruction it cannot follow.
-  if (!input.dispatchEnabled) return PTC_DISPATCH_DISABLED_SECTION_LINE;
+  // ADR-0058: a truncated session gets the shared fact and what THIS surface lost. The calling
+  // convention is NOT given — a model cannot create a task here, so there is nothing to teach it
+  // — and the search sentence goes with it: "create a task and let the child search" is exactly
+  // the thing that cannot happen right now.
+  if (!input.dispatchEnabled) {
+    return [
+      "PTC is off in this session. " + PTC_TRUNCATED_NO_NEW_TASK + " Do not try to create one.",
+      PTC_TRUNCATION_SECTION_LINES[input.surfaceMode],
+    ].join("\n");
+  }
   const lines: string[] = [DISPATCH_LINES[input.surfaceMode]];
-  if (input.childCanSearch) lines.push(PTC_CHILD_SEARCH_SECTION_LINE);
+  if (input.childCanSearch) lines.push(PTC_CHILD_SEARCH_NOTE);
   return lines.join("\n");
 }

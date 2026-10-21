@@ -30,6 +30,7 @@ import {
   createPtcTaskOutputTool,
   createPtcTaskStopTool,
   PTC_TASK_TOOL_NAMES,
+  type AnyTool,
 } from "./tools/ptc-task.ts";
 import {
   resolveBindingNames,
@@ -69,6 +70,7 @@ import {
   readWebSearchConfig,
   readWhyEnabledConfig,
   resolveBaseOnStart,
+  PTC_TRUNCATED_TOOL_NAMES,
 } from "./mode/ptc-mode.ts";
 import type {
   CodemodeActivationResolution,
@@ -78,10 +80,15 @@ import type {
   ModeHideStrategy,
   OptInBindingsConfig,
   PersistedModeState,
+  SurfaceMode,
   WhyEnabledConfig,
 } from "./mode/ptc-mode.ts";
 import { buildPtcSkillsSection, skillsSectionDropped } from "./mode/skills-section.ts";
-import { buildDispatchSection, DISPATCH_SECTION_NAME } from "./mode/dispatch-section.ts";
+import {
+  buildDispatchSection,
+  DISPATCH_SECTION_NAME,
+  PTC_TRUNCATED_NO_NEW_TASK,
+} from "./mode/dispatch-section.ts";
 import { createPtcSubagentTool } from "./tools/subagent.ts";
 import { createChildReportTool } from "./tools/child-report-tool.ts";
 
@@ -140,6 +147,42 @@ export { MAX_LINE_CHARS, renderModelValue, sanitizeText, stripAnsi } from "./too
 const MODE_STATUS_TEXT = "PTC";
 
 /**
+ * ADR-0058: what `/ptc off` did, per surface, in the terms of the truncation.
+ *
+ * The two surfaces lose different things, so the notice says different things — but the one fact
+ * they share (no new task can be created any more) is ONE constant, carried by this notice and by
+ * the model's section alike, so the two cannot drift into telling the model one thing and the user
+ * another.
+ *
+ * **The notice does not say the running tasks were stopped.** They were not (ADR-0057 decision 6),
+ * and a notice that says otherwise is something the user acts on.
+ */
+const PTC_TRUNCATION_NOTICE_LEADS: Record<SurfaceMode, string> = {
+  full_ptc:
+    "PTC off — this package's orchestration layer is withdrawn: `ptc_run_code` and `ptc_workflow` " +
+    "are gone, and the built-in tools are directly callable.",
+  codemode_ptc:
+    "PTC off — this package's segment under `codemode` is withdrawn: the PTC execution layer " +
+    "(`ptc_run_code`, `ptc_workflow`) and the task door (`tools.pi_task_codemode`) are gone; " +
+    "`codemode` still orchestrates.",
+};
+
+/**
+ * ADR-0058: what `/ptc` reports when the session is truncated, per surface.
+ *
+ * Same split as the notice: the two surfaces truncated at different places, so the state they are
+ * in is not the same state.
+ */
+const PTC_TRUNCATED_QUERY_LINES: Record<SurfaceMode, string> = {
+  full_ptc:
+    "PTC is OFF — this package's orchestration layer is withdrawn, so no new task can be created " +
+    "and the built-in tools are what the model calls. Run /ptc on to put it back.",
+  codemode_ptc:
+    "PTC is OFF — this package's segment under `codemode` is withdrawn, so no new task can be " +
+    "created; `codemode` still orchestrates. Run /ptc on to put it back.",
+};
+
+/**
  * Which tools the mode hides. The shipped extension always uses the default; it is a named
  * constant so a future settings surface (or a test) has one place to change it.
  */
@@ -162,7 +205,7 @@ function describeEntry(
   return [
     `PTC mode on — ${hidden} hidden.`,
     `Bindings available inside a program: ${resolveBindingNames(base, optIns).join(", ") || "(none)"}.`,
-    "Run /ptc off to restore the normal tool set.",
+    "Run /ptc off to restore the normal tool set — that withdraws this package's segment from the chain.",
   ].join("\n");
 }
 
@@ -511,6 +554,59 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
   });
 
   /**
+   * ADR-0058: the tool definitions this session registered, by name.
+   *
+   * pi cannot unregister a tool, so a withdrawal is a same-name re-registration with
+   * `exposure: "hidden"` — and a re-registration needs the definition it replaces. The
+   * definitions are KEPT here rather than rebuilt at withdrawal time, because a second build
+   * would be a different object with a different closure: a different pool getter, a different
+   * depth, a different session model. The withdrawn entry has to be the one this session had.
+   *
+   * The map is written only at registration. A withdrawal re-registers a MODIFIED copy and does
+   * not write here, so putting the segment back restores the original definition rather than the
+   * hidden copy of it — that is what makes the switch idempotent (ADR-0058 decision 8).
+   */
+  const sessionTools = new Map<string, AnyTool>();
+
+  /**
+   * Register a tool and remember it, so a withdrawal can put the same one back.
+   *
+   * `pi.registerTool` is a `Map.set` on the tool name, so registering the same name twice
+   * REPLACES the entry rather than adding a second one. That is the whole of the withdrawal
+   * mechanism: there is no unregister, and there does not need to be one.
+   */
+  const registerSessionTool = (tool: AnyTool): void => {
+    sessionTools.set(tool.name, tool);
+    pi.registerTool(tool);
+  };
+
+  /**
+   * ADR-0058: withdraw this package's segment of the chain, or put it back.
+   *
+   * **Withdrawal is a same-name re-registration with `exposure: "hidden"`.** pi filters the
+   * registry by the CURRENT exposure every time it recomputes a set, so a hidden tool is in
+   * neither the set declared to the model nor the set a `codemode` script may call — the two
+   * places a withdrawn tool could still be reached from. pi's own MCP extension withdraws tools
+   * exactly this way.
+   *
+   * **Which tools are withdrawn depends on the surface**, and the reason is one fact: pi's
+   * `codemode` is not ours to withdraw. On `full_ptc` the whole orchestration layer goes and the
+   * model is back to the built-in tools; on `codemode_ptc` `codemode` keeps orchestrating and
+   * only this package's segment under it goes. See `PTC_TRUNCATED_TOOL_NAMES`.
+   *
+   * **Putting it back re-registers the ORIGINAL definition**, so the tool's exposure is the one
+   * the surface gives it (`direct` on `full_ptc`, `codemode` on `codemode_ptc`) and no leftover
+   * `hidden` survives the round trip.
+   */
+  const setSegmentWithdrawn = (withdrawn: boolean): void => {
+    for (const name of PTC_TRUNCATED_TOOL_NAMES[surface.surfaceMode]) {
+      const tool = sessionTools.get(name);
+      if (tool === undefined) continue;
+      pi.registerTool(withdrawn ? { ...tool, exposure: "hidden" } : tool);
+    }
+  };
+
+  /**
    * Register everything this session offers, once, for the surface just detected.
    *
    * A function declaration rather than an inline block so `session_start` can call it from wherever
@@ -550,7 +646,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
       // `full_ptc` orchestrates itself and declares the tools; `codemode_ptc` hands composition to
       // pi's `codemode` and offers these as its execution layer.
       const programmingToolExposure = detected.surfaceMode === "full_ptc" ? "direct" : "codemode";
-      pi.registerTool(
+      registerSessionTool(
         createPtcRunCodeTool({
           getBindingSourceNames,
           getOptInBindings,
@@ -562,7 +658,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
           getDispatchDeps: () => background.dispatchDeps,
         }),
       );
-      pi.registerTool(
+      registerSessionTool(
         createPtcWorkflowTool({
           getBindingSourceNames,
           getOptInBindings,
@@ -589,7 +685,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
      * same call.
      */
     if (detected.surfaceMode === "codemode_ptc") {
-      pi.registerTool(
+      registerSessionTool(
         createPtcSubagentTool({
           cwd: process.cwd(),
           depth: ptcDepth,
@@ -619,9 +715,9 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
      * true of the factory it was written in and false of the function it now sits in, which is what
      * happens when a block moves and its comments do not — ADR-0035 moved this one.)
      */
-    pi.registerTool(createPtcTaskListTool(background.registry));
-    pi.registerTool(createPtcTaskOutputTool(background.registry, background.outputStorage));
-    pi.registerTool(
+    registerSessionTool(createPtcTaskListTool(background.registry));
+    registerSessionTool(createPtcTaskOutputTool(background.registry, background.outputStorage));
+    registerSessionTool(
       createPtcTaskStopTool(background.registry, background.lifecycle, { clock: background.clock }),
     );
 
@@ -641,7 +737,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
      * tool straight back out without the merge, while an agent that declares none gets no flag at
      * all and depends on `defaultActive`. See `childToolList`.
      */
-    pi.registerTool(createChildReportTool(ptcDepth > 0));
+    registerSessionTool(createChildReportTool(ptcDepth > 0));
   }
 
   /**
@@ -917,6 +1013,10 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
    *
    * The task tools follow the switch, and they are withheld only when the session has NO task
    * record (ADR-0053): a record — running or finished — is something for them to do.
+   *
+   * ADR-0058: the TRUNCATION is restored with the switch, not just the gate. A resumed session
+   * that carries an "off" record must not find the orchestration layer back — the switch is
+   * session-scoped, and a resume is the same session.
    */
   const applyPersistedDispatch = async (
     persisted: { enabled: boolean } | undefined,
@@ -924,6 +1024,8 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     if (persisted === undefined) return;
     dispatchEnabled = persisted.enabled;
     background.dispatchDeps.dispatchEnabled = persisted.enabled;
+    // ADR-0058: withdraw this package's segment, or put it back.
+    setSegmentWithdrawn(!persisted.enabled);
     // ADR-0053: the face follows the RECORDS, not the in-flight count.
     const faceVisible = background.registry.taskFaceVisible();
     applyTaskToolVisibility(!persisted.enabled && !faceVisible);
@@ -937,33 +1039,48 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
       // two switches. `surface` went with `surfaceMode`; the one in force reports at session start.
       if (action === "why" || action.startsWith("why ")) return applyWhy(action.slice(4), ctx);
       if (action === "off") {
-        // ADR-0050: PTC off stops NEW children AND restores the built-in tools. The narrowing
-        // goes with it, because "off" has to mean one thing.
+        // ADR-0058: PTC off is a TRUNCATION of this package's place in the chain, not a switch
+        // that leaves a door in place to refuse. The narrowing goes with it, because "off" has to
+        // mean one thing.
         if (!mode.enabled && !dispatchEnabled) {
           ctx.ui.notify("PTC is already off.", "info");
           return;
         }
         // The flag FIRST: `dispatch()` reads it per call, so this takes effect before the user's
-        // next turn rather than at the next extension load.
+        // next turn rather than at the next extension load. It is also the ONLY thing that covers
+        // the window between the switch being flipped and the model seeing the withdrawal (the
+        // request the model already sent still carries the old declaration) — see ADR-0058
+        // decision 4.
         dispatchEnabled = false;
         background.dispatchDeps.dispatchEnabled = false;
         pi.appendEntry(PTC_DISPATCH_ENTRY_TYPE, { enabled: false });
         if (mode.enabled) {
           exitMode(ctx, { announce: false, customType: PTC_MODE_ENTRY_TYPE });
         }
+        // The truncation itself: this package's segment of the chain is withdrawn, so the model
+        // has nothing left to call. On `full_ptc` that is the whole orchestration layer; on
+        // `codemode_ptc` it is this package's segment under pi's `codemode`.
+        setSegmentWithdrawn(true);
         // ADR-0057: the QUEUED ones are pulled out — a queued task has no child to signal.
         const withdrawn = await background.withdrawQueuedTasks(PTC_OFF_WITHDRAW_REASON);
         const inFlight = await countInFlightTasks();
-        applyTaskToolVisibility(!background.registry.taskFaceVisible());
+        // ADR-0053: the lifecycle face follows the RECORDS, not the in-flight count — a session
+        // with a finished record keeps the three task tools, so a running task stays stoppable.
+        const faceVisible = background.registry.taskFaceVisible();
+        applyTaskToolVisibility(!faceVisible);
         paintStatus(ctx);
         const one = inFlight === 1;
         const queued = withdrawn.length;
         ctx.ui.notify(
-          `PTC off — no new child can be started from here on.` +
+          PTC_TRUNCATION_NOTICE_LEADS[surface.surfaceMode] +
+            " " +
+            PTC_TRUNCATED_NO_NEW_TASK +
             (queued > 0 ? ` ${queued} queued task${queued === 1 ? "" : "s"} withdrawn.` : "") +
             (inFlight > 0
               ? ` The ${inFlight} background ${one ? "task" : "tasks"} already running ${one ? "is" : "are"} NOT affected: ${one ? "it keeps" : "they keep"} running and ${one ? "stays" : "stay"} manageable through ptc_task_list / ptc_task_output / ptc_task_stop.`
-              : " The background-task tools are gone because the session has no task record."),
+              : faceVisible
+                ? " The task tools stay in the model's face: this session has task records, and they stay visible and stoppable."
+                : " The background-task tools are gone because the session has no task record."),
           "info",
         );
         return;
@@ -971,10 +1088,10 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
       if (action !== "on") {
         ctx.ui.notify(
           mode.enabled
-            ? `PTC mode is ON — run /ptc off to restore built-in tools and stop new children.\nBindings: ${resolveBindingNames(mode.base, optInBindings).join(", ") || "(none)"}`
+            ? `PTC mode is ON — run /ptc off to restore the built-in tools and withdraw this package's segment.\nBindings: ${resolveBindingNames(mode.base, optInBindings).join(", ") || "(none)"}`
             : dispatchEnabled
-              ? "PTC mode is OFF — built-in tools are directly callable, and new children can still be started. Run /ptc off to stop dispatching, or /ptc on to enter the mode."
-              : "PTC is OFF — no new child can be started, and the background-task tools are gone unless a task is still running. Run /ptc on to allow dispatching again.",
+              ? "PTC mode is OFF — built-in tools are directly callable, and new tasks can still be created. Run /ptc off to withdraw this package's segment, or /ptc on to enter the mode."
+              : PTC_TRUNCATED_QUERY_LINES[surface.surfaceMode],
           "info",
         );
         return;
@@ -990,11 +1107,15 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
         // loadout as its `base`, and a base without them would keep them hidden for the rest of
         // the session.
         applyTaskToolVisibility(false);
+        // ADR-0058: put the segment back too, and AFTER the loadout above — the loadout write
+        // replaces the active set, and a segment that is still withdrawn at that moment would be
+        // filtered straight back out of it.
+        setSegmentWithdrawn(false);
       }
       if (mode.enabled) {
         ctx.ui.notify(
           reEnabledDispatch
-            ? "PTC is on — new children can be started again (the narrowing was already on)."
+            ? "PTC is on — new tasks can be created again (the narrowing was already on)."
             : "PTC mode is already on.",
           "info",
         );
@@ -1015,7 +1136,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
             ? "Cannot enter PTC mode: ptc_run_code / ptc_workflow are not active in this session."
             : "Cannot enter PTC mode in this run mode.";
         ctx.ui.notify(
-          reEnabledDispatch ? `${why} New children can be started again.` : why,
+          reEnabledDispatch ? `${why} New tasks can be created again.` : why,
           "warning",
         );
         return;
@@ -1674,7 +1795,10 @@ export const PTC_DISPATCH_ENTRY_TYPE = "ptc-dispatch";
 /**
  * The reason recorded on a task that `/ptc off` pulled out of the admission queue (ADR-0057).
  *
- * It lands on the record's `stopReason`, so "the session stopped accepting new dispatches" is
+ * It lands on the record's `stopReason`, so "the session stopped accepting new tasks" is
  * readable in the task list instead of the task having silently stopped existing.
+ *
+ * **The vocabulary is TASK, not "dispatch"** (ADR-0052): the model reads this string — it is
+ * rendered as the task's `reason` — and the thing the model creates is a task.
  */
-export const PTC_OFF_WITHDRAW_REASON = "the session stopped accepting new dispatches (/ptc off)";
+export const PTC_OFF_WITHDRAW_REASON = "the session stopped accepting new tasks (/ptc off)";
