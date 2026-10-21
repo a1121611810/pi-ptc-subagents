@@ -196,7 +196,7 @@ export interface PtcRunOutcome {
  * `DispatchResult.status: "rejected"` covers two different things, and the sub-call tree colours
  * them differently (ADR-0021 §6):
  *
- * - `started: false` — the harness declined to run it (depth gate, concurrency gate, unknown
+ * - `started: false` — the harness declined to run it (depth gate, unknown
  *   agent, a spawn that never happened). That is `rejected`.
  * - `started: true` — the child ran and failed (non-zero exit, no final text, killed). That is
  *   `error`, and it keeps the duration it actually took.

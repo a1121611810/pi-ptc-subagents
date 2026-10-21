@@ -67,9 +67,11 @@ async function copy(text) {
         <article class="lp-card">
           <h3><span class="lp-num">02</span> Subagent fan-out</h3>
           <p>
-            The <code>pi.dispatch</code> binding spawns a fresh <code>pi</code> subprocess per call,
-            so each task gets its own context. Foreground await, or background with a lifecycle you
-            can list, read and stop.
+            <code>pi_task_ptc</code> (inside a program) and <code>pi_task_codemode</code> (from a
+            <code>codemode</code> script) each spawn a fresh <code>pi</code> subprocess, so every
+            task gets its own context. Waiting is a parameter, not a mode: <code>wait: true</code>
+            waits for the result, and leaving it out hands back a handle while the task keeps
+            running.
           </p>
           <pre><b>ptc_task_list</b>
   ├─ t-3  audit the render path    <i>running · 41s</i>
@@ -91,11 +93,13 @@ async function copy(text) {
       <div class="lp-gaps">
         <article class="lp-gap">
           <s>No sub-agents</s>
-          <h4>&rarr; fan-out, in-process or background</h4>
+          <h4>&rarr; fan-out, result or handle</h4>
           <p>
-            <code>pi.dispatch</code> plus <code>ptc_task_list</code> /
-            <code>ptc_task_output</code> / <code>ptc_task_stop</code>. Session-level isolation
-            without inventing a task state machine.
+            <code>pi_task_ptc</code> / <code>pi_task_codemode</code> plus
+            <code>ptc_task_list</code> / <code>ptc_task_output</code> / <code>ptc_task_stop</code>.
+            Every dispatch creates a task record, so the same three tools read a task you waited
+            for and one you did not &mdash; session-level isolation, with no task state machine to
+            invent.
           </p>
         </article>
         <article class="lp-gap">
@@ -110,7 +114,7 @@ async function copy(text) {
           <s>No background bash</s>
           <h4>&rarr; long-lived, inspectable</h4>
           <p>
-            Background dispatch hands back a handle, not a tmux pane. List it, read it, stop it.
+            A dispatch you do not wait for hands back a handle, not a tmux pane. List it, read it, stop it.
           </p>
         </article>
       </div>
