@@ -96,6 +96,21 @@ const CASES = [
     },
   },
   {
+    gate: 'check-landing-tool-names.mjs',
+    name: 'the landing page still names a tool this package retired',
+    mutate(dir) {
+      // The shape the gate was blind to. `pi.dispatch` was the PTC door's name before ADR-0052
+      // renamed it to `pi_task_ptc`, and it matched neither name family the gate knew, so the
+      // page could teach a retired API and the gate still reported "8 claim(s) against 8
+      // registered tool(s)". The case above cannot catch that: `ptc_not_a_real_tool` is in the
+      // family the gate already had. This one is in the family it did not.
+      const file = join(dir, 'packages', 'website', '.vitepress', 'dist', 'index.html');
+      const before = read(file);
+      write(file, before.replace('</body>', '<code>pi.dispatch</code></body>'));
+      return 'added the retired `pi.dispatch` to the built landing page';
+    },
+  },
+  {
     gate: 'check-internal-links.mjs',
     name: 'a link points at a page that was never built',
     mutate(dir) {
