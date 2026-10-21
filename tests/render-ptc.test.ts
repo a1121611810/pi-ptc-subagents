@@ -414,7 +414,7 @@ describe("renderPtcToolCall", () => {
   });
 });
 
-describe("renderSubagentToolCall (ptc_subagent)", () => {
+describe("renderSubagentToolCall (pi_task_codemode)", () => {
   test("collapsed: heading + state flags + one task line + withheld count", () => {
     const theme = makeTheme();
     const task = "第一行任务：做一次只读 review\n\n第二行：审查范围\n第三行\n第四行";
@@ -930,12 +930,12 @@ describe("createPtcRenderers (the pair both tools register)", () => {
 
 describe("sub-row label gutter", () => {
   test("a name longer than the gutter still gets a separator before the status", () => {
-    // `pi.dispatch` is 11 characters and the gutter is 8, so `padEnd` alone left it glued to the
-    // status text — the flagship dispatch row read `pi.dispatchrejected: …`.
+    // `pi_task_ptc` is 11 characters and the gutter is 8, so `padEnd` alone left it glued to the
+    // status text — the flagship dispatch row read `pi_task_ptcrejected: …`.
     const subCalls: SubCallRecord[] = [
       {
         callId: 1,
-        name: "pi.dispatch",
+        name: "pi_task_ptc",
         args: { agent: "agent-research" },
         status: "rejected",
         startMs: 0,
@@ -961,10 +961,10 @@ describe("sub-row label gutter", () => {
       makeTheme(),
       { isPartial: true },
     ).render(120);
-    const row = out.find((line) => line.includes("pi.dispatch"));
+    const row = out.find((line) => line.includes("pi_task_ptc"));
     expect(row).toBeDefined();
-    expect(row).toContain("pi.dispatch ");
-    expect(row).not.toContain("pi.dispatchrejected");
+    expect(row).toContain("pi_task_ptc ");
+    expect(row).not.toContain("pi_task_ptcrejected");
   });
 });
 
@@ -1050,7 +1050,7 @@ describe("sub-call tree in collapsed view (ADR-0021)", () => {
       },
       {
         callId: 3,
-        name: "pi.dispatch",
+        name: "pi_task_ptc",
         args: { agent: "agent-research" },
         status: "error",
         startMs: 0,
@@ -1068,7 +1068,7 @@ describe("sub-call tree in collapsed view (ADR-0021)", () => {
       },
       {
         callId: 5,
-        name: "pi.dispatch",
+        name: "pi_task_ptc",
         args: { agent: "agent-extra" },
         status: "rejected",
         startMs: 0,
@@ -1090,15 +1090,15 @@ describe("sub-call tree in collapsed view (ADR-0021)", () => {
     expect(out[2]).toMatch(/^   ├─ bash/);
     expect(out[2]).toContain("pnpm test");
     expect(out[2]).toContain("ok 1.2s");
-    // Mid sub-row: failed pi.dispatch with → agent preview, error slot.
-    expect(out[3]).toMatch(/^   ├─ pi.dispatch/);
+    // Mid sub-row: failed pi_task_ptc with → agent preview, error slot.
+    expect(out[3]).toMatch(/^   ├─ pi_task_ptc/);
     expect(out[3]).toContain("→ agent-research");
     expect(out[3]).toContain("failed: boom");
     // Mid sub-row: cancelled bash, muted slot.
     expect(out[4]).toMatch(/^   ├─ bash/);
     expect(out[4]).toContain("cancelled");
-    // Last sub-row: rejected pi.dispatch with default concurrency message, warning slot.
-    expect(out[5]).toMatch(/^   └─ pi.dispatch/);
+    // Last sub-row: rejected pi_task_ptc with default concurrency message, warning slot.
+    expect(out[5]).toMatch(/^   └─ pi_task_ptc/);
     expect(out[5]).toContain("→ agent-extra");
     expect(out[5]).toContain("rejected: capacity");
     // All five status colour slots show up in the render path (running + cancelled both use muted).
@@ -1108,12 +1108,12 @@ describe("sub-call tree in collapsed view (ADR-0021)", () => {
     expect(fgTagsUsed(theme)).toContain("warning");
   });
 
-  test("a pi.dispatch row with no agent names the generalist rather than dumping the args", () => {
+  test("a pi_task_ptc row with no agent names the generalist rather than dumping the args", () => {
     const theme = makeTheme();
     const subCalls: SubCallRecord[] = [
       {
         callId: 1,
-        name: "pi.dispatch",
+        name: "pi_task_ptc",
         // No `agent`. This is the shape #185 made legal, and it is now the common one.
         args: { task: "survey the peer implementations end to end" },
         status: "ok",
@@ -1135,7 +1135,7 @@ describe("sub-call tree in collapsed view (ADR-0021)", () => {
      * Counterfactual: restore the `"agent" in args` guard and this goes red — the row carries the
      * JSON preview instead of the marker asserted below.
      */
-    expect(out[1]).toMatch(/^   [├└]─ pi\.dispatch/);
+    expect(out[1]).toMatch(/^   [├└]─ pi_task_ptc/);
     expect(out[1]).toContain("→ (generalist)");
     expect(out[1], "no raw-args dump in the row").not.toContain('{"task"');
   });
@@ -1145,7 +1145,7 @@ describe("sub-call tree in collapsed view (ADR-0021)", () => {
     const subCalls: SubCallRecord[] = [
       {
         callId: 1,
-        name: "pi.dispatch",
+        name: "pi_task_ptc",
         args: { agent: "agent-extra" },
         status: "rejected",
         startMs: 0,

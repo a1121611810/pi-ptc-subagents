@@ -67,7 +67,6 @@ function backtickedTokens(text: string): string[] {
  */
 const NON_BINDING_VOCABULARY: readonly string[] = [
   "tools.<name>(args)",
-  'tools["pi.dispatch"]',
   "{ content, details }",
   "content",
   "details",

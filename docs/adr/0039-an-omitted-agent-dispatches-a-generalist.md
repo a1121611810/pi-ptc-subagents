@@ -2,6 +2,8 @@
 
 status: accepted (2026-10-12)
 
+> **Amended by [ADR-0052](./0052-the-two-doors-share-one-prefix.md) (2026-10-21): the two task doors are renamed — `pi.dispatch` → `pi_task_ptc` (the PTC door, a binding inside a program) and `ptc_subagent` → `pi_task_codemode` (the codemode door, reachable from a `codemode` script) — with no alias and no compatibility shim. This record's decisions stand unchanged; read its `pi.dispatch` / `ptc_subagent` as those names.**
+
 ## Context
 
 ADR-0016 §Decision 1 gave `pi.dispatch` the input fields
@@ -112,7 +114,7 @@ differently about `agent`, this one governs** — that is the only field either 
   its child.
 - **The generalist has no report opt-out.** With no definition there is no `childReport: false` to
   read, so the child-report contract is on, and because pi's full toolset stays in place the report
-  tool is registered in the child — the registration is depth-gated (`src/index.ts:643`,
+  tool is registered in the child — the registration is depth-gated (`src/index.ts:644`,
   `createChildReportTool(ptcDepth > 0)`), and a dispatched child always runs above depth zero.
   Measured on a real dispatch with the argument omitted: `report_channel: "tool"`, with the child
   filing a summary and findings. Same channels as any other dispatch; only the opt-out is

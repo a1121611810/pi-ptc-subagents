@@ -74,6 +74,8 @@ Status: accepted (2026-09-24). Behavior change on the program-visible side (new 
 
 > **Amended by [ADR-0053](./0053-every-dispatch-is-a-task.md) (2026-10-21): the task record is not the background front's privilege — every dispatch is a task.** §"What we add" 3's record is now created by the FOREGROUND front too, and the foreground child's output is persisted to the same `<sessionDir>/tasks/<id>/output.log` the background front writes, so a foreground child is readable after the call returned instead of evaporating with the return value. §"What we add" 6's three tools change their visibility condition: they are in the model's face exactly when the session has a task record, and out of it before the first dispatch — the face's presence is a CONSEQUENCE of the session having dispatched, not a rule of its own. The gates stay ABOVE the record creation, so a refused request leaves no record. The state machine, the subscription cursor, the delivery decisions and the signal layering are unchanged; where this record and ADR-0053 read differently, ADR-0053 governs.
 
+> **Amended by [ADR-0052](./0052-the-two-doors-share-one-prefix.md) (2026-10-21): the two task doors are renamed — `pi.dispatch` → `pi_task_ptc` (the PTC door, a binding inside a program) and `ptc_subagent` → `pi_task_codemode` (the codemode door, reachable from a `codemode` script) — with no alias and no compatibility shim. This record's decisions stand unchanged; read its `pi.dispatch` / `ptc_subagent` as those names.**
+
 ## Context
 
 This ADR closes the bgdispatch map. The four research/decision tickets it crystallizes are:

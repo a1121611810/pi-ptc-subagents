@@ -201,33 +201,53 @@ test("the description tells the model how to reach tools and what comes back", a
 });
 
 test("the reach note names the reader, the entry points and the table the binding is absent from", () => {
-  // The one model-facing sentence that answers "I am a `codemode` script; how do I fan out?".
+  // The one model-facing sentence that answers "I am a `codemode` script; how do I create a task?".
   // Measured 2026-10-16 (spike round 2): without it, a script author enumerates its own tool
-  // table, finds no `pi.dispatch`, and reads the silence as "this install does not register the
+  // table, finds no `pi_task_ptc`, and reads the silence as "this install does not register the
   // binding". What these assertions pin: the tokens/clauses below, so deleting or rewording
   // any half turns a named test red. What they do NOT pin: polarity — a rewrite that keeps every
   // pinned token and inverts the meaning still passes (round-2 review measured four such
   // paraphrases green). The oracle for polarity is the A/B run recorded on #200, not this test;
   // do not add more substring pins chasing it.
   expect(PTC_BINDING_REACH_NOTE, "names the reader").toContain("`codemode`");
-  expect(PTC_BINDING_REACH_NOTE, "names the binding it is about").toContain("`pi.dispatch`");
+  expect(PTC_BINDING_REACH_NOTE, "names the binding it is about").toContain("`pi_task_ptc`");
   expect(PTC_BINDING_REACH_NOTE, "states the absence from the tool table").toMatch(/never in/);
   expect(PTC_BINDING_REACH_NOTE, "names the first entry point").toContain("`ptc_run_code`");
   expect(PTC_BINDING_REACH_NOTE, "names the second entry point").toContain("`ptc_workflow`");
   expect(PTC_BINDING_REACH_NOTE, "states the positive half: the way out is a call").toMatch(
-    /reaches it by calling|dispatches through the dispatch tools/,
+    /reaches it by calling|creates a task through the door/,
   );
   expect(PTC_BINDING_REACH_NOTE, "states where the binding is used: inside the program").toMatch(
     /using the binding inside the program|with the binding used inside the program/,
   );
-  // Measured 2026-10-20 on the `subagents` surface: the note was in the parent's context and the
+  // Measured 2026-10-20 on the `codemode_ptc` surface: the note was in the parent's context and the
   // parent STILL wrote `tools["pi.dispatch"]` into a codemode script, got a TypeError, and burned
-  // three calls that way before falling back to `ptc_subagent`. So the note now names the one-hop
-  // route too, and points the reader at its own tool table rather than at a route it has to infer.
-  expect(PTC_BINDING_REACH_NOTE, "names the one-hop dispatch face").toContain("`ptc_subagent`");
+  // three calls that way before falling back to the codemode door. So the note now names the
+  // one-hop route too, and points the reader at its own tool table rather than at a route it has
+  // to infer.
+  expect(PTC_BINDING_REACH_NOTE, "names the one-hop door").toContain("`pi_task_codemode`");
   expect(PTC_BINDING_REACH_NOTE, "points the reader at its own tool table").toMatch(
     /in its own table/,
   );
+  // ADR-0052: the model-facing word is TASK. The note is read by a script author, so the internal
+  // word must not be in it.
+  expect(PTC_BINDING_REACH_NOTE, "does not say dispatch").not.toMatch(/dispatch/i);
+});
+
+test("both PTC descriptions carry the SAME reach note, so the sentence cannot drift between them", async () => {
+  // One constant in two descriptions is only drift-proof if the test reads BOTH sides and compares
+  // them. The binding contract has its own byte-comparison; the reach note sits outside the
+  // contract, so the contract's guards never see it and this is the only place the two copies can
+  // be checked against each other.
+  //
+  // Counterfactual: a description that reworded the note in place — "a script creates a task
+  // through the door that IS in its own table" becoming "a script should create a task somehow" —
+  // leaves every other assertion in this file green, because they all read the CONSTANT. This one
+  // reads the rendered text, so it goes red.
+  const runCode = (await captureRegisteredTools()).get("ptc_run_code")?.description ?? "";
+  const workflow = (await captureRegisteredTools()).get("ptc_workflow")?.description ?? "";
+  expect(runCode, "ptc_run_code carries the shared note").toContain(PTC_BINDING_REACH_NOTE);
+  expect(workflow, "ptc_workflow carries the shared note").toContain(PTC_BINDING_REACH_NOTE);
 });
 
 test("the binding example is scoped to a program, so a script author does not copy it into a script", async () => {
@@ -240,27 +260,30 @@ test("the binding example is scoped to a program, so a script author does not co
     ["ptc_run_code", runCode],
     ["ptc_workflow", workflow],
   ] as const) {
-    const at = description.indexOf('await tools["pi.dispatch"]');
-    expect(at, `${name} states the pi.dispatch call form`).toBeGreaterThan(-1);
+    // ADR-0052: the door is dot-accessible, so the example is the dot form. The OLD name needed
+    // string indexing, and the whole point of the rename is that neither plane does any more.
+    const at = description.indexOf("await tools.pi_task_ptc(");
+    expect(at, `${name} states the pi_task_ptc call form`).toBeGreaterThan(-1);
     // The window AROUND the example, not the sentence it sits in: the example itself contains a
     // `.` (`{ task: "..." }`), so a sentence-scoped match would stop in the middle of it. The
     // scope marker is what precedes the example, and that is what the claim is about.
     const window = description.slice(Math.max(0, at - 200), at);
     expect(window, `${name} scopes that example to a program`).toMatch(/inside the program/);
+    // The old shape is gone from the model-facing text entirely: a program that still reaches for
+    // `tools["pi.dispatch"]` gets a TypeError, so the description must not teach it.
+    expect(description, `${name} does not teach the retired name`).not.toContain("pi.dispatch");
   }
 });
 
-test("the description documents the always-bound pi.dispatch binding (pitfalls #1/#4/#5)", async () => {
+test("the description documents the always-bound pi_task_ptc door (pitfalls #1/#4/#5)", async () => {
   const description = (await captureRegisteredTools()).get("ptc_run_code")?.description ?? "";
-  // Pitfall #1: the binding is registered under the literal dot name, so the description must
-  // show string indexing — `tools.pi.dispatch` is a TypeError in the program.
-  expect(description, "shows the string-indexed call form").toContain('tools["pi.dispatch"]');
-  expect(description, "states the namespaced form does not exist").toContain(
-    "`tools.pi.dispatch` does not exist",
-  );
-  // Pitfall #4: the run deadline bounds in-flight foreground dispatches too.
-  expect(description, "foreground dispatches compose under Promise.all").toContain(
-    "foreground dispatches compose under `Promise.all`",
+  // Pitfall #1: the door is registered under a plain identifier, so the description shows the dot
+  // form — and the string-indexed form it used to need is gone.
+  expect(description, "shows the dot call form").toContain("await tools.pi_task_ptc(");
+  expect(description, "does not teach string indexing").not.toContain('tools["pi_task_ptc"]');
+  // Pitfall #4: the run deadline bounds in-flight foreground tasks too.
+  expect(description, "foreground tasks compose under Promise.all").toContain(
+    "foreground tasks compose under `Promise.all`",
   );
   // Pitfall #5: the program reads this run's actual binding names instead of assuming a set.
   expect(description, "names the introspection global").toContain("`ptcBindings`");
@@ -275,7 +298,7 @@ test("the timeoutMs parameter description warns that the deadline kills in-fligh
   const description = parameters.properties?.timeoutMs?.description ?? "";
   // Same fact the model needs in prose form (pitfall #4): a timed-out run takes the
   // program's in-flight foreground dispatches with it.
-  expect(description).toContain("in-flight foreground dispatches");
+  expect(description).toContain("in-flight foreground tasks");
   expect(description).toContain("terminated with it");
 });
 
@@ -366,18 +389,17 @@ test(
 );
 
 test(
-  "a pi.dispatch the depth gate refuses is recorded 'rejected', not 'ok' (ADR-0021 §6)",
+  "a pi_task_ptc the depth gate refuses is recorded 'rejected', not 'ok' (ADR-0021 §6)",
   async () => {
-    // `pi.dispatch` never throws for its own refusals — it resolves with a rejected
+    // `pi_task_ptc` never throws for its own refusals — it resolves with a rejected
     // `DispatchResult`. Recording that as `ok` would tell the reader a dispatch succeeded when the
     // harness declined to run it. A run stamped at depth 1 with a max of 1 refuses its own
     // dispatches at the gate (childDepth 2 > 1), before any spawn — so the test is hermetic.
     const result = await call(createPtcRunCodeTool({ depth: 1, config: { maxDispatchDepth: 1 } }), {
-      code:
-        'const r = await tools["pi.dispatch"]({ agent: "x", task: "y" });\n' + "return r.status;",
+      code: 'const r = await tools.pi_task_ptc({ agent: "x", task: "y" });\n' + "return r.status;",
     });
     expect(result.details.result).toBe("rejected");
-    const dispatch = result.details.subCalls?.find((entry) => entry.name === "pi.dispatch");
+    const dispatch = result.details.subCalls?.find((entry) => entry.name === "pi_task_ptc");
     expect(dispatch?.status).toBe("rejected");
     expect(dispatch?.errorMessage).toContain("depth limit");
     // A refusal never ran, so it has no duration to report.

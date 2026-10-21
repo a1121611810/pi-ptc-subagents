@@ -557,6 +557,15 @@ const EXTERNAL_VOCABULARY: ReadonlyMap<string, string> = new Map([
     "surfaceModeConflict",
     "本仓已删除的冲突判定函数（ADR-0034 随 pinned 值通知一并删除）；ADR-0034 点名它是为了说明删掉了哪条提示",
   ],
+  // A4. 同类的第二个：ADR-0052 把 codemode 侧那扇门的名字从 `ptc_subagent` 改成
+  // `pi_task_codemode`，**不留别名**。已接受的 ADR 正文不改写（历史不改写，只加指针），所以这
+  // 个名字继续留在那些记录里；而 src/ 里已经没有了——连注释里都不能留（第一条反向守护按子串
+  // 判「是否在 src/ 里真实存在」，一条注释就足以让它变红）。
+  // 死条目那条反向守护也仍然成立：ADR 们还提它，所以这条清单条目是活的。
+  [
+    "ptc_subagent",
+    "本仓已删除的 codemode 侧门名（ADR-0052 把它改名为 pi_task_codemode，不留别名）；0013/0016/0022/0025/0026/0027/0028/0029/0032/0033/0039/0041/0042/0043/0044/0045/0049/0050/0053 保留这个名字是为了记录删除事实",
+  ],
   ["SessionShutdownEvent", "pi 宿主生命周期事件，本仓只消费不声明"],
   [
     "RUN_CODE_NAME",
@@ -1465,17 +1474,17 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // 函数内再 +15（N1 model/scope flags、N3 注释、N4 firstLine 压平），五条 render.ts 锚点
     // 合计 +104（945→1049、1102→1206、1196→1300、1198→1302、1193→1297）。ADR-0013 正文新增
     // 6 行 amendment，文档侧引用 +6。两侧均逐条按内容核对（内容未变），正文引用已同步。
-    "docs/adr/0013-ptc-row-compact-summary.md:146 -> src/tools/render.ts:90":
+    "docs/adr/0013-ptc-row-compact-summary.md:148 -> src/tools/render.ts:91":
       "MAX_CODE_LINES_EXPANDED = 3",
-    "docs/adr/0013-ptc-row-compact-summary.md:180 -> render.ts:153": "function firstLine(",
-    "docs/adr/0013-ptc-row-compact-summary.md:180 -> render.ts:1075": "function errorText(",
-    "docs/adr/0013-ptc-row-compact-summary.md:180 -> render.ts:1232": "errorText(result)",
-    "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:1326": "errorText(result)",
-    "docs/adr/0013-ptc-row-compact-summary.md:183 -> render.ts:1328": "MAX_LOG_LINES_EXPANDED",
-    "docs/adr/0013-ptc-row-compact-summary.md:184 -> render.ts:137": "function alignRow(",
-    "docs/adr/0013-ptc-row-compact-summary.md:188 -> render.ts:1323":
+    "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:154": "function firstLine(",
+    "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:1076": "function errorText(",
+    "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:1233": "errorText(result)",
+    "docs/adr/0013-ptc-row-compact-summary.md:184 -> render.ts:1327": "errorText(result)",
+    "docs/adr/0013-ptc-row-compact-summary.md:185 -> render.ts:1329": "MAX_LOG_LINES_EXPANDED",
+    "docs/adr/0013-ptc-row-compact-summary.md:186 -> render.ts:138": "function alignRow(",
+    "docs/adr/0013-ptc-row-compact-summary.md:190 -> render.ts:1324":
       "The failure text is the reason",
-    "docs/adr/0016-ptc-dispatch-binding.md:43 -> src/runtime/dispatcher.ts:447":
+    "docs/adr/0016-ptc-dispatch-binding.md:45 -> src/runtime/dispatcher.ts:447":
       "new DispatchSlotCounter(",
     // 2026-10-21（ADR-0053：前台也建任务记录）：下面 7 条的目标行因本次实现整体下移，正文引用
     // 与本表同步。目标行逐条按内容核对过——内容未变，只是行号变了：
@@ -1484,42 +1493,42 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     //   dispatch.ts:2086 → 2127（`function accumulateUsage(`）
     //   dispatch.ts:1905 → 1946（`export function childToolList(`）
     //   ptc-task.ts:253/604/832 → 281/637/870（三处 `outputSchema:` 声明）
-    "docs/adr/0026-surface-default-is-detected.md:260 -> dispatch.ts:2521":
+    "docs/adr/0026-surface-default-is-detected.md:262 -> dispatch.ts:2521":
       "spawnOptions.sessionId = taskId;",
     // Confirmed line by line 2026-10-12 (re-checked after #187 moved it): line 505 is
     // `pi.registerTool(createChildReportTool(ptcDepth > 0));` -- the depth gate the ADR cites to
     // explain why a generalist still gets the report tool.
-    "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:115 -> src/index.ts:643":
+    "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:117 -> src/index.ts:644":
       "createChildReportTool(ptcDepth > 0)",
-    "docs/adr/0029-surface-follows-codemode-activation.md:31 -> ptc-mode.ts:1331":
+    "docs/adr/0029-surface-follows-codemode-activation.md:33 -> ptc-mode.ts:1331":
       "export function detectedSurfaceMode(",
-    "docs/adr/0029-surface-follows-codemode-activation.md:34 -> src/index.ts:1322":
+    "docs/adr/0029-surface-follows-codemode-activation.md:36 -> src/index.ts:1323":
       'getActiveTools().includes("codemode")',
-    "docs/adr/0029-surface-follows-codemode-activation.md:145 -> src/index.ts:1322":
+    "docs/adr/0029-surface-follows-codemode-activation.md:147 -> src/index.ts:1323":
       'getActiveTools().includes("codemode")',
-    "docs/adr/0029-surface-follows-codemode-activation.md:176 -> ptc-mode.ts:32":
+    "docs/adr/0029-surface-follows-codemode-activation.md:178 -> ptc-mode.ts:32":
       "## Fail-safe on external loadout changes",
-    "docs/adr/0029-surface-follows-codemode-activation.md:213 -> src/index.ts:1271":
+    "docs/adr/0029-surface-follows-codemode-activation.md:215 -> src/index.ts:1272":
       "if (detected.present && !known) {",
     "docs/adr/0030-surface-switch-reloads.md:96 -> ptc-mode.ts:32":
       "## Fail-safe on external loadout changes",
     "docs/adr/0031-open-source-and-publish-authority.md:129 -> src/runtime/limits.ts:4":
       "The numbers are DSH's",
-    "docs/adr/0032-child-report.md:13 -> src/runtime/dispatch.ts:2104": "function assistantText(",
-    "docs/adr/0032-child-report.md:22 -> src/tools/subagent.ts:231":
+    "docs/adr/0032-child-report.md:15 -> src/runtime/dispatch.ts:2104": "function assistantText(",
+    "docs/adr/0032-child-report.md:24 -> src/tools/subagent.ts:240":
       "export const SUBAGENT_OUTPUT_SCHEMA",
-    "docs/adr/0032-child-report.md:35 -> src/runtime/dispatch.ts:2127": "function accumulateUsage(",
-    "docs/adr/0032-child-report.md:57 -> src/tools/subagent.ts:576":
+    "docs/adr/0032-child-report.md:37 -> src/runtime/dispatch.ts:2127": "function accumulateUsage(",
+    "docs/adr/0032-child-report.md:59 -> src/tools/subagent.ts:592":
       "structuredContent: structured,",
-    "docs/adr/0032-child-report.md:57 -> src/tools/ptc-task.ts:281":
+    "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:281":
       "outputSchema: LIST_OUTPUT_SCHEMA,",
     // 2026-10-19（#219-#222 · retro）：抽取器现在展开逗号后的数字，这两行才第一次进入判定面。
     // 它们一直是对的，只是以前没有任何东西检查；在这里补上，从此漂移会红。
-    "docs/adr/0032-child-report.md:57 -> src/tools/ptc-task.ts:637":
+    "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:637":
       "outputSchema: OUTPUT_OUTPUT_SCHEMA,",
-    "docs/adr/0032-child-report.md:57 -> src/tools/ptc-task.ts:870":
+    "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:870":
       "outputSchema: STOP_OUTPUT_SCHEMA,",
-    "docs/adr/0032-child-report.md:132 -> src/runtime/dispatch.ts:1946":
+    "docs/adr/0032-child-report.md:134 -> src/runtime/dispatch.ts:1946":
       "export function childToolList(",
     // 2026-10-20（DeepSeek 搜索模块改形，ADR-0047 撤销 / ADR-0049 现行）：下面 11 条是该模块
     // 的 ADR 与 spec 带进来的引用，目标行逐条核对过内容——矩阵那一行讲的是 `exposure` 字段在
@@ -1530,18 +1539,18 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // 矩阵引用因头部加了撤销声明而下移（54→68、89→103），ADR-0048 / spec 的 `src/index.ts:653`
     // 那条指向的是**缺凭据告警**的行，它随 `src/index.ts` 的改动从 653 移到 736，文档侧的行号
     // 也跟着变（45→44、141→129）。新增 ADR-0049 的一条与 spec 的一条（242）。
-    "docs/adr/0047-deepseek-search-is-program-internal.md:70 -> docs/agents/pi-compat-matrix.md:63":
+    "docs/adr/0047-deepseek-search-is-program-internal.md:72 -> docs/agents/pi-compat-matrix.md:63":
       "`ToolDefinition.exposure` field",
-    "docs/adr/0047-deepseek-search-is-program-internal.md:105 -> docs/agents/pi-compat-matrix.md:63":
+    "docs/adr/0047-deepseek-search-is-program-internal.md:107 -> docs/agents/pi-compat-matrix.md:63":
       "`ToolDefinition.exposure` field",
-    "docs/adr/0048-deepseek-search-gate.md:44 -> src/index.ts:783": "ctx.ui.notify(",
+    "docs/adr/0048-deepseek-search-gate.md:44 -> src/index.ts:784": "ctx.ui.notify(",
     "docs/adr/0048-deepseek-search-gate.md:72 -> src/runtime/limits.ts:147":
       "WORKER_ENV_ALLOW_LIST",
-    "docs/adr/0049-the-search-lives-in-the-child.md:13 -> docs/agents/pi-compat-matrix.md:63":
+    "docs/adr/0049-the-search-lives-in-the-child.md:15 -> docs/agents/pi-compat-matrix.md:63":
       "`ToolDefinition.exposure` field",
     "docs/specs/0044-deepseek-search-module.md:98 -> docs/agents/pi-compat-matrix.md:63":
       "`ToolDefinition.exposure` field",
-    "docs/specs/0044-deepseek-search-module.md:146 -> src/index.ts:783": "ctx.ui.notify(",
+    "docs/specs/0044-deepseek-search-module.md:146 -> src/index.ts:784": "ctx.ui.notify(",
     "docs/specs/0044-deepseek-search-module.md:173 -> src/runtime/limits.ts:147":
       "WORKER_ENV_ALLOW_LIST",
     "docs/specs/0044-deepseek-search-module.md:298 -> docs/agents/pi-compat-matrix.md:63":
@@ -1566,6 +1575,22 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
    * 而分散的规则读起来像各自的例外——包括一次真的按注释里的旧数字去"修正"数组。
    */
   const IN_REPO_PIN_BASELINE: readonly string[] = [
+    // 2026-10-21（ADR-0052 · 两扇门改名）：26 篇记录在正文顶部各加了一行修订指针
+    // （`> Amended by ADR-0052 …`），这 26 条引用的**文档侧**行号整体 +2（0013 146→148、
+    // 0016 43→45、0026 260→262、0029 五条 31→33 / 34→36 / 145→147 / 176→178 / 213→215、
+    // 0032 五条 13→15 / 22→24 / 35→37 / 57→59 / 132→134、0047 70→72 / 105→107、0049 13→15、
+    // 0048 两条 44→44 / 72→72——**0048 与 spec-0044 的两行没有变**，因为那两篇不在被修订的
+    // 26 篇里）；spec-0044 146→146。
+    // **目标侧动了三处**，逐条按**内容**核对后改正：
+    //   render.ts +1（`src/tools/render.ts` 新增一行 import）——八条：90→91、153→154、
+    //     1075→1076、1232→1233、1326→1327、1328→1329、137→138、1323→1324；
+    //   index.ts +1——四条：643→644、783→784、1271→1272、1322→1323；
+    //   subagent.ts **两段不同的位移**（本轮改了这个文件的两处，位置不同）：231→240（+9，
+    //     模块头重写）、576→592（+16，再加 `exposure: "codemode"` 那几行与格式化）。
+    //     **592 是 settled 路径的那条 `structuredContent: structured,`，492 是后台 handle
+    //     分支的同名那条——别取错。**
+    // 正文里的引用数字同步改了（`render.ts:90-97` → `91-98` 这类区间也一起平移），
+    // PIN_TOKENS 的 value 一个未变。
     // 2026-10-21（ADR-0051 · 表面值改名）：15 篇记录在正文顶部各加了一行修订指针（`> Amended by ADR-0051 …`），这 15 条引用的**文档侧**行号整体 +2（0026 258→260、0029 五条 29→31 / 32→34 / 143→145 / 174→176 / 211→213、0030 94→96、0032 五条 11→13 / 20→22 / 33→35 / 55→57 / 130→132、0047 68→70 / 103→105、0049 11→13）。
     // **目标侧一个都没有动**：每一行的内容逐条打开核对过，与改前逐字相同 —— `ptc-mode.ts:1331` 仍是 `export function detectedSurfaceMode(`（本轮刻意让 `detectedSurfaceMode` 留在 1331 行，免得连目标侧也位移），`src/index.ts:1322` / `:1271` / `:783` / `:643` 与 `dispatch.ts` / `subagent.ts` / `ptc-task.ts` / `limits.ts` 的目标行也都未移动。PIN_TOKENS 的 value 一个未变。
     // 2026-10-19 第十八次复核（ADR-0044 · P0 foreground 子进程错误 / P1 实际模型可观测 /
@@ -1615,21 +1640,21 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     //   0032:55 → subagent.ts 428→474（settled 路径的 `structuredContent: structured,`）
     // 顺带改正一处**既有**、本门不钉的散文漂移：ADR-0032 同一引用里的 `ptc-task.ts:471, 630`
     // 早已不是 outputSchema 行，本次与 233 一起写成 `233, 569, 766`（三条声明的实际行）。
-    "docs/adr/0013-ptc-row-compact-summary.md:146 -> src/tools/render.ts:90",
-    "docs/adr/0013-ptc-row-compact-summary.md:180 -> render.ts:153",
-    "docs/adr/0013-ptc-row-compact-summary.md:180 -> render.ts:1075",
-    "docs/adr/0013-ptc-row-compact-summary.md:180 -> render.ts:1232",
-    "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:1326",
-    "docs/adr/0013-ptc-row-compact-summary.md:183 -> render.ts:1328",
-    "docs/adr/0013-ptc-row-compact-summary.md:184 -> render.ts:137",
-    "docs/adr/0013-ptc-row-compact-summary.md:188 -> render.ts:1323",
+    "docs/adr/0013-ptc-row-compact-summary.md:148 -> src/tools/render.ts:91",
+    "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:154",
+    "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:1076",
+    "docs/adr/0013-ptc-row-compact-summary.md:182 -> render.ts:1233",
+    "docs/adr/0013-ptc-row-compact-summary.md:184 -> render.ts:1327",
+    "docs/adr/0013-ptc-row-compact-summary.md:185 -> render.ts:1329",
+    "docs/adr/0013-ptc-row-compact-summary.md:186 -> render.ts:138",
+    "docs/adr/0013-ptc-row-compact-summary.md:190 -> render.ts:1324",
     // Hand-confirmed line by line, 2026-09-30 (review round 5). The extractor resolves this
     // one only because the path is qualified: bare `dispatcher.ts` is ambiguous in this repo, and
     // the rule is to refuse rather than guess. Line 438 is
     // `const dispatchSlots = new DispatchSlotCounter(config.dispatchConcurrency);` -- the FALLBACK
     // counter, since :712 prefers `options.dispatchDeps?.slots ?? dispatchSlots`. ADR-0016 §2
     // names it as where the knob is read when nothing is injected.
-    "docs/adr/0016-ptc-dispatch-binding.md:43 -> src/runtime/dispatcher.ts:447",
+    "docs/adr/0016-ptc-dispatch-binding.md:45 -> src/runtime/dispatcher.ts:447",
     // 2026-10-10 第七次复核：**1096 → 1501**。1096 是一段 JSDoc 的开头，不是本 ADR 声称的
     // `spawnOptions.sessionId = taskId;`（那行在 1501）——而后者正是「同 id 重试从正常路径
     // 不可达」这个论断的落点。**既有漂移**，dispatch.ts 本轮未改，HEAD 上 1096 同样不是它。
@@ -1651,18 +1676,18 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // 锚点之前，所以四条恰好等量。**等量不等于可以算**：算术平移只在本轮成立，下一轮锚点
     // 分布在两个函数的两侧时就不成立。四条都按内容逐条核对后改正。
     // 上面这组是**当时值**（读法见本数组的头部说明）。
-    "docs/adr/0026-surface-default-is-detected.md:260 -> dispatch.ts:2521",
+    "docs/adr/0026-surface-default-is-detected.md:262 -> dispatch.ts:2521",
     // 2026-10-10 第七次复核：四条全部因本轮删除 surfaceMode 而位移，逐条核对内容后改正。
     //  29  → 628→1160 = `export function detectedSurfaceMode(`
     //  32  → 962→856  = decision-4 的 `if (surface.surfaceMode === "subagents" && !pi.getActiveTools()…`
     //  105 → 962→856  = 同一处（ADR-0029 正文第二次引用它）
     //  129 → 27 保持    = ` * ## Fail-safe on external loadout changes`，本轮未移动
-    "docs/adr/0029-surface-follows-codemode-activation.md:31 -> ptc-mode.ts:1331",
-    "docs/adr/0029-surface-follows-codemode-activation.md:34 -> src/index.ts:1322",
-    "docs/adr/0029-surface-follows-codemode-activation.md:145 -> src/index.ts:1322",
-    "docs/adr/0029-surface-follows-codemode-activation.md:176 -> ptc-mode.ts:32",
+    "docs/adr/0029-surface-follows-codemode-activation.md:33 -> ptc-mode.ts:1331",
+    "docs/adr/0029-surface-follows-codemode-activation.md:36 -> src/index.ts:1323",
+    "docs/adr/0029-surface-follows-codemode-activation.md:147 -> src/index.ts:1323",
+    "docs/adr/0029-surface-follows-codemode-activation.md:178 -> ptc-mode.ts:32",
     //  166 → 920→807 = `if (detected.present && !known) {`，即交叉核对那一条
-    "docs/adr/0029-surface-follows-codemode-activation.md:213 -> src/index.ts:1271",
+    "docs/adr/0029-surface-follows-codemode-activation.md:215 -> src/index.ts:1272",
     // 2026-10-03 第四次复核（ADR-0030）：0030 引 ptc-mode.ts:27-31 那段「loadout 被外部改写
     // 时模式如何退让」，27 行是段首。本轮该引用在**文档里**的行号因撤回声明从 68 前移到 83，
     // 引用目标（ptc-mode.ts:27）未动。ADR-0030 另外四处引用写的是 pi 宿主的行号而非本仓文件，
@@ -1760,17 +1785,17 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     //   569 → 584 = `outputSchema: OUTPUT_OUTPUT_SCHEMA,`
     //   766 → 803 = `outputSchema: STOP_OUTPUT_SCHEMA,`
     // 233 = `outputSchema: LIST_OUTPUT_SCHEMA,` 未动。ADR-0032 正文同一行的引用同步改为 233, 584, 803。
-    "docs/adr/0032-child-report.md:13 -> src/runtime/dispatch.ts:2104",
-    "docs/adr/0032-child-report.md:22 -> src/tools/subagent.ts:231",
-    "docs/adr/0032-child-report.md:35 -> src/runtime/dispatch.ts:2127",
-    "docs/adr/0032-child-report.md:57 -> src/tools/subagent.ts:576",
-    "docs/adr/0032-child-report.md:57 -> src/tools/ptc-task.ts:281",
-    "docs/adr/0032-child-report.md:57 -> src/tools/ptc-task.ts:637",
-    "docs/adr/0032-child-report.md:57 -> src/tools/ptc-task.ts:870",
-    "docs/adr/0032-child-report.md:132 -> src/runtime/dispatch.ts:1946",
+    "docs/adr/0032-child-report.md:15 -> src/runtime/dispatch.ts:2104",
+    "docs/adr/0032-child-report.md:24 -> src/tools/subagent.ts:240",
+    "docs/adr/0032-child-report.md:37 -> src/runtime/dispatch.ts:2127",
+    "docs/adr/0032-child-report.md:59 -> src/tools/subagent.ts:592",
+    "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:281",
+    "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:637",
+    "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:870",
+    "docs/adr/0032-child-report.md:134 -> src/runtime/dispatch.ts:1946",
     // 新增 1 条（2026-10-12，ADR-0039）：目标行已逐条核对。
     // 2026-10-20（搜索模块改形）：目标行随 src/index.ts 的改动从 620 移到 598，逐条核对内容未变。
-    "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:115 -> src/index.ts:643",
+    "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:117 -> src/index.ts:644",
     // 2026-10-20（DeepSeek 搜索模块）：新增 7 条，逐条核对过目标行的内容。
     // 2026-10-20 第二次（形状改成「只在子代理里」）：7 条变 11 条，理由见 PIN_TOKENS 上方那段。
     // 2026-10-21（订正 `/ptc off` 的说法）：src/index.ts 改了 `/ptc off` 与 `/ptc` 查询的通知文案，
@@ -1782,13 +1807,13 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // 与工具名常量，三处都往下挪 ⇒ 本清单 13 条目标行位移。逐条按**内容**核对后重钉（不做算术平移）：
     // dispatch.ts 2433→2480、2016→2063、2039→2086、1858→1905；index.ts 1175→1320（两处）、
     // 1124→1269、608→643、748→783（两处）；ptc-task.ts 236→253、587→604、815→832。
-    "docs/adr/0047-deepseek-search-is-program-internal.md:70 -> docs/agents/pi-compat-matrix.md:63",
-    "docs/adr/0047-deepseek-search-is-program-internal.md:105 -> docs/agents/pi-compat-matrix.md:63",
-    "docs/adr/0048-deepseek-search-gate.md:44 -> src/index.ts:783",
+    "docs/adr/0047-deepseek-search-is-program-internal.md:72 -> docs/agents/pi-compat-matrix.md:63",
+    "docs/adr/0047-deepseek-search-is-program-internal.md:107 -> docs/agents/pi-compat-matrix.md:63",
+    "docs/adr/0048-deepseek-search-gate.md:44 -> src/index.ts:784",
     "docs/adr/0048-deepseek-search-gate.md:72 -> src/runtime/limits.ts:147",
-    "docs/adr/0049-the-search-lives-in-the-child.md:13 -> docs/agents/pi-compat-matrix.md:63",
+    "docs/adr/0049-the-search-lives-in-the-child.md:15 -> docs/agents/pi-compat-matrix.md:63",
     "docs/specs/0044-deepseek-search-module.md:98 -> docs/agents/pi-compat-matrix.md:63",
-    "docs/specs/0044-deepseek-search-module.md:146 -> src/index.ts:783",
+    "docs/specs/0044-deepseek-search-module.md:146 -> src/index.ts:784",
     "docs/specs/0044-deepseek-search-module.md:173 -> src/runtime/limits.ts:147",
     "docs/specs/0044-deepseek-search-module.md:298 -> docs/agents/pi-compat-matrix.md:63",
   ];

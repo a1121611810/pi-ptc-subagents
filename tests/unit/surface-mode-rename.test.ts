@@ -105,17 +105,18 @@ test("the `<ptc>` section selects what the model reads by the NEW value", () => 
     dispatchEnabled: true,
   });
   expect(full).toContain("ptc_run_code");
-  expect(full).toContain('await tools["pi.dispatch"]({ task })');
+  // ADR-0052: the door is dot-accessible on every plane.
+  expect(full).toContain("await tools.pi_task_ptc({ task })");
 
-  // `codemode_ptc`: the model calls the top-level face, and the binding is NOT in a `codemode`
+  // `codemode_ptc`: the model calls the codemode door, and the PTC door is NOT in a `codemode`
   // script's tool table. That sentence is the whole point of the section.
   const codemode = buildDispatchSection({
     surfaceMode: "codemode_ptc",
     childCanSearch: false,
     dispatchEnabled: true,
   });
-  expect(codemode).toContain("ptc_subagent");
-  expect(codemode).toContain("does not contain `pi.dispatch`");
+  expect(codemode).toContain("pi_task_codemode");
+  expect(codemode).toContain("does not contain `pi_task_ptc`");
 });
 
 test("the startup notice about a missing orchestrator names the new surface value", async () => {
@@ -173,6 +174,37 @@ test("no file that decides the surface still mentions the old values", () => {
 });
 
 /**
+ * The manual e2e script, which is in NO gate — so nothing else would catch it.
+ *
+ * `scripts/verify-parent-dispatch-e2e.ts` picks its branch by comparing an env value against a
+ * surface name. After the rename it still compared against `subagents`, a value that can never
+ * match any more, so **the script silently measured the `full_ptc` branch on every run** — and
+ * the run that was supposed to measure "not our PTC mode" measured the other thing. A manual
+ * script that quietly measures the wrong thing is worse than one that fails, and no gate sees it.
+ *
+ * The scan is over the CODE, not the prose: the script's comment records that the env value
+ * "was `subagents` / `full` before ADR-0051", and that sentence is history worth keeping. Only a
+ * string literal in code can change which branch the script takes.
+ */
+test("the manual e2e script compares against a LIVE surface value, not a retired one", () => {
+  const file = join(import.meta.dirname, "..", "..", "scripts", "verify-parent-dispatch-e2e.ts");
+  const source = readFileSync(file, "utf8");
+  // Comments out, so the history the script records is not what fails this.
+  const code = source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^[ \t]*\/\/.*$/gm, " ");
+  const literals = [...code.matchAll(/"([^"]+)"/g)].map((m) => m[1] as string);
+  for (const old of OLD_SURFACE_VALUES) {
+    expect(
+      literals,
+      `${file} still compares against the retired surface value "${old}"`,
+    ).not.toContain(old);
+  }
+  // And the live values are the ones it branches on — so the scan above cannot pass on a script
+  // that stopped branching at all.
+  expect(literals, "the script branches on the live codemode surface").toContain("codemode_ptc");
+  expect(literals, "and on the live full surface").toContain("full_ptc");
+});
+
+/**
  * The registration branch, on the new values: the program pair is offered to the model under
  * `full_ptc` and held at `codemode` reach under `codemode_ptc`.
  *
@@ -185,7 +217,7 @@ test("the registration branch keys off the new value", async () => {
   expect(pair?.exposure ?? "direct", "the program pair is model-facing under full_ptc").toBe(
     "direct",
   );
-  expect(full.tools.has("ptc_subagent"), "no top-level face under full_ptc").toBe(false);
+  expect(full.tools.has("pi_task_codemode"), "no codemode door under full_ptc").toBe(false);
 
   const codemode = await makeExtensionStub({
     codemode: PRESENT,
@@ -198,9 +230,10 @@ test("the registration branch keys off the new value", async () => {
     held?.exposure ?? "direct",
     "the program pair is at codemode reach under codemode_ptc",
   ).toBe("codemode");
-  expect(codemode.tools.has("ptc_subagent"), "the top-level face is there under codemode_ptc").toBe(
-    true,
-  );
+  expect(
+    codemode.tools.has("pi_task_codemode"),
+    "the codemode door is there under codemode_ptc",
+  ).toBe(true);
 });
 
 /**

@@ -14,7 +14,7 @@
  * What the incident was: pi writes `stopReason: "error"` + `errorMessage` onto the assistant
  * event, retries four times, then exits 0 with no text. The background pump has always forwarded
  * that pair (issue #70); the foreground path dropped it and reported only "dispatch produced no
- * final text", `ptc_subagent` threw `refused the call: undefined`, and the child's actual model
+ * final text", `pi_task_codemode` threw `refused the call: undefined`, and the child's actual model
  * was invisible on every surface. These tests pin the three fixes:
  *   - P0: the self-reported error is the foreground `errorMessage` and reaches the refusal;
  *   - P0: a missing `errorMessage` renders a sentence, never the string "undefined";
@@ -488,7 +488,7 @@ describe("describeSettledFailure", () => {
 
   test("a rejection without an errorMessage says so instead of printing undefined", () => {
     // This is the exact bug: the old throw concatenated `outcome.errorMessage`, so this case
-    // produced "ptc_subagent refused the call: undefined" and told the caller nothing.
+    // produced "pi_task_codemode refused the call: undefined" and told the caller nothing.
     const text = describeSettledFailure(rejectedOutcome({ exitCode: 1 }));
     expect(text).toBe(
       "the child failed without an error message (child ran, exit=1, turns=0, reportChannel=none)",
@@ -550,10 +550,10 @@ describe("describeSettledFailure", () => {
 });
 
 // ---------------------------------------------------------------------------
-//  P0/P1: ptc_subagent, the front that throws instead of returning
+//  P0/P1: pi_task_codemode, the front that throws instead of returning
 // ---------------------------------------------------------------------------
 
-describe("ptc_subagent refuses with the bounded diagnostic", () => {
+describe("pi_task_codemode refuses with the bounded diagnostic", () => {
   interface Thrown {
     message: string;
   }
@@ -586,7 +586,7 @@ describe("ptc_subagent refuses with the bounded diagnostic", () => {
       );
     await driveChild(harness.lifecycle, events, exitCode);
     const outcome = await execution;
-    if (outcome.ok) throw new Error("ptc_subagent resolved a refused call");
+    if (outcome.ok) throw new Error("pi_task_codemode resolved a refused call");
     return {
       message: outcome.error instanceof Error ? outcome.error.message : String(outcome.error),
     };
@@ -606,7 +606,7 @@ describe("ptc_subagent refuses with the bounded diagnostic", () => {
       const harness = createHarness();
       const { message } = await callAndExpectThrow(dir, harness, FIXTURE_EVENTS, 0);
       expect(message).toBe(
-        "ptc_subagent refused the call: " +
+        "pi_task_codemode refused the call: " +
           FINAL_RATE_LIMIT_ERROR +
           " (child ran, exit=0, turns=4, reportChannel=none, model=" +
           CAPTURED_PROVIDER +
@@ -625,7 +625,7 @@ describe("ptc_subagent refuses with the bounded diagnostic", () => {
       const harness = createHarness();
       const { message } = await callAndExpectThrow(dir, harness, [], 1);
       expect(message).toBe(
-        "ptc_subagent refused the call: the child failed without an error message " +
+        "pi_task_codemode refused the call: the child failed without an error message " +
           "(child ran, exit=1, turns=0, reportChannel=none)",
       );
       expect(message).not.toContain("undefined");
@@ -648,11 +648,11 @@ describe("ptc_subagent refuses with the bounded diagnostic", () => {
           (value: unknown) => ({ ok: true as const, value }),
           (error: unknown) => ({ ok: false as const, error }),
         );
-      if (outcome.ok) throw new Error("ptc_subagent resolved a refused call");
+      if (outcome.ok) throw new Error("pi_task_codemode resolved a refused call");
       const message =
         outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
       expect(message).toBe(
-        "ptc_subagent refused the call: dispatch depth limit reached " +
+        "pi_task_codemode refused the call: dispatch depth limit reached " +
           "(harness declined to start, exit=-1, turns=0, reportChannel=none)",
       );
     });
@@ -864,7 +864,7 @@ describe("the observed-model text is sanitized on every model-facing surface", (
       .map((line) => line.slice("model: ".length));
   }
 
-  test("ptc_subagent renders one bounded, ANSI-free model line", async () => {
+  test("pi_task_codemode renders one bounded, ANSI-free model line", async () => {
     const dir = await makeTempDir();
     try {
       const harness = createHarness();

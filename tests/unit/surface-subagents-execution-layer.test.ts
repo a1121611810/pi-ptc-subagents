@@ -206,10 +206,13 @@ describe("the programming tools' reach per line", () => {
     expect(reach.ptc_workflow, "ptc_workflow reach on the subagents line").toBe("codemode");
   });
 
-  test("the subagent tool stays `direct` there — it exists to need no orchestrator", async () => {
+  test("the codemode door is at `codemode` reach there too — it is not declared to the model", async () => {
+    // ADR-0052: on the `codemode_ptc` surface the orchestrator responsible to the model is pi's
+    // own `codemode`, so the door sits UNDERNEATH it: a script calls it, the model does not.
+    // Declaring it as well would put a second, parallel way to create a task in front of the
+    // model — and the two would not be the same call.
     const reach = await reachOn(SUBAGENTS_AXES);
-    expect(reach.ptc_subagent, "subagent reach on the subagents line").toBe("direct");
-    // A `codemode`-reach subagent tool would be callable only by the sandbox that cannot spawn.
+    expect(reach.pi_task_codemode, "codemode door reach on the codemode_ptc line").toBe("codemode");
   });
 });
 

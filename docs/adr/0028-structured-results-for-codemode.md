@@ -4,6 +4,8 @@ status: accepted (2026-10-02). §Context amended 2026-10-09: `ptc_subagent` is n
 
 > **Amended by [ADR-0051](./0051-the-surface-names-the-orchestrator.md) (2026-10-21): the two surface values are renamed — `full` → `full_ptc`, `subagents` → `codemode_ptc` — and the surface now means _which orchestrator is responsible to the model_. This record's decisions stand unchanged; read its `full` / `subagents` as those names.**
 
+> **Amended by [ADR-0052](./0052-the-two-doors-share-one-prefix.md) (2026-10-21): the two task doors are renamed — `pi.dispatch` → `pi_task_ptc` (the PTC door, a binding inside a program) and `ptc_subagent` → `pi_task_codemode` (the codemode door, reachable from a `codemode` script) — with no alias and no compatibility shim. This record's decisions stand unchanged; read its `pi.dispatch` / `ptc_subagent` as those names.**
+
 # The model-facing tools declare a structured result for codemode, and it is a projection rather than a mirror
 
 ## Context

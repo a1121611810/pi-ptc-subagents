@@ -54,8 +54,17 @@ export const BUILTIN_BINDING_NAMES = [
 ] as const;
 export type BuiltinBindingName = (typeof BUILTIN_BINDING_NAMES)[number];
 
-/** Parallel binding name (ADR-0016). */
-export const DISPATCH_BINDING_NAME = "pi.dispatch" as const;
+/**
+ * The PTC door: the task-creating binding that exists only inside a PTC program (ADR-0052).
+ *
+ * The name is a plain JavaScript identifier, so a program reaches it with a dot:
+ * `await tools.pi_task_ptc({ task })`. The old name carried a dot of its own (`pi.dispatch`),
+ * which forced string indexing on one plane and a different spelling on the other — the shape
+ * error a model hit for real on 2026-10-20 (`TypeError: tools.pi.dispatch does not exist`).
+ * The two doors now share the `pi_task_` prefix and differ only in the suffix, so both planes
+ * use dot access.
+ */
+export const DISPATCH_BINDING_NAME = "pi_task_ptc" as const;
 
 /**
  * Bindings that are known but NOT exposed unless someone asks for them (#73).
@@ -117,9 +126,9 @@ export interface BindingContext {
   signal?: AbortSignal;
   /** Wire call id; also used to build the tool call id the tools see. */
   callId: number;
-  /** Depth of the current PTC run (0 for parent turn, 1+ for a child of `pi.dispatch`). */
+  /** Depth of the current PTC run (0 for parent turn, 1+ for a child of `pi_task_ptc`). */
   depth: number;
-  /** Maximum allowed depth; passed through to `pi.dispatch` for the depth check. */
+  /** Maximum allowed depth; passed through to `pi_task_ptc` for the depth check. */
   maxDispatchDepth: number;
   /**
    * ADR-0022 §5: the TaskRecord owner / subscription subscriber. The dispatcher threads the
@@ -135,7 +144,7 @@ export interface BindingContext {
   /**
    * ADR-0022 §3/reopen R-m12: this process's own background task id, when this run is inside a
    * background child. Threaded from the dispatcher (see `RunPtcProgramOptions.parentTaskId`)
-   * and forwarded to `pi.dispatch` so a nested spawn records `TaskRecord.parentTaskId`.
+   * and forwarded to `pi_task_ptc` so a nested spawn records `TaskRecord.parentTaskId`.
    */
   parentTaskId?: ULID;
   /**
@@ -146,7 +155,7 @@ export interface BindingContext {
   dispatchDeps?: DispatchDeps;
   /**
    * ADR-0044: the caller session's current model, read by the host off pi's tool-execution
-   * context. The `pi.dispatch` binding forwards it into the `DispatchContext` so a dispatch
+   * context. The `pi_task_ptc` binding forwards it into the `DispatchContext` so a dispatch
    * that names no model explicitly inherits the session's. Absent for direct library callers
    * and for a pi too old to pass `ctx.model`: both keep the pre-ADR-0044 behaviour.
    */
@@ -201,7 +210,7 @@ const BUILTIN_TOOL_FACTORIES: Record<BuiltinBindingName, (cwd: string) => AnyBui
 type ToolCallLike = Parameters<typeof validateToolArguments>[1];
 
 /**
- * The `pi.dispatch` argument schema, validated with pi's own `validateToolArguments`
+ * The `pi_task_ptc` argument schema, validated with pi's own `validateToolArguments`
  * exactly like the seven built-in bindings (field report pitfall #2: the binding used to
  * cast the wire args straight to `DispatchInput`, so a malformed call reached the
  * subprocess layer). `agent` / `task` must be non-empty strings; everything else is
@@ -221,7 +230,7 @@ type DispatchParameters = TObject<{
 }>;
 
 /**
- * The parallel binding's argument schema. Exported so ADR-0025's top-level `ptc_subagent`
+ * The parallel binding's argument schema. Exported so ADR-0025's top-level `pi_task_codemode`
  * can declare the SAME arguments rather than a second hand-written copy that could drift: the
  * two are different call sites for one dispatcher, and a test pins their key sets equal.
  */
@@ -243,16 +252,16 @@ export const DISPATCH_PARAMETERS: DispatchParameters = Type.Object({
   task: Type.String({ minLength: 1 }),
   // ADR-0042, renamed from `goal` by ADR-0043. The description has to say WHEN to pass it, not
   // only what it is: an optional parameter whose purpose is left implicit is one the model never
-  // uses, and an unused `why` makes E3 measure nothing. The description is unchanged by the rename
-  // — it already opened with "Why this dispatch slice exists", so the key and its own prose now
-  // agree on the word.
+  // uses, and an unused `why` makes E3 measure nothing. ADR-0052 changed only the word the
+  // description opens with — the model-facing word is "task", never "dispatch" — so the key and
+  // its own prose still agree.
   why: Type.Optional(
     Type.String({
       description:
-        "Why this dispatch slice exists, in your own words: the intent behind cutting this task " +
-        "out, not the whole conversation and not the user's original request. Pass it when the " +
-        "task involves judgment or trade-offs, so the child can resolve ambiguities the task " +
-        "text leaves open instead of inventing context. Omit it for a fully specified task.",
+        "Why this task exists, in your own words: the intent behind cutting it out of the " +
+        "conversation, not the whole conversation and not the user's original request. Pass it " +
+        "when the task involves judgment or trade-offs, so the child can resolve ambiguities the " +
+        "task text leaves open instead of inventing context. Omit it for a fully specified task.",
     }),
   ),
   cwd: Type.Optional(Type.String()),
@@ -302,7 +311,7 @@ export const DISPATCH_PARAMETERS: DispatchParameters = Type.Object({
 const DISPATCH_TOOL_LIKE = {
   name: DISPATCH_BINDING_NAME,
   description:
-    "Dispatch a task to a registered pi agent as a child subprocess (foreground await or background task).",
+    "Create a task on a registered pi agent: it runs as a child subprocess (foreground await or background task).",
   parameters: DISPATCH_PARAMETERS,
 };
 
@@ -357,7 +366,7 @@ export interface CreateBuiltinBindingsOptions {
    */
   optIns?: readonly string[];
   /**
-   * Whether the parallel binding `pi.dispatch` (ADR-0016) joins the table. Defaults to
+   * Whether the parallel binding `pi_task_ptc` (ADR-0016) joins the table. Defaults to
    * "did the caller curate the surface": `true` when `names` is omitted, `false` when an
    * explicit list is passed (R3's read-only PTC surface pattern). Deciding on whether
    * `names` was provided — not on array identity with {@link DEFAULT_BINDING_NAMES} —
@@ -443,7 +452,7 @@ export function createBuiltinBindings(options: CreateBuiltinBindingsOptions): Bi
     BUILTIN_BINDING_NAMES.filter(
       (name) => DEFAULT_BINDING_NAMES.includes(name) || granted.has(name),
     );
-  // ADR-0016: `pi.dispatch` joins the table unless the caller curated an explicit name list.
+  // ADR-0016: `pi_task_ptc` joins the table unless the caller curated an explicit name list.
   const includeDispatch = options.includeDispatch ?? options.names === undefined;
   const table = new Map<string, Binding>();
   for (const name of names) {

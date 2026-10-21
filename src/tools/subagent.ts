@@ -1,10 +1,15 @@
 /**
- * `ptc_subagent` (ADR-0025): the top-level face for spawning a fresh pi subprocess.
+ * `pi_task_codemode` (ADR-0025, renamed by ADR-0052): the codemode door for creating a task.
  *
- * Why it exists: the parallel binding `pi.dispatch` can only be reached from *inside* a PTC
- * program. A session that hands orchestration to pi's `codemode` can dispatch -- the pair sits at
- * `codemode` reach underneath that script -- but it has to write the script first. This is that
- * way in with no script at all, which is the whole of the difference.
+ * Why it exists: the PTC door `pi_task_ptc` can only be reached from *inside* a PTC program. A
+ * session that hands orchestration to pi's `codemode` still needs a way in -- the pair sits at
+ * `codemode` reach underneath that script -- but it has to write the script first. This is the
+ * other door, and it is reached from the same script.
+ *
+ * **It is NOT declared to the model** (ADR-0052): its exposure is `codemode`, so only a
+ * `codemode` script can call it. On the `codemode_ptc` surface the orchestrator responsible to
+ * the model is pi's own `codemode`, and this door sits underneath it -- the model composes, the
+ * script calls.
  *
  * Layering, per spec decision 9: this tool is a front and owns no lifecycle. It builds the
  * same DispatchContext the binding builds and calls the same `dispatch()`. Depth, concurrency,
@@ -17,17 +22,18 @@
  * A test pins the two key sets equal.
  *
  * The RESULT is declared twice, on purpose: `content` is what a model reads, `structuredContent`
- * is what a codemode script reads. A script dispatching through `ptc_run_code` reads its own result
- * over there instead, so this second channel is for the direct call -- and without it that caller
- * has to regex the ULID out of `"Started background task 01JABC..."`. See
+ * is what a codemode script reads. A script creating a task through `ptc_run_code` reads its own
+ * result over there instead, so this second channel is for the direct call -- and without it that
+ * caller has to regex the ULID out of `"Started background task 01JABC..."`. See
  * {@link SUBAGENT_OUTPUT_SCHEMA} for why that projection is not a mirror of `details`.
  *
- * A dispatched child also produces a **child report** (ADR-0032). It is rendered into the text the
+ * A child also produces a **child report** (ADR-0032). It is rendered into the text the
  * model reads -- see `renderChildReportText` -- with the report key in {@link SUBAGENT_OUTPUT_SCHEMA}
  * for callers that have a structured channel. (ADR-0032 once argued this surface had no
- * `codemode` and therefore no reader for `structuredContent`; as of 2026-10-09 `subagents` ships
- * `codemode` and this tool is `direct`, so a script reaches the structured side through
- * `ctx.executeTool()`. The rendering below is unchanged and is what the model reads either way.)
+ * `codemode` and therefore no reader for `structuredContent`; as of 2026-10-09 the `codemode_ptc`
+ * surface ships `codemode` and this tool is at `codemode` reach, so a script reaches the
+ * structured side through `ctx.executeTool()`. The rendering below is unchanged and is what the
+ * model reads either way.)
  */
 
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -58,7 +64,7 @@ export type SubagentOutcome = DispatchResult | DispatchHandle;
 export interface CreatePtcSubagentToolOptions {
   /** Run cwd; the `cwd` default for a spawn that does not name one. */
   cwd: string;
-  /** Depth of the calling run: 0 at the parent turn, 1+ inside a `pi.dispatch` child. */
+  /** Depth of the calling run: 0 at the parent turn, 1+ inside a `pi_task_ptc` child. */
   depth: number;
   /** Recursion ceiling; the same one the binding's call is checked against (ADR-0016). */
   maxDispatchDepth: number;
@@ -88,7 +94,7 @@ export interface CreatePtcSubagentToolOptions {
  * The tool's registered name, in one place.
  *
  * It had a second consumer until #187: `session_start` asked "does this surface register
- * `ptc_subagent`?" before reporting on agent availability, and that check was the reason the
+ * the top-level face?" before reporting on agent availability, and that check was the reason the
  * string could not be spelled twice — a rename that updated the registration but not the check
  * would have left a notice describing a tool the session does not have. The check went with the
  * notice it fed.
@@ -96,8 +102,11 @@ export interface CreatePtcSubagentToolOptions {
  * It stays a constant rather than being inlined even though the registration is now its only
  * production reader: a test pins it as the tool's public name, and the next cross-module reference
  * to that name should not have to re-introduce one.
+ *
+ * ADR-0052 renamed it to `pi_task_codemode`: the codemode door, sharing the `pi_task_` prefix
+ * with the PTC door so both are plain JavaScript identifiers and both planes use dot access.
  */
-export const SUBAGENT_TOOL_NAME = "ptc_subagent";
+export const SUBAGENT_TOOL_NAME = "pi_task_codemode";
 
 const HANDLE_TEXT = "Started background task ";
 
@@ -326,7 +335,7 @@ export const SETTLED_FAILURE_MAX_CHARS = 800;
  * One line describing why a settled dispatch call was refused: the cause, then the facts the
  * caller would otherwise have to infer.
  *
- * The failure this replaces was `"ptc_subagent refused the call: undefined"`: a rejected
+ * The failure this replaces was `"pi_task_codemode refused the call: undefined"`: a rejected
  * dispatch whose `errorMessage` is absent (a spawn that never happened, or a child that
  * reported no reason) rendered the string `undefined` and said nothing about what the
  * dispatcher knew. The facts are the dispatcher's own fields, so a caller reads the same values
@@ -369,8 +378,12 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
   return defineCompatTool({
     name: SUBAGENT_TOOL_NAME,
     label: "PTC Subagent",
+    // ADR-0052: the codemode door is at `codemode` reach, so it is NOT declared to the model.
+    // On the `codemode_ptc` surface the orchestrator responsible to the model is pi's own
+    // `codemode`; this door sits underneath it, and only a `codemode` script can call it.
+    exposure: "codemode",
     description: [
-      "Start a fresh pi agent as a child process: it gets its own context and tools, and it cannot see or change this session except through what it returns. Omit `model` and the child inherits this session's current model (when this pi exposes one; otherwise it falls back to pi's configured default); pass `model`, or let its agent definition pin one, to override that. Use it for work that would otherwise flood this context: a survey, a second opinion, or a task that can run while you do something else.",
+      "Create a task: start a fresh pi agent as a child process — it gets its own context and tools, and it cannot see or change this session except through what it returns. Omit `model` and the child inherits this session's current model (when this pi exposes one; otherwise it falls back to pi's configured default); pass `model`, or let its agent definition pin one, to override that. Use it for work that would otherwise flood this context: a survey, a second opinion, or a task that can run while you do something else.",
       // T4 (#181): the model cannot learn where agent definitions come from by reading a tool
       // list, so it goes looking -- and in the session that motivated this it spent twenty-plus
       // tool calls inspecting the install and guessing at argument values. The two directories
@@ -392,7 +405,8 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
       // home for the data — they are two moments (registration vs. failure), not two sources.
       roster,
     ].join("\n"),
-    promptSnippet: "Start a fresh pi agent as a child process (foreground or background)",
+    promptSnippet:
+      "Create a task: start a fresh pi agent as a child process (foreground or background)",
     promptGuidelines: [
       "Prefer one subagent over many tool calls when the work is a question with an answer rather than a fact you can look up, or when the raw output would be larger than the answer.",
     ],
@@ -482,7 +496,9 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
         // The bounded diagnostic, not the bare `errorMessage`: see `describeSettledFailure` for
         // the `refused the call: undefined` failure this replaced. The prefix is unchanged so
         // existing readers that match it keep working.
-        throw new Error("ptc_subagent refused the call: " + describeSettledFailure(outcome));
+        throw new Error(
+          SUBAGENT_TOOL_NAME + " refused the call: " + describeSettledFailure(outcome),
+        );
       }
       // The report is projected verbatim, never rebuilt: `usage` in it was stamped by the host
       // at settle, and a value this tool could recompute would be a second, unauthoritative
@@ -556,7 +572,7 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
       // because `structuredContent` has no reader for a `direct` tool.
       const tierText = renderReadOnlyTierText(outcome.readOnlyTier);
       // ADR-0043 on the same surface and for the same reason: `structuredContent` has no reader
-      // for a `direct` tool, so a model that called `ptc_subagent` learns about a suppressed `why`
+      // for a `direct` tool, so a caller that invoked `pi_task_codemode` learns about a suppressed `why`
       // from this text or not at all. It sits beside the tier rather than after the report,
       // because it is a fact about what the child was TOLD — the report describes what it did.
       const suppressedText = renderWhySuppressedText(outcome.whySuppressed);

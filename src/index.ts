@@ -255,7 +255,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
    * it only exists on the `full_ptc` surface in a TUI: measured 2026-10-20, the `codemode_ptc` surface
    * never enters it (`tools-unavailable`), because `ptc_run_code` is not model-facing there. A
    * switch hung off `mode.enabled` would therefore read "off" for the whole session on that
-   * surface — and that surface's ONLY orchestration route is `ptc_subagent`, so it would have no
+   * surface — and that surface's ONLY orchestration route is the codemode door, so it would have no
    * way to start a child at all.
    *
    * It is session-scoped, like ADR-0043's `why` switch: `/ptc off` writes it into a session
@@ -306,7 +306,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
 
   /**
    * ADR-0044: the caller session's current model, as the host last read it off pi's tool
-   * context. The `ptc_subagent` call row uses it to state the inherited model when the call names
+   * context. The codemode door's call row uses it to state the inherited model when the call names
    * none. It is a snapshot refreshed at session start and at every turn start: a model switch
    * cannot interleave with a streaming turn, so the value a dispatch issued in this turn sees is
    * the value the turn started with. Absent = the host could not read one (old pi, library use).
@@ -386,7 +386,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
 
   /**
    * Depth baseline for PTC runs this pi process starts (ADR-0016 Recursive section).
-   * Inside a pi process spawned by `pi.dispatch`, the env carries `PI_PTC_DEPTH`; a
+   * Inside a pi process spawned by `pi_task_ptc`, the env carries `PI_PTC_DEPTH`; a
    * normal pi session has none, and the parent turn's runs stay at depth 0.
    */
   const ptcDepth = resolveDepthFromEnv();
@@ -394,7 +394,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
   /**
    * ADR-0022 §3/reopen R-m12: this process's own background task id, read once from the child
    * environment `dispatch()` stamped (`PI_PTC_TASK_ID`). A top-level pi session has none. It
-   * travels with each PTC run so a nested `pi.dispatch({ background: true })` records its parent.
+   * travels with each PTC run so a nested `pi_task_ptc({ background: true })` records its parent.
    */
   const parentTaskId = resolveParentTaskIdFromEnv();
 
@@ -538,7 +538,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
      * that composes tool calls; `codemode_ptc` is pi's `codemode` composing tool calls, with this
      * package's program reachable underneath it as the execution layer. The capability that makes
      * the second worth having is the one `codemode` cannot provide at all: its sandbox has no
-     * module loader, so a script there cannot spawn a process — `pi.dispatch`, background tasks
+     * module loader, so a script there cannot spawn a process — the PTC door, background tasks
      * with a six-state lifecycle, and the frozen six-name environment all live in the PTC worker.
      *
      * **A pi older than 0.99.0 is unaffected.** `ToolExposure` does not exist there, so the field
@@ -577,15 +577,16 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     }
 
     /*
-     * ADR-0025 `codemode_ptc`: the top-level subagent face, registered only here. It is the reason
-     * this mode exists -- `pi.dispatch` lives inside a program, so dispatching needs a program
-     * underneath pi's `codemode`; this face is the one that does not.
+     * ADR-0025 `codemode_ptc`: the codemode door, registered only here. It is the reason this mode
+     * exists -- the PTC door lives inside a program, so creating a task needs a program underneath
+     * pi's `codemode`; this door is the one that does not.
      *
-     * **It stays `direct` beside the pair above, and that asymmetry is the point.** The pair reach
-     * a `codemode` script, which is where a model composing tool calls already is; this one is
-     * declared to the model so that starting a subagent needs no script at all. `subagent` is the
-     * capability whose whole purpose is being callable without an orchestrator — a `codemode`
-     * reach would make it callable only by the thing that cannot use it.
+     * **It sits at `codemode` reach beside the pair above (ADR-0052), and that is the point.** On
+     * this surface the orchestrator responsible to the model is pi's own `codemode`: the model
+     * composes a script, and the script calls the door. Declaring the door to the model as well
+     * would put a second, parallel way to create a task in front of it -- the model would call the
+     * door directly on some turns and through a script on others, and the two would not be the
+     * same call.
      */
     if (detected.surfaceMode === "codemode_ptc") {
       pi.registerTool(
@@ -629,7 +630,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
      * it exists in every surface — but ACTIVE only where it has a caller.
      *
      * `defaultActive` is `ptcDepth > 0`, and `ptcDepth` is this process's own depth baseline read
-     * from `PI_PTC_DEPTH`: 0 in a parent session, 1+ inside a `pi.dispatch` child. A parent has no
+     * from `PI_PTC_DEPTH`: 0 in a parent session, 1+ inside a `pi_task_ptc` child. A parent has no
      * child to report, so the tool is registered there and never offered to its model — which is
      * the whole of "the tool is not active in the parent's ordinary surface" (`ToolDefinition.
      * defaultActive`: pi activates a `direct` tool on registration unless this says otherwise).
@@ -1204,7 +1205,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
 
     /*
      * #187 removed the agent-availability notice that used to sit here. It reported that no agent
-     * was registered and therefore that `ptc_subagent` had nothing to dispatch -- which was true
+     * was registered and therefore that the codemode door had nothing to start -- which was true
      * only while `agent` was required, and became a false alarm about a working tool the moment an
      * omitted `agent` started dispatching a generalist child.
      *
@@ -1232,7 +1233,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
      * The probe's other wrong answer. It walks the FILESYSTEM, so it cannot see the two ways pi
      * offers to withhold a tool it has on disk: `--no-extensions`, and `--exclude-tools codemode`.
      * Either way the probe answers `present`, `detectedSurfaceMode` hands the session to
-     * `codemode`, and pi registers no such tool -- leaving `ptc_subagent` with no orchestrator. The
+     * `codemode`, and pi registers no such tool -- leaving the codemode door with no orchestrator. The
      * ADR-0025 decision-4 warning below cannot cover it: that one asks whether codemode is
      * ACTIVE, and with the tool absent both questions are false for the same reason.
      *

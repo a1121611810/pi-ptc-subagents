@@ -57,10 +57,9 @@ const DESCRIPTION_BASE = [
   "with the same per-item `null` on failure. There is no `agent()` helper.",
   "",
   "Tools are reachable as `tools.<name>(args)` exactly as in `ptc_run_code`, and the bound names",
-  "are this session's enabled built-ins less any binding the install has not opted in. The parallel",
-  "binding `pi.dispatch` is always available under",
-  "its literal dot name — inside the program, call it with string indexing:",
-  '`await tools["pi.dispatch"]({ task })`;',
+  "are this session's enabled built-ins less any binding the install has not opted in. The PTC",
+  "door `pi_task_ptc` is always available — inside the program, call it with a dot:",
+  "`await tools.pi_task_ptc({ task })`;",
   "**the `agent` name is optional** — omit it and the child is a fresh generalist pi with pi's own",
   'prompt and toolset; add `agent: "reviewer"` only to narrow it to a registered definition,',
   "because a name with no definition behind it is refused.",
@@ -287,7 +286,7 @@ export function createPtcWorkflowTool(
           code: params.script,
           surface: "workflow",
           cwd,
-          // Same surface contract as ptc_run_code: pi.dispatch is always bound (ADR-0016).
+          // Same surface contract as ptc_run_code: the PTC door is always bound (ADR-0016).
           bindings: createBuiltinBindings({
             cwd,
             names,
@@ -299,7 +298,7 @@ export function createPtcWorkflowTool(
           ...(options.depth === undefined ? {} : { depth: options.depth }),
           // ADR-0022 §3/reopen R-m12: same parent-task-id seam as ptc_run_code.
           ...(options.parentTaskId === undefined ? {} : { parentTaskId: options.parentTaskId }),
-          // ADR-0044: same session-model seam as ptc_run_code (the `pi.dispatch` binding's
+          // ADR-0044: same session-model seam as ptc_run_code (the `pi_task_ptc` binding's
           // model-inheritance tier).
           ...(sessionModel === undefined ? {} : { sessionModel }),
           ...(signal === undefined ? {} : { signal }),

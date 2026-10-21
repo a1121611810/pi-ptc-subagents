@@ -272,9 +272,9 @@ describe("the background call site passes the session model", () => {
   });
 });
 
-describe("ptc_subagent reads ctx.model and forwards it (installRecordingPi)", () => {
+describe("pi_task_codemode reads ctx.model and forwards it (installRecordingPi)", () => {
   /**
-   * The real front, the real spawn: `ptc_subagent` calls the production foreground
+   * The real front, the real spawn: `pi_task_codemode` calls the production foreground
    * `dispatch()`, which spawns the `pi` on PATH. `installRecordingPi` is therefore the only
    * observation seam that sees the argv this tool actually produced — a mock lifecycle would
    * test the dispatcher, not the tool's ctx read.
@@ -308,7 +308,7 @@ describe("ptc_subagent reads ctx.model and forwards it (installRecordingPi)", ()
 
   test("a tool call whose ctx has no model leaves the argv unchanged", async () => {
     // The counterfactual for the test above: the same tool, the same call, only the context's
-    // model removed. If `ptc_subagent` synthesised a model from anywhere else, this would fail.
+    // model removed. If `pi_task_codemode` synthesised a model from anywhere else, this would fail.
     const pi = await installRecordingPi();
     try {
       await withAgentDir(async (dir) => {
@@ -334,7 +334,7 @@ describe("ptc_subagent reads ctx.model and forwards it (installRecordingPi)", ()
   }, 30_000);
 });
 
-describe("runPtcProgram threads sessionModel to the pi.dispatch binding", () => {
+describe("runPtcProgram threads sessionModel to the pi_task_ptc binding", () => {
   /** One program whose only act is a foreground dispatch; the child is the recording pi. */
   async function runDispatchProgram(
     dir: string,
@@ -344,7 +344,7 @@ describe("runPtcProgram threads sessionModel to the pi.dispatch binding", () => 
     try {
       const outcome = await runPtcProgram({
         code:
-          "return await tools['pi.dispatch']({ agent: '" +
+          "return await tools.pi_task_ptc({ agent: '" +
           AGENT +
           "', agentScope: 'project', task: 'reply with PONG' });",
         surface: "run_code",
@@ -407,7 +407,7 @@ describe("the two programming tools read ctx.model and forward it to the dispatc
           {
             description: "one dispatch",
             code:
-              "return await tools['pi.dispatch']({ agent: '" +
+              "return await tools.pi_task_ptc({ agent: '" +
               AGENT +
               "', agentScope: 'project', task: 'reply with PONG' });",
           },
@@ -430,7 +430,7 @@ describe("the two programming tools read ctx.model and forward it to the dispatc
           {
             meta: { name: "inherit-model", description: "one dispatch" },
             script:
-              "return await tools['pi.dispatch']({ agent: '" +
+              "return await tools.pi_task_ptc({ agent: '" +
               AGENT +
               "', agentScope: 'project', task: 'reply with PONG' });",
           },

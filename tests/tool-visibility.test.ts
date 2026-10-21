@@ -150,7 +150,7 @@ const declaredPtcTools = (record: ProbeRecord): readonly string[] =>
  */
 const SUBAGENTS_SURFACE = [
   "ptc_run_code",
-  "ptc_subagent",
+  "pi_task_codemode",
   "ptc_task_list",
   "ptc_task_output",
   "ptc_task_stop",
@@ -572,7 +572,7 @@ test.skipIf(CODEMODE_PI.bin === undefined)(
     ).toBe(true);
 
     // The default cell: a real pi that ships codemode, launched with nothing configured. Before
-    // ADR-0029 this was `codemode_ptc`, which meant `ptc_subagent` with no orchestrator and a
+    // ADR-0029 this was `codemode_ptc`, which meant `pi_task_codemode` with no orchestrator and a
     // warning on every session. It is now `full_ptc`, silently, which is the fix stated as a fact
     // about the built artifact rather than about the probe.
     const plainPtc = plain.tools.filter((name) => name.startsWith("ptc_")).sort();
@@ -601,7 +601,7 @@ test.skipIf(CODEMODE_PI.bin === undefined)(
     // go red on a factory doing exactly the right thing, and it would have passed for a factory
     // that simply stopped registering the pair — so the claim moved to the surface that settles it.
     expect(
-      delegatedPtc.includes("ptc_subagent"),
+      delegatedPtc.includes("pi_task_codemode"),
       "a pi whose loadout names codemode is handed the subagent face",
     ).toBe(true);
 
@@ -665,5 +665,7 @@ test("a plain launch never delegates, whichever pi is on PATH (ADR-0029)", async
     detectedPtc.includes("ptc_run_code"),
     "a session that cannot call codemode keeps the front, or the delegation hands over to nothing",
   ).toBe(true);
-  expect(detectedPtc.includes("ptc_subagent"), "and hands over nothing in its place").toBe(false);
+  expect(detectedPtc.includes("pi_task_codemode"), "and hands over nothing in its place").toBe(
+    false,
+  );
 }, 120_000);

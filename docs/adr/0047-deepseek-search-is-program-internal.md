@@ -20,6 +20,8 @@ status (original): accepted (2026-10-20). Ticket #227 (map #226). 配套记录�
 **Amended 2026-10-20（实测后）**：桥接已由真机观测确认；同时「不面向模型」由「永不」修正为「**默认**」——
 `tool_search` 能把 `codemode` 档工具激活进模型声明。见文末 §修订。
 
+> **Amended by [ADR-0052](./0052-the-two-doors-share-one-prefix.md) (2026-10-21): the two task doors are renamed — `pi.dispatch` → `pi_task_ptc` (the PTC door, a binding inside a program) and `ptc_subagent` → `pi_task_codemode` (the codemode door, reachable from a `codemode` script) — with no alias and no compatibility shim. This record's decisions stand unchanged; read its `pi.dispatch` / `ptc_subagent` as those names.**
+
 ## Context
 
 pi 没有网页检索能力：内置工具只有 `read` / `bash` / `edit` / `write` / `grep` / `find` / `ls`。DeepSeek 在 2026-10-17 开放了 Search / Fetch 两个**模型无关**的裸 JSON 接口（`POST https://api.deepseek.com/v1/tools/search`、`/v1/tools/fetch`），和聊天模型完全解耦，同一把 `api.deepseek.com` 的 Bearer key 就能调——所以「加搜索」在技术上不难。

@@ -11,6 +11,8 @@ ADR-0012 governs the model's copy). Wire protocol gains nothing (the existing `c
 `callResult` path already carries every fact the renderer needs); the new field is a host-side
 data structure (`PtcToolDetails.subCalls`).
 
+> **Amended by [ADR-0052](./0052-the-two-doors-share-one-prefix.md) (2026-10-21): the two task doors are renamed — `pi.dispatch` → `pi_task_ptc` (the PTC door, a binding inside a program) and `ptc_subagent` → `pi_task_codemode` (the codemode door, reachable from a `codemode` script) — with no alias and no compatibility shim. This record's decisions stand unchanged; read its `pi.dispatch` / `ptc_subagent` as those names.**
+
 ## Why
 
 DSH shows each binding call as a nested sub-row under the PTC parent row, even when the parent is

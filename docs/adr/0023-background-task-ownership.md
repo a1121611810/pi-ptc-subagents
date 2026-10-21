@@ -6,6 +6,8 @@ Status: accepted (2026-09-29). Behavior change: two new optional `TaskRecord` fi
 
 > **Amended by [ADR-0053](./0053-every-dispatch-is-a-task.md) (2026-10-21): the ownership scope covers the foreground front's records too.** The owner stamp and the two owner-scoped sweeps were written for the background front's records, because those were the only records that existed. ADR-0053 gives the FOREGROUND front records as well — every dispatch is a task — and those records are stamped and swept by exactly the same rules: a foreground task carries the creating runtime's owner identity, the startup reconcile reaps it only when its owner process is dead, and the shutdown sweep reaps it only when the sweeping runtime owns it. A foreground child is not a separate pi process, so the cross-process hazard this record exists for does not arise on that front; the rules are nevertheless the same rules, so there is one ownership story rather than two.
 
+> **Amended by [ADR-0052](./0052-the-two-doors-share-one-prefix.md) (2026-10-21): the two task doors are renamed — `pi.dispatch` → `pi_task_ptc` (the PTC door, a binding inside a program) and `ptc_subagent` → `pi_task_codemode` (the codemode door, reachable from a `codemode` script) — with no alias and no compatibility shim. This record's decisions stand unchanged; read its `pi.dispatch` / `ptc_subagent` as those names.**
+
 ## Context
 
 The storage is dir-wide by design (ADR-0022, R1: the child carries the parent's `--session-dir`), so multiple pi processes legitimately read and write the same `<sessionDir>/tasks/`. What was missing was any way to tell "my record, my responsibility" from "someone else's record, hands off". Two sweeps needed the distinction:

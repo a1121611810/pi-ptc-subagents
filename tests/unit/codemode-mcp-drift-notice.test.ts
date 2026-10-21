@@ -28,7 +28,12 @@ const TASK_TOOLS = ["ptc_task_list", "ptc_task_output", "ptc_task_stop"] as cons
 const FULL_PTC_TOOLS = ["ptc_run_code", "ptc_workflow", ...TASK_TOOLS, "ptc_child_report"] as const;
 
 /** `codemode_ptc`: the pair at codemode reach plus the top-level subagent face. */
-const CODEMODE_PTC_TOOLS = ["ptc_run_code", "ptc_workflow", "ptc_subagent", ...TASK_TOOLS] as const;
+const CODEMODE_PTC_TOOLS = [
+  "ptc_run_code",
+  "ptc_workflow",
+  "pi_task_codemode",
+  ...TASK_TOOLS,
+] as const;
 
 /** The message of the ADR-0033 drift notice. */
 const DRIFT = "codemode is active in this session";
@@ -170,7 +175,7 @@ test("an mcp.json that keeps codemode off resolves full, exactly as ADR-0029's d
 
 test("a disabled server resolves full, and a session with no MCP at all resolves full", async () => {
   // The remaining two negative rows, on the same terms: the registered list, exactly. `full_ptc`
-  // means `ptc_run_code` and NOT `ptc_subagent` — the second is the assertion that carries, since
+  // means `ptc_run_code` and NOT `pi_task_codemode` — the second is the assertion that carries, since
   // `ptc_run_code` alone could be registered beside a `codemode_ptc` decision that never happened.
   const disabled = await startAndTurn({
     active: DEFAULT_TOOLS,
@@ -178,7 +183,7 @@ test("a disabled server resolves full, and a session with no MCP at all resolves
     mcpJson: JSON.stringify({ mcpServers: { docs: { command: "npx", enabled: false } } }),
   });
   expect(disabled.tools).toEqual(FULL_PTC_TOOLS);
-  expect(disabled.tools).not.toContain("ptc_subagent");
+  expect(disabled.tools).not.toContain("pi_task_codemode");
   const none = await startAndTurn({ active: DEFAULT_TOOLS, activateAfterStart: true });
   expect(none.tools).toEqual(FULL_PTC_TOOLS);
 });

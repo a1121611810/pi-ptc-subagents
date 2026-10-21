@@ -6,6 +6,8 @@ The user-visible trigger was a report that `pnpm run build` "didn't compress". T
 
 Status: accepted (2026-09-23). Driver: tarball hygiene; downstream (`pi install npm:pi-ptc-subagents`) sees no API change.
 
+> **Amended by [ADR-0052](./0052-the-two-doors-share-one-prefix.md) (2026-10-21): the two task doors are renamed — `pi.dispatch` → `pi_task_ptc` (the PTC door, a binding inside a program) and `ptc_subagent` → `pi_task_codemode` (the codemode door, reachable from a `codemode` script) — with no alias and no compatibility shim. This record's decisions stand unchanged; read its `pi.dispatch` / `ptc_subagent` as those names.**
+
 ## Decision
 
 **1. §1 · `vite.config.ts#pack.minify` is set to `true`.** This is the boolean form of rolldown's `output.minify` (`boolean | "dce-only" | MinifyOptions`), and tsdown forwards it verbatim (`minify: !cjsDts && minify` in `@voidzero-dev/vite-plus-core/dist/tsdown/build-*.js`). The default in tsdown is `?? false` — the current state of the repo, hence the half-minified output. With `minify: true`, rolldown's built-in oxc-based minifier runs. **No new dependency** is required; rolldown 1.2.9 (already a transitive devDependency through vite-plus) ships the minifier. `MinifyOptions` is not needed — none of the codebase uses `mangleProps`, prebuilt CommonJS, or other patterns that would justify fine-tuning.

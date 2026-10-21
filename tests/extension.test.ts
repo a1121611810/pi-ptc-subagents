@@ -86,13 +86,14 @@ const FULL_PTC_SURFACE_TOOLS = [...PTC_TOOLS, ...TASK_TOOLS, REPORT_TOOL] as con
  * What the `codemode_ptc` line registers, in registration order.
  *
  * The program pair is here at `codemode` reach — registered, callable from a pi `codemode` script,
- * and NOT declared to the model — so this list is the same length as `full_ptc`'s minus `ptc_subagent`,
+ * and NOT declared to the model — so this list is the same length as `full_ptc`'s minus the
+ * codemode door,
  * and what tells the two lines apart is exposure rather than presence. Asserted literally, in order,
  * because a tool dropped from one group has to turn these red.
  */
 const CODEMODE_PTC_SURFACE_TOOLS = [
   ...PTC_TOOLS,
-  "ptc_subagent",
+  "pi_task_codemode",
   ...TASK_TOOLS,
   REPORT_TOOL,
 ] as const;
@@ -197,10 +198,14 @@ test("subagents mode keeps the subagent face and the lifecycle face, and offers 
     const definition = tools.get(name) as { exposure?: string } | undefined;
     expect(definition?.exposure ?? "direct", `${name} reach on subagents`).toBe("codemode");
   }
-  // `ptc_subagent` is the exception and stays `direct`: it exists to be callable with no
-  // orchestrator at all, which is the reason this line exists.
-  const subagent = tools.get("ptc_subagent") as { exposure?: string } | undefined;
-  expect(subagent?.exposure ?? "direct", "subagent reach on subagents").toBe("direct");
+  // The codemode door is the exception and is ALSO at `codemode` reach (ADR-0052): on this line
+  // the orchestrator responsible to the model is pi's own `codemode`, so the door is reachable from
+  // a script and NOT declared to the model. Declaring it as well would put a second, parallel way
+  // to create a task in front of the model.
+  const codemodeDoor = tools.get("pi_task_codemode") as { exposure?: string } | undefined;
+  expect(codemodeDoor?.exposure ?? "direct", "codemode door reach on codemode_ptc").toBe(
+    "codemode",
+  );
 });
 
 test("a `surfaceMode` key left in ptc.json is reported as ignored, and the surface stays detected", async () => {
@@ -577,7 +582,7 @@ test("the surface is resolved before anything is registered", async () => {
   // `codemode_ptc` adds exactly one name. If a future axis change moved a tool between the groups
   // this turns red, which is the point of the subtraction rather than a second literal list.
   const onlyOnSubagents = [...subagents.keys()].filter((name) => !full.has(name));
-  expect(onlyOnSubagents).toEqual(["ptc_subagent"]);
+  expect(onlyOnSubagents).toEqual(["pi_task_codemode"]);
 });
 
 test("each surface registers a distinct set, and `codemode_ptc` differs from `full_ptc` by REACH not by presence", async () => {
@@ -617,7 +622,7 @@ test("subagents mode without codemode warns once, and says what to do about it",
   // not in.
   const stub = await makeExtensionStub({
     ...SUBAGENTS_AXES,
-    active: ["read", "bash", "edit", "write", "ptc_subagent"],
+    active: ["read", "bash", "edit", "write"],
     declaredProgrammingTools: [],
   });
   // Scoped to THIS notice. A second, unrelated warning fires here and SHOULD: this stub also
@@ -641,7 +646,7 @@ test("the warning does not fire when codemode is active", async () => {
    * developer's real `~/.pi` decide its outcome is not green, it is unmeasured.
    *
    * The redirect was added for a narrower reason, now history: this session registers
-   * `ptc_subagent`, so `session_start` used to enumerate the agent registry, and
+   * `pi_task_codemode`, so `session_start` used to enumerate the agent registry, and
    * `resolveAgentDirs` answers the USER axis from `os.homedir()` — which `PI_CODING_AGENT_DIR`
    * does not touch. #187 removed that enumeration with the notice it fed, so the specific reason
    * is gone; the discipline stays.
@@ -658,13 +663,13 @@ test("the warning does not fire when codemode is active", async () => {
   try {
     const stub = await makeExtensionStub({
       ...SUBAGENTS_AXES,
-      active: ["read", "bash", "edit", "write", "codemode", "ptc_subagent"],
+      active: ["read", "bash", "edit", "write", "codemode"],
     });
     /*
      * Scoped to THIS notice.
      *
      * The scoping was load-bearing when this test was written: the session registers
-     * `ptc_subagent` against an isolated-but-empty agent registry, so the agent-availability
+     * `pi_task_codemode` against an isolated-but-empty agent registry, so the agent-availability
      * warning fired here — correctly, at the time — and a blanket "no warning of any kind" would
      * have been asserting a false thing about the product. That warning is gone (#187: an empty
      * registry stopped being a problem once an omitted `agent` began dispatching a generalist
@@ -688,7 +693,7 @@ test("a subagents session with no agent definitions says nothing about it", asyn
   /*
    * The inverse of the notice #178 added and #187 retires, asserted rather than merely deleted.
    *
-   * That notice reported that no agent was registered, and therefore that `ptc_subagent` had
+   * That notice reported that no agent was registered, and therefore that `pi_task_codemode` had
    * nothing to dispatch. That was true only while `agent` was required; an omitted `agent` now
    * dispatches a generalist child, so an empty registry is the normal state of a fresh install and
    * the notice was a false alarm about a tool that works.
@@ -718,7 +723,7 @@ test("a subagents session with no agent definitions says nothing about it", asyn
   try {
     const stub = await makeExtensionStub({
       ...SUBAGENTS_AXES,
-      active: ["read", "bash", "edit", "write", "codemode", "ptc_subagent"],
+      active: ["read", "bash", "edit", "write", "codemode"],
     });
     expect(
       stub.notifications.filter((n) => /registered agent|nothing to dispatch/i.test(n.message)),
@@ -751,7 +756,7 @@ test("the warning is withheld when the program tools ARE declared — the 0.86 c
   // listing the pair as active, which is what pi does with a tool it has no exposure concept for.
   const stub = await makeExtensionStub({
     ...SUBAGENTS_AXES,
-    active: ["read", "bash", "edit", "write", "ptc_subagent"],
+    active: ["read", "bash", "edit", "write", "pi_task_codemode"],
     declaredProgrammingTools: ["ptc_run_code", "ptc_workflow"],
   });
   expect(
@@ -1083,9 +1088,9 @@ test("the subagent call row inherits the session model the host read from pi (AD
     ...SUBAGENTS_AXES,
     sessionModel: { provider: "deepseek", id: "deepseek-flash" },
   });
-  const tool = stub.tools.get("ptc_subagent");
+  const tool = stub.tools.get("pi_task_codemode");
   const renderCall = tool?.renderCall;
-  if (typeof renderCall !== "function") throw new Error("ptc_subagent must expose renderCall");
+  if (typeof renderCall !== "function") throw new Error("pi_task_codemode must expose renderCall");
   const theme = {
     fg: (_slot: string, text: string) => text,
     bold: (text: string) => text,

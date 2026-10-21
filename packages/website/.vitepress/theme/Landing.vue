@@ -145,7 +145,7 @@ async function copy(text) {
               <td class="c no">&mdash;</td><td class="c no">QuickJS</td><td class="c yes">✓</td>
             </tr>
             <tr>
-              <td>Spawn a fresh <code>pi</code> subprocess<small><code>pi.dispatch</code></small></td>
+              <td>Spawn a fresh <code>pi</code> subprocess<small><code>pi_task_ptc</code></small></td>
               <td class="c no">&mdash;</td><td class="c no">&mdash;</td><td class="c yes">✓</td>
             </tr>
             <tr>
@@ -153,7 +153,7 @@ async function copy(text) {
               <td class="c no">&mdash;</td><td class="c no">&mdash;</td><td class="c yes">✓</td>
             </tr>
             <tr>
-              <td>Top-level subagent call, no program needed<small><code>ptc_subagent</code></small></td>
+              <td>Task call from a <code>codemode</code> script<small><code>pi_task_codemode</code></small></td>
               <td class="c no">&mdash;</td><td class="c yes">✓</td><td class="c yes">✓</td>
             </tr>
             <tr>
