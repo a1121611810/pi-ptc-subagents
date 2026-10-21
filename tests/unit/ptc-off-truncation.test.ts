@@ -222,7 +222,9 @@ describe("ADR-0058: the determinate meaning of the switch", () => {
     // And a call that slips through anyway — because the model's request predates the
     // withdrawal — is refused, with nothing started.
     const result = await dispatch(
-      { agent: "anyone", task: "ping" },
+      // ADR-0055: a call that does not wait can resolve with a HANDLE, so the union is real.
+      // This one waits, so the outcome is a result and the refusal's fields are readable.
+      { agent: "anyone", task: "ping", wait: true },
       { callId: 1, cwd: process.cwd(), depth: 0, maxDispatchDepth: 3 },
       runtime.dispatchDeps,
     );
