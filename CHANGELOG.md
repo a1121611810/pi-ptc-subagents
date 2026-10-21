@@ -18,33 +18,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   neither registers the tool nor reads a DeepSeek credential, so the capability never reaches
   the session that would otherwise be tempted to use it. The budget is per child process
   (30 successful requests by default), and a page already fetched is free to re-read: `open` and
-  `find` are served from the last five searches' results, so a child does not pay twice for
-  the same page (ADR-0048, ADR-0049).
-- **The system prompt says how to reach a child, on whichever surface is in play.** The
-  calling convention used to live only in the `ptc_run_code` / `ptc_workflow` descriptions, so
-  it reached the model only while those tools were offered to it. On the `subagents` surface
-  they are not — they are reachable from a script, not from the model — and pi collects a
-  tool's guidelines from the declared tools only. Measured: a parent on that surface had no way
-  to learn that a `codemode` script's tool table has no `pi.dispatch` in it, wrote
-  `await tools["pi.dispatch"]({ task })` into a script, and got
-  `TypeError: tools.pi.dispatch does not exist` three times before falling back to
-  `ptc_subagent`. A `ptc` section in the system prompt now states the convention for the
-  surface in play, and pi merges custom sections into the prompt unconditionally.
+  `find` are served from the last five searches' results, so a child does not pay twice for the
+  same page (ADR-0048, ADR-0049).
+
+- **A routing index the model reads to choose a way of working.** The session's system prompt
+  now carries one line per road — when to take it, and where the details are — and the details
+  live in files that ship with the package, which the model opens with pi's own `read` tool.
+  Every sentence the model reads about this package's tools is written once, in one typed
+  registry, and rendered from there into the index, the tool descriptions and the guidelines: a
+  fact can no longer drift between two channels, because it is only ever written in one. The
+  index says so when it grows past its budget rather than dropping a road the model could not
+  know it was missing, and it is byte-identical every turn, so the prompt cache survives
+  (ADR-0059, ADR-0061).
 
 ### Changed
 
-- **`/ptc off` now stops new children, and says what it did not stop.** PTC off used to mean
-  only "stop narrowing the built-in tools": measured against a real pi, a parent still
-  dispatched a child with it off, so "PTC is off" did not mean what the name says — and the
-  three background-task tools stayed in front of the model with nothing to explain them.
-  `/ptc off` is now one switch that means one thing: **no new child can be started**, on the
-  foreground front (`pi.dispatch` inside a program) and the background one alike, while the
-  children already running keep running and stay manageable. The tools themselves leave the
-  model's face exactly while nothing is in flight — with a task running they stay, because that
-  task has to stay stoppable — and the switch tells you so at the moment you turn it. The
-  switch is session-scoped and survives a resume, exactly like `/ptc why`; no file is written,
-  and `pi config` remains the way to take the package out of your sessions entirely
-  (ADR-0050).
+- **The model calls "create a task", and both doors are the same door.** **Breaking:** the PTC
+  binding `pi.dispatch` and the codemode tool `ptc_subagent` are now `pi_task_ptc` and
+  `pi_task_codemode` — no alias, no shim. Both are plain identifiers, so both planes use dot
+  access (`tools.pi_task_ptc(…)`); the old dotted name forced bracket indexing in one plane and
+  a different spelling in the other, which is a shape error a model actually hit in the wild.
+  Both doors return the same object — the raw result, no projection, no envelope — and neither
+  throws: a refusal comes back as `status: "rejected"` with an `errorMessage`, in the same shape
+  on both doors. **Breaking:** the surface values are `full_ptc` and `codemode_ptc`, because the
+  surface now means _which orchestrator is responsible to the model_, not _which tools got
+  registered_. **Breaking:** `background: true` is gone; the entry takes `wait`, and **omitting
+  it means not waiting** — the call returns a handle at once and the task keeps running
+  (ADR-0051, ADR-0052, ADR-0054, ADR-0055).
+
+- **Every dispatch is a task.** **Breaking:** the foreground path creates a task record too,
+  persists the child's output under the session's task directory, and keeps the record after the
+  call returns — so a foreground child's report is still readable afterwards. The task record is
+  the only trace a dispatch leaves, and the lifecycle face follows it: the task tools are there
+  when the session has a record, and gone before the first dispatch. Cancelling reaches only what
+  has not started — a queued task is withdrawn from the queue, a running one goes down the
+  signal ladder as before (ADR-0053, ADR-0057).
+
+- **The concurrency cap queues instead of refusing.** **Breaking:** a call over the cap waits
+  for a slot rather than being rejected, the way libuv's thread pool behaves — the queue is
+  FIFO, unbounded, and has no timeout. Enqueueing creates the record, so a queued task is
+  visible in the task list and can be pulled out of the queue before it starts. The cost, stated
+  plainly: the cap no longer bounds how many children a session may have in flight, only how
+  many run at once; the background has no bound, and the foreground's bound is its own timeout
+  (ADR-0056).
+
+- **`/ptc off` truncates the chain.** **Breaking:** it used to mean "stop narrowing the built-in
+  tools" while leaving a door in place to refuse. It now means this package's segment of the
+  chain is gone: on `full_ptc` the orchestration layer is withdrawn and the model is back to
+  calling the built-ins directly; on `codemode_ptc` pi's own `codemode` keeps orchestrating and
+  the segment under it that belongs to this package is withdrawn with it. Either way there is no
+  way left to start a child, the tasks that already exist stay inspectable and stoppable, and
+  the ones already running keep running (ADR-0058).
+
+- **PTC programs run in strict mode.** **Breaking:** the program body is compiled with
+  `"use strict"`, matching upstream DeepSeek Harness, which has always done this — we were
+  silently out of alignment, and the parity audit had not registered the gap. An undeclared
+  assignment is a `ReferenceError` instead of a silent global, top-level `this` is `undefined`,
+  and a duplicate parameter or an octal literal is a compile-time `SyntaxError`. There is no
+  opt-out (ADR-0060).
 
 ### Fixed
 
