@@ -420,7 +420,7 @@ describe("renderSubagentToolCall (pi_task_codemode)", () => {
     const task = "第一行任务：做一次只读 review\n\n第二行：审查范围\n第三行\n第四行";
     const out = visible(renderSubagentToolCall({ task, readOnly: "lenient" }, theme));
 
-    expect(out).toContain("└─ *subagent* → (generalist)");
+    expect(out).toContain("└─ *task* → (generalist)");
     expect(out).toContain("foreground · read-only:lenient");
     expect(out).toContain("│ 第一行任务：做一次只读 review");
     // 4 non-empty lines, one shown → 3 withheld.
@@ -466,7 +466,7 @@ describe("renderSubagentToolCall (pi_task_codemode)", () => {
         { expanded: true },
       ),
     );
-    expect(out).toContain("└─ *subagent* → (generalist)");
+    expect(out).toContain("└─ *task* → (generalist)");
     expect(out).toContain("   ├─ label   review-fix-loop");
     expect(out).toContain("   ├─ why     need an independent check");
     expect(out).toContain("   └─ task    第一行任务 (4 行)");

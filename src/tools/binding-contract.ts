@@ -59,6 +59,26 @@ const SHAPE_LINES = [
 ];
 
 /**
+ * What a task door resolves to, and what a refusal looks like (ADR-0054).
+ *
+ * ONE constant, TWO surfaces: the PTC door's note below, and the codemode door's description
+ * (`src/tools/subagent.ts`). They say the same thing to a model on two different planes, and a
+ * sentence written twice is a sentence that will drift — the failure this whole module exists to
+ * prevent. A test asserts that both sides contain this exact text.
+ *
+ * Door-agnostic on purpose ("a task door", not a name): the note has to name the binding it is
+ * about, and the description belongs to a tool that is not a binding, so a name would be wrong in
+ * one of the two places.
+ *
+ * The refusal half is ADR-0054's: a refusal is a RESULT on both doors — `status: "rejected"` plus
+ * an `errorMessage` — and never an exception. The codemode door used to throw, which made a
+ * refused call indistinguishable from a broken one.
+ */
+export const TASK_DOOR_RESULT_NOTE: string =
+  "A task door resolves to `{ text, status, ... }` with no `content`, and it never throws: a " +
+  'refusal comes back as a result with `status: "rejected"` and an `errorMessage`, so read those two.';
+
+/**
  * Per-binding departures from the shared shape, keyed by binding name. A binding
  * with nothing to add is absent rather than mapped to an empty string, so the key
  * set is exactly the set of bindings that genuinely deviate -- which is what a
@@ -85,8 +105,9 @@ const NOTE_ENTRIES: ReadonlyArray<readonly [NotedBindingName, string]> = [
   ["edit", "`edit` always reports a `details` object carrying `diff` and `patch`."],
   [
     DISPATCH_BINDING_NAME,
-    "`pi_task_ptc` is the exception: it resolves to `{ text, status, ... }` with no `content` and" +
-      " never throws, so read `status`.",
+    // ADR-0054: the shape and the failure mode are ONE statement, and it is a shared constant
+    // because the codemode door says the same thing to a model on the other plane.
+    "`" + DISPATCH_BINDING_NAME + "` is the exception. " + TASK_DOOR_RESULT_NOTE,
   ],
 ];
 

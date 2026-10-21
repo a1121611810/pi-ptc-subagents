@@ -358,8 +358,19 @@ const CHILD_REPORT_LITERAL = {
  * counted, so the expected value points at something this file controls.
  */
 const FOREGROUND_USAGE_INPUT = { input: 31_995, output: 5_888, cost: 0.01763178 };
-/** The four display fields that feed the transcript row and the projection: `turns` is one. */
-const FOREGROUND_USAGE_VIEW = { ...FOREGROUND_USAGE_INPUT, turns: 1 };
+/**
+ * The four display fields that feed the transcript row, plus the two cache counters the raw
+ * accumulator carries (ADR-0054: the script reads the accumulator, not the four-field view).
+ *
+ * The cache counters are 0 because the fixture's usage block names no cache counters and the
+ * accumulator counts 0 for an absent one — the same rule the other four fields follow.
+ */
+const FOREGROUND_USAGE_VIEW = {
+  ...FOREGROUND_USAGE_INPUT,
+  cacheRead: 0,
+  cacheWrite: 0,
+  turns: 1,
+};
 
 describe("pi_task_codemode", () => {
   test("a background call spawns a child and hands back a task id the model can use", async () => {
@@ -390,9 +401,11 @@ describe("pi_task_codemode", () => {
       expect(taskId, "a background call resolves with a task id").toBeDefined();
       expect(
         result.content[0]?.text ?? "",
-        "the model is told the id, not left to find it in a details object",
+        "the reader is told the id, not left to find it in a details object",
       ).toContain(taskId as string);
-      expect(result.details.status, "and told this is a background task").toBe("background");
+      // ADR-0054: the details channel carries the RAW handle, so its status is the handle's own
+      // ("running"), not a word this front invented for it.
+      expect(result.details.status, "and the status is the handle's own").toBe("running");
       expect(h.lifecycle.spawnCount, "exactly one child was launched").toBe(1);
       // WHAT was launched, not merely that something was. Both mutations below -- dropping the
       // parent task id, and running the child in process.cwd() instead of the call's cwd --
@@ -412,21 +425,32 @@ describe("pi_task_codemode", () => {
     });
   });
 
-  test("a refused call throws with the dispatcher's own message, never silently", async () => {
+  test("a refused call resolves with the dispatcher's own message, never silently", async () => {
     // IO boundary, failure direction (constraint 1 and 3). An unregistered agent is the
     // refusal the dispatcher already knows how to word; this test pins that the front
-    // surfaces it as a visible error rather than resolving to something success-shaped.
+    // surfaces it as a VISIBLE refusal rather than resolving to something success-shaped.
+    //
+    // ADR-0054: a refusal is a RESULT, not an exception. The call resolves, the raw result
+    // carries `status: "rejected"` and the dispatcher's own `errorMessage`, and the text says
+    // the same thing to a reader.
     await withAgent(async (dir) => {
       const h = createHarness();
       const tool = createPtcSubagentTool(baseOptions(dir, h.deps));
-      let message = "";
-      try {
-        await run(tool, { agent: "no-such-agent", agentScope: "project", task: "anything" });
-      } catch (error) {
-        message = error instanceof Error ? error.message : String(error);
-      }
-      expect(message, "the refusal names the tool").toContain("pi_task_codemode");
-      expect(message, "and names the agent that was asked for").toContain("no-such-agent");
+      const result = (await run(tool, {
+        agent: "no-such-agent",
+        agentScope: "project",
+        task: "anything",
+      })) as {
+        content: { type: string; text: string }[];
+        structuredContent?: { status?: string; errorMessage?: string; started?: boolean };
+      };
+      const refusal = result.structuredContent ?? {};
+      expect(refusal.status, "the refusal is a result").toBe("rejected");
+      expect(refusal.started, "and no child was started").toBe(false);
+      expect(refusal.errorMessage, "the dispatcher's own wording").toContain("no-such-agent");
+      const text = result.content[0]?.text ?? "";
+      expect(text, "the reader is told which door said no").toContain("pi_task_codemode");
+      expect(text, "and names the agent that was asked for").toContain("no-such-agent");
     });
   });
 
@@ -439,13 +463,21 @@ describe("pi_task_codemode", () => {
         ...baseOptions(dir, h.deps),
         depth: DEFAULT_CONFIG.maxDispatchDepth,
       });
-      let message = "";
-      try {
-        await run(tool, { agent: AGENT, agentScope: "project", task: "one level too deep" });
-      } catch (error) {
-        message = error instanceof Error ? error.message : String(error);
-      }
-      expect(message, "the depth ceiling is reported").toContain("pi_task_codemode");
+      const result = (await run(tool, {
+        agent: AGENT,
+        agentScope: "project",
+        task: "one level too deep",
+      })) as {
+        content: { type: string; text: string }[];
+        structuredContent?: { status?: string; errorMessage?: string };
+      };
+      expect(result.structuredContent?.status, "the refusal is a result").toBe("rejected");
+      expect(result.structuredContent?.errorMessage, "the depth ceiling is reported").toContain(
+        "dispatch depth limit reached",
+      );
+      expect(result.content[0]?.text ?? "", "and the reader hears it too").toContain(
+        "dispatch depth limit reached",
+      );
       expect(
         h.registry.query !== undefined,
         "the registry is wired, so a spawn would have been recorded",
@@ -527,7 +559,11 @@ describe("pi_task_codemode", () => {
     } as unknown as Parameters<typeof renderCall>[2];
     const args = { task: "do the thing\nsecond line", readOnly: "lenient" as const };
     const collapsed = renderCall(args, theme, context).render(80).join("\n");
-    expect(collapsed).toContain("└─ subagent → (generalist)");
+    // ADR-0054: the row says what the call creates -- a task -- and the retired word is gone
+    // from the user-facing row too. The counterfactual: put "subagent" back on the title and
+    // this goes red on the first line.
+    expect(collapsed).toContain("└─ task → (generalist)");
+    expect(collapsed, "and the retired word is not on the row").not.toContain("subagent");
     expect(collapsed).toContain("foreground · read-only:lenient");
     expect(collapsed).toContain("│ do the thing");
     expect(collapsed).toContain("… 还有 1 行");
@@ -909,6 +945,12 @@ describe("pi_task_codemode and the dispatch cap", () => {
  * session that has handed orchestration to pi's `codemode` can start a subagent at all, so before
  * this channel existed the script had to regex the ULID out of `"Started background task 01JABC..."`.
  *
+ * ADR-0054: what the script receives is the RAW result — the same object the PTC door resolves
+ * with, field for field, under the same names. No projection, no renamed keys, no envelope. The
+ * child's own text (`text`) is in it, which is the gap this ticket closes: the projection that
+ * stood here had no prose in it, so a script that dispatched a child could not read what the child
+ * produced.
+ *
  * Every absence claim below is asserted with `Object.hasOwn`, never with `=== undefined`. That is
  * the defect this suite exists to catch: `JsonValue` has no `undefined`, so a key set to
  * `undefined` compiles fine in spirit, reads identically to "absent" through the obvious check,
@@ -919,23 +961,23 @@ describe("pi_task_codemode structuredContent", () => {
     await withAgent(async (dir) => {
       const { result, h } = await dispatchBackground(dir);
       const structured = structuredOf(result);
-      expect(structured.task_id, "the id is a value, not prose the script has to parse").toBe(
+      expect(structured.taskId, "the id is a value, not prose the script has to parse").toBe(
         result.details.taskId,
       );
-      expect(structured.status, "and the script is told this is a handle").toBe("background");
+      expect(structured.status, "and the script is told this is a handle").toBe("running");
       expect(
-        Object.hasOwn(structured, "exit_code"),
+        Object.hasOwn(structured, "exitCode"),
         "a handle has nothing to report yet, so the key is ABSENT rather than undefined",
       ).toBe(false);
       // Independent sources for the id itself, not "whatever the tool wrote". `PARENT_TASK` is this
       // file's canonical 26-char Crockford-base32 ULID literal, so the shape is a stated invariant
       // rather than a copy of the implementation; and the registry proves the id names a task that
       // really exists in this session, which no locally-invented string could.
-      const record = await h.registry.get(structured.task_id as ULID);
+      const record = await h.registry.get(structured.taskId as ULID);
       expect(record?.agentName, "the id names a task the session registry really holds").toBe(
         AGENT,
       );
-      expect(String(structured.task_id), "and it is a ULID, like PARENT_TASK above").toMatch(
+      expect(String(structured.taskId), "and it is a ULID, like PARENT_TASK above").toMatch(
         /^[0-9A-HJKMNP-TV-Z]{26}$/,
       );
     });
@@ -951,40 +993,66 @@ describe("pi_task_codemode structuredContent", () => {
       // tell "exited 0" from "nothing to report" by truthiness -- which is exactly why the
       // background test above pins absence with `hasOwn`.
       expect(
-        Object.hasOwn(structured, "exit_code"),
+        Object.hasOwn(structured, "exitCode"),
         "a finished call has something to report, so the key is present",
       ).toBe(true);
-      expect(structured.exit_code, "and it is the code this file closed the child with").toBe(
+      expect(structured.exitCode, "and it is the code this file closed the child with").toBe(
         FOREGROUND_EXIT_CODE,
       );
-      expect(Object.hasOwn(structured, "task_id"), "and there is nothing to poll").toBe(false);
+      expect(Object.hasOwn(structured, "taskId"), "and there is nothing to poll").toBe(false);
     });
   });
 
-  test("the two outcomes are told apart from the projection alone, with no text in reach", async () => {
+  test("the script reads the child's own words — the gap the projection left", async () => {
+    // The headline of this ticket. The projection that stood here handed the script a structured
+    // value INSTEAD of the text block, and that value had no prose in it — so a script that
+    // dispatched a child could read its report but not the child's working output.
+    //
+    // The expected value is this file's own child-answer literal, not a copy of whatever the
+    // implementation put there.
+    await withAgent(async (dir) => {
+      const structured = structuredOf(await dispatchForeground(dir));
+      expect(structured.text, "the child's working text reaches the script").toBe(
+        FOREGROUND_ANSWER,
+      );
+    });
+  });
+
+  test("the two outcomes are told apart from the object alone, with no text in reach", async () => {
     await withAgent(async (dir) => {
       const handle = structuredOf((await dispatchBackground(dir)).result);
       const finished = structuredOf(await dispatchForeground(dir));
       // The property the change exists for. A codemode script gets this object INSTEAD of the text
-      // block, so its routing decision has to be readable from here -- with key sets, because
-      // `exit_code: 0` and "no exit_code" are the same observation to any truthiness test.
-      // `report_channel` is on BOTH, and that is the point: it is the total field, present even
-      // where nothing was reported, so a script can tell "ignored the contract" from "still
-      // running" without a text block. It is on neither branch's DISCRIMINATING key.
-      expect(Object.keys(handle).sort(), "a handle is {task_id, status, report_channel}").toEqual([
-        "report_channel",
+      // block, so its routing decision has to be readable from here.
+      //
+      // A handle is the raw `DispatchHandle` — three fields, and nothing else. A settled call is
+      // the raw `DispatchResult` — the dispatcher's own fields, including the record it created.
+      //
+      // The key sets are LITERALS, because the claim is that the script sees the dispatcher's own
+      // object: a projection that renamed a key, or dropped one, would break them here.
+      expect(Object.keys(handle).sort(), "a handle is {label, status, taskId}").toEqual([
+        "label",
         "status",
-        "task_id",
+        "taskId",
       ]);
       expect(
         Object.keys(finished).sort(),
-        "a finished call is {status, exit_code, report_channel}",
-      ).toEqual(["exit_code", "report_channel", "status"]);
-      expect("task_id" in handle, "so a script branches on task_id for 'poll me'").toBe(true);
-      expect("task_id" in finished, "and on its absence for 'already done'").toBe(false);
-      // Not on `status`, which would also discriminate. The two branches differ in WHICH key they
-      // carry, and that is the claim: the id is the thing a script acts on next.
-      expect(Object.keys(handle).sort().join(",")).not.toBe(Object.keys(finished).sort().join(","));
+        "a settled call is the raw DispatchResult, with the record it created",
+      ).toEqual([
+        "agentName",
+        "durationMs",
+        "exitCode",
+        "recordId",
+        "recordLabel",
+        "reportChannel",
+        "started",
+        "status",
+        "text",
+      ]);
+      // The discriminant is `status` (ADR-0054), not "does it carry an id": a settled result
+      // carries an id of its own, so an id probe would call every settled call a handle.
+      expect(handle.status, "a handle is running").toBe("running");
+      expect(finished.status, "a settled call is not").toBe("fulfilled");
     });
   });
 
@@ -1041,51 +1109,68 @@ describe("pi_task_codemode structuredContent", () => {
         ]),
       ].sort();
       const declared = Object.keys(SUBAGENT_OUTPUT_SCHEMA.properties ?? {}).sort();
-      expect(emitted, "every emitted key is a declared one").toEqual(declared);
-      // And the projection stays LEAN -- eight keys, none of them the `details` spelling, and no
-      // field that exists only to say "this does not apply". `report_channel` is the exception
-      // that proves the rule: it exists ONLY to say that `report` does not apply, and it is here
-      // because ADR-0032 makes an unstated degradation a defect. `why_suppressed` is the same
-      // shape of exception (ADR-0043): its ABSENCE is the claim, and it is emitted only when
-      // something was actually dropped.
+      // A SUBSET check, not equality: the declared schema is the whole raw result (ADR-0054), and
+      // no single outcome carries every field of it — `stderr` and the observed-model pair only
+      // appear when there is something to observe. The sweep's question is the one it has always
+      // been: does the tool ever emit a key the schema does not declare?
+      expect(
+        emitted.filter((key) => !declared.includes(key)),
+        "every emitted key is a declared one",
+      ).toEqual([]);
+      // The declared shape is the RAW result's, field for field (ADR-0054) -- the same names the
+      // PTC door's value carries, so a script and a program read one vocabulary. The list is a
+      // LITERAL: it is the claim, and a schema that grew a key or lost one would break it here
+      // rather than quietly agreeing with the implementation.
       expect(declared).toEqual([
-        "exit_code",
-        "read_only_tier",
+        "agentName",
+        "durationMs",
+        "errorMessage",
+        "exitCode",
+        "label",
+        "observedModel",
+        "observedProvider",
+        "readOnlyTier",
+        "recordId",
+        "recordLabel",
         "report",
-        "report_channel",
+        "reportChannel",
+        "started",
         "status",
-        "task_id",
+        "stderr",
+        "taskId",
+        "text",
         "usage",
-        "why_suppressed",
+        "whySuppressed",
       ]);
-      expect(declared, "snake_case, like pi's own builtins").not.toContain("taskId");
-      expect(declared).not.toContain("exitCode");
+      // The one field every shape carries is the one the two shapes are told apart by.
+      expect(
+        (SUBAGENT_OUTPUT_SCHEMA.required ?? []).includes("status"),
+        "status is the required one, and it is the discriminant",
+      ).toBe(true);
     });
   });
 
-  test("the handle projection carries the tier on its OWN, which the sweep above cannot see", async () => {
+  test("the handle carries NO tier of its own — the raw handle has nowhere to put one", async () => {
     /*
-     * The sweep above unions every outcome into one Set, so a key emitted by ANY row satisfies it
-     * for all of them. That is the right question for `emitted ⊆ declared`, and it is structurally
-     * blind to the question this row asks: does the HANDLE branch project the tier at all?
+     * ADR-0054 removed the projection, and the projection is where the handle's tier came from:
+     * a `DispatchHandle` has three fields, and the tier is not one of them. The tier the call
+     * resolved to is on the TaskRecord (`ptc_task_output` reads it) and in the text — which is
+     * where ADR-0041 put it for the background front in the first place.
      *
-     * Measured, and the reason this row exists: deleting `read_only_tier: handleTier` from
-     * `src/tools/subagent.ts` turned doc-integrity red (the pins moved) and left every behavioural
-     * assertion green — the foreground row was still supplying the key to the union.
-     *
-     * The two projections are separately written, so they fail separately: one reads the settled
-     * `DispatchResult`, the other re-derives the tier off the params because a `DispatchHandle` has
-     * nowhere to carry it. One assertion per writer.
+     * The counterfactual: re-add `readOnlyTier` to the handle's structured content, and the
+     * script would be reading a field the PTC door's handle does not have — the two doors would
+     * no longer give the same object, which is the whole claim.
      */
     await withAgent(async (dir) => {
       const tiered = structuredOf((await dispatchBackground(dir, { readOnly: "strict" })).result);
-      expect(tiered.read_only_tier, "the handle states the tier it was asked for").toBe("strict");
-
-      const untiered = structuredOf((await dispatchBackground(dir)).result);
       expect(
-        "read_only_tier" in untiered,
-        "and says nothing when no tier was asked for — absent is the claim, not an empty string",
+        Object.hasOwn(tiered, "readOnlyTier"),
+        "the raw handle carries no tier — the record and the text do",
       ).toBe(false);
+      expect(
+        tiered.status,
+        "what it does carry is the handle's own status, which is the discriminant",
+      ).toBe("running");
     });
   });
 
@@ -1163,40 +1248,37 @@ describe("pi_task_codemode structuredContent", () => {
     });
   });
 
-  test("the settled projection carries the tier too, which the sweep cannot see either", async () => {
-    // The other of the two writers, with the same reason and the same measurement: neutering
-    // `tierField` on the settled path (`outcome.readOnlyTier === undefined ? {} : {}`) left the
-    // whole repository green while the sweep above was still collecting the key from the handle
-    // row. The settled path is the one that reads the authoritative `DispatchResult`, so it is the
-    // one where a wrong value would be a wrong CLAIM rather than a derived duplicate.
+  test("the settled result carries the tier too, which the sweep cannot see either", async () => {
+    // The settled path is the one that reads the authoritative `DispatchResult`, so it is the one
+    // where a wrong value would be a wrong CLAIM rather than a derived duplicate.
     await withAgent(async (dir) => {
       const strict = structuredOf(await dispatchForeground(dir, { readOnly: "strict" }));
-      expect(strict.read_only_tier).toBe("strict");
+      expect(strict.readOnlyTier).toBe("strict");
 
       const lenient = structuredOf(await dispatchForeground(dir, { readOnly: "lenient" }));
-      expect(lenient.read_only_tier, "lenient is its own tier, not a flavour of strict").toBe(
+      expect(lenient.readOnlyTier, "lenient is its own tier, not a flavour of strict").toBe(
         "lenient",
       );
 
       const untiered = structuredOf(await dispatchForeground(dir));
-      expect("read_only_tier" in untiered, "no tier asked for, so nothing claimed").toBe(false);
+      expect("readOnlyTier" in untiered, "no tier asked for, so nothing claimed").toBe(false);
     });
   });
 
-  test("the projection survives the JSON round trip the sandbox makes", async () => {
+  test("the raw result survives the JSON round trip the script's boundary makes", async () => {
     await withAgent(async (dir) => {
       const handle = structuredOf((await dispatchBackground(dir)).result);
       const finished = structuredOf(await dispatchForeground(dir));
-      // The sandbox receives what `JSON.stringify` produced. `toEqual` would not notice an
+      // The script receives what `JSON.stringify` produced. `toEqual` would not notice an
       // `undefined`-valued key -- it ignores undefined properties -- so this uses `toStrictEqual`,
-      // which does: an explicit `exit_code: undefined` on the handle is exactly what would vanish
-      // here and leave the script with a projection its schema does not describe.
+      // which does: an explicit `exitCode: undefined` on the handle is exactly what would vanish
+      // here and leave the script an object its own schema does not describe.
       expect(JSON.parse(JSON.stringify(handle))).toStrictEqual(handle);
       expect(JSON.parse(JSON.stringify(finished))).toStrictEqual(finished);
       // The key sets, again by length and by hasOwn: the round trip above compares VALUES, and a
       // dropped key is a shape change a value comparison can report as equal.
       expect(Object.keys(JSON.parse(JSON.stringify(handle)))).toHaveLength(3);
-      expect(Object.keys(JSON.parse(JSON.stringify(finished)))).toHaveLength(3);
+      expect(Object.keys(JSON.parse(JSON.stringify(finished)))).toHaveLength(9);
     });
   });
 
@@ -1217,10 +1299,12 @@ describe("pi_task_codemode structuredContent", () => {
       const structured = structuredOf(result);
       const text = result.content[0]?.text ?? "";
 
-      expect(structured.report_channel, "the child ran and did not comply").toBe("none");
+      expect(structured.reportChannel, "the child ran and did not comply").toBe("none");
       expect(Object.hasOwn(structured, "report")).toBe(false);
+      // The raw accumulator, all six of its fields — the projection carried four of them, and the
+      // two cache counters are the ones it dropped.
       expect(structured.usage).toStrictEqual(FOREGROUND_USAGE_VIEW);
-      // `toEqual` ignores an `undefined`-valued key and the sandbox sees what `JSON.stringify`
+      // `toEqual` ignores an `undefined`-valued key and the script sees what `JSON.stringify`
       // produced, so the round trip is what proves the key survives the boundary.
       expect(JSON.parse(JSON.stringify(structured))).toStrictEqual(structured);
       // The transcript says the same thing, in the renderer's own rounding (four decimals,
@@ -1257,29 +1341,25 @@ describe("pi_task_codemode structuredContent", () => {
     });
   });
 
-  test("a refusal still throws, and hands a script no result to mistake for a handle", async () => {
+  test("a refusal hands the script a REJECTED result, not a handle it could mistake for one", async () => {
+    // ADR-0054: the door does not throw. A refusal is a result whose `status` says so, and the
+    // script has to be able to tell it from a handle WITHOUT reading prose: the discriminant is
+    // `status`, and a rejected result is not `"running"`.
     await withAgent(async (dir) => {
       const h = createHarness();
       const tool = createPtcSubagentTool(baseOptions(dir, h.deps));
-      let result: unknown = undefined;
-      let message = "";
-      try {
-        result = await run(tool, {
-          agent: "no-such-agent",
-          agentScope: "project",
-          task: "anything",
-        });
-      } catch (error) {
-        message = error instanceof Error ? error.message : String(error);
-      }
-      expect(message, "the refusal is still an error rather than a result").toContain(
-        "pi_task_codemode",
-      );
-      // Its own test because a `rejected` DispatchResult is the one outcome neither success
-      // projection covers, and resolving it as `{ structuredContent: { status: "rejected" } }`
-      // would look like an improvement. A script would then see a THIRD shape -- a status with
-      // neither task_id nor exit_code -- that the two-branch discrimination above never sees.
-      expect(result, "no result object escaped the throw").toBeUndefined();
+      const result = (await run(tool, {
+        agent: "no-such-agent",
+        agentScope: "project",
+        task: "anything",
+      })) as {
+        content: { type: string; text: string }[];
+        structuredContent?: { status?: string; errorMessage?: string };
+      };
+      const refusal = result.structuredContent ?? {};
+      expect(refusal.status, "the refusal says what it is").toBe("rejected");
+      expect(refusal.status, "and it is not a handle").not.toBe("running");
+      expect(refusal.errorMessage, "with the gate's own wording").toContain("no-such-agent");
     });
   });
 });
@@ -1420,21 +1500,31 @@ describe("pi_task_codemode renders the child report into the text the model read
       }
       // And the host's usage, not the child's: `usage` came from this file's `message_end`.
       expect(report?.usage).toEqual({ input: 1200, output: 340, cost: 0.0123, turns: 1 });
-      // Issue #199: the report keeps that four-field view UNCHANGED while the top-level key states
-      // the same four numbers, from the canonical accumulator. Decision 2's invariant — when both
-      // carriers are present they agree — checked here because it is the one place both are in
-      // reach at once, and the two channels must not disagree about one measurement.
-      expect(structured.usage).toEqual({ input: 1200, output: 340, cost: 0.0123, turns: 1 });
+      // Issue #199: the report keeps its four-field view while the top-level key states the
+      // canonical accumulator. Decision 2's invariant — when both carriers are present they agree
+      // — checked here because it is the one place both are in reach at once, and the two must
+      // not disagree about one measurement.
+      //
+      // ADR-0054: the top-level `usage` is the raw accumulator, so it carries the two cache
+      // counters the four-field view does not have. The projection dropped them.
+      expect(structured.usage).toEqual({
+        input: 1200,
+        output: 340,
+        cacheRead: 0,
+        cacheWrite: 0,
+        cost: 0.0123,
+        turns: 1,
+      });
       expect(
         Object.keys(structured.usage as object).sort(),
-        "four display fields, never the six-field accumulator",
-      ).toEqual(["cost", "input", "output", "turns"]);
+        "the raw accumulator, with the cache counters the projection dropped",
+      ).toEqual(["cacheRead", "cacheWrite", "cost", "input", "output", "turns"]);
     });
   });
 
   test("a non-compliant child gets no `report` key rather than an empty one", async () => {
     // `JsonValue` has no `undefined`, so a key set to `undefined` would compile in spirit and
-    // vanish at `JSON.stringify` on the far side of the sandbox boundary. Absence is asserted
+    // vanish at `JSON.stringify` on the far side of the script's boundary. Absence is asserted
     // with `hasOwn` for exactly that reason -- the same discipline the handle/finished pair above.
     await withAgent(async (dir) => {
       const structured = structuredOf(await dispatchForegroundSaying(dir, "no report here"));
@@ -1443,37 +1533,44 @@ describe("pi_task_codemode renders the child report into the text the model read
         "no report means the key is ABSENT, not present-and-empty",
       ).toBe(false);
       // The other two keys are untouched by this, so "absent" is about the report and not about
-      // the whole projection having vanished.
+      // the whole object having vanished.
       expect(structured.status).toBe("fulfilled");
-      expect(structured.exit_code).toBe(FOREGROUND_EXIT_CODE);
+      expect(structured.exitCode).toBe(FOREGROUND_EXIT_CODE);
       // ...and the channel is what says WHY it is absent. Without this key the two ways a
       // `report` can be missing -- the child ignored the contract, or a handle has not finished --
       // are the same value, which is the silent degradation ADR-0032 exists to prevent.
-      expect(structured.report_channel).toBe("none");
+      expect(structured.reportChannel).toBe("none");
     });
   });
 
-  test("report_channel says why a report is absent, on every branch that can omit it", async () => {
-    // Three outcomes, one of them compliant. Two of them omit `report`, and without the channel
-    // they are the same value to a caller -- which is the silent degradation ADR-0032 forbids.
-    // Counterfactual: dropping `report_channel`, or leaving it off the handle branch, turns this
-    // red; so does an implementation that claims a channel it did not use.
+  test("reportChannel says why a report is absent, on every branch that can omit it", async () => {
+    // Two outcomes omit `report`, and without anything to tell them apart they are the same
+    // value to a caller -- which is the silent degradation ADR-0032 forbids. ADR-0054 changes HOW
+    // they are told apart: a settled call states its channel, and a handle says it has not
+    // finished (`status: "running"`) — which is the stronger claim, and the one the PTC door's
+    // handle makes too.
+    //
+    // Counterfactual: dropping `reportChannel` from the settled path, or letting a handle claim
+    // a channel it never used, turns this red; so does an implementation that claims a channel it
+    // did not use.
     await withAgent(async (dir) => {
       const nonCompliant = structuredOf(await dispatchForegroundSaying(dir, "no report here"));
       expect(Object.hasOwn(nonCompliant, "report")).toBe(false);
-      expect(nonCompliant.report_channel).toBe("none");
+      expect(nonCompliant.reportChannel).toBe("none");
 
       const handleStructured = structuredOf((await dispatchBackground(dir)).result);
       expect(Object.hasOwn(handleStructured, "report")).toBe(false);
-      expect(handleStructured.report_channel).toBe("none");
+      // The raw handle has no channel to state: it has not finished, and `status` says so.
+      expect(Object.hasOwn(handleStructured, "reportChannel")).toBe(false);
+      expect(handleStructured.status, "which is what tells the two apart").toBe("running");
       // What IS different between the two non-compliant outcomes, so this pair is not vacuous.
-      expect(Object.hasOwn(handleStructured, "task_id")).toBe(true);
+      expect(Object.hasOwn(handleStructured, "taskId")).toBe(true);
 
       const compliant = structuredOf(
         await dispatchForegroundSaying(dir, childSaying("done", CHILD_REPORT_LITERAL)),
       );
       expect(Object.hasOwn(compliant, "report")).toBe(true);
-      expect(compliant.report_channel).toBe("prompt-json");
+      expect(compliant.reportChannel).toBe("prompt-json");
     });
   });
 });
