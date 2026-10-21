@@ -84,16 +84,21 @@ function retiredNames(): string[] {
  *
  * The script resolves the repository root from its own location, so it is copied into a throwaway
  * tree with the two things it reads. The copy is what makes the run possible; the repository is
- * untouched.
+ * untouched. `patch` edits the COPY — it is how a self-check inside the script is exercised
+ * without touching the repository.
  */
-function runGate(pageHtml: string): { code: number | null; out: string } {
+function runGate(
+  pageHtml: string,
+  patch?: (script: string) => string,
+): { code: number | null; out: string } {
   const dir = mkdtempSync(join(tmpdir(), "ptc-landing-tool-names-"));
   try {
     const scripts = join(dir, "packages", "website", "scripts");
     const dist = join(dir, "packages", "website", ".vitepress", "dist");
     mkdirSync(scripts, { recursive: true });
     mkdirSync(dist, { recursive: true });
-    cpSync(CHECK_SCRIPT, join(scripts, "check-landing-tool-names.mjs"));
+    const script = readFileSync(CHECK_SCRIPT, "utf8");
+    writeFileSync(join(scripts, "check-landing-tool-names.mjs"), patch ? patch(script) : script);
     cpSync(join(REPO_ROOT, "src"), join(dir, "src"), { recursive: true });
     writeFileSync(join(dist, "index.html"), pageHtml);
 
@@ -105,6 +110,25 @@ function runGate(pageHtml: string): { code: number | null; out: string } {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/**
+ * The check script's allowance registry, read out of the script's own text.
+ *
+ * An allowance is a name the page may mention even though this package does not register it —
+ * `pi.extensions` is pi's own manifest field, and the install note on the page says so. The same
+ * extraction shape as the retired registry, for the same reason: a second copy of the list in
+ * this file is a liability that goes stale silently.
+ */
+const ALLOWANCE_BLOCK = /const NOT_A_TOOL_NAMES = new Map\(\[([\s\S]*?)\]\);/;
+
+/** Every name the gate tolerates without registering it, read from the gate's own registry. */
+function allowedNames(): string[] {
+  const source = readFileSync(CHECK_SCRIPT, "utf8");
+  const block = source.match(ALLOWANCE_BLOCK)?.[1] ?? "";
+  return [...block.matchAll(RETIRED_ENTRY)]
+    .map((match) => match[1])
+    .filter((name): name is string => name !== undefined);
 }
 
 /**
@@ -154,5 +178,36 @@ describe("the landing page's tool-name gate sees the names it cannot recognise",
     const page = readFileSync(LANDING_SOURCE, "utf8");
     const named = retiredNames().filter((name) => page.includes(name));
     expect(named, `the landing page names a retired tool: ${named.join(", ")}`).toEqual([]);
+  });
+
+  test("a page naming an allowed non-tool stays green — the allowance is honoured", () => {
+    // The allowance exists so that legitimate prose (pi's own `pi.extensions` manifest field) does
+    // not turn the gate red on the real page. If the allowance stopped being honoured the gate
+    // would be a false red — and nothing in the suite would say so.
+    const allowed = allowedNames();
+    expect(
+      allowed.length,
+      "the allowance registry is not empty — 抽取器失效必须红",
+    ).toBeGreaterThan(0);
+    const page = CLEAN_PAGE.replace(
+      "</body>",
+      `${allowed.map((name) => `<code>${name}</code>`).join(" ")}</body>`,
+    );
+    const gate = runGate(page);
+    expect(gate.code, gate.out).toBe(0);
+  });
+
+  test("an allowance naming a tool this package registers goes red — 豁免不得变成影子", () => {
+    // A stale allowance is worse than no allowance: it hides the next rename, because the name it
+    // excuses is exactly the one that must be reported. The script's own self-check has to catch
+    // it — this asserts that the self-check is there at all.
+    const gate = runGate(CLEAN_PAGE, (script) =>
+      script.replace(
+        "const NOT_A_TOOL_NAMES = new Map([",
+        'const NOT_A_TOOL_NAMES = new Map([\n  ["ptc_run_code", "a stale allowance"],',
+      ),
+    );
+    expect(gate.code, gate.out).not.toBe(0);
+    expect(gate.out).toContain("ptc_run_code");
   });
 });

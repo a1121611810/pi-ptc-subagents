@@ -156,11 +156,16 @@ test("a truncated session is told the shared fact, and what THIS surface lost", 
     // the call form is handing it an instruction it cannot follow (ADR-0050 decision 6).
     // The check is on the CALL FORM, not on the name: ADR-0058 wants the withdrawn doors NAMED
     // ("a model that saw them a turn ago needs to know they are gone"), so a name-absence
-    // assertion would turn red on a correct rewording.
-    expect(section, `${surfaceMode} gives no call form`).not.toContain("tools.pi_task_codemode");
-    expect(section, `${surfaceMode} gives no call form`).not.toContain("tools.pi_task_ptc");
-    expect(section, `${surfaceMode} gives no call form`).not.toContain("pi_task_codemode(");
-    expect(section, `${surfaceMode} gives no call form`).not.toContain("pi_task_ptc(");
+    // assertion would turn red on a correct rewording. These are the same three shapes the
+    // end-to-end script looks for (scripts/verify-ptc-off-e2e.ts).
+    const callingConvention: readonly RegExp[] = [
+      /\bpi_task_codemode\s*\(/,
+      /\bpi_task_ptc\s*\(/,
+      /\btools\s*(?:\.|\[)\s*["'`]?\s*pi_task_/,
+    ];
+    for (const pattern of callingConvention) {
+      expect(section, `${surfaceMode} gives no call form (${pattern})`).not.toMatch(pattern);
+    }
     // And the search sentence goes with it: "create a task and let the child search" is exactly
     // the thing that cannot happen right now.
     expect(section, `${surfaceMode} withholds the search sentence`).not.toContain(
