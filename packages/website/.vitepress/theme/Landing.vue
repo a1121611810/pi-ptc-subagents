@@ -91,7 +91,7 @@ async function copy(text) {
       <div class="lp-gaps">
         <article class="lp-gap">
           <s>No sub-agents</s>
-          <h4>&rarr; fan-out, in-process or background</h4>
+          <h4>&rarr; fan-out, result or handle</h4>
           <p>
             <code>pi.dispatch</code> plus <code>ptc_task_list</code> /
             <code>ptc_task_output</code> / <code>ptc_task_stop</code>. Session-level isolation
@@ -110,7 +110,7 @@ async function copy(text) {
           <s>No background bash</s>
           <h4>&rarr; long-lived, inspectable</h4>
           <p>
-            Background dispatch hands back a handle, not a tmux pane. List it, read it, stop it.
+            A dispatch you do not wait for hands back a handle, not a tmux pane. List it, read it, stop it.
           </p>
         </article>
       </div>
