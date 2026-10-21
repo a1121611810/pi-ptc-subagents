@@ -31,10 +31,10 @@ something else, a batch of children fanned out from one program.
 | observation        | the return value, plus the task record  | `ptc_task_list` / `ptc_task_output` / `ptc_task_stop` and `<bg-task-notification>` events                                                      |
 | failure            | `status: "rejected"` on the result      | a terminal `TaskStatus` on the `TaskRecord`                                                                                                    |
 
-Both forms share the same depth and concurrency gates — and, since the concurrency gate moved into
-`dispatch()`, they share one **counter** for them rather than one each (see [Limits](#limits)). A
-pre-spawn refusal uses the foreground `DispatchResult` shape, so a background call returns either a
-`DispatchHandle` **or** a refusal `DispatchResult`.
+Both forms share the same depth gate and the same admission queue — and, since the admission moved
+into `dispatch()`, they share one **counter** for them rather than one each (see
+[Limits](#limits)). A pre-spawn refusal uses the foreground `DispatchResult` shape, so a background
+call returns either a `DispatchHandle` **or** a refusal `DispatchResult`.
 
 A foreground result also carries the record it created: `recordId` and `recordLabel`
 ([ADR-0053](../adr/0053-every-dispatch-is-a-task.md)). That is how a program — or the model, through
@@ -170,8 +170,9 @@ diagnostic. Either half may be absent when the transcript named only the other; 
 no observed assistant turn named the pair — no turn, a supported pi that does not report it, or an
 old record — never "unknown model".
 
-On a refusal — depth cap, concurrency cap, unknown agent, or a spawn that never came up — the call
+On a refusal — depth cap, unknown agent, or a spawn that never came up — the call
 resolves with a `DispatchResult` instead: `{ status: "rejected", started: false, errorMessage: … }`.
+The concurrency cap is **not** one of them any more: over the cap a call is queued, not refused.
 The binding never throws, so branch on the shape:
 
 ```ts
@@ -199,7 +200,9 @@ if ("taskId" in result) {
 ```
 
 The handle is a **spawn-time projection** of the `TaskRecord`, frozen at creation and never updated.
-It always reads `"running"`. Live state comes from `ptc_task_list`; the handle is only an address.
+It reads `"running"` when the child is up, and `"queued"` when the call had to wait for a
+concurrency slot (the child starts later, when the task reaches the head of the queue).
+Live state comes from `ptc_task_list`; the handle is only an address.
 
 ## Observing a task
 
@@ -374,16 +377,18 @@ is already terminal is an illegal-transition error.
 
 ## Status and transitions
 
-`TaskStatus` has six values. `queued` is deliberately absent: the concurrency cap is a hard reject,
-there is no in-task queue.
+`TaskStatus` has seven values. `queued` is the admission-queue state: the task exists and is
+waiting for a concurrency slot, and it has not started a child yet
+([ADR-0056](../adr/0056-admission-queues-instead-of-rejecting.md)).
 
-A foreground dispatch's record uses the same six states and the same transitions
+A foreground dispatch's record uses the same seven states and the same transitions
 ([ADR-0053](../adr/0053-every-dispatch-is-a-task.md)) — the foreground front writes the same
 `running -> succeeded | failed | canceled` edges, with the same rules about what counts as a
 success (exit 0 **and** assistant text).
 
 | status      | terminal | can move to                                           |
 | ----------- | -------- | ----------------------------------------------------- |
+| `queued`    | no       | `running`, `canceled`, `lost`                         |
 | `running`   | no       | `stopping`, `succeeded`, `failed`, `canceled`, `lost` |
 | `stopping`  | no       | `succeeded`, `failed`, `canceled`                     |
 | `succeeded` | yes      | —                                                     |
@@ -391,6 +396,10 @@ success (exit 0 **and** assistant text).
 | `canceled`  | yes      | —                                                     |
 | `lost`      | yes      | —                                                     |
 
+- `queued -> running` — the task took a concurrency slot and its child started.
+- `queued -> canceled` — the task was withdrawn from the queue before it started (a foreground
+  program was aborted while it waited).
+- `queued -> lost` — the owning session ended while the task was still waiting.
 - `running -> succeeded` — the child exited 0.
 - `running -> failed` — the child exited non-zero.
 - `running -> stopping` — `ptc_task_stop` (explicit model stop).
@@ -504,25 +513,26 @@ subscription unchanged.
 
 Two caps apply to dispatch; both are `PtcConfig` fields, and the first is no longer per-run.
 
-- **`dispatchConcurrency` — default 8, one counter per pi session.** A hard cap on concurrently
-  in-flight dispatches across the whole session. The N+1th resolves immediately with
-  `{ status: "rejected", errorMessage: "dispatch concurrency limit reached" }` — never queued.
-  A background task **counts against the cap for its whole lifetime**, from spawn to its terminal
-  transition, not just until `pi.dispatch` returns.
+- **`dispatchConcurrency` — default 8, one counter per pi session.** A cap on how many dispatch
+  children run **at once** across the whole session. The N+1th call is **queued**, not refused:
+  the queue is FIFO, unbounded and has no timeout, and the call runs when it reaches the head
+  ([ADR-0056](../adr/0056-admission-queues-instead-of-rejecting.md)). A background task
+  **counts against the cap for its whole lifetime**, from spawn to its terminal transition, not
+  just until `pi.dispatch` returns.
 
-  Three things follow, and they are the difference from the per-run cap this used to be:
+  Three things follow:
 
   - **Foreground and background draw on the same 8.** A session with eight long background children
-    running has no foreground dispatch headroom left, and a program issuing
-    `Promise.all([...pi.dispatch])` in that state gets **every** call refused. Measured, with a real
-    fake-`pi` spawn and 24 concurrent foreground calls: 8 live background children plus one program
-    went from 8 foreground calls spawned to **0**. That is not a rounding difference.
-  - **Two concurrent programs share it.** Measured: two programs at 24 foreground calls each went
-    from 16 spawned to 8. One program on its own is unchanged (8 of 24, before and after), which is
-    why the change survived three review rounds.
-  - **A refusal is not a wait.** Because the overflow is a hard reject with no queue, a foreground
-    call is never parked behind a background child that has twenty minutes left to run. If a
-    session needs both, raise the cap rather than retrying.
+    running has no foreground dispatch headroom left _right now_, so a program issuing
+    `Promise.all([...pi.dispatch])` in that state gets every call **queued** rather than refused —
+    they run as the background children finish. The queue is what makes this usable at all: the
+    caller was going to wait for its children anyway.
+  - **Two concurrent programs share it.** They also share the queue, so a call from one program
+    waits behind the other's rather than being turned away.
+  - **The cap bounds concurrency, not the number of children.** A program that loops can queue
+    as many dispatches as it likes; the queue is unbounded, and each queued task eventually runs.
+    The foreground's bound is the program's own deadline (below); the background's bound is the
+    session's lifetime.
 
   **The live control is `createBackgroundTaskRuntime({ concurrency })`** — the call that builds the
   session counter, in `src/index.ts`, handed the value of `PtcConfig.dispatchConcurrency`. It is not
@@ -642,7 +652,8 @@ Deferred deliberately; the map items and reasons are in ADR-0022 §8/§10.
   [Structured results for codemode](./structured-results.md).
 - **Foreground → background promotion** — spawn-or-reject only; a running foreground call cannot be
   moved to the background.
-- **`queued`** — no in-task queue; spawning above the concurrency cap is an immediate rejection.
+- **Cancelling a QUEUED task** — the queue is populated and a queued task is visible, but
+  `ptc_task_stop` cannot yet withdraw one that has not started; that is a separate step.
 
 ## See also
 

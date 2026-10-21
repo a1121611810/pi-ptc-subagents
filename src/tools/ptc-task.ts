@@ -123,8 +123,16 @@ export const PTC_TASK_TOOL_GUIDELINES: readonly string[] = [
   "PTC off stops NEW children from being started, and takes these tools out of reach while nothing is running; a task already running keeps going and stays listed here.",
 ];
 
-/** The 6-state status set (ADR-0022 §2), exposed to the model as a schema union. */
+/**
+ * The 7-state status set (ADR-0022 §2, as amended by ADR-0056), exposed to the model as a
+ * schema union.
+ *
+ * ADR-0056 adds `queued`: a task that is waiting for a concurrency slot. It is in the model
+ * face because queueing CREATES the record — the admission queue IS the set of `queued`
+ * records, so a task that is waiting is as visible as one that is running.
+ */
 const TASK_STATUS_SCHEMA = Type.Union([
+  Type.Literal("queued"),
   Type.Literal("running"),
   Type.Literal("stopping"),
   Type.Literal("succeeded"),
@@ -185,7 +193,7 @@ const LIST_PARAMETERS = Type.Object({
   status: Type.Optional(
     Type.Array(TASK_STATUS_SCHEMA, {
       description:
-        "Only return tasks in these states. Omit for all six states (running, stopping, succeeded, failed, canceled, lost).",
+        "Only return tasks in these states. Omit for all seven states (queued, running, stopping, succeeded, failed, canceled, lost).",
     }),
   ),
   limit: Type.Optional(
@@ -203,7 +211,8 @@ const LIST_OUTPUT_SCHEMA = Type.Object({
         description: "The task's ULID — the id ptc_task_output and ptc_task_stop take.",
       }),
       status: Type.String({
-        description: "One of running, stopping, succeeded, failed, canceled, lost (ADR-0022 §2).",
+        description:
+          "One of queued, running, stopping, succeeded, failed, canceled, lost (ADR-0022 §2). `queued` means the task is waiting for a concurrency slot (ADR-0056).",
       }),
       agent: Type.String({
         description: "The agent the task was dispatched with (the record's agentName).",
@@ -708,7 +717,9 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
       const body =
         details.output.length > 0
           ? details.output
-          : record.status === "running" || record.status === "stopping"
+          : record.status === "queued" ||
+              record.status === "running" ||
+              record.status === "stopping"
             ? `(no output yet; task ${taskId} is ${record.status})`
             : `(no output; task ${taskId} is ${record.status})`;
       // Issue #70 / ADR-0022 §2: the record's own reason for the failure, in the `error=` spelling

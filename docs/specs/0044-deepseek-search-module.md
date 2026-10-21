@@ -170,7 +170,7 @@ pi 工具名走 `--tools` allowlist 匹配，**不带点更安全** ⇒ 工具�
 - 路径走 `getAgentDir()`，**不写死 `~/.pi/agent`**（`getAuthPath()` 未从根导出）。
 - **开关关时完全不读凭据文件**（连路径都不解析）；**父会话时也完全不读**。
 
-**泄露禁令**：key **不得**出现在工具描述、错误文案、日志、异常栈、请求 header 打印里。`WORKER_ENV_ALLOW_LIST`（`src/runtime/limits.ts:147`）已经挡住 key 类环境变量进 PTC worker，但**扩展跑在 host 进程里**，`process.env.DEEPSEEK_API_KEY` 对它可见 ⇒ 判定必须涵盖环境变量这一级，而它**绝不能被回显**。
+**泄露禁令**：key **不得**出现在工具描述、错误文案、日志、异常栈、请求 header 打印里。`WORKER_ENV_ALLOW_LIST`（`src/runtime/limits.ts:154`）已经挡住 key 类环境变量进 PTC worker，但**扩展跑在 host 进程里**，`process.env.DEEPSEEK_API_KEY` 对它可见 ⇒ 判定必须涵盖环境变量这一级，而它**绝不能被回显**。
 
 ### D7 — 配额
 

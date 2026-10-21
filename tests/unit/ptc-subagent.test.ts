@@ -670,10 +670,14 @@ test("the call row states an inherited model when the call names none (ADR-0044)
 });
 
 describe("ptc_subagent and the dispatch cap", () => {
-  test("a saturated counter refuses a foreground call instead of spawning one", async () => {
+  test("a saturated counter QUEUES a foreground call instead of refusing it", async () => {
     // The defect this closes: the only slot acquire lived at the dispatcher's program call site,
     // which ptc_subagent bypasses. Measured before the fix -- with every slot held the call
     // reached lifecycle.spawn and reported a spawn failure, never a concurrency refusal.
+    //
+    // ADR-0056: the cap is no longer a rejection reason. A saturated counter now QUEUES the
+    // call, so the assertion is that the call WAITS and launches no child -- not that it is
+    // refused.
     //
     // "No child was launched" is observed through `installRecordingPi`, not through
     // `h.lifecycle`. Round 4 measured the mock version of that line to be vacuous: the
@@ -687,26 +691,29 @@ describe("ptc_subagent and the dispatch cap", () => {
       await withAgent(async (dir) => {
         const h = createHarness();
         const slots = new DispatchSlotCounter(1);
-        slots.tryAcquire("someone-else");
+        slots.acquire("someone-else", () => undefined);
         const tool = createPtcSubagentTool({
           ...baseOptions(dir, h.deps),
           getDispatchDeps: () => ({ ...h.deps, slots }),
         });
-        let message = "";
-        try {
-          await run(tool, { agent: AGENT, agentScope: "project", task: "no slot is free" });
-        } catch (error) {
-          message = error instanceof Error ? error.message : String(error);
-        }
-        expect(message, "the gate, not a spawn failure").toContain(
-          "dispatch concurrency limit reached",
-        );
+        let settled = false;
+        void run(tool, { agent: AGENT, agentScope: "project", task: "no slot is free" })
+          .then(() => {
+            settled = true;
+          })
+          .catch(() => {
+            settled = true;
+          });
+        // The call is WAITING for the slot, not refused: it has not settled.
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(settled, "the call is queued, not refused and not settled").toBe(false);
         expect(
           (await pi.settle()).length,
           "and no child was launched -- waited for the log to settle, because a spawn that " +
             "happened anyway would land in it after this call returned",
         ).toBe(0);
-        expect(slots.active, "a refusal must not consume a slot").toBe(1);
+        expect(slots.active, "the running child still holds the one slot").toBe(1);
+        expect(slots.queued, "the call is waiting in the admission queue").toBe(1);
       });
     } finally {
       await pi.restore();

@@ -95,8 +95,8 @@ const PARENT_TASK = "01ARZ3NDEKTSV4RRFFQ69G5FAV" as ULID;
  */
 const BG_DEPTH_REFUSAL =
   "dispatch depth limit reached; next_step: call ptc_task_list to inspect the in-flight background tasks";
-const BG_CONCURRENCY_REFUSAL =
-  "dispatch concurrency limit reached; next_step: call ptc_task_list to inspect running tasks and ptc_task_stop to free a slot";
+// ADR-0056: there is no concurrency refusal any more. The cap is a queue, so an over-cap
+// background call is admitted and waits -- it is never turned away.
 
 /** The terminal states from ADR-0022 §2; used to poll the pump without a real timer. */
 const TERMINAL_STATUSES: ReadonlySet<TaskStatus> = new Set<TaskStatus>([
@@ -634,7 +634,7 @@ describe("dispatch background gates", () => {
     expect(await allTasks(h.storage)).toEqual([]);
   });
 
-  test("holds a concurrency slot while running and rejects the N+1th call (§9)", async () => {
+  test("holds a concurrency slot while running and QUEUES the N+1th call (§9, ADR-0056)", async () => {
     await withAgent(async (dir) => {
       const h = createHarness({ limit: 1 });
       const first = asHandle(
@@ -648,22 +648,29 @@ describe("dispatch background gates", () => {
       // just until dispatch() returns (ADR-0022 §9).
       expect(h.slots.active).toBe(1);
 
-      const second = await dispatch(
-        { agent: AGENT, task: "two", background: true, agentScope: "project" },
-        { callId: 2, cwd: dir, depth: 0, maxDispatchDepth: 3 },
-        h.deps,
+      // ADR-0056: the cap is a QUEUE now, not a refusal. The N+1th call is admitted and
+      // waits for a slot; it is not turned away.
+      const second = asHandle(
+        await dispatch(
+          { agent: AGENT, task: "two", background: true, agentScope: "project" },
+          { callId: 2, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+          h.deps,
+        ),
       );
-      const refused = asResult(second);
-      expect(refused.status).toBe("rejected");
-      expect(refused.errorMessage).toBe(BG_CONCURRENCY_REFUSAL);
-      // The teaching copy points the model at the management surface (issue #68 part 4).
-      expect(refused.errorMessage).toContain("ptc_task_list");
-      expect(refused.errorMessage).toContain("ptc_task_stop");
-      expect(h.lifecycle.spawnCount).toBe(1);
+      expect(second.status, "the over-cap call is queued, not refused").toBe("queued");
+      expect(h.lifecycle.spawnCount, "the queued call has not started a child").toBe(1);
+      expect(h.slots.active, "a queued task holds no slot -- the running one does").toBe(1);
+      expect(h.slots.queued, "the call is waiting in the admission queue").toBe(1);
 
-      // Terminal transition releases the slot for the next spawn. The child answers first:
-      // a silent exit-0 child is `failed` (issue #70), and this test is about the slot, not
-      // about the terminal verdict.
+      // Queueing CREATES the record: the queued task is already a task, and the model can
+      // see it in the task list.
+      const queued = await h.registry.query({ status: ["queued"] });
+      expect(queued, "the queued call left one record behind").toHaveLength(1);
+      expect(queued[0]?.id, "the record is the queued task's own").toBe(second.taskId);
+
+      // Terminal transition releases the slot, and the queued call takes it and starts.
+      // The child answers first: a silent exit-0 child is `failed` (issue #70), and this
+      // test is about the slot, not about the terminal verdict.
       h.lifecycle.pushEvent(h.lifecycle.handleAt(0), {
         type: "message_end",
         message: { role: "assistant", content: [{ type: "text", text: "PONG" }] },
@@ -672,15 +679,10 @@ describe("dispatch background gates", () => {
       h.lifecycle.resolveExit(h.lifecycle.handleAt(0), 0, null);
       const terminal = await waitForTerminal(h.storage, first.taskId);
       expect(terminal.status).toBe("succeeded");
-      expect(h.slots.active).toBe(0);
-
-      const third = await dispatch(
-        { agent: AGENT, task: "three", background: true, agentScope: "project" },
-        { callId: 3, cwd: dir, depth: 0, maxDispatchDepth: 3 },
-        h.deps,
-      );
-      expect(asHandle(third).status).toBe("running");
-      expect(h.slots.active).toBe(1);
+      await waitFor(() => h.lifecycle.spawnCount > 1);
+      expect(h.slots.active, "the queued task now holds the freed slot").toBe(1);
+      const running = await h.registry.get(second.taskId);
+      expect(running?.status, "the queued task turned `running` when it started").toBe("running");
     });
   });
 
@@ -2068,7 +2070,7 @@ describe("background pump: host-observed usage survives every close (issue #199)
     expect(await allTasks(h.storage)).toEqual([]);
   });
 
-  test("a live child has no usage yet, and the N+1th refusal adds no record that could", async () => {
+  test("a live child has no usage yet, and the N+1th QUEUED call adds a record without it", async () => {
     await withAgent(async (dir) => {
       const h = createHarness({ limit: 1 });
       const first = asHandle(
@@ -2093,15 +2095,23 @@ describe("background pump: host-observed usage survives every close (issue #199)
       expect(live?.status).toBe("running");
       expect(Object.hasOwn(live as object, "usage")).toBe(false);
 
-      const refused = asResult(
+      // ADR-0056: the over-cap call is QUEUED, not refused. Its record exists (queueing
+      // creates the record), and it carries no usage either — the child has not run, so
+      // there is nothing to count.
+      const queued = asHandle(
         await dispatch(
           { agent: AGENT, task: "two", background: true, agentScope: "project" },
           { callId: 48, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           h.deps,
         ),
       );
-      expect(refused.errorMessage).toBe(BG_CONCURRENCY_REFUSAL);
-      expect(await allTasks(h.storage)).toHaveLength(1);
+      expect(queued.status, "the over-cap call is queued, not refused").toBe("queued");
+      const queuedRecord = await h.storage.loadTask(queued.taskId);
+      expect(queuedRecord?.status).toBe("queued");
+      expect(
+        Object.hasOwn(queuedRecord as object, "usage"),
+        "a queued task has no usage: its child has not run",
+      ).toBe(false);
       expect(h.lifecycle.spawnCount).toBe(1);
 
       h.clock.set(1500);
