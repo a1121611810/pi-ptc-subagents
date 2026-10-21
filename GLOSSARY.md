@@ -214,13 +214,22 @@ scripts (see _MCP auto-enable evidence_). ADR-0025, ADR-0033.
 _Avoid_: "pi's PTC" (it is one implementation of PTC, and "PTC mode"
 below already names ours), "code mode" (the pre-August-2026 DSH name).
 
-**surface mode** — which model-facing tools this package registers,
-independent of the _narrowing mode_ (which decides which of the registered tools are
+**surface mode** — **which orchestrator is responsible to the model**: this
+package's own PTC, or pi's `codemode`. (Earlier wording: "which model-facing
+tools this package registers" — that named the _inventory_, not the question the
+model faces, and the inventory is the same on both surfaces for the PTC pair.)
+Independent of the _narrowing mode_ (which decides which of the registered tools are
 _active_) and of the _dispatch switch_ (which withholds the _lifecycle face_ from
 the model while nothing is running). **Detected, not configured**: there is no key for it, and the
 former `surfaceMode` key in `ptc.json` was removed 2026-10-10 (ADR-0034).
-Two values, in increasing order of what this package takes responsibility
-for: `subagents`, `full`. The detection asks three questions, not one. Does
+Two values, named after the orchestrator they put in charge: `full_ptc`,
+`codemode_ptc`.
+(Renamed from `full` / `subagents` on 2026-10-21, grill round 1: the old pair
+named _what was registered_, the new pair names _who orchestrates_; `full` also
+read as "everything is available", which is false on that surface — there the PTC
+pair is registered but not model-facing. The `_ptc` suffix says the same thing
+about both: our PTC is in play either way, and the prefix says who is in charge
+of it.) The detection asks three questions, not one. Does
 this pi ship a `codemode` extension directory, will pi actually load it, and
 will `codemode` be **active** for the model? The second one is not redundant:
 since pi 0.99.0 a user can disable a built-in extension, so a pi can ship
@@ -241,6 +250,135 @@ installed and doing something, so "disabled" would be a different claim), "defau
 (there is no constant default — the answer is a function of the pi, so call
 it the detected surface), "setting" (there is no key; the surface is
 detected).
+
+**route registry** — 路由文案的**唯一出处**（2026-10-21 grill 决定；ADR-0059 / ADR-0061 落地）。
+
+两个区：`ROUTES`（一行 = 一条「路」）与 `TOOLS`（一行 = 一个工具）。持有**全部** model-facing 散文——
+选路（什么时候走哪条路）、事实（这个工具是什么、参数、返回）都在这里；**模型面前不出现 "dispatch" 这个词**
+（那是任务侧内部实现）。
+
+**输出两层**，照搬 `@tylerho/pi-memory` 的 `MEMORY.md` 形状：
+
+- **常驻索引**（`<ptc>` section）：每条路**一行** hook + detail 指针。详情**永远不在索引里**。
+  有 token 预算，超了要**明说**（`> WARNING:`），不静默截断。
+- **详情文件**（随包 markdown，`docs/routes/<id>.md`）：模型用 pi 核心的 `read` 读。
+  `docs/usage/` 也**随包发布**——否则 detail 指针在用户机器上是悬空的。
+
+**索引每 turn 字节相同**：改了会废掉 prompt cache（pi-memory 原话：「changing the system prompt
+mid-session invalidates the cached prefix」），所以索引只在 `session_start` / `session_compact` 刷新。
+
+八条机械强制点（工具→行 · 行→工具 · route 集完整 · 索引 token 预算 · 每行事实段非空 ·
+工具三块散文必须来自 registry · 索引一行一条且指针可解 · 索引每 turn 相同）
+
+- 一条约定（参数 schema 的 description 跟 schema 留在一起）。
+
+**留在外面**：参数 schema（含参数的 description）· 实现 · renderers · **动态**的绑定清单（会话内注入）·
+binding contract（「调了得到什么形状」是另一个问题，它已有自己的 ADR 与预算）。
+
+_Avoid_: "路由表"（它有两层：索引 + 详情文件），"prompt 模板"，
+"往 AGENTS.md 里写路由"（AGENTS.md 是 per-project 的位置，我们的路由是 per-package 的；
+`@tylerho/pi-memory` 明确**不碰** AGENTS.md，`ai-memory` 往里放的是 per-project 的知识，
+而且是 server 返回内容、由 agent/CLI 写进文件）。
+
+**admission queue** — 待准入队列：子代理派发在**并发槽满**时去的地方。
+
+照 **libuv 的线程池**建模（2026-10-21 grill 决定）：固定数量的槽（默认 8，session 级，所有前端共用），
+超出容量的请求**进队列等，不被拒绝**。队列是 **FIFO**、**无界**、**无超时**。
+
+- **入队即建任务记录**（状态 `queued`）—— 队列 = registry 里 `queued` 的那些记录，**队列状态与任务状态是同一份数据**，
+  所以队列天然可观测（`ptc_task_list` 看得见）也可取消。
+- **取消只对排队中的生效**（libuv `uv_cancel`：仍在队列里则出队取消，返回 0；已经开始执行则 `UV_EBUSY`）——
+  `ptc_task_stop` 能抽掉一个还在排队的任务，已起的不行。
+- **后台派发立刻返回 handle，不等槽** —— libuv 每个 work item 的调用方都 await 它，我们是 fire-and-forget，
+  让它阻塞在队列上就不 background 了。孩子等槽排到时才真的起；**槽只被「跑起来的孩子」占**。
+- **前台程序 abort → 取消还在排队的请求** —— 也是前台队列的天然界（程序 2 分钟 `timeoutMs`）。
+- `/ptc off` = 停收新的 + 抽掉排队中的 + 在跑的照常（与 ADR-0050「在跑的不受影响」吻合）。
+
+**已知取舍**：队列无界。libuv 的前提是生产者天然有界（外部请求流），我们的后台生产者是一个能循环调用的程序——
+今天 cap-8 白送了「最多 8 个后台孩子」这个界，改成无界队列后这个界就没了。
+
+_Avoid_: "并发队列"（它排的是**待准入**的任务，不是运行中的孩子），"slot 队列"，
+"派发队列"（容易和 registry 的事件队列混）。
+(2026-10-21, grill round 4.)
+
+**task** — **一次派发的记录**。不是「后台任务」：前台派发也建一条。
+
+**门背后先建记录再起进程**——前台也一样建：一次派发就是一条任务记录，不分等不等。
+等的那次等到终态、把结果返回；不等的那次立刻交出句柄，让泵去驱动终态。于是「派发」和「任务」是同一件事：
+
+- registry 是派发的**唯一痕迹**；
+- _lifecycle face_ 是它**唯一的模型面**——有任务记录就可见，没有就收走；
+- 并发槽按 task id 记（前台不再匿名占槽，`createPtcSubagentTool` 那个写死的 `callId: 0`
+  不再让两个并发调用共用一个 token）；
+- 前台的产出也落盘（`<sessionDir>/tasks/<id>/output.log`），所以前台孩子的报告事后也读得到；
+- 满了不拒绝——进 _admission queue_ 等（libuv 模型）；
+- **「等不等」是入口的一个 `wait` 参数**（默认 `false` = 不等），不是两种派发模式。
+  `wait: true` = 等这个任务完成，结果在返回值里（`DispatchResult`）；
+  省略 = 不等，立刻返回 handle（`DispatchHandle`），完成时**通知回到父会话**。
+  参数的语义取自 Kotlin 协程的判据：「**这个调用点需要结果吗**」。
+
+**为什么 `wait` 只能是参数，不能是「调用方自己 await」**（2026-10-21）：tokio / Python 那一路
+（一个句柄 + 调用方 `await` 它）在跨边界时做不出来——**结果是一次性穿过结构化边界的值**，
+句柄里的 promise 带不回来（codemode 那侧更硬：pi 的文档写死了工具「resolve to a structured
+value」，promise 根本传不回来）。剩下的只有「参数」和「两个入口」，而两个入口 = 2 门 × 2 等法
+= 4 个名字，模型调用表翻倍。
+
+**已知取舍**：默认不等 = libuv 回调式，代价是返回形状随参数变——模型可能以为要结果却拿到
+handle。Kotlin 管这叫「await 遗忘综合征」（「结果永远丢失，且异常静默吞没」），靠静态检查插件
+
+- CI 规则（detekt 的 `UnusedDeferred`）兜；我们靠描述文案、handle 里的明写、以及
+  `ptc_task_output` 这个兜底通道。
+
+_Avoid_: "后台派发" / "前台派发"（模型面上是「等 / 不等」，不是两种派发），
+"dispatch 模式"（没有模式，只有一个参数），"后台任务"（旧的 `background` 语义已退役）。
+(2026-10-21, grill round 4-5.)
+
+_Avoid_: "后台任务"（那是旧语义，现在前台也进 registry），"派发链" vs "任务链"（现在是同一条链），
+"前台是内存的"（那是旧事实）。
+(2026-10-21, grill round 2.)
+
+**subagent door** — one of the two model-reachable entries into the **one**
+shared subagent implementation, named after the orchestrator that uses it. There
+is **one** implementation — the machinery that spawns a child pi process — and
+**two** doors, one per surface, because each surface's orchestrator reaches a
+child in its own language:
+
+- the **PTC door** — `tools.pi_task_ptc({ task })` **inside** a PTC program.
+  The program is the orchestrator; it fans out with its own `Promise.allSettled`.
+- the **codemode door** — `tools.pi_task_codemode({ task })` called **from** a
+  codemode script. The script is the orchestrator; it fans out with its own
+  `Promise.allSettled` over the script's tool table.
+
+**Both doors are "start a task", not "dispatch".** The model-facing word is
+**task**; _dispatch_ is what the task side does internally, and the word does
+not appear in the model-facing vocabulary at all. The two names share the
+`pi_task_` prefix on purpose: the suffix is the ONLY thing that differs
+between the surfaces, and both are valid JavaScript identifiers — so
+`tools.pi_task_…` is dot access in BOTH planes. The old names could not be
+that: a name carrying a dot forces bracket indexing, and pi's codemode maps
+tool names to JS identifiers (`pi.dispatch` → `tools.pi_dispatch`), so one and
+the same call had to be spelled two different ways. That is the shape error
+measured on 2026-10-20 (`TypeError: tools.pi.dispatch does not exist`).
+
+Because it is one implementation behind two doors, changing surface is a change
+of door, not a change of capability. On the `codemode` surface the model is
+expected to take the **flat** door — codemode → `pi_task_codemode` → child —
+and not the nested one (codemode → a PTC program → `pi_task_ptc` → child):
+the nested path reaches the same implementation through the other orchestrator's
+clothes, and it costs an extra worker plus an extra hop. (2026-10-21, grill round 1.)
+
+**Either door can be withdrawn.** pi cannot unregister a tool, but it CAN
+overwrite one: `pi.registerTool` is a `Map.set` on the tool name, so
+re-registering the same name with `exposure: "hidden"` replaces the entry, and a
+`hidden` tool is in neither the declared set (`agent-session.js:1163`) nor the
+codemode callable set (`agent-session.js:1151` — that predicate admits `codemode`,
+`deferred`, and active `direct`, and nothing else). pi's own MCP extension
+withdraws tools exactly this way (`dist/extensions/mcp/index.js:344`). The PTC
+door needs no such trick: it lives inside a PTC program, so withdrawing the PTC
+pair withdraws the door with it. (2026-10-21, grill round 3.)
+_Avoid_: "subagent tool" (the door is not the implementation), "dispatch" alone
+for the model-facing entry (the model starts a TASK; dispatch is internal),
+"the subagent API".
 
 **codemode activation** — the third question surface-mode detection asks: will
 `codemode` be **active**, i.e. callable by the model? It is distinct from the
@@ -751,6 +889,39 @@ floor), "0.99.0 is the floor" (true of these four capabilities, false of
 `peerDependencies`, and the two are set independently).
 
 ## Narrowing mode
+
+**strict program** — a PTC program runs in **strict mode**（2026-10-21 grill 决定）：
+`new Function` 的 body 开头带 `"use strict";`，整个程序体（连同它里面定义的函数）都是严格的。
+
+Three reasons it is strict rather than sloppy:
+
+1. **It is what upstream DSH does** — DSH materializes the program as
+   `new AsyncFunction(..., "'use strict';\n" + code)(...)`. Not a preference: an
+   upstream difference we had not registered in the parity audit.
+2. **We run TypeScript** — TS emits `alwaysStrict` for modules by default, so
+   `stripTypeScriptTypes` was silently dropping the strictness the author
+   expected.
+3. **Sloppy mode had two measured costs** — assigning to an undeclared name
+   really does create an implicit global on the worker's global object
+   (measured: an own enumerable property). The worker's warm-baseline restore
+   deletes it before the next run, so today it does not reach the next program
+   — but it exists, and its cleanup is a separate mechanism; strict mode makes
+   it never exist. And the silent case was the **write** side, not the read
+   side: a bare read of an undeclared name already threw in sloppy mode, while
+   assigning to a misspelled name succeeded quietly. Strict mode turns that
+   write into a `ReferenceError`.
+   (2026-10-21 grill 决定；代价一在实现票 #244 于 base commit 上复测后订正，见 ADR-0060。)
+
+**Breaking**: top-level `this` becomes `undefined` (was `globalThis`), an
+implicit global becomes a `ReferenceError`, duplicate parameters become a
+compile-time `SyntaxError`, and octal literals become a `SyntaxError`. A program
+may still write `"use strict";` itself — it stays legal and is a no-op. There is
+no in-program opt-out: JavaScript has no `"use sloppy"` directive.
+
+Distinct from _read-only tier_ (which narrows what a CHILD may change) and from
+_JS hardening_ (the prototype-pollution axis, still open — the parity audit's
+A8 row, where DSH captures Node intrinsics and uses `Object.create(null)` and we
+do neither).
 
 The session-level switch that makes a session work the PTC way. It is one of
 the two switches `/ptc on` and `/ptc off` control — the other is the

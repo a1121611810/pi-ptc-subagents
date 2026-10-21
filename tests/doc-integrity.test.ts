@@ -654,6 +654,10 @@ const EXTERNAL_VOCABULARY: ReadonlyMap<string, string> = new Map([
   ],
   ["SessionShutdownEvent", "pi 宿主生命周期事件，本仓只消费不声明"],
   [
+    "session_compact",
+    "pi 宿主的会话压缩事件名，本仓只把它当作索引刷新时点的对照，不声明（ADR-0061）",
+  ],
+  [
     "RUN_CODE_NAME",
     "DSH 上游的 tool-surface 常量（packages/core/tools/src/ptc.ts），本仓只引用其名不声明（ADR-0031 §C）",
   ],
@@ -786,6 +790,14 @@ const EXTERNAL_VOCABULARY: ReadonlyMap<string, string> = new Map([
   ],
   ["required_status_checks", "GitHub ruleset 的规则类型名，ADR-0031 §A 的 main 门禁表逐条列出"],
   ["toEqual", "vitest 的断言器名，ADR 里在讲测试写法"],
+  [
+    "alwaysStrict",
+    "TypeScript 的编译期标志（模块默认带严格模式）；本仓只在 ADR-0060 里提它，说明剥离类型时丢掉了这份严格性",
+  ],
+  [
+    "UnusedDeferred",
+    "detekt 的规则名（Kotlin 的「await 遗忘综合征」那条）；本仓只在 ADR-0055 里提它作为对照，不声明",
+  ],
   ["tool_name", "竞态采集表的列名字面量，不是代码符号"],
   // D2. 站点工作流与工具输出里的词表，随 ADR-0036 / ADR-0038 进入规范文档。
   [

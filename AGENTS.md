@@ -19,6 +19,19 @@ of. `pnpm run compat:pi` runs the gate against the floor and the ceiling. See
 `docs/agents/pi-compat-matrix.md` — read it before touching the codemode probes, the binding
 contract, or the declared peer range.
 
+## Model-facing text and PTC programs
+
+Each of these has one source. Edit the source, not the copy.
+
+- **Model-facing prose lives in the route registry** (`src/routes/registry.ts`) — every sentence the
+  model reads about a tool (what it is, when to pick it, what it returns). Tool files carry
+  schemas and behaviour only. Read the "route registry" entry in
+  [GLOSSARY.md](./GLOSSARY.md) before changing a tool description, a tool name, or the `<ptc>`
+  section.
+- **PTC programs run in strict mode** — an undeclared assignment is a `ReferenceError`, top-level
+  `this` is `undefined`, a duplicate parameter is a compile-time `SyntaxError`. Read the "strict
+  program" entry in [GLOSSARY.md](./GLOSSARY.md) before writing or reviewing a PTC program.
+
 ## The website
 
 `packages/website/` is a second workspace member with **its own five checks and its own deployment**,

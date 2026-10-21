@@ -5,14 +5,14 @@ Subagents and programmable tool calling for [pi](https://pi.dev).
 One package, two capabilities:
 
 - **Subagent fan-out** — dispatch a task to a fresh `pi` subprocess running a named agent
-  (from `~/.pi/agent/agents/<name>.md` or `.pi/agents/<name>.md`), in isolation. Foreground
-  await, or background with a lifecycle you can inspect and stop.
+  (from `~/.pi/agent/agents/<name>.md` or `.pi/agents/<name>.md`), in isolation. Wait for the
+  result, or take a handle and watch its lifecycle instead.
 - **Programmable tool calling** — `ptc_run_code` / `ptc_workflow` run a JS/TS program in a
   worker; the program composes the session's tools as `tools.<name>(args)`, and only the
   program's return value plus its logs come back to the model.
 
 pi ships its own programmable tool calling (`codemode` — a QuickJS sandbox that cannot spawn
-processes). This package is the part that can spawn processes — subagents, background tasks,
+processes). This package is the part that can spawn processes — subagents, task lifecycles,
 a real Node runtime inside programs — and it composes with `codemode` instead of replacing
 it. On a session where pi's `codemode` orchestrates, this package registers underneath it as
 the execution layer ([ADR-0025](./docs/adr/0025-extension-surface-is-a-setting.md)); the deep
@@ -41,20 +41,21 @@ Documentation site: **[pi-ptc-subagents on GitHub Pages](https://a1121611810.git
 
 ## Tools
 
-- `ptc_subagent` — the top-level subagent face: dispatch a fresh `pi` subprocess for a task
-  without writing a program. Registered only when the detected surface is `subagents`
-  ([ADR-0025](./docs/adr/0025-extension-surface-is-a-setting.md)); on `full` the same
-  capability is the `pi.dispatch` binding inside a program.
+- `pi_task_codemode` — the dispatch door on the `codemode_ptc` surface: start a fresh `pi`
+  subprocess for a task, called from inside a codemode script. Registered only when the
+  detected surface is `codemode_ptc` ([ADR-0025](./docs/adr/0025-extension-surface-is-a-setting.md));
+  on `full_ptc` the same capability is the `pi_task_ptc` binding inside a PTC program.
 - `ptc_run_code` — run a JS/TS program that composes tool calls; the program reaches the
   session's enabled built-in tools as `tools.read(...)`, `tools.write(...)`, etc.
-  (`read`, `edit`, `write`, `grep`, `find`, `ls`), plus `tools["pi.dispatch"]`;
+  (`read`, `edit`, `write`, `grep`, `find`, `ls`), plus `tools.pi_task_ptc`;
   its return value and `console.log` output are reported back. `tools.bash(...)` is an
   **opt-in** — see [Trust posture](#trust-posture-read-me).
 - `ptc_workflow` — structured variant with `meta` + plain-JSON `args`, plus the workflow
   helpers (`log`, `phase`, `parallel`, `pipeline`). There is no `agent()` helper on either
   surface.
-- `ptc_task_list` / `ptc_task_output` / `ptc_task_stop` — manage background dispatches
-  (see [Background dispatch](#background-dispatch)). They stay available when PTC mode is off.
+- `ptc_task_list` / `ptc_task_output` / `ptc_task_stop` — the task face: list this session's
+  tasks, read a task's output, stop a task (see [Waiting or not](#waiting-or-not)). They are
+  there whenever the session has a task record, and they stay available when PTC mode is off.
 - `web_ds_search` — searches the web (or fetches one page) through DeepSeek's Search API.
   **Off by default**, and it exists **only inside a dispatched child** — a parent session does
   not have it at all, and the child's own model calls it as a tool of its own. See
@@ -66,60 +67,75 @@ file the next program can `tools.read`, and the collapsed row shows `truncated` 
 
 ## Dispatch (fan-out to per-call pi subprocesses)
 
-PTC programs can spawn a fresh `pi` subprocess per call via the **`pi.dispatch(...)`** binding
-([ADR-0016](./docs/adr/0016-ptc-dispatch-binding.md)) — the child loads the named agent's
-markdown, runs that agent's tool set and system prompt in isolation, and returns a structured
-result. Bindings live in the one `tools` table — there is no `pi` global in the worker — so
-the binding is called as `tools["pi.dispatch"]({ … })` with a single object argument.
+An orchestrator can spawn a fresh `pi` subprocess per call through the **dispatch door** —
+`tools.pi_task_ptc({ … })` inside a PTC program, `tools.pi_task_codemode({ … })` inside a
+codemode script ([ADR-0016](./docs/adr/0016-ptc-dispatch-binding.md)). The child loads the named
+agent's markdown, runs that agent's tool set and system prompt in isolation, and returns a
+structured result. Bindings live in the one `tools` table — there is no `pi` global in the worker —
+so the call takes a single object argument.
+
+**There is no top-level "dispatch a subagent" tool.** The model always goes through its own
+orchestrator: a program on `full_ptc`, a codemode script on `codemode_ptc`. One door, two planes,
+the same behaviour on both. What the model sees is `pi_task_…` — it starts a **task**, and
+dispatching is what the task side does behind the door.
 
 ```ts
 // inside a ptc_run_code program
-const result = await tools["pi.dispatch"]({
+const result = await tools.pi_task_ptc({
   agent: "scout",
   task: "find all auth code in src/",
   cwd: process.cwd(),
+  wait: true,
 });
 
 // result.status: "fulfilled" | "rejected"  (the binding never throws)
 // result.text:   final assistant text
+// result.taskId: "01J…"  — the task record this call created
 // result.usage:  { input, output, cacheRead, cacheWrite, cost, turns }
 // result.observedProvider?, result.observedModel?: the provider/model the child actually ran
 // result.exitCode, result.durationMs, result.stderr?, result.errorMessage?
 ```
 
-**Fan out in parallel** with the rest of PTC's tools — dispatch is a binding, not a
-model-facing lifecycle tool, so the dispatcher handles concurrency the same way it does for
-any other tool call:
+Every call creates a **task** — a record in this session's task registry — and `wait` decides
+only whether the call waits for it (see [Waiting or not](#waiting-or-not)). Nothing throws: a
+call that is turned down comes back as `status: "rejected"` with an `errorMessage`.
+
+**Fan out in parallel** with the rest of the tools. Use `Promise.allSettled`: a child that fails
+outright still reports through its own record, and one rejection must not swallow the siblings'
+results.
 
 ```ts
-const [read, scoutA, scoutB] = await Promise.all([
+const [read, scoutA, scoutB] = await Promise.allSettled([
   tools.read({ path: "package.json" }),
-  tools["pi.dispatch"]({ agent: "scout", task: "review auth" }),
-  tools["pi.dispatch"]({ agent: "scout", task: "review db" }),
+  tools.pi_task_ptc({ agent: "scout", task: "review auth", wait: true }),
+  tools.pi_task_ptc({ agent: "scout", task: "review db", wait: true }),
 ]);
 ```
 
 **The child report.** A dispatched child returns more than prose: under the report contract
 ([ADR-0032](./docs/adr/0032-child-report.md)) it hands back a `summary`, `findings` each
-carrying independent evidence, `files_touched`, and token usage the host measured. On the
-background path that same measurement is written to the task record itself, on every terminal
-close for a child that started — so a child that reported nothing, or failed, still shows what it
-cost. The result names the channel that delivered it — `"tool"`, `"prompt-json"`, or `"none"` — and
-`"none"` means the child ran but did not comply, which must not read as "returned nothing".
-An agent opts out with one frontmatter line, `childReport: false`, and its channel reads
-`"opted-out"`. `ptc_subagent` renders the same report into the text the model reads, bounded
-at 20 findings with the withheld count stated in-band.
+carrying independent evidence, `files_touched`, and token usage the host measured. That
+measurement is written to the task record itself, on every terminal close for a child that
+started — so a child that reported nothing, or failed, still shows what it cost, and a
+foreground child's report is still readable after the call returned. The result names the channel
+that delivered it — `"tool"`, `"prompt-json"`, or `"none"` — and `"none"` means the child ran but
+did not comply, which must not read as "returned nothing". An agent opts out with one frontmatter
+line, `childReport: false`, and its channel reads `"opted-out"`. The door renders the same report
+into the text the model reads, bounded at 20 findings with the withheld count stated in-band.
 
-**Bounded.** Three knobs keep fan-out from running away:
+**Concurrency and bounds.** Three knobs keep fan-out from running away:
 
-- `PtcConfig.dispatchConcurrency` (default **8**) — one counter per pi session, spent by
-  foreground dispatches, the `ptc_subagent` front, and live background children. A call over
-  the cap resolves `{ status: "rejected", errorMessage: "dispatch concurrency limit reached" }`
-  instead of queueing.
+- `PtcConfig.dispatchConcurrency` (default **8**) — how many children may run at once, counted
+  per pi session and shared by every door. A call over the cap does **not** fail: it **queues**.
+  The queue is FIFO and unbounded, and a queued call is admitted as soon as a slot frees — the
+  shape libuv's thread pool uses, where fifty arrivals mean forty-six wait rather than six
+  rejections. A queued call is already a task, so `ptc_task_list` shows it and `ptc_task_stop`
+  can pull it out before it starts. The trade-off: the cap now bounds how many children run at
+  once, not how many a session may have in flight.
 - `PtcConfig.maxDispatchDepth` (default **3**) — recursion bound; the child sees a
   `<pi-ptc-context depth="N" max-depth="M">` hint so it can budget its own recursion.
 - `signal` — when the parent run is cancelled, every in-flight child gets `SIGTERM` then
-  `SIGKILL` after a 5-second grace window.
+  `SIGKILL` after a 5-second grace window, and every call still waiting for a slot is dropped.
 
 ### The child's model
 
@@ -138,45 +154,116 @@ dispatch inherits the child's own session model. Pin the model at the call site 
 definition to opt out; there is no config key for it, and a direct library caller (or a pi that
 exposes no session model) falls back to pi's default exactly as before.
 
-The result says which model the child actually ran: `observedProvider` / `observedModel` on a foreground
-`DispatchResult`, the same optional pair on a background task record (which `ptc_task_output`
-renders as a line), and a `model: provider/id` line in `ptc_subagent`'s text. Absence means no
+The result says which model the child actually ran: `observedProvider` / `observedModel` on the
+`DispatchResult` a waiting call returns, the same optional pair on a task record (which
+`ptc_task_output` renders as a line), and a `model: provider/id` line in the dispatch row.
+Absence means no
 observed assistant turn named the pair — no turn, a supported pi that does not report it, or an
 old record — never "unknown model". When the child reported its own failure, a
 rejected dispatch now states that error verbatim as `errorMessage` instead of the generic
-`dispatch produced no final text`, so the foreground failure path matches the background one. Full
+`dispatch produced no final text`, so the failure reads the same whether the call waited or not.
+Full
 guide: [`docs/usage/bgdispatch.md`](./docs/usage/bgdispatch.md#which-model-the-child-runs).
 
-### Background dispatch
+### Waiting or not
 
-Foreground `pi.dispatch` blocks the program until the child exits. Pass `background: true` to
-spawn the child and return immediately with a `DispatchHandle`
-([ADR-0022](./docs/adr/0022-background-dispatch.md)); the child outlives both the program and
-the turn:
+One door, one path. The call creates a task and the only question is whether the call waits for
+it. Pass `wait: true` to wait:
 
 ```ts
-const handle = await tools["pi.dispatch"]({
+const result = await tools.pi_task_ptc({
   agent: "scout",
   task: "audit the auth code",
-  background: true,
-  label: "auth audit", // defaults to task.slice(0, 64)
+  wait: true,
 });
-// handle: { taskId: "01J…", label: "auth audit", status: "running" }
 ```
 
-A detached pump drives the task's lifecycle (`running` -> `succeeded` / `failed` / `canceled`
-/ `lost`). The model observes it with three always-on tools — they survive `/ptc off` and are
-registered on every surface:
+Leave `wait` out — the default is **not** to wait — and the call returns a handle at once, while
+the child keeps running after both the program and the turn are gone
+([ADR-0022](./docs/adr/0022-background-dispatch.md)):
+
+```ts
+const handle = await tools.pi_task_ptc({
+  agent: "scout",
+  task: "audit the auth code",
+  label: "auth audit", // defaults to task.slice(0, 64)
+});
+// handle: { taskId: "01J…", label: "auth audit", status: "queued" }
+```
+
+The handle is a snapshot taken when the call returns: its `status` is the task's state at that
+moment — `queued` while it waits for a slot, `running` once the child is up. The record moves on
+from there, and `ptc_task_list` shows the live state. A call
+that is turned down does not throw on either door: it returns the rejection result with
+`status: "rejected"` and an `errorMessage`, so a not-waiting call cannot be assumed to return a
+handle.
+
+A detached pump drives the task's lifecycle (`queued` -> `running` -> `succeeded` / `failed` /
+`canceled` / `lost`). The model observes it with three tools that are there whenever the session
+has a task record — they survive `/ptc off` and are registered on every surface:
 
 - `ptc_task_list({ status?, limit? })` — this session's tasks, newest first (default limit 100).
 - `ptc_task_output({ taskId, sinceBytes? })` — a task's captured output, tail-truncated to the
   50 KB / 2000-line contract (ADR-0015).
-- `ptc_task_stop({ taskId, reason? })` — ask a running task to stop.
+- `ptc_task_stop({ taskId, reason? })` — ask a running task to stop, or pull a queued one out of
+  the queue before it starts.
 
-Background tasks count against the same `dispatchConcurrency` for their whole lifetime and
-share the `maxDispatchDepth` bound. A background task is owned by the dispatching pi process
-(ADR-0023): it survives programs, turns, and `/ptc off`, and ends when that session ends. Full
-guide: [`docs/usage/bgdispatch.md`](./docs/usage/bgdispatch.md).
+Tasks share the same `dispatchConcurrency` slots and the `maxDispatchDepth` bound. A task is
+owned by the dispatching pi process (ADR-0023): it survives programs, turns, and `/ptc off`, and
+ends when that session ends. Full guide:
+[`docs/usage/bgdispatch.md`](./docs/usage/bgdispatch.md).
+
+## Program semantics
+
+A PTC program runs in **strict mode**. Assigning an undeclared variable is a `ReferenceError`
+rather than a silent global, top-level `this` is `undefined`, and a duplicate parameter is a
+compile-time `SyntaxError`. A program may still write `"use strict";` itself — that stays legal,
+and is a no-op.
+
+This is not a preference: upstream DSH materializes every program with a `'use strict'` prefix,
+and the TypeScript a program is written in already implied it — TS emits `alwaysStrict` for
+modules, and stripping the types was quietly dropping it. Two measured costs go away with it:
+
+- **No implicit globals at all.** In sloppy mode, assigning to an undeclared name really does
+  create one on the worker's global object (measured: an own enumerable property). The worker's
+  warm-baseline restore deletes it before the next run, so today it does not reach the next
+  program — but it exists, and its cleanup is a separate mechanism. Strict mode makes it never
+  exist.
+- **Typos are loud.** Reading an undeclared name already threw in sloppy mode — that was never
+  the silent case. The silent one was the write side: assigning to a misspelled name quietly
+  created a global. Strict mode turns that into a `ReferenceError` at the point of the mistake.
+
+It is a breaking change, and there is no opt-out — JavaScript has no `"use sloppy"`.
+
+## The route table the model reads
+
+A session's system prompt carries a **routing index** from this package: one line per road —
+when to take it, how to take it here, and where the whole story is.
+
+```
+Routes — one line each: when to take the road, how to take it here, and the file with the whole story.
+
+- Use the built-in tools — one or two calls would do, and there is nothing to gather between them: not directly in PTC mode: the built-in tools are hidden from you and reached from inside a program (`tools.read({ path })` inside `ptc_run_code`). Details: docs/routes/use-the-built-in-tools.md.
+```
+
+There are seven roads today, and each has a file of its own under `docs/routes/` — how to call it,
+what comes back, the pitfalls. Those files ship with the package, and the model opens them on
+demand with pi's own `read` tool.
+
+The index is the only part that is always resident, and it is **byte-identical every turn** —
+rebuilding it mid-session would invalidate the prompt cache. It has a token budget (560; the
+seven roads cost about 483 today), and when it grows past it the index says so (`> WARNING: …`)
+instead of quietly dropping a road: a road that is missing is one the model can neither take nor
+know it is missing.
+
+Two things are worth knowing about it:
+
+- **The prose has one source.** Every sentence the model reads about these tools — what one is,
+  when to pick it, what it returns — is written once, in the package's route registry, and
+  rendered from there into the index, the tool descriptions and the guidelines. A fact cannot
+  drift between two channels, because it is only ever written in one.
+- **A road is not a tool.** It is a way of doing something, and it says how to take it on each
+  surface — including, on a surface that does not offer it, that it does not.
 
 ## TUI rendering
 
@@ -200,7 +287,7 @@ per row, with the withheld amount stated in-band. A scalar is one line (`→ 47`
 bounds ([ADR-0012](./docs/adr/0012-model-facing-result-text.md)): a compact value under 100
 characters stays on one line, every line caps at 200. Nothing is ever printed as escaped JSON.
 
-The `ptc_subagent` call row follows the same rule: it reads as a heading — agent, state flags, and
+A dispatch call row follows the same rule: it reads as a heading — agent, state flags, and
 a pinned model when the caller set one — plus one task preview line and a withheld count, and
 `ctrl+e` expands the `label` / `why` rows and the task block (the first task line plus up to
 `MAX_LOG_LINES_EXPANDED` continuation lines). A dispatch's long prose is never dumped as its
@@ -217,14 +304,22 @@ collapsed row's meta shows the count (`· 1 image`).
 ## PTC default mode
 
 On a TUI start the session narrows its tool loadout so the built-in tools are reachable only
-_from inside a program_: the model calls `ptc_run_code` / `ptc_workflow` (or `ptc_subagent`)
+_from inside a program_: the model calls `ptc_run_code` / `ptc_workflow`
 and reaches `read` / `bash` / `edit` / `write` / `grep` / `find` / `ls` through
 `tools.<name>(args)` inside it. Tools contributed by _other_ extensions (`web_search`, `todo`,
-…) stay directly callable. Turn it off for one session with `/ptc off` (also `/ptc on`, `/ptc`
-for status), permanently with `{ "defaultMode": false }` in `~/.pi/agent/ptc.json`.
+…) stay directly callable.
 
-A dispatch may also carry the caller's **reason** for the slice: an optional `why` on
-`pi.dispatch` / `ptc_subagent`, which reaches the child as its own `<pi-ptc-why>` block after the
+`/ptc off` **truncates** this package's place in the chain rather than flipping a switch: on
+`full_ptc` the orchestration layer itself (`ptc_run_code` / `ptc_workflow`) is withdrawn and the
+model is back to calling the built-ins directly; on `codemode_ptc` pi's `codemode` keeps
+orchestrating, but the layer under it that belongs to this package — the program pair and the
+task door — is withdrawn with it. Either way there is no way left to start a child. Tasks that
+already exist stay inspectable and stoppable, and the ones already running keep running. Turn
+it back on with `/ptc on` (`/ptc` reports the status), or make it the permanent shape with
+`{ "defaultMode": false }` in `~/.pi/agent/ptc.json`.
+
+A dispatch may also carry the caller's **reason** for the slice: an optional `why` on the
+dispatch door, which reaches the child as its own `<pi-ptc-why>` block after the
 host's policy block, and never widens the task. It is on by default. Turn it off for one session
 with `/ptc why off` (`/ptc why` reports the current value and whether it came from the session or
 the file), or permanently with `{ "whyEnabled": false }` in `~/.pi/agent/ptc.json`. A value that is
@@ -234,9 +329,10 @@ result (`whySuppressed`), never silently ([ADR-0043](./docs/adr/0043-a-why-switc
 
 Which model-facing tools this package registers is **detected, not configured** — there is no
 setting for it ([ADR-0034](./docs/adr/0034-surface-is-detected-not-set.md)). The short version:
-a pi whose `codemode` is loaded _and_ callable by the model gets the `subagents` surface
-(`ptc_subagent` on top; the program pair underneath at `codemode` reach); every other pi gets
-`full` (`ptc_run_code` / `ptc_workflow` model-facing). To use the `subagents` surface, put
+a pi whose `codemode` is loaded _and_ callable by the model gets the `codemode_ptc` surface
+(the dispatch door `pi_task_codemode` at `codemode` reach; the program pair underneath, also at
+`codemode` reach); every other pi gets `full_ptc` (`ptc_run_code` / `ptc_workflow` model-facing).
+To use the `codemode_ptc` surface, put
 `codemode` in your tool list (`pi --tools read,bash,edit,write,codemode`, or `"defaultTools":
 ["read", "bash", "edit", "write", "+codemode"]`). To keep this package out of your sessions
 entirely, run `pi config` and disable its extensions there.
