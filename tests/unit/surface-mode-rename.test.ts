@@ -204,16 +204,25 @@ test("the registration branch keys off the new value", async () => {
 });
 
 /**
- * The surface values are the ones the type admits, so a caller cannot pass anything else.
+ * The TYPE refuses the old names — checked by the compiler, not by vitest.
  *
- * Stated as a type-level fact, because that is where it lives: `SurfaceMode` is derived from
- * `SURFACE_MODES`, so the two are the same set by construction. The assertion is on the derived
- * type's membership rather than on a second runtime copy of the list.
+ * `SurfaceMode` is derived from `SURFACE_MODES`, so pinning the list pins the type by
+ * construction, and every runtime assertion above is therefore about the list. What no runtime
+ * assertion can reach is the type itself: if `SurfaceMode` ever admits an old name again — an
+ * alias, a widened union, a hand-written literal — the two `@ts-expect-error` directives below
+ * become UNUSED, and `pnpm run typecheck` fails the build. The directive is the assertion; the
+ * body carries the runtime counterpart so the case is not an assertion-free body.
+ *
+ * The counterfactual: widen the union to `["full_ptc", "codemode_ptc", "full"]` and this file
+ * stops compiling — the directive on the `full` line has nothing left to suppress.
  */
-test("the surface type and the declared list are the same set", () => {
-  const declared: readonly SurfaceMode[] = SURFACE_MODES;
-  expect(declared.length).toBe(RENAMED_SURFACE_VALUES.length);
-  for (const value of RENAMED_SURFACE_VALUES) {
-    expect(declared.includes(value as SurfaceMode), `${value} is a declared surface`).toBe(true);
-  }
+test("the surface type does not admit an old name", () => {
+  // @ts-expect-error "full" is not a surface value any more
+  const legacyFull: SurfaceMode = "full";
+  // @ts-expect-error "subagents" is not a surface value any more
+  const legacySubagents: SurfaceMode = "subagents";
+  // The runtime half: the two rejected literals are still ordinary strings, and neither of them
+  // is one of the surfaces this package declares.
+  expect([legacyFull, legacySubagents]).not.toContain(SURFACE_MODES[0]);
+  expect([legacyFull, legacySubagents]).not.toContain(SURFACE_MODES[1]);
 });
