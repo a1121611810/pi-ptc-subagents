@@ -161,7 +161,7 @@ describe("ADR-0053: a foreground dispatch is a task", () => {
     await withAgent(async (dir) => {
       const h = createHarness();
       const settled = dispatch(
-        { agent: AGENT, task: "ping", agentScope: "project", label: "probe the thing" },
+        { wait: true, agent: AGENT, task: "ping", agentScope: "project", label: "probe the thing" },
         { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
         h.deps,
       );
@@ -173,17 +173,17 @@ describe("ADR-0053: a foreground dispatch is a task", () => {
       // Expected values: the label the caller passed, and a non-empty id.
       expect(result.status, "the child answered, so the dispatch fulfilled").toBe("fulfilled");
       expect(result.text).toBe(ANSWER);
-      expect(result.recordLabel, "the label the caller passed is the record's label").toBe(
+      expect(result.label, "the label the caller passed is the record's label").toBe(
         "probe the thing",
       );
-      expect(typeof result.recordId, "the result names the record it created").toBe("string");
-      expect(result.recordId).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+      expect(typeof result.taskId, "the result names the record it created").toBe("string");
+      expect(result.taskId).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
 
       // The record itself: the registry is the dispatch's only trace (spec decision 4).
       const records = await allTasks(h.storage);
       expect(records, "the foreground dispatch left exactly one record").toHaveLength(1);
       const record = records[0];
-      expect(record?.id, "the record's id is the id the result handed back").toBe(result.recordId);
+      expect(record?.id, "the record's id is the id the result handed back").toBe(result.taskId);
       expect(record?.status, "a child that answered and exited 0 succeeded").toBe("succeeded");
       expect(record?.label).toBe("probe the thing");
       expect(record?.agentName).toBe(AGENT);
@@ -197,7 +197,7 @@ describe("ADR-0053: a foreground dispatch is a task", () => {
     await withAgent(async (dir) => {
       const h = createHarness();
       const settled = dispatch(
-        { agent: AGENT, task: "ping", agentScope: "project" },
+        { wait: true, agent: AGENT, task: "ping", agentScope: "project" },
         { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
         h.deps,
       );
@@ -206,7 +206,7 @@ describe("ADR-0053: a foreground dispatch is a task", () => {
       const result = await settled;
 
       // A SECOND read, after the dispatch is over: the record survives its own completion.
-      const later = await h.registry.get(result.recordId as ULID);
+      const later = await h.registry.get(result.taskId as ULID);
       expect(later, "the finished record is still on the registry").not.toBeNull();
       expect(later?.status).toBe("succeeded");
       expect(later?.finishedAt, "a finished record says when it finished").toBe(1_000);
@@ -226,7 +226,7 @@ describe("ADR-0053: the foreground child's output is on disk", () => {
       const outputStorage = new FileOutputStorage(sessionDir);
       const deps: DispatchDeps = { ...h.deps, outputStorage };
       const settled = dispatch(
-        { agent: AGENT, task: "ping", agentScope: "project" },
+        { wait: true, agent: AGENT, task: "ping", agentScope: "project" },
         { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
         deps,
       );
@@ -235,7 +235,7 @@ describe("ADR-0053: the foreground child's output is on disk", () => {
       const result = await settled;
 
       // The path is the one the ticket names, spelled out: <sessionDir>/tasks/<id>/output.log.
-      const path = join(sessionDir, "tasks", String(result.recordId), "output.log");
+      const path = join(sessionDir, "tasks", String(result.taskId), "output.log");
       expect(await readFile(path, "utf8"), "the child's answer is on disk").toBe(ANSWER);
 
       // And the model-facing tool reads the SAME bytes, so the model is not told about a
@@ -243,7 +243,7 @@ describe("ADR-0053: the foreground child's output is on disk", () => {
       const tool = createPtcTaskOutputTool(h.registry, outputStorage);
       const rendered = await tool.execute(
         "call-1",
-        { taskId: String(result.recordId) },
+        { taskId: String(result.taskId) },
         undefined,
         undefined,
         undefined as never,
@@ -257,7 +257,7 @@ describe("ADR-0053: the foreground child's output is on disk", () => {
     await withAgent(async (dir) => {
       const h = createHarness();
       const settled = dispatch(
-        { agent: AGENT, task: "ping", agentScope: "project" },
+        { wait: true, agent: AGENT, task: "ping", agentScope: "project" },
         { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
         h.deps,
       );
@@ -272,7 +272,7 @@ describe("ADR-0053: the foreground child's output is on disk", () => {
 
       // ...and it is ALSO on the record, so the model can read it back later. Before this
       // ticket the foreground path left no record at all, so this read could not happen.
-      const record = await h.registry.get(result.recordId as ULID);
+      const record = await h.registry.get(result.taskId as ULID);
       expect(record?.report?.summary, "the record carries the same report").toBe(
         "the probe answered",
       );
@@ -281,7 +281,7 @@ describe("ADR-0053: the foreground child's output is on disk", () => {
       const tool = createPtcTaskOutputTool(h.registry, h.outputStorage);
       const rendered = await tool.execute(
         "call-1",
-        { taskId: String(result.recordId) },
+        { taskId: String(result.taskId) },
         undefined,
         undefined,
         undefined as never,
@@ -301,7 +301,7 @@ describe("ADR-0053: the gate is above the record", () => {
     await withAgent(async (dir) => {
       const h = createHarness();
       const result = await dispatch(
-        { agent: AGENT, task: "ping", agentScope: "project" },
+        { wait: true, agent: AGENT, task: "ping", agentScope: "project" },
         { callId: 1, cwd: dir, depth: 3, maxDispatchDepth: 3 },
         h.deps,
       );
@@ -320,7 +320,7 @@ describe("ADR-0053: the gate is above the record", () => {
       const h = createHarness({ limit: 0 });
       let settled = false;
       const queued = dispatch(
-        { agent: AGENT, task: "ping", agentScope: "project" },
+        { wait: true, agent: AGENT, task: "ping", agentScope: "project" },
         { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
         h.deps,
       ).then((result) => {
@@ -358,12 +358,12 @@ describe("ADR-0053: the concurrency slot is keyed by the task id", () => {
       // refused — and if a release freed the other's slot, the third and fourth would both fit.
       const h = createHarness({ limit: 2 });
       const first = dispatch(
-        { agent: AGENT, task: "one", agentScope: "project" },
+        { wait: true, agent: AGENT, task: "one", agentScope: "project" },
         { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
         h.deps,
       );
       const second = dispatch(
-        { agent: AGENT, task: "two", agentScope: "project" },
+        { wait: true, agent: AGENT, task: "two", agentScope: "project" },
         { callId: 2, cwd: dir, depth: 0, maxDispatchDepth: 3 },
         h.deps,
       );
@@ -377,7 +377,7 @@ describe("ADR-0053: the concurrency slot is keyed by the task id", () => {
 
       // A third call takes the free slot...
       const third = dispatch(
-        { agent: AGENT, task: "three", agentScope: "project" },
+        { wait: true, agent: AGENT, task: "three", agentScope: "project" },
         { callId: 3, cwd: dir, depth: 0, maxDispatchDepth: 3 },
         h.deps,
       );
@@ -388,7 +388,7 @@ describe("ADR-0053: the concurrency slot is keyed by the task id", () => {
       // ADR-0056: "does not fit" is a QUEUE now, not a refusal.
       let fourthSettled = false;
       const fourth = dispatch(
-        { agent: AGENT, task: "four", agentScope: "project" },
+        { wait: true, agent: AGENT, task: "four", agentScope: "project" },
         { callId: 4, cwd: dir, depth: 0, maxDispatchDepth: 3 },
         h.deps,
       ).then((result) => {
@@ -433,7 +433,7 @@ describe("ADR-0053: the task face is a consequence of the record", () => {
       expect(list.exposure, "the face is hidden before the first dispatch").toBe("hidden");
 
       const settled = dispatch(
-        { agent: AGENT, task: "ping", agentScope: "project" },
+        { wait: true, agent: AGENT, task: "ping", agentScope: "project" },
         { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
         h.deps,
       );

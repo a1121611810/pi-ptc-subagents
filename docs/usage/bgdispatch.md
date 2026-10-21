@@ -1,12 +1,14 @@
 # Background dispatch
 
 `pi_task_ptc` is a PTC **binding**: a program calls it, the extension spawns a fresh `pi`
-subprocess for a named agent, and the program gets a structured result. The foreground form
-([ADR-0016](../adr/0016-ptc-dispatch-binding.md)) resolves only when the child exits — the child
-has no life beyond that `await`. Background dispatch
-([ADR-0022](../adr/0022-background-dispatch.md)) is the long-lived variant: the binding returns a
-handle immediately, a detached pump drives the child's lifecycle, and the child keeps running after
-the spawning program and the spawning turn have ended. Precisely (ADR-0023): the child survives the
+subprocess for a named agent, and the program gets a structured result. Whether the call **waits**
+for that child is one parameter, `wait` ([ADR-0055](../adr/0055-wait-is-one-parameter.md)): `wait:
+true` resolves only when the child exits, so the child has no life beyond that `await`; **omitted
+(or `false`), the binding returns a handle immediately**, a detached pump drives the child's
+lifecycle, and the child keeps running after the spawning program and the spawning turn have ended.
+That long-lived form is the background dispatch of
+[ADR-0022](../adr/0022-background-dispatch.md), and it is the **default** — a call that says
+nothing about waiting gets a handle, not an answer. Precisely (ADR-0023): the child survives the
 spawning program, the spawning turn, and `/ptc off`; it is **owned by the dispatching pi process**
 and ends only when that session ends or is replaced (`session_ended_while_running`) or when the
 owner process dies before completion (`lost_on_session_restart`).
@@ -21,25 +23,29 @@ Reach for it when the work is longer than the program's useful lifetime, or when
 able to check on it later: a scout over a large tree, a review that runs while the model does
 something else, a batch of children fanned out from one program.
 
-## Foreground vs. background
+## Waiting vs. not waiting
 
-|                    | foreground `pi_task_ptc`                | `pi_task_ptc({ background: true })`                                                                                                            |
+|                    | `pi_task_ptc({ wait: true })`           | `pi_task_ptc({ ... })` — the default                                                                                                           |
 | ------------------ | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| return             | `DispatchResult`, after the child exits | `DispatchHandle`, immediately after spawn                                                                                                      |
+| return             | `DispatchResult`, after the child exits | `DispatchHandle`, immediately after the child is up                                                                                            |
 | blocks the program | yes, until the child exits              | no                                                                                                                                             |
 | child lifetime     | the awaited `Promise`                   | the dispatching pi process's lifetime — survives the program, the turn, and `/ptc off`; ends on session end/replacement or owner process death |
 | observation        | the return value, plus the task record  | `ptc_task_list` / `ptc_task_output` / `ptc_task_stop` and `<bg-task-notification>` events                                                      |
 | failure            | `status: "rejected"` on the result      | a terminal `TaskStatus` on the `TaskRecord`                                                                                                    |
 
-Both forms share the same depth gate and the same admission queue — and, since the admission moved
-into `dispatch()`, they share one **counter** for them rather than one each (see
-[Limits](#limits)). A pre-spawn refusal uses the foreground `DispatchResult` shape, so a background
-call returns either a `DispatchHandle` **or** a refusal `DispatchResult`.
+Both are **one path with one parameter** (ADR-0055): the gate order, the task id minting, the slot
+acquisition and the record creation are the same code, and only the last step differs — whether the
+caller awaits the child. Since the admission moved into `dispatch()`, they share one **counter**
+rather than one each (see [Limits](#limits)). A pre-spawn refusal is a `DispatchResult` on **both**
+modes — never a handle, because a refused task never ran — so a not-waiting call returns either a
+`DispatchHandle` **or** a refusal `DispatchResult`.
 
-A foreground result also carries the record it created: `recordId` and `recordLabel`
-([ADR-0053](../adr/0053-every-dispatch-is-a-task.md)). That is how a program — or the model, through
-the tool that projects it — looks the child up after the fact with `ptc_task_output`. Both fields are
-absent on a refusal, because a refused call left no record.
+A result also carries the record it created: `taskId` and `label`
+([ADR-0053](../adr/0053-every-dispatch-is-a-task.md),
+[ADR-0055](../adr/0055-wait-is-one-parameter.md)). That is how a program — or the model, through
+the tool that projects it — looks the child up after the fact with `ptc_task_output`. The handle
+carries the same two names for the same task, so a caller reads one vocabulary either way. Both
+fields are absent on a refusal, because a refused call left no record.
 
 ## Spawning
 
@@ -93,29 +99,36 @@ empty registry is not an error: it means everything dispatches as a generalist.
 // ptc_run_code
 const handle = await tools.pi_task_ptc({
   task: "survey the peer implementations", // required: the child's task text
-  background: true, // switch to the long-lived path
+  // wait is omitted: the call does NOT wait, and the task keeps running.
   label: "peer survey", // optional; defaults to task.slice(0, 64)
   // agent: "researcher", // optional: narrow the child with a definition
 });
 
-// A background spawn returns a DispatchHandle:
+// A not-waiting spawn returns a DispatchHandle:
 // { taskId: "01JBZ000000000000000000001", label: "peer survey", status: "running" }
 return handle;
+
+// The other shape: ask for the answer, and the result comes back in this call.
+const result = await tools.pi_task_ptc({
+  task: "survey the peer implementations",
+  wait: true,
+});
+// { text: "...", status: "fulfilled", taskId: "01JBZ...", label: "...", ... }
 ```
 
-Input fields are the foreground binding's fields plus two:
+Input fields are the binding's fields:
 
-| field           | type                            | default                          | meaning                                  |
-| --------------- | ------------------------------- | -------------------------------- | ---------------------------------------- |
-| `agent`         | `string`                        | omitted = generalist             | optional: narrow the child               |
-| `task`          | `string`                        | — (required)                     | task text handed to the child            |
-| `cwd`           | `string`                        | the run's cwd                    | child working directory                  |
-| `agentScope`    | `"user" \| "project" \| "both"` | `"user"`                         | which agent directories are searched     |
-| `model`         | `string`                        | unset: inherit the session model | model override                           |
-| `thinkingLevel` | `string`                        | `"off"`                          | thinking-level override                  |
-| `background`    | `boolean`                       | `false`                          | long-lived dispatch                      |
-| `label`         | `string`                        | `task.slice(0, 64)`              | human label on the handle and the record |
-| `readOnly`      | `"strict" \| "lenient"`         | omitted = no tier                | ask for a read-only child (ADR-0041)     |
+| field           | type                            | default                          | meaning                                                                |
+| --------------- | ------------------------------- | -------------------------------- | ---------------------------------------------------------------------- |
+| `agent`         | `string`                        | omitted = generalist             | optional: narrow the child                                             |
+| `task`          | `string`                        | — (required)                     | task text handed to the child                                          |
+| `cwd`           | `string`                        | the run's cwd                    | child working directory                                                |
+| `agentScope`    | `"user" \| "project" \| "both"` | `"user"`                         | which agent directories are searched                                   |
+| `model`         | `string`                        | unset: inherit the session model | model override                                                         |
+| `thinkingLevel` | `string`                        | `"off"`                          | thinking-level override                                                |
+| `wait`          | `boolean`                       | `false`                          | wait for the result (`true`), or take a handle and let the task run on |
+| `label`         | `string`                        | `task.slice(0, 64)`              | human label on the handle and the record                               |
+| `readOnly`      | `"strict" \| "lenient"`         | omitted = no tier                | ask for a read-only child (ADR-0041)                                   |
 
 `readOnly` is a mode, not a role, and a **string, not a boolean** — strings only, because pi's
 validator coerces booleans and that coercion could silently turn `readOnly: 0` into "no tier".
@@ -179,10 +192,10 @@ The binding never throws, so branch on the shape:
 const result = await tools.pi_task_ptc({
   agent: "researcher",
   task: "survey the peer implementations",
-  background: true,
+  // wait is omitted, so the call does not wait.
 });
 
-if ("taskId" in result) {
+if (result.status === "running" || result.status === "queued") {
   console.log("spawned", result.taskId); // DispatchHandle
 } else {
   console.log("refused:", result.errorMessage); // DispatchResult
@@ -303,7 +316,7 @@ band.
 **A foreground child's report is now inspectable too**
 ([ADR-0053](../adr/0053-every-dispatch-is-a-task.md)). The foreground front persists the report on
 its own record and writes the child's output to the same `<sessionDir>/tasks/<id>/output.log` the
-background front writes — so after the call returns, `ptc_task_output` on the result's `recordId`
+background front writes — so after the call returns, `ptc_task_output` on the result's `taskId`
 renders the report and the prose, exactly as it does for a background task. Before that, a foreground
 child's report existed only in the return value and nowhere else.
 
@@ -669,8 +682,8 @@ Deferred deliberately; the map items and reasons are in ADR-0022 §8/§10.
   and has no structured form (see the exception in the binding contract). The `ptc_task_*` tools and
   `pi_task_codemode` DO declare one, for a different consumer — see
   [Structured results for codemode](./structured-results.md).
-- **Foreground → background promotion** — spawn-or-reject only; a running foreground call cannot be
-  moved to the background.
+- **Waiting → not-waiting promotion** — there is none: a call decides once, at its own call site,
+  and a call that is already waiting cannot be turned into a task that outlives it.
 
 ## See also
 

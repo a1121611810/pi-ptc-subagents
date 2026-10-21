@@ -137,7 +137,7 @@ async function driveForeground(
 ): Promise<{ result: DispatchResult; argv: readonly string[] }> {
   const lifecycle = new RecordingLifecycle();
   const settled = dispatch(
-    { agent: AGENT, agentScope: "project", task: "name the model you inherited" },
+    { wait: true, agent: AGENT, agentScope: "project", task: "name the model you inherited" },
     contextFor(dir, sessionModel),
     { lifecycle, slots: new DispatchSlotCounter(4) },
   );
@@ -179,7 +179,7 @@ async function driveBackground(
     clock,
   };
   const outcome = await dispatch(
-    { agent: AGENT, agentScope: "project", task: "name the model you inherited", background: true },
+    { agent: AGENT, agentScope: "project", task: "name the model you inherited", wait: false },
     contextFor(dir, sessionModel),
     deps,
   );
@@ -290,7 +290,7 @@ describe("pi_task_codemode reads ctx.model and forwards it (installRecordingPi)"
         });
         const result = (await tool.execute(
           "call-inherit",
-          { agent: AGENT, agentScope: "project", task: "reply with PONG" },
+          { agent: AGENT, agentScope: "project", task: "reply with PONG", wait: true },
           undefined,
           undefined,
           toolContext(dir, DS_FLASH),

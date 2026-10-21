@@ -145,9 +145,12 @@ describe("InMemoryTaskStorage: task CRUD (loadTask / saveTask / deleteTask)", ()
     const record = fixtureTask({
       status: "succeeded",
       report: {
-        summary: "the concurrency gate precedes agent discovery",
+        summary: "the agent is resolved before the admission",
         findings: [
-          { what: "the gate runs first", evidence: "slot acquire returns before discoverAgent" },
+          {
+            what: "the agent runs first",
+            evidence: "discoverAgent returns before the slot acquire",
+          },
         ],
         files_touched: ["src/runtime/dispatch.ts"],
         usage: { input: 900, output: 260, cost: 0.0123, turns: 1 },
@@ -162,7 +165,7 @@ describe("InMemoryTaskStorage: task CRUD (loadTask / saveTask / deleteTask)", ()
     // caller still holds must not rewrite what was persisted.
     (record.report as { summary: string }).summary = "mutated after save";
     const reread = await storage.loadTask(record.id);
-    expect(reread?.report?.summary).toBe("the concurrency gate precedes agent discovery");
+    expect(reread?.report?.summary).toBe("the agent is resolved before the admission");
   });
 
   test("a record whose child never reported persists with both report fields absent", async () => {

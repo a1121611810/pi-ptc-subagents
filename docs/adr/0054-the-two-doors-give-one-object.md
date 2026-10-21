@@ -3,6 +3,8 @@
 Status: accepted (2026-10-21). Spec #234 决定 3。修订：[ADR-0028](./0028-structured-results-for-codemode.md)、
 [ADR-0053](./0053-every-dispatch-is-a-task.md) 的字段命名一节。
 
+> **Amended by [ADR-0055](./0055-wait-is-one-parameter.md) (2026-10-21): the two shapes name the id the same way, and one parameter chooses between them.** The result's id is `taskId` and its label is `label` — the handle's names — so the object a script reads no longer needs two vocabularies for one task. The discriminant stays `status`: a handle is `"running"` or `"queued"`, a result is `"fulfilled"` or `"rejected"`. A task door resolves with a handle unless the caller asks it to wait (`wait: true`), and a refusal is a result on both. Where this record and ADR-0055 read differently, ADR-0055 governs.
+
 ## Context
 
 本包有**两扇门**，一个实现：`pi_task_ptc`（PTC 程序里的绑定）与 `pi_task_codemode`（`codemode` 脚本能调的

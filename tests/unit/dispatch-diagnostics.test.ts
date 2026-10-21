@@ -188,7 +188,11 @@ async function dispatchForeground(
   const dir = await makeTempDir();
   try {
     const harness = createHarness();
-    const settled = dispatch({ task: "probe the child" }, foregroundContext(dir), harness.deps);
+    const settled = dispatch(
+      { wait: true, task: "probe the child" },
+      foregroundContext(dir),
+      harness.deps,
+    );
     await driveChild(harness.lifecycle, events, exitCode);
     return { result: await settled, harness };
   } finally {
@@ -341,8 +345,11 @@ describe("foreground dispatch over the real 429 transcript", () => {
   });
 
   test("the new failure path leaves one operator warning naming the child's cause", async () => {
-    const { harness } = await dispatchForeground(FIXTURE_EVENTS);
-    expect(harness.warnings).toEqual(["foreground dispatch failed: " + FINAL_RATE_LIMIT_ERROR]);
+    const { result, harness } = await dispatchForeground(FIXTURE_EVENTS);
+    // ADR-0055: the operator warning names the TASK, not the front -- one path, one warning.
+    expect(harness.warnings).toEqual([
+      "dispatch task " + result.taskId + " failed: " + FINAL_RATE_LIMIT_ERROR,
+    ]);
   });
 
   test("the pre-existing exit-0-silent rejection stays quiet and generic", async () => {
@@ -377,7 +384,7 @@ describe("foreground dispatch over the real 429 transcript", () => {
       const harness = createHarness();
       const controller = new AbortController();
       const settled = dispatch(
-        { task: "probe the child" },
+        { wait: true, task: "probe the child" },
         { ...foregroundContext(dir), signal: controller.signal },
         harness.deps,
       );
@@ -393,7 +400,9 @@ describe("foreground dispatch over the real 429 transcript", () => {
       // rejected && started && childError !== undefined), and this child did report one — the
       // cancellation only wins the OUTCOME. Naming the cause here is what keeps the aborted run
       // from looking like a bare cancellation when the child was already failing.
-      expect(harness.warnings).toEqual(["foreground dispatch failed: " + FINAL_RATE_LIMIT_ERROR]);
+      expect(harness.warnings).toEqual([
+        "dispatch task " + result.taskId + " failed: " + FINAL_RATE_LIMIT_ERROR,
+      ]);
     } finally {
       await removeTempDir(dir);
     }
@@ -584,7 +593,7 @@ describe("pi_task_codemode refuses with the bounded diagnostic", () => {
     });
     const execution = tool.execute(
       "call-diagnostic",
-      { task: "probe the child" },
+      { task: "probe the child", wait: true },
       undefined,
       undefined,
       undefined as never,
@@ -680,7 +689,7 @@ describe("pi_task_codemode refuses with the bounded diagnostic", () => {
       });
       const execution = tool.execute(
         "call-model-line",
-        { task: "reply with PONG" },
+        { task: "reply with PONG", wait: true },
         undefined,
         undefined,
         undefined as never,
@@ -717,7 +726,7 @@ describe("pi_task_codemode refuses with the bounded diagnostic", () => {
       });
       const execution = tool.execute(
         "call-no-model-line",
-        { task: "reply with PONG" },
+        { task: "reply with PONG", wait: true },
         undefined,
         undefined,
         undefined as never,
@@ -789,7 +798,7 @@ async function runBackground(
   try {
     const harness = createBackgroundHarness();
     const outcome = await dispatch(
-      { task: "probe the child", background: true },
+      { task: "probe the child", wait: false },
       foregroundContext(dir),
       harness.deps,
     );
@@ -811,11 +820,10 @@ describe("the background record and ptc_task_output carry the observed model", (
     expect(record.observedProvider).toBe(CAPTURED_PROVIDER);
     expect(record.observedModel).toBe(CAPTURED_MODEL);
     expect(record.usage?.turns).toBe(4);
-    // The pump's existing operator warning names the task and the child's cause (issue #70).
+    // The operator warning names the task and the child's cause (issue #70). ADR-0055: it names
+    // the TASK, not the front -- one path, one warning.
     expect(
-      harness.warnings.some(
-        (line) => line.includes("background dispatch task") && line.includes("429"),
-      ),
+      harness.warnings.some((line) => line.includes("dispatch task ") && line.includes("429")),
     ).toBe(true);
   });
 
@@ -887,7 +895,7 @@ describe("the observed-model text is sanitized on every model-facing surface", (
       });
       const execution = tool.execute(
         "call-sanitize-model",
-        { task: "reply with PONG" },
+        { task: "reply with PONG", wait: true },
         undefined,
         undefined,
         undefined as never,
@@ -957,7 +965,7 @@ describe("a canceled close still records the observed model", () => {
     try {
       const harness = createBackgroundHarness();
       const outcome = await dispatch(
-        { task: "probe the child", background: true },
+        { task: "probe the child", wait: false },
         foregroundContext(dir),
         harness.deps,
       );

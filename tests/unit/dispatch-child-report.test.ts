@@ -583,7 +583,7 @@ describe("dispatch() foreground carries the child report", () => {
 
       const result = asResult(
         await dispatch(
-          { agent: "reporter", task: "check the gates", agentScope: "project" },
+          { wait: true, agent: "reporter", task: "check the gates", agentScope: "project" },
           { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           { slots: new DispatchSlotCounter(4) },
         ),
@@ -605,7 +605,7 @@ describe("dispatch() foreground carries the child report", () => {
 
       const result = asResult(
         await dispatch(
-          { agent: "reporter", task: "check the gates", agentScope: "project" },
+          { wait: true, agent: "reporter", task: "check the gates", agentScope: "project" },
           { callId: 2, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           { slots: new DispatchSlotCounter(4) },
         ),
@@ -625,7 +625,7 @@ describe("dispatch() foreground carries the child report", () => {
       childTranscript.lines = [...COMPLIANT_TRANSCRIPT];
 
       await dispatch(
-        { agent: "reporter", task: "check the gates", agentScope: "project" },
+        { wait: true, agent: "reporter", task: "check the gates", agentScope: "project" },
         { callId: 3, cwd: dir, depth: 0, maxDispatchDepth: 3 },
         { slots: new DispatchSlotCounter(4) },
       );
@@ -664,6 +664,7 @@ describe("dispatch() foreground carries the child report", () => {
 
       await dispatch(
         {
+          wait: true,
           agent: "reporter",
           task: "check the gates",
           why: "we are preparing a release",
@@ -699,6 +700,7 @@ describe("dispatch() foreground under the whyEnabled switch (ADR-0043)", () => {
 
       const suppressed = await dispatch(
         {
+          wait: true,
           agent: "reporter",
           task: "check the gates",
           why: "we are preparing a release",
@@ -716,7 +718,13 @@ describe("dispatch() foreground under the whyEnabled switch (ADR-0043)", () => {
       // The comparison the claim rests on: switch-off and blank-value must not differ anywhere.
       childArgv.prompts.length = 0;
       const blank = await dispatch(
-        { agent: "reporter", task: "check the gates", why: "   ", agentScope: "project" },
+        {
+          wait: true,
+          agent: "reporter",
+          task: "check the gates",
+          why: "   ",
+          agentScope: "project",
+        },
         { callId: 6, cwd: dir, depth: 0, maxDispatchDepth: 3 },
         { slots: new DispatchSlotCounter(4), whyEnabled: false },
       );
@@ -737,6 +745,7 @@ describe("dispatch() foreground under the whyEnabled switch (ADR-0043)", () => {
       childArgv.prompts.length = 0;
       const result = await dispatch(
         {
+          wait: true,
           agent: "reporter",
           task: "check the gates",
           why: "we are preparing a release",
@@ -760,7 +769,7 @@ describe("dispatch() foreground under the whyEnabled switch (ADR-0043)", () => {
       childTranscript.lines = [...COMPLIANT_TRANSCRIPT];
       childArgv.prompts.length = 0;
       const result = await dispatch(
-        { agent: "reporter", task: "check the gates", agentScope: "project" },
+        { wait: true, agent: "reporter", task: "check the gates", agentScope: "project" },
         { callId: 8, cwd: dir, depth: 0, maxDispatchDepth: 3 },
         { slots: new DispatchSlotCounter(4), whyEnabled: false },
       );
@@ -775,10 +784,7 @@ describe("dispatch() foreground under the whyEnabled switch (ADR-0043)", () => {
     // The depth gate refuses before any child exists, so the caller's reason reached nobody. A
     // stamp only on the success path would make the two fronts disagree on a fact both know.
     const result = await dispatch(
-      {
-        task: "check the gates",
-        why: "we are preparing a release",
-      },
+      { wait: true, task: "check the gates", why: "we are preparing a release" },
       { callId: 9, cwd: process.cwd(), depth: 3, maxDispatchDepth: 3 },
       { slots: new DispatchSlotCounter(4), whyEnabled: false },
     );
@@ -801,7 +807,12 @@ describe("dispatch() foreground under the whyEnabled switch (ADR-0043)", () => {
      */
     const refused = asResult(
       await dispatch(
-        { task: "check the gates", why: "we are preparing a release", readOnly: 1 } as never,
+        {
+          wait: true,
+          task: "check the gates",
+          why: "we are preparing a release",
+          readOnly: 1,
+        } as never,
         { callId: 20, cwd: process.cwd(), depth: 0, maxDispatchDepth: 3 },
         { slots: new DispatchSlotCounter(4), whyEnabled: false },
       ),
@@ -813,7 +824,7 @@ describe("dispatch() foreground under the whyEnabled switch (ADR-0043)", () => {
     // The absence half: same refusal, no `why`, so nothing was withheld and no key appears.
     const withoutWhy = asResult(
       await dispatch(
-        { task: "check the gates", readOnly: 1 } as never,
+        { wait: true, task: "check the gates", readOnly: 1 } as never,
         { callId: 21, cwd: process.cwd(), depth: 0, maxDispatchDepth: 3 },
         { slots: new DispatchSlotCounter(4), whyEnabled: false },
       ),
@@ -828,7 +839,7 @@ describe("dispatch() foreground under the whyEnabled switch (ADR-0043)", () => {
     // result for every input, and that is a promise its callers are written against.
     const badWhy = asResult(
       await dispatch(
-        { task: "check the gates", readOnly: 1, why: 42 } as never,
+        { wait: true, task: "check the gates", readOnly: 1, why: 42 } as never,
         { callId: 22, cwd: process.cwd(), depth: 0, maxDispatchDepth: 3 },
         { slots: new DispatchSlotCounter(4), whyEnabled: false },
       ),
@@ -909,7 +920,7 @@ describe("dispatch() background persists the same report as foreground returns (
       const h = createBackgroundHarness();
       const handle = asHandle(
         await dispatch(
-          { agent: "reporter", task: "check the gates", background: true, agentScope: "project" },
+          { agent: "reporter", task: "check the gates", wait: false, agentScope: "project" },
           { callId: 4, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           h.deps,
         ),
@@ -934,7 +945,7 @@ describe("dispatch() background persists the same report as foreground returns (
       const h = createBackgroundHarness();
       const handle = asHandle(
         await dispatch(
-          { agent: "reporter", task: "check the gates", background: true, agentScope: "project" },
+          { agent: "reporter", task: "check the gates", wait: false, agentScope: "project" },
           { callId: 5, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           h.deps,
         ),
@@ -957,7 +968,7 @@ describe("dispatch() background persists the same report as foreground returns (
           {
             agent: "reporter",
             task: "check the gates",
-            background: true,
+            wait: false,
             agentScope: "project",
           },
           { callId: 6, cwd: dir, depth: 3, maxDispatchDepth: 3 },
@@ -983,7 +994,7 @@ describe("reportChannel is present on every result shape", () => {
 
       const result = asResult(
         await dispatch(
-          { agent: "reporter", task: "t", agentScope: "project" },
+          { wait: true, agent: "reporter", task: "t", agentScope: "project" },
           { callId: 7, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           { slots: new DispatchSlotCounter(4) },
         ),
@@ -1001,7 +1012,7 @@ describe("reportChannel is present on every result shape", () => {
 
       const result = asResult(
         await dispatch(
-          { agent: "reporter", task: "t", agentScope: "project" },
+          { wait: true, agent: "reporter", task: "t", agentScope: "project" },
           { callId: 8, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           { slots: new DispatchSlotCounter(4) },
         ),
@@ -1016,7 +1027,7 @@ describe("reportChannel is present on every result shape", () => {
   test("depth refusal", async () => {
     const result = asResult(
       await dispatch(
-        { agent: "reporter", task: "t" },
+        { wait: true, agent: "reporter", task: "t" },
         { callId: 9, cwd: process.cwd(), depth: 3, maxDispatchDepth: 3 },
         { slots: new DispatchSlotCounter(4) },
       ),
@@ -1031,7 +1042,7 @@ describe("reportChannel is present on every result shape", () => {
   test("concurrency refusal", async () => {
     const result = asResult(
       await dispatch(
-        { agent: "reporter", task: "t" },
+        { wait: true, agent: "reporter", task: "t" },
         { callId: 10, cwd: process.cwd(), depth: 0, maxDispatchDepth: 3 },
         // A zero-width cap refuses at the gate, before discovery or spawn.
         { slots: new DispatchSlotCounter(0) },
@@ -1047,7 +1058,7 @@ describe("reportChannel is present on every result shape", () => {
     await withAgent(async (dir) => {
       const result = asResult(
         await dispatch(
-          { agent: "nobody-by-that-name", task: "t", agentScope: "project" },
+          { wait: true, agent: "nobody-by-that-name", task: "t", agentScope: "project" },
           { callId: 11, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           { slots: new DispatchSlotCounter(4) },
         ),
@@ -1066,7 +1077,7 @@ describe("reportChannel is present on every result shape", () => {
 
       const result = asResult(
         await dispatch(
-          { agent: "reporter", task: "t", agentScope: "project" },
+          { wait: true, agent: "reporter", task: "t", agentScope: "project" },
           { callId: 12, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           { slots: new DispatchSlotCounter(4) },
         ),
@@ -1082,7 +1093,7 @@ describe("reportChannel is present on every result shape", () => {
   test("missing agent argument", async () => {
     const result = asResult(
       await dispatch(
-        { agent: "   ", task: "t" },
+        { wait: true, agent: "   ", task: "t" },
         { callId: 13, cwd: process.cwd(), depth: 0, maxDispatchDepth: 3 },
         { slots: new DispatchSlotCounter(4) },
       ),
@@ -1339,7 +1350,7 @@ describe("the report tool channel", () => {
 
       const result = asResult(
         await dispatch(
-          { agent: "reporter", task: "check the gates", agentScope: "project" },
+          { wait: true, agent: "reporter", task: "check the gates", agentScope: "project" },
           { callId: 20, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           { slots: new DispatchSlotCounter(4) },
         ),
@@ -1358,7 +1369,7 @@ describe("the report tool channel", () => {
       const h = createBackgroundHarness();
       const handle = asHandle(
         await dispatch(
-          { agent: "reporter", task: "check the gates", background: true, agentScope: "project" },
+          { agent: "reporter", task: "check the gates", wait: false, agentScope: "project" },
           { callId: 21, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           h.deps,
         ),
@@ -1524,7 +1535,7 @@ describe("the report tool channel", () => {
 
       const result = asResult(
         await dispatch(
-          { agent: "reporter", task: "check the gates", agentScope: "project" },
+          { wait: true, agent: "reporter", task: "check the gates", agentScope: "project" },
           { callId: 50, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           { slots: new DispatchSlotCounter(4) },
         ),
@@ -1578,7 +1589,7 @@ describe("the report tool channel", () => {
 
       const result = asResult(
         await dispatch(
-          { agent: "reporter", task: "check the gates", agentScope: "project" },
+          { wait: true, agent: "reporter", task: "check the gates", agentScope: "project" },
           { callId: 22, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           { slots: new DispatchSlotCounter(4) },
         ),
@@ -1665,7 +1676,7 @@ describe("the report tool is activated in the child and not in the parent", () =
       childTranscript.lines = [...COMPLIANT_TRANSCRIPT];
 
       await dispatch(
-        { agent: "reporter", task: "t", agentScope: "project" },
+        { wait: true, agent: "reporter", task: "t", agentScope: "project" },
         { callId: 23, cwd: dir, depth: 0, maxDispatchDepth: 3 },
         { slots: new DispatchSlotCounter(4) },
       );
@@ -1717,7 +1728,7 @@ describe("the report tool is activated in the child and not in the parent", () =
       childTranscript.lines = [...COMPLIANT_TRANSCRIPT];
 
       await dispatch(
-        { agent: "reporter", task: "t", agentScope: "project" },
+        { wait: true, agent: "reporter", task: "t", agentScope: "project" },
         { callId: 24, cwd: dir, depth: 0, maxDispatchDepth: 3 },
         { slots: new DispatchSlotCounter(4) },
       );
@@ -1946,7 +1957,7 @@ describe("the agent frontmatter opt-out", () => {
 
       const result = asResult(
         await dispatch(
-          { agent: "reporter", task: "t", agentScope: "project" },
+          { wait: true, agent: "reporter", task: "t", agentScope: "project" },
           { callId: 30, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           { slots: new DispatchSlotCounter(4) },
         ),
@@ -1983,7 +1994,7 @@ describe("the agent frontmatter opt-out", () => {
 
       const result = asResult(
         await dispatch(
-          { agent: "reporter", task: "t", agentScope: "project" },
+          { wait: true, agent: "reporter", task: "t", agentScope: "project" },
           { callId: 31, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           { slots: new DispatchSlotCounter(4) },
         ),
@@ -2005,7 +2016,7 @@ describe("the agent frontmatter opt-out", () => {
 
       const result = asResult(
         await dispatch(
-          { agent: "reporter", task: "t", agentScope: "project" },
+          { wait: true, agent: "reporter", task: "t", agentScope: "project" },
           { callId: 32, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           { slots: new DispatchSlotCounter(4) },
         ),
@@ -2022,7 +2033,7 @@ describe("the agent frontmatter opt-out", () => {
       const h = createBackgroundHarness();
       const handle = asHandle(
         await dispatch(
-          { agent: "reporter", task: "t", background: true, agentScope: "project" },
+          { agent: "reporter", task: "t", wait: false, agentScope: "project" },
           { callId: 33, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           h.deps,
         ),
@@ -2047,7 +2058,7 @@ describe("the agent frontmatter opt-out", () => {
 
       const result = asResult(
         await dispatch(
-          { agent: "reporter", task: "t", agentScope: "project" },
+          { wait: true, agent: "reporter", task: "t", agentScope: "project" },
           { callId: 34, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           { slots: new DispatchSlotCounter(4) },
         ),
@@ -2073,21 +2084,21 @@ describe("a refused dispatch carries no report, not an empty one", () => {
     const refusals: DispatchResult[] = [
       asResult(
         await dispatch(
-          { agent: "reporter", task: "t" },
+          { wait: true, agent: "reporter", task: "t" },
           { callId: 40, cwd: process.cwd(), depth: 3, maxDispatchDepth: 3 },
           { slots: new DispatchSlotCounter(4) },
         ),
       ),
       asResult(
         await dispatch(
-          { agent: "reporter", task: "t" },
+          { wait: true, agent: "reporter", task: "t" },
           { callId: 41, cwd: process.cwd(), depth: 0, maxDispatchDepth: 3 },
           { slots: new DispatchSlotCounter(0) },
         ),
       ),
       asResult(
         await dispatch(
-          { agent: "nobody-by-that-name", task: "t", agentScope: "project" },
+          { wait: true, agent: "nobody-by-that-name", task: "t", agentScope: "project" },
           { callId: 42, cwd: process.cwd(), depth: 0, maxDispatchDepth: 3 },
           { slots: new DispatchSlotCounter(4) },
         ),
@@ -2105,7 +2116,7 @@ describe("a refused dispatch carries no report, not an empty one", () => {
       spawnFailure.error = new Error("spawn pi ENOENT");
       const result = asResult(
         await dispatch(
-          { agent: "reporter", task: "t", agentScope: "project" },
+          { wait: true, agent: "reporter", task: "t", agentScope: "project" },
           { callId: 43, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           { slots: new DispatchSlotCounter(4) },
         ),
@@ -2120,7 +2131,7 @@ describe("a refused dispatch carries no report, not an empty one", () => {
   test("a missing agent argument names channel none and carries no report", async () => {
     const result = asResult(
       await dispatch(
-        { agent: "  ", task: "t" },
+        { wait: true, agent: "  ", task: "t" },
         { callId: 44, cwd: process.cwd(), depth: 0, maxDispatchDepth: 3 },
         { slots: new DispatchSlotCounter(4) },
       ),

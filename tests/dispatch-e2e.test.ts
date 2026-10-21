@@ -47,7 +47,7 @@ describe("dispatch end-to-end smoke", () => {
       const timeout = setTimeout(() => controller.abort(), 300_000);
       try {
         const result = await dispatch(
-          { agent: "smoke-echo", task: "ping", agentScope: "project" },
+          { wait: true, agent: "smoke-echo", task: "ping", agentScope: "project" },
           { callId: 1, cwd: tmp, depth: 0, maxDispatchDepth: 3, signal: controller.signal },
         );
         // SPECIFICATION assertions (constraint #4 + #5): exact status + literal text + usage recorded.

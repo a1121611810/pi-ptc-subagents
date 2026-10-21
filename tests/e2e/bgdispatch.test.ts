@@ -407,7 +407,7 @@ describe("background dispatch end-to-end", () => {
       await withBgE2e(async ({ dir, registry, deps }) => {
         const handle = requireHandle(
           await dispatch(
-            { agent: AGENT, task: "ping", background: true, agentScope: "project" },
+            { agent: AGENT, task: "ping", wait: false, agentScope: "project" },
             {
               callId: 1,
               cwd: dir,
@@ -444,7 +444,7 @@ describe("background dispatch end-to-end", () => {
             {
               agent: AGENT,
               task: "wait for the stop signal",
-              background: true,
+              wait: false,
               agentScope: "project",
             },
             {
@@ -502,7 +502,7 @@ describe("background dispatch end-to-end", () => {
       await withBgE2eSharedDir(async ({ dir, registry, lifecycle, deps }) => {
         const first = requireHandle(
           await dispatch(
-            { agent: AGENT, task: "ping", background: true, agentScope: "project" },
+            { agent: AGENT, task: "ping", wait: false, agentScope: "project" },
             {
               callId: 1,
               cwd: dir,
@@ -526,7 +526,7 @@ describe("background dispatch end-to-end", () => {
 
         const second = requireHandle(
           await dispatch(
-            { agent: AGENT, task: "ping", background: true, agentScope: "project" },
+            { agent: AGENT, task: "ping", wait: false, agentScope: "project" },
             {
               callId: 2,
               cwd: dir,

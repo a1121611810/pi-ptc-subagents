@@ -8,6 +8,8 @@ Status: accepted (2026-10-21). 修订：[ADR-0022](./0022-background-dispatch.md
 
 > **Amended by [ADR-0054](./0054-the-two-doors-give-one-object.md) (2026-10-21): the reason this record gave for NOT calling the foreground result's id `taskId` is gone — the door now tells a handle from a result by `status` (`isDispatchHandle`), not by the presence of an id, so the two shapes can no longer be confused. The fields keep the names this record gave them (`recordId` / `recordLabel` on the result, `taskId` / `label` on the handle); unifying the two names is now two lines in `src/runtime/dispatch.ts` and rides along with the ticket that owns that file.**
 
+> **Amended by [ADR-0055](./0055-wait-is-one-parameter.md) (2026-10-21): the reason this record gave for NOT calling the result's id `taskId` is void, and the two names are now one.** The fields this record called `recordId` / `recordLabel` are now `taskId` / `label` — on BOTH shapes. The obstacle was the codemode door's "is there a STRING `taskId` on it" probe, which ADR-0054 replaced with `status`; with that gone, a result and a handle can name the same task the same way, and they do. The decisions stand: every dispatch is still a task, the record is still created before the child is spawned, and a refusal still leaves no record. Read this record's `recordId` / `recordLabel` as `taskId` / `label`.
+
 ## Context
 
 到 2026-10-21 为止，本包里有**两件**叫「派发」的事，而它们只在后台那件上留下痕迹：

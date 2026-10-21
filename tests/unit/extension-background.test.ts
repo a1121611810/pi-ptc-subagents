@@ -204,7 +204,7 @@ async function spawnBackground(
 ): Promise<DispatchHandle> {
   return asHandle(
     await dispatch(
-      { agent: AGENT, task: "background wiring", background: true, agentScope: "project" },
+      { agent: AGENT, task: "background wiring", wait: false, agentScope: "project" },
       { callId, cwd: dir, depth: 0, maxDispatchDepth: 3, callerId: "run-" + String(callId) },
       runtime.dispatchDeps,
     ),

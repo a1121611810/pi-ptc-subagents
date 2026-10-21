@@ -13,13 +13,29 @@ import {
 import {
   DispatchSlotCounter,
   dispatch,
+  isDispatchHandle,
   isUsableReadOnlyRequest,
   resolveReadOnlyTier,
   type DispatchInput,
+  type DispatchResult,
   type ReadOnlyTier,
 } from "../src/runtime/dispatch.ts";
+import type { DispatchHandle } from "../src/runtime/task-registry.ts";
 import { resolveBindingNames } from "../src/tools/common.ts";
 import { makeTempDir, removeTempDir, RUN_TIMEOUT_MS } from "./helpers/ptc.ts";
+
+/**
+ * The outcome of a call that must be a RESULT.
+ *
+ * ADR-0055: a call that does not wait can resolve with a HANDLE, so the union is real. A
+ * refusal is a result on both modes, so narrowing is what says "this one was refused".
+ */
+function asResult(value: DispatchHandle | DispatchResult): DispatchResult {
+  if (isDispatchHandle(value)) {
+    throw new Error("expected a DispatchResult, got a DispatchHandle");
+  }
+  return value;
+}
 
 const options = RUN_TIMEOUT_MS;
 const call = { callId: 1, depth: 0, maxDispatchDepth: 3 };
@@ -348,15 +364,18 @@ test(
         // declared type forbids, not a call the overload set cannot resolve. Casting the argument
         // to `never` would also hide the return type, and `started` / `errorMessage` are the whole
         // claim here.
-        const result = await dispatch(
-          {
-            agent: "ghost",
-            task: "t",
-            agentScope: "project",
-            readOnly: bad,
-          } as unknown as DispatchInput,
-          { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
-          { slots: new DispatchSlotCounter(8) },
+        const result = asResult(
+          await dispatch(
+            {
+              wait: true,
+              agent: "ghost",
+              task: "t",
+              agentScope: "project",
+              readOnly: bad,
+            } as unknown as DispatchInput,
+            { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+            { slots: new DispatchSlotCounter(8) },
+          ),
         );
         // `JSON.stringify` for the object row and `String` for the primitives: the label has to
         // be the value the caller sent, and Object's default stringification would print
@@ -511,7 +530,7 @@ test(
         ).toBe("strict");
 
         const viaDispatch = (await dispatch(
-          { agent: args.agent as string, task: "t", readOnly: "strict" } as never,
+          { wait: true, agent: args.agent as string, task: "t", readOnly: "strict" } as never,
           { callId: 0, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           { slots: new DispatchSlotCounter(8) },
         )) as { status: string; readOnlyTier?: string };
@@ -592,7 +611,7 @@ test(
         // injected here). `ghost` cannot exist on any machine, so the comparison stays a unit test
         // and the two fronts are still compared on the one input both refuse.
         const viaDispatch = (await dispatch(
-          { agent: "ghost", task: "t", why: "we are preparing a release" } as never,
+          { wait: true, agent: "ghost", task: "t", why: "we are preparing a release" } as never,
           { callId: 0, cwd: dir, depth: 0, maxDispatchDepth: 3 },
           { slots: new DispatchSlotCounter(8), whyEnabled: false },
         )) as { status: string; whySuppressed?: true };

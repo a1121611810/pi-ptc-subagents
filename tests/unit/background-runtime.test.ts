@@ -431,7 +431,7 @@ describe("shutdown", () => {
       const spawn = async (callId: number, task: string): Promise<DispatchHandle> =>
         asHandle(
           await dispatch(
-            { agent: AGENT, task, background: true, agentScope: "project" },
+            { agent: AGENT, task, wait: false, agentScope: "project" },
             { callId, cwd: dir, depth: 0, maxDispatchDepth: 3, callerId: "run-1" },
             runtime.dispatchDeps,
           ),
@@ -460,7 +460,7 @@ describe("shutdown", () => {
       expect(runtime.slots.active).toBe(2);
 
       const overCap = await dispatch(
-        { agent: AGENT, task: "five", background: true, agentScope: "project" },
+        { agent: AGENT, task: "five", wait: false, agentScope: "project" },
         { callId: 5, cwd: dir, depth: 0, maxDispatchDepth: 3, callerId: "run-1" },
         runtime.dispatchDeps,
       );
@@ -649,7 +649,7 @@ describe("dispatch path and tools share the holder registry", () => {
       await runtime.bindSession(undefined);
       const handle = asHandle(
         await dispatch(
-          { agent: AGENT, task: "shared registry", background: true, agentScope: "project" },
+          { agent: AGENT, task: "shared registry", wait: false, agentScope: "project" },
           { callId: 7, cwd: dir, depth: 0, maxDispatchDepth: 3, callerId: "run-1" },
           runtime.dispatchDeps,
         ),
@@ -737,7 +737,7 @@ describe("session rebind pins an in-flight task to its owning registry", () => {
 
       const handle = asHandle(
         await dispatch(
-          { agent: AGENT, task: "across rebind", background: true, agentScope: "project" },
+          { agent: AGENT, task: "across rebind", wait: false, agentScope: "project" },
           { callId: 1, cwd: dir, depth: 0, maxDispatchDepth: 3, callerId: "run-1" },
           runtime.dispatchDeps,
         ),

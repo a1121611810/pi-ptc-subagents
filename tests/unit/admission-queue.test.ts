@@ -175,7 +175,7 @@ describe("ADR-0056: over the cap, a dispatch waits instead of being refused", ()
       // One slot, and it is taken: the cap is reached by the very next call.
       const h = createHarness({ limit: 1 });
       const running = dispatch(
-        { agent: AGENT, task: "first", agentScope: "project" },
+        { wait: true, agent: AGENT, task: "first", agentScope: "project" },
         { ...ctx(1), cwd: dir },
         h.deps,
       );
@@ -186,7 +186,7 @@ describe("ADR-0056: over the cap, a dispatch waits instead of being refused", ()
       // rejection reason.
       let settled = false;
       const queued = dispatch(
-        { agent: AGENT, task: "second", agentScope: "project" },
+        { wait: true, agent: AGENT, task: "second", agentScope: "project" },
         { ...ctx(2), cwd: dir },
         h.deps,
       ).then((result: DispatchResult) => {
@@ -228,7 +228,7 @@ describe("ADR-0056: the queue is FIFO", () => {
     await withAgent(async (dir) => {
       const h = createHarness({ limit: 1 });
       const running = dispatch(
-        { agent: AGENT, task: "first", agentScope: "project" },
+        { wait: true, agent: AGENT, task: "first", agentScope: "project" },
         { ...ctx(1), cwd: dir },
         h.deps,
       );
@@ -236,12 +236,12 @@ describe("ADR-0056: the queue is FIFO", () => {
 
       // Two more, queued in a known order: "second" before "third".
       const second = dispatch(
-        { agent: AGENT, task: "second", agentScope: "project" },
+        { wait: true, agent: AGENT, task: "second", agentScope: "project" },
         { ...ctx(2), cwd: dir },
         h.deps,
       );
       const third = dispatch(
-        { agent: AGENT, task: "third", agentScope: "project" },
+        { wait: true, agent: AGENT, task: "third", agentScope: "project" },
         { ...ctx(3), cwd: dir },
         h.deps,
       );
@@ -315,7 +315,7 @@ describe("ADR-0056: a background dispatch over the cap returns its handle at onc
 
       // The one slot is taken by a child that is still running.
       const first = await dispatch(
-        { agent: AGENT, task: "first", agentScope: "project", background: true },
+        { agent: AGENT, task: "first", agentScope: "project", wait: false },
         { ...ctx(1), cwd: dir },
         h.deps,
       );
@@ -327,7 +327,7 @@ describe("ADR-0056: a background dispatch over the cap returns its handle at onc
       // The second call has nowhere to go. It does NOT wait for a slot: a background
       // dispatch returns its handle at once, and the child waits.
       const second = await dispatch(
-        { agent: AGENT, task: "second", agentScope: "project", background: true },
+        { agent: AGENT, task: "second", agentScope: "project", wait: false },
         { ...ctx(2), cwd: dir },
         h.deps,
       );
@@ -357,14 +357,14 @@ describe("ADR-0056: a queued task is visible in the task list", () => {
     await withAgent(async (dir) => {
       const h = createHarness({ limit: 1 });
       const running = dispatch(
-        { agent: AGENT, task: "first", agentScope: "project" },
+        { wait: true, agent: AGENT, task: "first", agentScope: "project" },
         { ...ctx(1), cwd: dir },
         h.deps,
       );
       await waitFor(() => h.lifecycle.spawnCount > 0);
 
       const queued = dispatch(
-        { agent: AGENT, task: "second", agentScope: "project" },
+        { wait: true, agent: AGENT, task: "second", agentScope: "project" },
         { ...ctx(2), cwd: dir },
         h.deps,
       );
@@ -402,7 +402,7 @@ describe("ADR-0056: an aborted foreground run withdraws its queued request", () 
     await withAgent(async (dir) => {
       const h = createHarness({ limit: 1 });
       const running = dispatch(
-        { agent: AGENT, task: "first", agentScope: "project" },
+        { wait: true, agent: AGENT, task: "first", agentScope: "project" },
         { ...ctx(1), cwd: dir },
         h.deps,
       );
@@ -410,7 +410,7 @@ describe("ADR-0056: an aborted foreground run withdraws its queued request", () 
 
       const controller = new AbortController();
       const queued = dispatch(
-        { agent: AGENT, task: "second", agentScope: "project" },
+        { wait: true, agent: AGENT, task: "second", agentScope: "project" },
         { ...ctx(2), cwd: dir, signal: controller.signal },
         h.deps,
       );

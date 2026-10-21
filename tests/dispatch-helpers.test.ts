@@ -9,6 +9,7 @@ import {
   decideCloseOutcome,
   discoverAgent,
   dispatch,
+  isDispatchHandle,
   DISPATCH_DISABLED_MESSAGE,
   listRegisteredAgentEntries,
   listRegisteredAgents,
@@ -19,8 +20,23 @@ import {
   truncationFailureMessage,
   type AgentConfigLike,
   type DispatchInput,
+  type DispatchResult,
 } from "../src/runtime/dispatch.ts";
+import type { DispatchHandle } from "../src/runtime/task-registry.ts";
 import { DISPATCH_CONTEXT, makeTempDir, removeTempDir } from "./helpers/ptc.ts";
+
+/**
+ * The outcome of a call that must be a RESULT.
+ *
+ * ADR-0055: a call that does not wait can resolve with a HANDLE, so the union is real. A
+ * refusal is a result on both modes, so narrowing is what says "this one was refused".
+ */
+function asResult(value: DispatchHandle | DispatchResult): DispatchResult {
+  if (isDispatchHandle(value)) {
+    throw new Error("expected a DispatchResult, got a DispatchHandle");
+  }
+  return value;
+}
 
 /**
  * Spawn observation seam: `dispatch()` spawns the `pi` binary through `node:child_process`,
@@ -413,7 +429,7 @@ describe("registered-agent listing + actionable refusals (pitfall #2)", () => {
       // the call count.
       expect(warn).toHaveBeenCalledTimes(1);
       const warning = warn.mock.calls[0]?.[0] ?? "";
-      expect(warning).toContain("pi.dispatch: cannot read agent file");
+      expect(warning).toContain("pi_task_ptc: cannot read agent file");
       expect(warning).toContain(join(cwd, ".pi", "agents", "ghost.md"));
       expect(warning).toContain("skipping it");
     } finally {
@@ -767,7 +783,7 @@ describe("registered-agent listing + actionable refusals (pitfall #2)", () => {
       // pitfall #2 was about. The project scope puts the temp agent dir in the listing (the
       // default "user" scope would not).
       const blank = await dispatch(
-        { agent: "   ", task: "ping", agentScope: "project" },
+        { wait: true, agent: "   ", task: "ping", agentScope: "project" },
         { callId: 21, cwd: dir, depth: 0, maxDispatchDepth: 3 },
       );
       expect(blank.status).toBe("rejected");
@@ -791,16 +807,23 @@ describe("registered-agent listing + actionable refusals (pitfall #2)", () => {
       // is distinguished from, so losing any of them would blur the distinction rather than
       // simply drop a branch.
       const empty = await dispatch(
-        { agent: "", task: "ping", agentScope: "project" },
+        { wait: true, agent: "", task: "ping", agentScope: "project" },
         { callId: 22, cwd: dir, depth: 0, maxDispatchDepth: 3 },
       );
       expect(empty.status).toBe("rejected");
       expect(empty.errorMessage ?? "").toContain("agent, when given");
       expect(spawnRecorder.calls).toHaveLength(0);
 
-      const notAString = await dispatch(
-        { agent: 42, task: "ping", agentScope: "project" } as unknown as DispatchInput,
-        { callId: 23, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+      const notAString = asResult(
+        await dispatch(
+          {
+            wait: true,
+            agent: 42,
+            task: "ping",
+            agentScope: "project",
+          } as unknown as DispatchInput,
+          { callId: 23, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+        ),
       );
       expect(notAString.status).toBe("rejected");
       expect(notAString.errorMessage ?? "").toContain("agent, when given");
@@ -824,9 +847,11 @@ describe("registered-agent listing + actionable refusals (pitfall #2)", () => {
        * Counterfactual: put absent back through the malformed gate and this goes red while every
        * case in the test above stays green. That pair is the whole specification.
        */
-      const result = await dispatch(
-        { task: "ping", agentScope: "project" } as unknown as DispatchInput,
-        { callId: 20, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+      const result = asResult(
+        await dispatch(
+          { wait: true, task: "ping", agentScope: "project" } as unknown as DispatchInput,
+          { callId: 20, cwd: dir, depth: 0, maxDispatchDepth: 3 },
+        ),
       );
 
       expect(
@@ -851,7 +876,7 @@ describe("registered-agent listing + actionable refusals (pitfall #2)", () => {
       spawnRecorder.calls.length = 0;
 
       const result = await dispatch(
-        { agent: "ghost", task: "ping", agentScope: "project" },
+        { wait: true, agent: "ghost", task: "ping", agentScope: "project" },
         { callId: 22, cwd: dir, depth: 0, maxDispatchDepth: 3 },
       );
       expect(result.status).toBe("rejected");
@@ -875,7 +900,7 @@ describe("registered-agent listing + actionable refusals (pitfall #2)", () => {
     try {
       spawnRecorder.calls.length = 0;
       const result = await dispatch(
-        { agent: "ghost", task: "ping", agentScope: "project" },
+        { wait: true, agent: "ghost", task: "ping", agentScope: "project" },
         { callId: 23, cwd: dir, depth: 0, maxDispatchDepth: 3 },
       );
       expect(result.status).toBe("rejected");
@@ -1103,7 +1128,7 @@ describe("foreground close: the child's stderr reaches the outcome (production w
       };
 
       const result = await dispatch(
-        { agent: "stderr-probe", task: "ping", agentScope: "project" },
+        { wait: true, agent: "stderr-probe", task: "ping", agentScope: "project" },
         { callId: 31, cwd: dir, depth: 0, maxDispatchDepth: 3 },
       );
 
@@ -1134,7 +1159,7 @@ describe("foreground close: the child's stderr reaches the outcome (production w
       spawnRecorder.nextChild = { stderr: authStderr, exitCode: 1 };
 
       const result = await dispatch(
-        { agent: "stderr-probe", task: "ping", agentScope: "project" },
+        { wait: true, agent: "stderr-probe", task: "ping", agentScope: "project" },
         { callId: 32, cwd: dir, depth: 0, maxDispatchDepth: 3 },
       );
 
@@ -1159,7 +1184,7 @@ describe("foreground close: the child's stderr reaches the outcome (production w
       spawnRecorder.nextChild = { stderr: TRUNCATION_STDERR, exitCode: 0 };
 
       const result = await dispatch(
-        { agent: "stderr-probe", task: "ping", agentScope: "project" },
+        { wait: true, agent: "stderr-probe", task: "ping", agentScope: "project" },
         { callId: 33, cwd: dir, depth: 0, maxDispatchDepth: 3 },
       );
 
@@ -1223,7 +1248,7 @@ describe("dispatch depth propagation (ADR-0016 Recursive section)", () => {
       );
       spawnRecorder.calls.length = 0;
       const result = await dispatch(
-        { agent: "env-probe", task: "ping", agentScope: "project" },
+        { wait: true, agent: "env-probe", task: "ping", agentScope: "project" },
         { callId: 7, cwd: dir, depth: 2, maxDispatchDepth: 3 },
       );
       expect(spawnRecorder.calls).toHaveLength(1);
@@ -1243,7 +1268,7 @@ describe("dispatch depth propagation (ADR-0016 Recursive section)", () => {
   test("a dispatch at the depth limit rejects with 'dispatch depth limit reached' and never spawns", async () => {
     spawnRecorder.calls.length = 0;
     const result = await dispatch(
-      { agent: "anyone", task: "ping" },
+      { wait: true, agent: "anyone", task: "ping" },
       { callId: 8, cwd: process.cwd(), depth: 3, maxDispatchDepth: 3 },
     );
     expect(result.status).toBe("rejected");
@@ -1260,7 +1285,7 @@ describe("dispatch depth propagation (ADR-0016 Recursive section)", () => {
     // reason — so the only refusal left on this path is the PTC-off one, and it is marked
     // "not started" like every other refusal.
     const result = await dispatch(
-      { agent: "anyone", task: "ping" },
+      { wait: true, agent: "anyone", task: "ping" },
       { callId: 10, cwd: process.cwd(), depth: 0, maxDispatchDepth: 3 },
       { dispatchEnabled: false },
     );
@@ -1274,14 +1299,14 @@ describe("dispatch depth propagation (ADR-0016 Recursive section)", () => {
     spawnRecorder.calls.length = 0;
     const ctx = { callId: 9, cwd: process.cwd(), depth: 0, maxDispatchDepth: 3 };
 
-    const foreground = await dispatch({ agent: "anyone", task: "ping" }, ctx, {
+    const foreground = await dispatch({ wait: true, agent: "anyone", task: "ping" }, ctx, {
       dispatchEnabled: false,
     });
     expect(foreground.status).toBe("rejected");
     expect(foreground.errorMessage).toBe(DISPATCH_DISABLED_MESSAGE);
     expect(foreground.started).toBe(false);
 
-    const background = await dispatch({ agent: "anyone", task: "ping", background: true }, ctx, {
+    const background = await dispatch({ agent: "anyone", task: "ping", wait: false }, ctx, {
       dispatchEnabled: false,
     });
     expect(background).toMatchObject({
@@ -1302,7 +1327,7 @@ describe("dispatch depth propagation (ADR-0016 Recursive section)", () => {
     // is WHICH refusal came back — not whether the dispatch went on to succeed.
     spawnRecorder.calls.length = 0;
     const result = await dispatch(
-      { agent: "anyone", task: "ping" },
+      { wait: true, agent: "anyone", task: "ping" },
       { callId: 10, cwd: process.cwd(), depth: 0, maxDispatchDepth: 3 },
     );
     expect(result.errorMessage).not.toBe(DISPATCH_DISABLED_MESSAGE);
@@ -1319,7 +1344,7 @@ describe("dispatch depth propagation (ADR-0016 Recursive section)", () => {
         "---\nname: env-probe\n---\nProbe.\n",
       );
       const result = await dispatch(
-        { agent: "env-probe", task: "ping", agentScope: "project" },
+        { wait: true, agent: "env-probe", task: "ping", agentScope: "project" },
         { callId: 9, cwd: dir, depth: 0, maxDispatchDepth: 3 },
       );
       expect(result.status).toBe("rejected");

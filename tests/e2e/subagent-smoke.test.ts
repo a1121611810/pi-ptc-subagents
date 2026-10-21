@@ -26,9 +26,27 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DISPATCH_CONTEXT } from "../helpers/ptc.ts";
-import { dispatch } from "../../src/runtime/dispatch.ts";
-import { DispatchSlotCounter, type DispatchInput } from "../../src/runtime/dispatch.ts";
+import { dispatch, isDispatchHandle } from "../../src/runtime/dispatch.ts";
+import {
+  DispatchSlotCounter,
+  type DispatchInput,
+  type DispatchResult,
+} from "../../src/runtime/dispatch.ts";
+import type { DispatchHandle } from "../../src/runtime/task-registry.ts";
 import { WEB_DS_SEARCH_TOOL_NAME } from "../../src/search/contract.ts";
+
+/**
+ * The outcome of a call that must be a RESULT.
+ *
+ * ADR-0055: a call that does not wait can resolve with a HANDLE, so the union is real. A
+ * refusal is a result on both modes, so narrowing is what says "this one was refused".
+ */
+function asResult(value: DispatchHandle | DispatchResult): DispatchResult {
+  if (isDispatchHandle(value)) {
+    throw new Error("expected a DispatchResult, got a DispatchHandle");
+  }
+  return value;
+}
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FAKE_PI = join(HERE, "fixtures", "fake-pi.mjs");
@@ -84,7 +102,7 @@ async function withFakePi<T>(body: (cwd: string) => Promise<T>): Promise<T> {
 /** One foreground dispatch with nothing in the way. */
 async function dispatchOnce(cwd: string, agent: string) {
   return await dispatch(
-    { agent, task: "say PONG", agentScope: "both", cwd },
+    { wait: true, agent, task: "say PONG", agentScope: "both", cwd },
     { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
     { slots: new DispatchSlotCounter(2), taskRegistry: undefined },
   );
@@ -100,7 +118,7 @@ async function dispatchOnce(cwd: string, agent: string) {
  */
 async function dispatchGeneralist(cwd: string) {
   return await dispatch(
-    { task: "say PONG", agentScope: "both", cwd },
+    { wait: true, task: "say PONG", agentScope: "both", cwd },
     { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
     { slots: new DispatchSlotCounter(2), taskRegistry: undefined },
   );
@@ -147,7 +165,7 @@ describe("a real dispatch works when an agent is registered", () => {
       const result = await dispatchOnce(cwd, "smoke");
       expect(result.status).toBe("fulfilled");
       const userScoped = await dispatch(
-        { agent: "smoke", task: "say PONG", agentScope: "user", cwd },
+        { wait: true, agent: "smoke", task: "say PONG", agentScope: "user", cwd },
         { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
         { slots: new DispatchSlotCounter(2), taskRegistry: undefined },
       );
@@ -217,7 +235,14 @@ describe("a read-only tier is decided at the call site (ADR-0041)", () => {
 
   async function dispatchReadOnly(cwd: string, readOnly: "strict" | "lenient", agent?: string) {
     return await dispatch(
-      { task: "say PONG", agentScope: "both", cwd, readOnly, ...(agent ? { agent } : {}) },
+      {
+        wait: true,
+        task: "say PONG",
+        agentScope: "both",
+        cwd,
+        readOnly,
+        ...(agent ? { agent } : {}),
+      },
       { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
       { slots: new DispatchSlotCounter(2), taskRegistry: undefined },
     );
@@ -236,7 +261,7 @@ describe("a read-only tier is decided at the call site (ADR-0041)", () => {
   test("no tier leaves the child's tool list exactly as it was", async () => {
     await withFakePi(async (cwd) => {
       const result = await dispatch(
-        { task: "say PONG", cwd },
+        { wait: true, task: "say PONG", cwd },
         { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
         { slots: new DispatchSlotCounter(2) },
       );
@@ -274,7 +299,7 @@ describe("a read-only tier is decided at the call site (ADR-0041)", () => {
      */
     await withFakePi(async (cwd) => {
       const result = await dispatch(
-        { task: "say PONG", agentScope: "both", cwd, readOnly: "strict" },
+        { wait: true, task: "say PONG", agentScope: "both", cwd, readOnly: "strict" },
         { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
         { slots: new DispatchSlotCounter(2), taskRegistry: undefined, searchEnabled: true },
       );
@@ -320,10 +345,12 @@ describe("a read-only tier is decided at the call site (ADR-0041)", () => {
         // `as unknown as DispatchInput`: the point of the row is a VALUE the declared type
         // forbids. Casting to `never` would also erase the return type, and `started` /
         // `errorMessage` are the whole claim.
-        const result = await dispatch(
-          { task: "say PONG", cwd, readOnly: notATier } as unknown as DispatchInput,
-          { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
-          { slots: new DispatchSlotCounter(2) },
+        const result = asResult(
+          await dispatch(
+            { wait: true, task: "say PONG", cwd, readOnly: notATier } as unknown as DispatchInput,
+            { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
+            { slots: new DispatchSlotCounter(2) },
+          ),
         );
 
         expect(result.status, `readOnly: ${String(notATier)} refused, not coerced`).toBe(
@@ -364,7 +391,7 @@ describe("a read-only tier is decided at the call site (ADR-0041)", () => {
      */
     await withFakePi(async (cwd) => {
       const untiered = await dispatch(
-        { task: "say PONG", cwd },
+        { wait: true, task: "say PONG", cwd },
         { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
         { slots: new DispatchSlotCounter(2) },
       );
@@ -450,16 +477,18 @@ describe("a read-only tier is decided at the call site (ADR-0041)", () => {
      * "asked for nothing, outcome unknown".
      */
     await withFakePi(async (cwd) => {
-      const none = await dispatch(
-        { task: "say PONG", cwd },
-        { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
-        { slots: new DispatchSlotCounter(2) },
+      const none = asResult(
+        await dispatch(
+          { wait: true, task: "say PONG", cwd },
+          { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
+          { slots: new DispatchSlotCounter(2) },
+        ),
       );
       expect(none.status).toBe("fulfilled");
       expect(Object.hasOwn(none, "readOnlyTier"), "no tier asked for, none reported").toBe(false);
 
       const explicitlyNull = await dispatch(
-        { task: "say PONG", cwd, readOnly: null } as unknown as DispatchInput,
+        { wait: true, task: "say PONG", cwd, readOnly: null } as unknown as DispatchInput,
         { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
         { slots: new DispatchSlotCounter(2) },
       );
@@ -494,20 +523,29 @@ describe("a read-only tier is decided at the call site (ADR-0041)", () => {
      * of run, which the `fulfilled` assertion catches.
      */
     await withFakePi(async (cwd) => {
-      const none = await dispatch(
-        { task: "say PONG", cwd },
-        { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
-        { slots: new DispatchSlotCounter(2) },
+      const none = asResult(
+        await dispatch(
+          { wait: true, task: "say PONG", cwd },
+          { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
+          { slots: new DispatchSlotCounter(2) },
+        ),
       );
       expect(none.status).toBe("fulfilled");
 
       for (const askedForNothing of [null] as const) {
-        const explicitlyNo = await dispatch(
-          // Cast: `null` is not in `DispatchInput["readOnly"]`, and the fact that the wire can
-          // carry it anyway is why the read-point guard has an `unknown` parameter at all.
-          { task: "say PONG", cwd, readOnly: askedForNothing } as unknown as DispatchInput,
-          { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
-          { slots: new DispatchSlotCounter(2) },
+        const explicitlyNo = asResult(
+          await dispatch(
+            // Cast: `null` is not in `DispatchInput["readOnly"]`, and the fact that the wire can
+            // carry it anyway is why the read-point guard has an `unknown` parameter at all.
+            {
+              wait: true,
+              task: "say PONG",
+              cwd,
+              readOnly: askedForNothing,
+            } as unknown as DispatchInput,
+            { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
+            { slots: new DispatchSlotCounter(2) },
+          ),
         );
 
         expect(

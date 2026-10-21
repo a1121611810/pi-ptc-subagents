@@ -204,14 +204,14 @@ describe("ADR-0057: stopping a task that is still waiting for a slot withdraws i
       // One slot, and it is taken: the cap is reached by the very next call.
       const h = createHarness({ limit: 1 });
       const running = dispatch(
-        { agent: AGENT, task: "first", agentScope: "project" },
+        { wait: true, agent: AGENT, task: "first", agentScope: "project" },
         { ...ctx(1), cwd: dir },
         h.deps,
       );
       await waitFor(() => h.lifecycle.spawnCount > 0);
 
       const queued = dispatch(
-        { agent: AGENT, task: "second", agentScope: "project" },
+        { wait: true, agent: AGENT, task: "second", agentScope: "project" },
         { ...ctx(2), cwd: dir },
         h.deps,
       );
@@ -259,7 +259,7 @@ describe("ADR-0057: a task that is already running is not canceled", () => {
       const h = createHarness({ limit: 1 });
       // A background dispatch returns its handle at once, so the task is up while the test runs.
       const spawned = await dispatch(
-        { agent: AGENT, task: "first", agentScope: "project", background: true },
+        { agent: AGENT, task: "first", agentScope: "project", wait: false },
         { ...ctx(1), cwd: dir },
         h.deps,
       );
