@@ -3,7 +3,9 @@
  * Gate: the reader-facing documents must still say what the code does.
  *
  * A sweep of the four projected documents found **48** machine-checkable claims about the code.
- * Twenty-four are checkable with what this repository already has. This gate binds the
+ * **Eighteen** are checkable with what this repository already has — the script prints its own
+ * count, and it moves as bindings come and go (a claim whose subject is deleted goes with it).
+ * This gate binds the
  * drift-plausible subset to **named constants**, because that is the failure worth catching: a
  * default moves, a literal is reworded, a key is renamed, and the prose keeps describing the
  * previous code. A reader has no way to check a landing page, which makes a documentation site a
