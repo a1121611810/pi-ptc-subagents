@@ -2,6 +2,8 @@
 
 Status: accepted (2026-10-21). 修订：[ADR-0022](./0022-background-dispatch.md) §"What we add" 3 与 6、[ADR-0023](./0023-background-task-ownership.md) 的记录归属范围、[ADR-0050](./0050-ptc-off-stops-new-dispatch.md) 决定 3。
 
+> **Amended by [ADR-0057](./0057-cancellation-only-reaches-queued-tasks.md) (2026-10-21): the gap this record named is closed — `src/index.ts` now asks whether the session has ANY task record (`taskFaceVisible`) rather than how many tasks are in flight, so "PTC off plus a finished record" keeps the lifecycle face in the model's face. The rule itself is unchanged.**
+
 > **Amended by [ADR-0052](./0052-the-two-doors-share-one-prefix.md) (2026-10-21): the two task doors are renamed — `pi.dispatch` → `pi_task_ptc` (the PTC door, a binding inside a program) and `ptc_subagent` → `pi_task_codemode` (the codemode door, reachable from a `codemode` script) — with no alias and no compatibility shim. This record's decisions stand unchanged; read its `pi.dispatch` / `ptc_subagent` as those names.**
 
 > **Amended by [ADR-0054](./0054-the-two-doors-give-one-object.md) (2026-10-21): the reason this record gave for NOT calling the foreground result's id `taskId` is gone — the door now tells a handle from a result by `status` (`isDispatchHandle`), not by the presence of an id, so the two shapes can no longer be confused. The fields keep the names this record gave them (`recordId` / `recordLabel` on the result, `taskId` / `label` on the handle); unifying the two names is now two lines in `src/runtime/dispatch.ts` and rides along with the ticket that owns that file.**

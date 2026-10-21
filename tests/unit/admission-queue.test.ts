@@ -428,6 +428,10 @@ describe("ADR-0056: an aborted foreground run withdraws its queued request", () 
       // The withdrawal leaves a trace: the record says it was canceled.
       const canceled = await h.registry.get(queuedId);
       expect(canceled?.status, "the withdrawn task is marked canceled").toBe("canceled");
+      expect(
+        canceled?.stopReason,
+        "and the reason is on the record — it did not silently disappear",
+      ).toBe("the dispatch was aborted while it waited for a concurrency slot");
       expect(h.slots.queued, "and it is no longer in the queue").toBe(0);
 
       // Freeing the slot must NOT start the withdrawn child.

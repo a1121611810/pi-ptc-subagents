@@ -849,9 +849,6 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
    * `setActiveTools` is the only lever pi leaves for this: a registered tool cannot be
    * unregistered (the mode narrows the loadout the same way), and the three are registered at
    * session_start, so they are active until this runs.
-   *
-   * It never overlaps the narrowing: turning PTC off turns the narrowing off too, so the loadout
-   * being narrowed here is always the restored one.
    */
   const applyTaskToolVisibility = (hidden: boolean): void => {
     if (taskToolsHidden === hidden) return;
@@ -868,10 +865,9 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
   };
 
   /**
-   * How many background tasks are still running in this session (ADR-0050).
-   *
-   * The off switch has to know one thing: whether something is already running. That is what
-   * decides whether the task tools stay in the model's face, and what the warning is about.
+   * How many background tasks are still running in this session (ADR-0050) — the off switch
+   * asks this to word its warning: the running ones are NOT affected. The FACE is another
+   * question (ADR-0053): does the session have a record at all?
    */
   const countInFlightTasks = async (): Promise<number> => {
     const records = await background.registry.query({ status: ["running", "stopping"] });
@@ -916,12 +912,11 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
   /**
    * Restore the dispatch switch from the session record (ADR-0050).
    *
-   * The same three properties ADR-0043's `why` restore has: effective for the NEXT dispatch (the
-   * one shared deps object every front reads), durable for the session (the entry itself), and
-   * nothing else (no file is written, and the narrowing is not touched here).
+   * The same three properties ADR-0043's `why` restore has: effective for the NEXT dispatch,
+   * durable for the session (the entry itself), and nothing else (no file is written).
    *
-   * The task tools follow the switch, and they are withheld only when there is nothing for them
-   * to do — a task that is still running keeps them, because it has to stay stoppable.
+   * The task tools follow the switch, and they are withheld only when the session has NO task
+   * record (ADR-0053): a record — running or finished — is something for them to do.
    */
   const applyPersistedDispatch = async (
     persisted: { enabled: boolean } | undefined,
@@ -929,8 +924,9 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     if (persisted === undefined) return;
     dispatchEnabled = persisted.enabled;
     background.dispatchDeps.dispatchEnabled = persisted.enabled;
-    const inFlight = persisted.enabled ? 0 : await countInFlightTasks();
-    applyTaskToolVisibility(!persisted.enabled && inFlight === 0);
+    // ADR-0053: the face follows the RECORDS, not the in-flight count.
+    const faceVisible = background.registry.taskFaceVisible();
+    applyTaskToolVisibility(!persisted.enabled && !faceVisible);
   };
 
   pi.registerCommand("ptc", {
@@ -955,15 +951,19 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
         if (mode.enabled) {
           exitMode(ctx, { announce: false, customType: PTC_MODE_ENTRY_TYPE });
         }
-        // The task tools stay exactly as long as there is something for them to do.
+        // ADR-0057: the QUEUED ones are pulled out — a queued task has no child to signal.
+        const withdrawn = await background.withdrawQueuedTasks(PTC_OFF_WITHDRAW_REASON);
         const inFlight = await countInFlightTasks();
-        applyTaskToolVisibility(inFlight === 0);
+        applyTaskToolVisibility(!background.registry.taskFaceVisible());
         paintStatus(ctx);
         const one = inFlight === 1;
+        const queued = withdrawn.length;
         ctx.ui.notify(
-          inFlight > 0
-            ? `PTC off — no new child can be started from here on. The ${inFlight} background ${one ? "task" : "tasks"} already running ${one ? "is" : "are"} NOT affected: ${one ? "it keeps" : "they keep"} running and stay manageable through ptc_task_list / ptc_task_output / ptc_task_stop.`
-            : "PTC off — no new child can be started from here on, and the background-task tools are gone because nothing was running.",
+          `PTC off — no new child can be started from here on.` +
+            (queued > 0 ? ` ${queued} queued task${queued === 1 ? "" : "s"} withdrawn.` : "") +
+            (inFlight > 0
+              ? ` The ${inFlight} background ${one ? "task" : "tasks"} already running ${one ? "is" : "are"} NOT affected: ${one ? "it keeps" : "they keep"} running and ${one ? "stays" : "stay"} manageable through ptc_task_list / ptc_task_output / ptc_task_stop.`
+              : " The background-task tools are gone because the session has no task record."),
           "info",
         );
         return;
@@ -1670,3 +1670,11 @@ export const PTC_WHY_ENTRY_TYPE = "ptc-why";
  * has nothing to say about the loadout.
  */
 export const PTC_DISPATCH_ENTRY_TYPE = "ptc-dispatch";
+
+/**
+ * The reason recorded on a task that `/ptc off` pulled out of the admission queue (ADR-0057).
+ *
+ * It lands on the record's `stopReason`, so "the session stopped accepting new dispatches" is
+ * readable in the task list instead of the task having silently stopped existing.
+ */
+export const PTC_OFF_WITHDRAW_REASON = "the session stopped accepting new dispatches (/ptc off)";

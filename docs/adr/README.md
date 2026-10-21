@@ -59,6 +59,7 @@ ADRs for pi-ptc-subagents, per `docs/agents/domain.md` (single-context repo).
 | [0053](./0053-every-dispatch-is-a-task.md)                 | Every dispatch is a task: the foreground front registers a record, persists its output, and the face follows  | accepted              |
 | [0054](./0054-the-two-doors-give-one-object.md)            | The two task doors give one object: the raw result, no projection, and neither door throws                    | accepted              |
 | [0056](./0056-admission-queues-instead-of-rejecting.md)    | Admission queues instead of refusing: FIFO, unbounded, and the queue creates the record                       | accepted              |
+| [0057](./0057-cancellation-only-reaches-queued-tasks.md)   | Cancellation reaches only what has not started: a queued task is withdrawn, a running one takes the ladder    | accepted              |
 | [0060](./0060-ptc-programs-run-in-strict-mode.md)          | PTC programs run in strict mode, matching upstream DSH                                                        | accepted              |
 
 Numbering gaps are deliberate: 0001/0006 were reserved while wayfinder map #7 was charting and dropped when G1 resolved; keeping their slots means every cross-reference in the map and its tickets stays valid.

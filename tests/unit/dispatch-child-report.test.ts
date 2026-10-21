@@ -288,16 +288,15 @@ const VERSION_IS_AT_LEAST_0_99_0 = ((): boolean => {
  * `usage` is host-observed and arrives later, which is the point of the split.
  */
 const VALID_REPORT: ChildReportPayload = {
-  summary: "A saturated counter refuses before any agent is discovered, so nothing is spawned.",
+  summary: "The agent is resolved before the admission, and over the cap the request waits.",
   findings: [
     {
-      what: "the concurrency gate precedes discoverAgent",
-      evidence: "the slot acquire returns dispatchConcurrencyLimitReached() before discovery",
+      what: "the admission is taken after agent discovery",
+      evidence: "resolveDispatchAgent runs before slots.acquire, so an unknown agent fails at once",
     },
     {
-      what: "the refusal reuses the foreground wording verbatim",
-      evidence:
-        "backgroundDispatchConcurrencyLimitReached() spreads dispatchConcurrencyLimitReached()",
+      what: "over the cap the request waits instead of being refused",
+      evidence: "DispatchSlotCounter.acquire queues the holder and returns `queued`",
     },
   ],
   files_touched: ["src/runtime/dispatch.ts", "tests/unit/dispatch-child-report.test.ts"],

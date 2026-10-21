@@ -2,6 +2,8 @@
 
 status: accepted (2026-10-21). 修订：[ADR-0010](./0010-ptc-default-mode.md) §Decision 5、[ADR-0022](./0022-background-dispatch.md) §"What we add" 6 与 §"What we deliberately don't add" 1。
 
+> **Amended by [ADR-0057](./0057-cancellation-only-reaches-queued-tasks.md) (2026-10-21): `/ptc off` now has three parts — it stops accepting new dispatches, it PULLS THE QUEUED ONES OUT of the admission queue, and the ones already running are unaffected as before; and the task face follows the RECORDS rather than the in-flight count, so a session that has a finished record keeps the three task tools in the model's face.**
+
 > **修订：[ADR-0051](./0051-the-surface-names-the-orchestrator.md)（2026-10-21）：两个表面值改名——`full` → `full_ptc`、`subagents` → `codemode_ptc`——且「表面」现在指**哪个编排器对模型负责**。本记录的决定不变；读到它的 `full` / `subagents` 时，读作那两个新名字。**
 
 > **修订：[ADR-0053](./0053-every-dispatch-is-a-task.md)（2026-10-21）：决定 3 的露面条件改了。** 原文写「PTC 关着**且**没有在飞任务 ⇒ 藏起来」。现在那条条件由「有没有在飞任务」换成「**这个会话有没有任务记录**」——因为任务记录是派发的唯一痕迹，所以「模型面前有没有那三个工具」不再是独立规则，而是「这个会话派过没有」的后果：没有记录 ⇒ 第一次派发之前 ⇒ 藏起来；有记录 ⇒ 在模型面前。这条改动同时覆盖了**PTC 开着**的那一格：今天 PTC 开着时那三个工具一直在模型面前（哪怕这个会话一个任务都没有），改动之后它们与「有没有记录」对齐。
