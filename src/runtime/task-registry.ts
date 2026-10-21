@@ -163,6 +163,11 @@ export type TaskCommand =
       outputBytes?: number;
       outputPreview?: string;
     }
+  /**
+   * The model stop. `running -> stopping` for a task with a child to signal; ADR-0057's
+   * `queued -> canceled` for one that has not started yet (there is no process to signal, so
+   * the task is withdrawn from the admission queue instead).
+   */
   | { kind: "stop"; taskId: ULID; reason: string }
   | { kind: "reconcile-lost"; taskId: ULID; reason: LostReason }
   /**
@@ -283,6 +288,26 @@ export interface TaskRegistry {
   reconcileLostTasks(): Promise<TaskRecord[]>;
 }
 
+/**
+ * ADR-0057: the admission queue a `queued` record waits in.
+ *
+ * The shape is exactly `DispatchSlotCounter.cancelQueued` — the counter satisfies it
+ * structurally, so the wiring site hands the counter over without an adapter. Keeping the
+ * registry's dependency this narrow is what lets the registry decide "this task is withdrawn"
+ * without knowing anything about slots, children or signals.
+ */
+export interface TaskQueue {
+  /**
+   * Withdraw one waiting holder from the queue.
+   *
+   * Returns `true` when the holder was still WAITING — so it will never start — and `false`
+   * when it was not in the queue: it already holds a slot, or it was never admitted. That
+   * answer is libuv's cancel split: a work item still in the queue is removed (the call
+   * returns 0), an item a worker has already taken is busy (the call returns a busy code).
+   */
+  cancelQueued(holder: string): boolean;
+}
+
 /** Registry-level dependencies (used by commands that have no TransitionContext). */
 export interface TaskRegistryOptions {
   clock: () => number;
@@ -295,6 +320,15 @@ export interface TaskRegistryOptions {
   owner?: TaskOwner;
   /** ADR-0023: pid liveness probe for the startup reconcile; defaults to {@link isPidAlive}. */
   isPidAlive?: (pid: number) => boolean;
+  /**
+   * ADR-0057: the admission queue this registry's `queued` records wait in.
+   *
+   * Absent means "no queue is wired here": the registry still records the withdrawal
+   * (`queued -> canceled`), it just cannot take the task out of a wait list. Production wires
+   * the session's one `DispatchSlotCounter` here, so the queue and the registry are the same
+   * data — the queue IS the set of `queued` records (ADR-0056).
+   */
+  queue?: TaskQueue;
 }
 
 // ---------------------------------------------------------------------------
@@ -311,8 +345,9 @@ export interface TaskRegistryOptions {
  *
  * ADR-0056 adds the `queued` row. `queued -> running` is the dequeue: the task took a
  * concurrency slot and its child is about to start. `queued -> canceled` is a withdrawn queue
- * entry (the task left the queue without ever running). `queued -> lost` is the recovery edge,
- * for a session that died with a task still waiting.
+ * entry (the task left the queue without ever running) — ADR-0057 makes the model stop take
+ * that edge, and a foreground run that is aborted while waiting takes it too.
+ * `queued -> lost` is the recovery edge, for a session that died with a task still waiting.
  */
 const ALLOWED_TRANSITIONS: Record<TaskStatus, readonly TaskStatus[]> = {
   queued: ["running", "canceled", "lost"],
@@ -479,6 +514,8 @@ export class DefaultTaskRegistry implements TaskRegistry {
   readonly #owner: TaskOwner | undefined;
   /** ADR-0023: pid liveness probe backing the owner-scoped startup reconcile. */
   readonly #isPidAlive: (pid: number) => boolean;
+  /** ADR-0057: the admission queue this registry's `queued` records wait in. */
+  readonly #queue: TaskQueue | undefined;
   /** Per-instance monotonic id minter (ulid.ts); its state is not shared module-globally. */
   readonly #ulid: UlidMinter;
   /** Registered in-process transition observers (issue #68 §1). */
@@ -514,6 +551,7 @@ export class DefaultTaskRegistry implements TaskRegistry {
     this.#logger = options.logger;
     this.#owner = options.owner;
     this.#isPidAlive = options.isPidAlive ?? isPidAlive;
+    this.#queue = options.queue;
     this.#ulid = createUlidMinter({ now: () => this.#clock() });
   }
 
@@ -750,6 +788,12 @@ export class DefaultTaskRegistry implements TaskRegistry {
   /**
    * Shorthand for `running -> stopping`. It deliberately does not proceed to `canceled`:
    * ADR-0022 §8 makes the child's close event the writer of the terminal `canceled` state.
+   *
+   * ADR-0057: a task that has NOT started is WITHDRAWN instead — `queued -> canceled`. There
+   * is no process to signal, so the signal ladder does not apply to it: the queue entry goes
+   * and the child never comes up. That is the same split libuv's cancel makes — a work
+   * item still in the queue is removed (the call returns 0), one a worker has already taken
+   * is busy (the call returns a busy code) and keeps running.
    */
   async #stop(
     command: Extract<TaskCommand, { kind: "stop" }>,
@@ -766,6 +810,15 @@ export class DefaultTaskRegistry implements TaskRegistry {
         cursor: subscription?.cursor ?? record.id,
         fromStatus: record.status,
       };
+    }
+    if (record.status === "queued") {
+      // ADR-0057: the RECORD first, the queue second. A slot that frees up between the two
+      // hands itself to a task whose record is already terminal, and the dispatch side then
+      // refuses to start it (`queued -> running` is not a legal edge out of `canceled`). The
+      // other order would leave a window in which a withdrawn task still starts.
+      const result = await this.#apply(record, "canceled", ctx, { stopReason: command.reason });
+      this.#queue?.cancelQueued(command.taskId);
+      return result;
     }
     this.#assertAllowed(record, "stopping");
     return this.#apply(record, "stopping", ctx, { stopReason: command.reason });

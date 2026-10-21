@@ -46,6 +46,10 @@ import {
 import type { PtcTaskListDetails } from "../../src/tools/ptc-task.ts";
 
 const TASK_RUNNING = "01JBZ000000000000000000001" as ULID;
+/** A task that is still waiting for a concurrency slot (ADR-0057). */
+const TASK_QUEUED = "01JBZ000000000000000000002" as ULID;
+/** A task that has already finished — a record, but nothing running. */
+const TASK_FINISHED = "01JBZ000000000000000000003" as ULID;
 const OWNER = "run-prev";
 const AGENT = "bg-extension-probe";
 const AGENT_MD = "---\nname: " + AGENT + "\n---\nYou probe.\n";
@@ -128,6 +132,50 @@ async function seedForeignRunningTask(
       record: spawnRecord(owner),
     },
     { clock: () => 1_000, callerId: owner },
+  );
+}
+
+/**
+ * ADR-0057: seed a task that is still WAITING for a concurrency slot, owned by THIS runtime
+ * instance (the same pid and bootMs the runtime mints), so `/ptc off` is allowed to withdraw it
+ * — the ownership rule of ADR-0023 says a sibling's queued record is not ours to touch.
+ */
+async function seedQueuedTask(
+  storage: InMemoryTaskStorage,
+  taskId: ULID,
+  owner: string,
+  runtimeOwner: { pid: number; bootMs: number },
+): Promise<void> {
+  const registry = createTaskRegistry(storage, { clock: () => 1_000, owner: runtimeOwner });
+  await registry.transition(
+    {
+      kind: "spawn",
+      status: "queued",
+      handle: { taskId, label: "seeded task", status: "queued" },
+      record: spawnRecord(owner),
+    },
+    { clock: () => 1_000, callerId: owner },
+  );
+}
+
+/** Seed a task that has ALREADY finished — a record, but nothing running. */
+async function seedFinishedTask(
+  storage: InMemoryTaskStorage,
+  taskId: ULID,
+  owner: string,
+): Promise<void> {
+  const registry = createTaskRegistry(storage, { clock: () => 1_000 });
+  await registry.transition(
+    {
+      kind: "spawn",
+      handle: { taskId, label: "seeded task", status: "running" },
+      record: spawnRecord(owner),
+    },
+    { clock: () => 1_000, callerId: owner },
+  );
+  await registry.transition(
+    { kind: "transition", taskId, to: "succeeded" },
+    { clock: () => 2_000, callerId: owner },
   );
 }
 
@@ -261,6 +309,62 @@ describe("always-on registration", () => {
     const said = stub.notifications.at(-1)?.message ?? "";
     expect(said).toContain("NOT affected");
     expect(said).toContain("1 background task");
+  });
+
+  // -------------------------------------------------------------------------
+  //  ADR-0057: `/ptc off` pulls the QUEUED tasks out
+  // -------------------------------------------------------------------------
+
+  test("/ptc off withdraws the QUEUED tasks and leaves the running ones alone", async () => {
+    const { stub, storage } = await wiredStub();
+    // The runtime mints its owner identity from the injected clock, so a record seeded with the
+    // same pid and bootMs is OWNED by this runtime — and ADR-0023 says only our own records are
+    // ours to withdraw.
+    await seedQueuedTask(storage, TASK_QUEUED, OWNER, { pid: process.pid, bootMs: 2_000 });
+    await seedForeignRunningTask(storage, TASK_RUNNING, OWNER, { pid: process.pid, bootMs: 1 });
+    const ctx = stubContext(stub);
+    await stub.emit("session_start", ctx);
+
+    const command = stub.commands.get("ptc");
+    if (command === undefined) throw new Error("ptc command missing");
+    await command.handler("off", ctx);
+
+    // ADR-0057: the queued task is withdrawn — it has no child to signal, so it is pulled out of
+    // the queue and its record says so. It is NOT left `queued`, and it is not silently gone.
+    const registry = createTaskRegistry(storage, { clock: () => 2_000 });
+    const queued = await registry.get(TASK_QUEUED);
+    expect(queued?.status, "the queued task was withdrawn").toBe("canceled");
+    expect(queued?.stopReason, "and the withdrawal left a trace on the record").toContain(
+      "/ptc off",
+    );
+
+    // The RUNNING one is untouched: "off" is about what starts from here on.
+    const running = await registry.get(TASK_RUNNING);
+    expect(running?.status, "the running task is not disturbed").toBe("running");
+
+    // The user is told both halves: the queued ones went, the running ones did not.
+    const said = stub.notifications.at(-1)?.message ?? "";
+    expect(said, "the user is told the queued task was withdrawn").toContain(
+      "1 queued task withdrawn",
+    );
+    expect(said, "and that the running one is NOT affected").toContain("NOT affected");
+  });
+
+  test("/ptc off keeps the three task tools when the session has a FINISHED record", async () => {
+    const { stub, storage } = await wiredStub();
+    // A record that has already finished: nothing is running, but the session HAS a record, so
+    // there is still something for the task tools to do (ADR-0053).
+    await seedFinishedTask(storage, TASK_FINISHED, OWNER);
+    const ctx = stubContext(stub);
+    await stub.emit("session_start", ctx);
+
+    const command = stub.commands.get("ptc");
+    if (command === undefined) throw new Error("ptc command missing");
+    await command.handler("off", ctx);
+
+    // The face follows the RECORDS, not the in-flight count: a finished record is still
+    // something to list, read and stop, so the three tools stay in the model's face.
+    for (const name of TASK_TOOLS) expect(stub.active).toContain(name);
   });
 
   test("the factory body never calls pi.* (R2): it only subscribes handlers", () => {

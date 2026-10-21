@@ -88,16 +88,18 @@ export type {
 const DISPATCH_LIFECYCLE: ChildProcessLifecycle = new RealChildProcessLifecycle();
 
 /**
- * One entry of the admission queue (ADR-0056).
+ * One entry of the admission queue (ADR-0056). `holder` is the task id waiting for a slot;
+ * `onGranted` is what starts the child once the slot is free. The counter NEVER calls
+ * `onGranted` itself — handing the slot over and starting a child are two different jobs, and
+ * a callback that threw inside `release()` would take the releasing task down with it.
  *
- * `holder` is the task id waiting for a slot; `onGranted` is what starts the child once the
- * slot is free. The counter NEVER calls `onGranted` itself — handing the slot over and
- * starting a child are two different jobs, and a callback that threw inside `release()` would
- * take the releasing task down with it.
+ * ADR-0057 adds `onWithdrawn`: what ends the wait when the entry is pulled OUT of the queue
+ * instead of being handed a slot — a withdrawn task never starts.
  */
 export interface SlotWaiter {
   readonly holder: string;
   readonly onGranted: () => void;
+  readonly onWithdrawn?: () => void;
 }
 
 /**
@@ -114,14 +116,15 @@ export type SlotAdmission = "granted" | "queued";
  * foreground gate owns the canonical counter today; this class is the small exported seam
  * ADR-0022 §9 asks for so the background branch can hold a slot for a child's whole
  * lifetime and release it only on the terminal transition — a background task keeps
- * counting against `dispatchConcurrency` after `dispatch()` has already returned. The
- * dispatcher can adopt this type without a behaviour change.
+ * counting against `dispatchConcurrency` after `dispatch()` has already returned.
  *
  * **ADR-0056: it is an admission gate, not a rejection gate.** Over the cap a request is
  * QUEUED, never refused: the counter keeps a FIFO wait list, and a slot that frees up goes
- * to the OLDEST waiter. Modelled on libuv's thread pool, which has the same shape — a fixed
- * number of workers and an unbounded queue in front of them, where "if fifty tasks arrive,
- * forty-six wait". The queue is unbounded and has no timeout.
+ * to the OLDEST waiter. Modelled on libuv's thread pool — a fixed number of workers and an
+ * unbounded queue in front of them, where "if fifty tasks arrive, forty-six wait".
+ *
+ * **ADR-0057: a waiting entry can be withdrawn** (`cancelQueued`), which is libuv's
+ * cancel on a work item that has not been picked up yet.
  */
 export class DispatchSlotCounter {
   readonly limit: number;
@@ -173,12 +176,12 @@ export class DispatchSlotCounter {
    *
    * `onGranted` is called when a slot frees up and this holder is the oldest waiter. It is
    * NOT called on the `"granted"` path — the caller already knows it may start.
+   * `onWithdrawn` (ADR-0057) is called when the entry is pulled out of the queue instead.
    *
-   * A holder that already holds a slot is a caller bug, not a queueing situation: the task
-   * is already running, so admitting it twice would double-count one child. It throws
-   * rather than being silently absorbed.
+   * A holder that already holds a slot is a caller bug, not a queueing situation: admitting
+   * it twice would double-count one child. It throws rather than being silently absorbed.
    */
-  acquire(holder: string, onGranted: () => void): SlotAdmission {
+  acquire(holder: string, onGranted: () => void, onWithdrawn?: () => void): SlotAdmission {
     if (this.#holders.has(holder)) {
       throw new Error(`DispatchSlotCounter: task ${holder} already holds a slot`);
     }
@@ -187,7 +190,7 @@ export class DispatchSlotCounter {
       this.#active += 1;
       return "granted";
     }
-    this.#waiters.push({ holder, onGranted });
+    this.#waiters.push({ holder, onGranted, onWithdrawn });
     return "queued";
   }
 
@@ -212,11 +215,17 @@ export class DispatchSlotCounter {
    * It holds no slot, so there is nothing to release — the waiter simply stops waiting.
    * Returns `true` when the holder was waiting, `false` when it was not (it holds a slot, or
    * it was never admitted).
+   *
+   * ADR-0057: the withdrawn waiter is woken through `onWithdrawn`, so the side that was
+   * waiting stops waiting — a task that will never start must not leave its caller blocked
+   * until the program's own deadline.
    */
   cancelQueued(holder: string): boolean {
     const index = this.#waiters.findIndex((waiter) => waiter.holder === holder);
     if (index < 0) return false;
+    const waiter = this.#waiters[index];
     this.#waiters.splice(index, 1);
+    waiter?.onWithdrawn?.();
     return true;
   }
 
@@ -246,10 +255,7 @@ const FALLBACK_DISPATCH_SLOTS: DispatchSlotCounter = new DispatchSlotCounter(
   DEFAULT_CONFIG.dispatchConcurrency,
 );
 
-/**
- * A promise plus its resolver — the shape the admission queue needs to hand a slot over
- * across an `await`.
- */
+/** A promise plus its resolver — how the admission queue hands a slot over across an `await`. */
 interface Deferred {
   readonly promise: Promise<void>;
   resolve(): void;
@@ -265,11 +271,9 @@ function deferred(): Deferred {
 }
 
 /**
- * ADR-0056: release a slot and start whoever the queue handed it to.
- *
- * **EVERY release goes through here.** The counter gives the freed slot to the oldest waiter
- * and returns it; starting that waiter's child is this module's job, so a release that
- * skipped this call would leave a queued task waiting for a slot that is already free.
+ * ADR-0056: release a slot and start whoever the queue handed it to. **EVERY release goes
+ * through here** — the counter hands the freed slot to the oldest waiter and returns it, and
+ * starting that waiter's child is this module's job.
  */
 function releaseSlot(slots: DispatchSlotCounter, holder: string, logger?: RegistryLogger): void {
   const promoted = slots.release(holder);
@@ -288,21 +292,18 @@ function releaseSlot(slots: DispatchSlotCounter, holder: string, logger?: Regist
 }
 
 /**
- * ADR-0056: withdraw an admitted dispatch that will not run after all.
- *
- * A task that is still WAITING is removed from the queue; a task that already holds a slot
- * gives it back. Either way it never starts a child.
+ * ADR-0056 / ADR-0057: withdraw an admitted dispatch that will not run after all. A task
+ * that is still WAITING is removed from the queue (and woken); a task that already holds a
+ * slot gives it back. Either way it never starts a child.
  */
 function withdrawAdmission(slots: DispatchSlotCounter, holder: string): void {
   if (!slots.cancelQueued(holder)) slots.release(holder);
 }
 
 /**
- * ADR-0056: mark a task whose child never came up as failed.
- *
- * The queued path creates its record before the child exists, so a child that could not be
- * brought up leaves a record that says `running`. That is a lie the model would read, so the
- * record is corrected: a task whose child never started is a FAILED task.
+ * ADR-0056: mark a task whose child never came up as failed. The queued path creates its
+ * record before the child exists, so a child that could not be brought up leaves a record that
+ * says `running` — a lie the model would read. A child that never started is a FAILED task.
  */
 async function markTaskFailed(
   registry: TaskRegistry,
@@ -324,29 +325,28 @@ async function markTaskFailed(
 }
 
 /**
- * ADR-0056: wait for the admission queue to hand this task a slot.
+ * ADR-0056 / ADR-0057: wait for the admission queue to hand this task a slot.
  *
- * Returns `true` when the wait was cut short by the caller's abort signal, and `false` when
- * the slot arrived. The foreground's bound is the CALLER's own deadline -- the PTC program's
- * timeout is the foreground queue's natural edge -- so an aborted run withdraws its queued
- * request instead of leaving it to start a child nobody is waiting for.
+ * Returns "granted" when the slot arrived, "withdrawn" when the task was pulled OUT of the
+ * queue (it will never start) and "aborted" when the caller's abort signal cut the wait
+ * short. The foreground's bound is the CALLER's own deadline -- the PTC program's timeout is
+ * the foreground queue's natural edge -- so an aborted run withdraws its queued request.
  */
-async function waitForAdmission(granted: Promise<void>, signal?: AbortSignal): Promise<boolean> {
-  if (signal === undefined) {
-    await granted;
-    return false;
-  }
-  if (signal.aborted) return true;
-  return await new Promise<boolean>((resolve) => {
-    const settle = (aborted: boolean): void => {
-      signal.removeEventListener("abort", onAbort);
-      resolve(aborted);
+async function waitForAdmission(
+  granted: Promise<void>,
+  withdrawn: Promise<void>,
+  signal?: AbortSignal,
+): Promise<"granted" | "withdrawn" | "aborted"> {
+  if (signal !== undefined && signal.aborted) return "aborted";
+  return await new Promise<"granted" | "withdrawn" | "aborted">((resolve) => {
+    const settle = (outcome: "granted" | "withdrawn" | "aborted"): void => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve(outcome);
     };
-    const onAbort = (): void => settle(true);
-    signal.addEventListener("abort", onAbort, { once: true });
-    void granted.then(() => {
-      settle(false);
-    });
+    const onAbort = (): void => settle("aborted");
+    signal?.addEventListener("abort", onAbort, { once: true });
+    void granted.then(() => settle("granted"));
+    void withdrawn.then(() => settle("withdrawn"));
   });
 }
 
@@ -2687,10 +2687,8 @@ async function dispatchBackground(
   const label = input.label ?? input.task.slice(0, 64);
 
   /**
-   * The task record's body. It is written once, at whichever moment the task is created:
-   * at the admission for a task that got a slot at once, or at the enqueue for a task that
-   * had to wait. The body is the same either way -- queueing creates the SAME task, one
-   * state earlier.
+   * The task record's body, written once at whichever moment the task is created: the
+   * admission for a task that got a slot at once, or the enqueue for a task that had to wait.
    */
   const recordBody = {
     label,
@@ -2753,8 +2751,10 @@ async function dispatchBackground(
   // A background dispatch does NOT wait for a slot. It returns its handle at once, and the
   // child waits -- the same shape libuv's work queue has, where the submission returns
   // immediately and the work item runs when a worker frees up.
-  const granted = deferred();
-  const admission = slots.acquire(taskId, () => granted.resolve());
+  // ADR-0057: the wait ends two ways -- a slot arrives, or the task is withdrawn.
+  const waitOver = deferred();
+  const onWaitOver = () => waitOver.resolve();
+  const admission = slots.acquire(taskId, onWaitOver, onWaitOver);
   if (admission === "queued") {
     try {
       await registry.transition(
@@ -2787,9 +2787,9 @@ async function dispatchBackground(
     // Detached: the child starts when this task reaches the head of the queue. The caller
     // already has its handle, so a failure here lands on the RECORD, not on a return value.
     void (async (): Promise<void> => {
-      await granted.promise;
+      await waitOver.promise;
       // The slot is ours: the task leaves the queue and turns `running` BEFORE the child
-      // starts, so the record never says `running` for a child that is not up yet.
+      // starts. A task WITHDRAWN while it waited is `canceled` — an illegal edge, no child.
       try {
         await registry.transition(
           { kind: "transition", taskId, to: "running" },
@@ -3305,7 +3305,14 @@ export async function dispatch(
   const taskId = createULID();
   const slots = deps.slots ?? FALLBACK_DISPATCH_SLOTS;
   const granted = deferred();
-  const admission = slots.acquire(taskId, () => granted.resolve());
+  // ADR-0057: a task pulled OUT of the queue before it starts never becomes a child, so the
+  // wait has to end on the withdrawal too — not only when a slot arrives.
+  const withdrawn = deferred();
+  const admission = slots.acquire(
+    taskId,
+    () => granted.resolve(),
+    () => withdrawn.resolve(),
+  );
 
   /**
    * The record's body, shared by the two admission outcomes: a task that got a slot at once
@@ -3370,9 +3377,9 @@ export async function dispatch(
     // Wait for the slot. The foreground's bound is the CALLER's own deadline -- the PTC
     // program's timeout is the foreground queue's natural edge (ADR-0056) -- so an aborted
     // run withdraws its queued request instead of leaving it to start a child nobody is
-    // waiting for.
-    const aborted = await waitForAdmission(granted.promise, ctx.signal);
-    if (aborted) {
+    // waiting for. ADR-0057 adds the third outcome: the task was pulled out of the queue.
+    const outcome = await waitForAdmission(granted.promise, withdrawn.promise, ctx.signal);
+    if (outcome === "aborted") {
       withdrawAdmission(slots, taskId);
       await markQueuedTaskCanceled(registry, taskId, clock, callerId, logger);
       return finish({
@@ -3384,6 +3391,21 @@ export async function dispatch(
         exitCode: -1,
         reportChannel: "none",
         errorMessage: "dispatch was aborted while it waited for a concurrency slot",
+      });
+    }
+    if (outcome === "withdrawn") {
+      // ADR-0057: the task was withdrawn from the queue — the record already says `canceled`
+      // and no child will ever start. The caller is told rather than left waiting for a
+      // result that will never come.
+      return finish({
+        text: "",
+        status: "rejected",
+        started: false,
+        agentName: agent.name,
+        durationMs: Date.now() - start,
+        exitCode: -1,
+        reportChannel: "none",
+        errorMessage: "dispatch was withdrawn from the admission queue",
       });
     }
 

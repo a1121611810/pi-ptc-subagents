@@ -270,6 +270,19 @@ export interface BackgroundTaskRuntime {
    * the session dir — are never reaped here, and their children are never signaled.
    */
   shutdown(reason: LostReason): Promise<TaskRecord[]>;
+  /**
+   * ADR-0057: withdraw every task that is still WAITING in the admission queue.
+   *
+   * A queued task has no child, so there is nothing to signal: it is pulled out of the queue
+   * and its record goes `queued -> canceled` with the reason on it. This is the `/ptc off`
+   * half of "stop accepting new dispatches, pull the queued ones out, let the running ones
+   * continue".
+   *
+   * Only tasks this runtime OWNS are withdrawn (ADR-0023): the session directory is shared, so
+   * a sibling pi process's queued record is visible here and is none of this runtime's
+   * business.
+   */
+  withdrawQueuedTasks(reason: string): Promise<TaskRecord[]>;
 }
 
 /** Default warn surface: a bind failure must never vanish silently (testing-constraints #3). */
@@ -560,6 +573,9 @@ class DefaultBackgroundTaskRuntime implements BackgroundTaskRuntime {
           ? new InMemoryOutputStorage()
           : new FileOutputStorage(sessionDir));
 
+    // The session counter is built FIRST: the registries hold it as their admission queue
+    // (ADR-0057), so a `queued` record can be withdrawn from the queue it is waiting in.
+    this.slots = new DispatchSlotCounter(options.concurrency ?? DEFAULT_CONFIG.dispatchConcurrency);
     // The pre-session delegate is always in-memory, so the tools/dispatch path are usable before
     // any session exists and a session-less test never touches the filesystem.
     const initialStorage = (
@@ -570,6 +586,7 @@ class DefaultBackgroundTaskRuntime implements BackgroundTaskRuntime {
       logger: this.#logger,
       owner: this.#owner,
       isPidAlive: this.#isPidAlive,
+      queue: this.slots,
     });
     const initialPipeline = new DefaultNotificationPipeline(initialStorage, {
       now: this.clock,
@@ -587,7 +604,6 @@ class DefaultBackgroundTaskRuntime implements BackgroundTaskRuntime {
         ((): ChildProcessLifecycle => new RealChildProcessLifecycle({ logger: this.#logger }))
       )(),
     );
-    this.slots = new DispatchSlotCounter(options.concurrency ?? DEFAULT_CONFIG.dispatchConcurrency);
     this.dispatchDeps = {
       taskRegistry: this.registry,
       lifecycle: this.lifecycle,
@@ -641,6 +657,7 @@ class DefaultBackgroundTaskRuntime implements BackgroundTaskRuntime {
       logger: this.#logger,
       owner: this.#owner,
       isPidAlive: this.#isPidAlive,
+      queue: this.slots,
     });
     const sessionPipeline = new DefaultNotificationPipeline(storage, {
       now: this.clock,
@@ -810,6 +827,48 @@ class DefaultBackgroundTaskRuntime implements BackgroundTaskRuntime {
     }
 
     return lost;
+  }
+
+  /**
+   * ADR-0057: withdraw every task this runtime owns that is still WAITING in the admission
+   * queue.
+   *
+   * The registry owns the withdrawal (it is the only legal writer of a record's lifecycle) and
+   * the queue is the registry's: `queued -> canceled` on the record, then the queue entry goes.
+   * The RUNNING tasks are not touched — they are separate processes, and "off" is about what
+   * starts from here on (ADR-0050).
+   */
+  async withdrawQueuedTasks(reason: string): Promise<TaskRecord[]> {
+    let records: TaskRecord[];
+    try {
+      records = await this.registry.query({ status: ["queued"] });
+    } catch (error) {
+      this.#logger.warn(
+        "withdrawQueuedTasks: could not list the queued tasks: " + messageOf(error),
+      );
+      return [];
+    }
+    const withdrawn: TaskRecord[] = [];
+    for (const record of records) {
+      // ADR-0023: the session dir is shared, so a sibling pi process's queued record is
+      // visible here. It is not this runtime's to withdraw.
+      if (!isOwnRecord(record, this.#owner)) continue;
+      try {
+        const result = await this.registry.transition(
+          { kind: "stop", taskId: record.id, reason },
+          { clock: this.clock, callerId: ownerOf(record), logger: this.#logger },
+        );
+        withdrawn.push(result.record);
+      } catch (error) {
+        this.#logger.warn(
+          "withdrawQueuedTasks: could not withdraw the queued task " +
+            record.id +
+            ": " +
+            messageOf(error),
+        );
+      }
+    }
+    return withdrawn;
   }
 
   /** Warn through the logger and the caller's notifier; a throwing notifier is never fatal. */

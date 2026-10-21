@@ -332,16 +332,15 @@ function childSaying(prose: string, report: unknown): string {
 
 /** The declared report a compliant child emits: a literal over ADR-0032's three declared fields. */
 const CHILD_REPORT_LITERAL = {
-  summary: "The concurrency gate precedes agent discovery, so nothing is spawned.",
+  summary: "The agent is resolved before the admission, and over the cap the request waits.",
   findings: [
     {
-      what: "the slot acquire happens before discoverAgent",
-      evidence:
-        "dispatchConcurrencyLimitReached() returns from the acquire branch, above discovery",
+      what: "the admission is taken after agent discovery",
+      evidence: "resolveDispatchAgent runs before slots.acquire, so an unknown agent fails at once",
     },
     {
-      what: "the background refusal reuses the foreground wording",
-      evidence: "backgroundDispatchConcurrencyLimitReached() spreads the foreground error object",
+      what: "over the cap the request waits instead of being refused",
+      evidence: "DispatchSlotCounter.acquire queues the holder and returns `queued`",
     },
   ],
   files_touched: ["src/runtime/dispatch.ts", "tests/unit/ptc-subagent.test.ts"],

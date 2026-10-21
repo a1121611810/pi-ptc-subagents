@@ -243,7 +243,10 @@ registration — and what is withheld from the model is a different question now
 
 The tools stay **registered** either way (pi cannot unregister a tool); what changes is whether the
 model is offered them. `/ptc off` still stops new spawns, and an in-flight task still has to stay
-readable and stoppable.
+readable and stoppable — and it now also pulls the QUEUED tasks out of the queue
+([ADR-0057](../adr/0057-cancellation-reaches-only-what-has-not-started.md)): a task that has not
+started is withdrawn rather than signaled, so `/ptc off` means "stop accepting new dispatches, pull
+the queued ones out, let the running ones continue".
 
 **`ptc_task_list`** — list this session's background tasks.
 
@@ -361,7 +364,7 @@ makes an empty log readable. The empty-output fallback agrees with it: a termina
 `(no output; task <id> is <status>)`, and only `running` / `stopping` keep the `yet` — a task
 that will never write again is not still waiting to write.
 
-**`ptc_task_stop`** — ask a running task to stop.
+**`ptc_task_stop`** — ask a task to stop.
 
 | parameter | type     | default        | notes                                 |
 | --------- | -------- | -------------- | ------------------------------------- |
@@ -374,6 +377,19 @@ ptc_task_stop({ taskId: "01JBZ000000000000000000001", reason: "no longer needed"
 
 A stop while the task is already `stopping` is idempotent (no second event). A stop on a task that
 is already terminal is an illegal-transition error.
+
+**The stop reaches two different states, and which one it is depends on whether the task has
+started** ([ADR-0057](../adr/0057-cancellation-reaches-only-what-has-not-started.md)):
+
+- A task that is still **waiting for a concurrency slot** (`queued`) is **withdrawn**: it leaves
+  the queue, it never starts a child, and its record goes `canceled` with your `reason` on it.
+  There is no process to signal, so no signal is sent — the task simply never runs.
+- A task that is already **running** (`running`) cannot be canceled: it goes `running -> stopping`
+  and the dispatcher sends the signal, so the task transitions through `stopping` to `canceled`
+  when the child exits.
+
+That is the same split libuv's `uv_cancel` makes: a work item still in the queue is removed
+(the call returns 0), one a worker has already taken is busy and keeps running.
 
 ## Status and transitions
 
@@ -398,7 +414,7 @@ success (exit 0 **and** assistant text).
 
 - `queued -> running` — the task took a concurrency slot and its child started.
 - `queued -> canceled` — the task was withdrawn from the queue before it started (a foreground
-  program was aborted while it waited).
+  program was aborted while it waited, or `ptc_task_stop` withdrew it).
 - `queued -> lost` — the owning session ended while the task was still waiting.
 - `running -> succeeded` — the child exited 0.
 - `running -> failed` — the child exited non-zero.
@@ -572,11 +588,12 @@ findings usually are. Two conventions keep that from costing a re-dispatch:
 
 Signal handling is layered by who asked:
 
-| source                  | transition                        | notes                                                                                                                                                                                   |
-| ----------------------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ptc_task_stop` (model) | `running -> stopping -> canceled` | explicit and synchronous; the dispatcher pump owns the actual signal and writes `canceled` when the child closes. A late stop is idempotent.                                            |
-| session stop / Esc      | `running -> lost`                 | implicit; v1 records `session_ended_while_running` (pi exposes no Esc-specific signal, so `user_killed_via_esc` is not emitted).                                                        |
-| session restart         | `running -> lost`                 | startup reconciliation, reason `lost_on_session_restart`; reaps only records whose owner process is dead (or pre-upgrade ownerless ones), and also sweeps a task caught mid-`stopping`. |
+| source                  | transition                        | notes                                                                                                                                                                                       |
+| ----------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ptc_task_stop` (model) | `running -> stopping -> canceled` | explicit and synchronous; the dispatcher pump owns the actual signal and writes `canceled` when the child closes. A late stop is idempotent.                                                |
+| `ptc_task_stop` (model) | `queued -> canceled`              | a task that has not started is WITHDRAWN, not signaled: no child exists, so it leaves the queue and never runs ([ADR-0057](../adr/0057-cancellation-reaches-only-what-has-not-started.md)). |
+| session stop / Esc      | `running -> lost`                 | implicit; v1 records `session_ended_while_running` (pi exposes no Esc-specific signal, so `user_killed_via_esc` is not emitted).                                                            |
+| session restart         | `running -> lost`                 | startup reconciliation, reason `lost_on_session_restart`; reaps only records whose owner process is dead (or pre-upgrade ownerless ones), and also sweeps a task caught mid-`stopping`.     |
 
 ## On disk
 
@@ -652,8 +669,6 @@ Deferred deliberately; the map items and reasons are in ADR-0022 §8/§10.
   [Structured results for codemode](./structured-results.md).
 - **Foreground → background promotion** — spawn-or-reject only; a running foreground call cannot be
   moved to the background.
-- **Cancelling a QUEUED task** — the queue is populated and a queued task is visible, but
-  `ptc_task_stop` cannot yet withdraw one that has not started; that is a separate step.
 
 ## See also
 

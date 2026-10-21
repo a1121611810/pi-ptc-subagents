@@ -5,6 +5,8 @@
  *   - `ptc_task_output` - "give me task X's output" (read-only, ADR-0015-truncated)
  *   - `ptc_task_stop`   - "ask task X to stop" (lifecycle; the *dispatcher* owns the signal)
  *
+ * ADR-0057: `ptc_task_stop` reaches a task that has not started too — a queued task is
+ * withdrawn from the queue instead of being signaled.
  * These tools are the *only* model-facing lifecycle face of a background child: the
  * `pi.dispatch({ background: true })` binding returns a thin `DispatchHandle` at spawn
  * (ADR-0022 §4) and never updates it, so live state is read through `ptc_task_list`.
@@ -21,15 +23,12 @@
  * never sees it: pi documents `structuredContent` as "Not sent to the model", and the three text
  * blocks and `details` shapes are unchanged by it.
  *
- * Conditional, not always-on (ADR-0050): PTC off stops NEW children from being started, and
- * while nothing is running these three leave the model's face — there is nothing for them to do.
- * They come back the moment a task is in flight, because that task has to stay readable and
- * stoppable: off is about what starts from here on, and hiding the lifecycle face of a running
- * task would strand it (ADR-0022 "What we deliberately don't add" 1).
- * `src/index.ts` constructs all three factories against the session-scoped stable holder
- * (registry / outputStorage / lifecycle) and registers them with `pi.registerTool(...)` outside
- * the `/ptc` mode loadout, so they stay callable while PTC mode is off. This module is the
- * factory layer only.
+ * Live reach (ADR-0053): the face is a CONSEQUENCE of the session having dispatched — a session
+ * with a task record keeps all three, and a session with none has nothing to list, read or
+ * stop. `src/index.ts` constructs all three factories against the session-scoped stable holder
+ * (registry / outputStorage / lifecycle) and registers them with `pi.registerTool(...)`, so
+ * they stay callable while PTC mode is off. This module is the factory layer only, and the
+ * prose about what a stop does lives in `task-stop-text.ts`.
  */
 
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -51,6 +50,7 @@ import { formatObservedModel } from "../runtime/session-model.ts";
 import { renderReadOnlyTierText } from "./read-only-tier-text.ts";
 import { renderWhySuppressedText } from "./why-suppressed-text.ts";
 import { createTaskPanelRenderers } from "./task-panel-render.ts";
+import { TASK_STOP_SEMANTICS } from "./task-stop-text.ts";
 import { sanitizeText } from "./text.ts";
 
 /**
@@ -115,12 +115,12 @@ function taskFaceExposure(registry: TaskRegistry): ToolExposure {
   return registry.taskFaceVisible() ? "direct" : "hidden";
 }
 
-/** Shared guidance for the three tools (they are one surface and should read that way). */
+/** Shared guidance for the three tools; the stop guideline carries ADR-0057's shared sentence. */
 export const PTC_TASK_TOOL_GUIDELINES: readonly string[] = [
   "Use ptc_task_list to see the background tasks this session dispatched and their live status.",
   "Use ptc_task_output to read a task's captured output (it is tail-truncated; the footer names the full-output file). A succeeded task's child report is rendered there, ahead of the prose.",
-  "Use ptc_task_stop to ask a running task to stop; the dispatcher delivers the actual signal, so the task transitions through stopping to canceled.",
-  "PTC off stops NEW children from being started, and takes these tools out of reach while nothing is running; a task already running keeps going and stays listed here.",
+  "Use ptc_task_stop to stop a task: " + TASK_STOP_SEMANTICS,
+  "PTC off stops NEW children from being started, pulls the queued ones out of the queue, and takes these tools out of reach while the session has no task record; a task already running keeps going and stays listed here.",
 ];
 
 /**
@@ -834,11 +834,11 @@ const STOP_OUTPUT_SCHEMA = Type.Object({
   task_id: Type.String({ description: "The background task id that was asked to stop." }),
   status: Type.String({
     description:
-      "The task's status AFTER the stop command — `stopping`, not the terminal `canceled`; the dispatcher pump owns the latter (ADR-0022 §8).",
+      "The task's status AFTER the stop command — `stopping` for a task that is running (the dispatcher pump owns the terminal `canceled`, ADR-0022 §8), or `canceled` straight away for a task that was still queued and has been withdrawn (ADR-0057).",
   }),
   from_status: Type.String({
     description:
-      "The status observed before the stop: `running` for a fresh stop, `stopping` for the idempotent late-arrival path (ADR-0022 §8).",
+      "The status observed before the stop: `running` for a fresh stop, `queued` for a withdrawn one, `stopping` for the idempotent late-arrival path (ADR-0022 §8, ADR-0057).",
   }),
   stop_reason: Type.Optional(
     Type.String({
@@ -871,8 +871,8 @@ export function createPtcTaskStopTool(
     name: PTC_TASK_STOP_TOOL_NAME,
     label: "PTC Task Stop",
     description: [
-      "Ask a running background task to stop.",
-      'The task moves to "stopping"; the dispatcher sends the signal and records the terminal "canceled" state when the child exits.',
+      "Ask a background task to stop.",
+      TASK_STOP_SEMANTICS,
       "The call is idempotent when the task is already stopping, and errors when the task is already terminal.",
     ].join("\n"),
     promptSnippet: "Ask a background task to stop (dispatcher delivers the signal)",
