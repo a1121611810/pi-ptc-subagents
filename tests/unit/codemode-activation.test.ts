@@ -77,7 +77,7 @@ describe("readCodemodeActivation does not read settings files", () => {
     // loadout, so a `defaultTools` this package can see on disk is not evidence of anything: pi
     // may have declined to read that project entirely. An implementation that re-read the file
     // here would report `active` for a project whose settings pi ignored, and the surface would be
-    // `subagents` with orchestration tools nothing can reach.
+    // `codemode_ptc` with orchestration tools nothing can reach.
     const agentDir = await makeTempDir();
     const cwd = await makeTempDir();
     try {
@@ -114,14 +114,14 @@ describe("readCodemodeActivation does not read settings files", () => {
 describe("the fifth cell of the detected table", () => {
   test("present and loadable but not callable is full, and activation is the only difference", () => {
     // The counterfactual for the whole ADR: with the activation argument held at `active`, this
-    // exact presence/switch pair resolves to `subagents`. Dropping the third check from
+    // exact presence/switch pair resolves to `codemode_ptc`. Dropping the third check from
     // `detectedSurfaceMode` turns both assertions red.
     const presence = { present: true, how: "found" } as const;
-    expect(detectedSurfaceMode(presence, "absent", "active")).toBe("subagents");
-    expect(detectedSurfaceMode(presence, "absent", "inactive")).toBe("full");
-    // And a disabled extension is `full` either way, which is what makes the switch the
+    expect(detectedSurfaceMode(presence, "absent", "active")).toBe("codemode_ptc");
+    expect(detectedSurfaceMode(presence, "absent", "inactive")).toBe("full_ptc");
+    // And a disabled extension is `full_ptc` either way, which is what makes the switch the
     // stronger of the two signals.
-    expect(detectedSurfaceMode(presence, "disabled", "active")).toBe("full");
-    expect(detectedSurfaceMode(presence, "disabled", "inactive")).toBe("full");
+    expect(detectedSurfaceMode(presence, "disabled", "active")).toBe("full_ptc");
+    expect(detectedSurfaceMode(presence, "disabled", "inactive")).toBe("full_ptc");
   });
 });

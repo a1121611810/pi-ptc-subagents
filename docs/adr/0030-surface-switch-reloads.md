@@ -5,6 +5,8 @@ status: **withdrawn 2026-10-10** by
 no longer exists — the `surfaceMode` key it wrote is gone — so the whole "switch the surface by
 writing the file and reloading" subject is moot. There is no surface to switch.
 
+> **Amended by [ADR-0051](./0051-the-surface-names-the-orchestrator.md) (2026-10-21): the two surface values are renamed — `full` → `full_ptc`, `subagents` → `codemode_ptc` — and the surface now means _which orchestrator is responsible to the model_. This record's decisions stand unchanged; read its `full` / `subagents` as those names.**
+
 Nothing here is left standing, and nothing needs to be carried forward: the reload-on-switch path
 existed only to make an in-session change to a value that no longer exists. The underlying
 observation in §Context — pi has no `unregisterTool`, so a factory-time registration is

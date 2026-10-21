@@ -8,7 +8,7 @@
  *     cannot see (`--no-extensions`, `--exclude-tools codemode`), so the cross-check at
  *     session start compares the probe's answer against the registry's.
  *   - `getActiveTools()` -- can the model CALL it? ADR-0025 decision 4 warns when a
- *     `subagents` surface has no active codemode, because there is then no orchestrator.
+ *     `codemode_ptc` surface has no active codemode, because there is then no orchestrator.
  *
  * pi's `codemode` registers with `defaultActive: false`, so on a real install the shipped
  * state is `known && !active`. `makeExtensionStub` used to answer `getAllTools()` with the
@@ -28,7 +28,7 @@
  * ours to choose. Measured on pi 1.1.0 with a project `mcp.json` naming a codemode-exposed
  * server: a synchronous read here saw it inactive, a read one microtask later still did, and it
  * appeared roughly 250 ms afterwards. So the file-side evidence says `active`, the surface is
- * built as `subagents`, and the loadout genuinely does not have the tool yet — which is exactly
+ * built as `codemode_ptc`, and the loadout genuinely does not have the tool yet — which is exactly
  * the case below, reached the way a real session reaches it.
  *
  * These three cases are the set, and each one is red against the others:
@@ -47,8 +47,8 @@ const REGISTRY_CROSSCHECK = "--no-extensions";
 /** The message of the ADR-0025 decision-4 warning, i.e. the "not active" one. */
 const NOT_ACTIVE = "codemode is not active";
 
-/** The tool set on the `subagents` surface: the pair at codemode reach, plus the subagent face. */
-const SUBAGENTS_TOOLS = ["ptc_run_code", "ptc_workflow", "ptc_subagent", ...TASK_TOOLS];
+/** The tool set on the `codemode_ptc` surface: the pair at codemode reach, plus the subagent face. */
+const CODEMODE_PTC_TOOLS = ["ptc_run_code", "ptc_workflow", "ptc_subagent", ...TASK_TOOLS];
 
 /**
  * Build the stub and return the notifications its `session_start` raised.
@@ -63,8 +63,8 @@ async function sessionStartNotices(options: {
   registeredInactive?: readonly string[];
   /**
    * ADR-0025 (amended): what this session DECLARES to the model. These tests are all about the
-   * `subagents` shape, where the pair is `codemode`-reach and absent from `getActiveTools()`; the
-   * stub's default is `full`'s, which would make the decision-4 warning withhold itself for a
+   * `codemode_ptc` shape, where the pair is `codemode`-reach and absent from `getActiveTools()`; the
+   * stub's default is `full_ptc`'s, which would make the decision-4 warning withhold itself for a
    * reason that has nothing to do with what is under test.
    */
   declaredProgrammingTools?: readonly string[];
@@ -79,7 +79,7 @@ async function sessionStartNotices(options: {
       // No ptc.json at all: the surface is DETECTED, and the probe is told pi has codemode on
       // disk. Both warnings under test are reachable only on that path.
       //
-      // All three probes are pinned. The surface these tests are about is `subagents`, and leaving
+      // All three probes are pinned. The surface these tests are about is `codemode_ptc`, and leaving
       // any axis to run for real would make it depend on the machine running the suite.
       codemode: { present: true, how: "found" },
       codemodeSwitch: { switch: "enabled", source: "user" },
@@ -104,9 +104,9 @@ async function sessionStartNotices(options: {
   }
 }
 
-test("a subagents surface built on evidence pi has not applied yet gets the not-active warning", async () => {
+test("a codemode_ptc surface built on evidence pi has not applied yet gets the not-active warning", async () => {
   // The recoverable wrong answer, reached the way a real MCP session reaches it: the evidence said
-  // `active`, the surface is `subagents`, and pi's loadout does not have the tool YET. The package
+  // `active`, the surface is `codemode_ptc`, and pi's loadout does not have the tool YET. The package
   // cannot correct that — pi has no unregister — so reporting it is the whole of the design, and
   // this is the evidence for the bound ADR-0029 rests on.
   //
@@ -116,7 +116,7 @@ test("a subagents surface built on evidence pi has not applied yet gets the not-
     active: ["read", "bash", "edit", "write"],
     registeredInactive: ["codemode"],
     activation: { activation: "active", source: "mcp" },
-    // This session resolved `subagents`, where the pair is `codemode`-reach and pi declares
+    // This session resolved `codemode_ptc`, where the pair is `codemode`-reach and pi declares
     // neither. Saying so is what makes the decision-4 warning's premise true — its gate asks what
     // the model is offered before telling it it has no orchestration tool.
     declaredProgrammingTools: [],
@@ -131,7 +131,7 @@ test("a subagents surface built on evidence pi has not applied yet gets the not-
   ).toHaveLength(1);
   // The surface itself is the one the detection picked: ptc_subagent beside the task tools, and
   // the program pair reachable from pi's live codemode without being declared to the model.
-  expect(tools).toEqual([...SUBAGENTS_TOOLS, "ptc_child_report"]);
+  expect(tools).toEqual([...CODEMODE_PTC_TOOLS, "ptc_child_report"]);
 });
 
 test("the same pi with codemode ABSENT from the registry does get the cross-check warning", async () => {
@@ -150,7 +150,7 @@ test("the same pi with codemode ABSENT from the registry does get the cross-chec
   // The surface NAMED is the one the three probes resolved to, not a hardcoded literal in the
   // notice. Asserting the literal would let a wrong resolution ship silently.
   expect(crosschecks[0]?.message, "and it names the surface actually in force").toContain(
-    'the surface is "subagents"',
+    'the surface is "codemode_ptc"',
   );
 });
 
@@ -167,15 +167,15 @@ test("a pi that knows AND activates codemode raises neither warning", async () =
     ),
     "healthy means silent: known and active is the one state with nothing to report",
   ).toEqual([]);
-  expect(tools).toEqual([...SUBAGENTS_TOOLS, "ptc_child_report"]);
+  expect(tools).toEqual([...CODEMODE_PTC_TOOLS, "ptc_child_report"]);
 });
 
-test("a session that did not activate codemode resolves full and says neither warning", async () => {
+test("a session that did not activate codemode resolves full_ptc and says neither warning", async () => {
   // The cell that used to need a settings file written on disk to reach. Activation is read from
   // the loadout now, so "pi did not activate it" is expressed by the loadout not naming it —
   // which is pi's own default, `defaultActive: false`, rather than something this package infers.
   //
-  // No warning is correct and not merely quiet: both warnings describe a `subagents` surface with
+  // No warning is correct and not merely quiet: both warnings describe a `codemode_ptc` surface with
   // a missing orchestrator, and this session has no such surface. A decision-4 warning here would
   // be crying wolf on the most ordinary pi there is.
   const { notices, tools } = await sessionStartNotices({
@@ -186,9 +186,10 @@ test("a session that did not activate codemode resolves full and says neither wa
     notices.filter(
       (n) => n.message.includes(REGISTRY_CROSSCHECK) || n.message.includes(NOT_ACTIVE),
     ),
-    "full is the right answer for a session that activated nothing, so there is nothing to warn about",
+    "full_ptc is the right answer for a session that activated nothing, so there is nothing to warn about",
   ).toEqual([]);
-  expect(tools, "and the subagent face is absent, because that is what full means").not.toContain(
-    "ptc_subagent",
-  );
+  expect(
+    tools,
+    "and the subagent face is absent, because that is what full_ptc means",
+  ).not.toContain("ptc_subagent");
 });

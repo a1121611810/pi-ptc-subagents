@@ -4,7 +4,7 @@
  * The probe asks "is the directory on disk". The switch asks "will pi load it". pi 0.99.0 added
  * `-builtin:<name>`, which made those two different questions with different answers, and the
  * first version of this feature conflated them: a user who disabled pi's codemode kept getting
- * `subagents` surface and therefore no `ptc_run_code`, with nothing to orchestrate in its place.
+ * `codemode_ptc` surface and therefore no `ptc_run_code`, with nothing to orchestrate in its place.
  *
  * Every case below is pinned to pi's OWN resolution, read from
  * `dist/core/package-manager.js` (`isEnabledByOverrides` + the built-in loop) rather than to the
@@ -29,7 +29,7 @@ import { dirname, join } from "node:path";
 const PRESENT: CodemodePresence = { present: true, how: "found" };
 const ABSENT: CodemodePresence = { present: false, how: "not-found" };
 /**
- * ADR-0029's third axis, stated here because the switch is not enough on its own to reach `subagents`.
+ * ADR-0029's third axis, stated here because the switch is not enough on its own to reach `codemode_ptc`.
  *
  * `source: "loadout"` is the only provenance a real session can produce: `session_start` reads
  * activation from `pi.getActiveTools()`, so the user file, the project file and `argv` are no
@@ -99,12 +99,12 @@ const PI_NORMALIZE_PATH: ((input: string) => string) | undefined = await (async 
  * a column they do not vary.
  */
 const TABLE: ReadonlyArray<readonly [CodemodePresence, CodemodeSwitch, string]> = [
-  [PRESENT, "absent", "subagents"],
-  [PRESENT, "enabled", "subagents"],
-  [PRESENT, "disabled", "full"],
-  [ABSENT, "absent", "full"],
-  [ABSENT, "enabled", "full"],
-  [ABSENT, "disabled", "full"],
+  [PRESENT, "absent", "codemode_ptc"],
+  [PRESENT, "enabled", "codemode_ptc"],
+  [PRESENT, "disabled", "full_ptc"],
+  [ABSENT, "absent", "full_ptc"],
+  [ABSENT, "enabled", "full_ptc"],
+  [ABSENT, "disabled", "full_ptc"],
 ];
 
 describe("ADR-0027 codemode switch", () => {
@@ -114,27 +114,27 @@ describe("ADR-0027 codemode switch", () => {
         `${presence.present ? "on-disk" : "absent"}/${sw}=>${detectedSurfaceMode(presence, sw, "active")}`,
     );
     expect(actual).toEqual([
-      "on-disk/absent=>subagents",
-      "on-disk/enabled=>subagents",
-      "on-disk/disabled=>full",
-      "absent/absent=>full",
-      "absent/enabled=>full",
-      "absent/disabled=>full",
+      "on-disk/absent=>codemode_ptc",
+      "on-disk/enabled=>codemode_ptc",
+      "on-disk/disabled=>full_ptc",
+      "absent/absent=>full_ptc",
+      "absent/enabled=>full_ptc",
+      "absent/disabled=>full_ptc",
     ]);
   });
 
-  test("disabling codemode is the only SWITCH value that turns a present codemode into full", () => {
+  test("disabling codemode is the only SWITCH value that turns a present codemode into full_ptc", () => {
     // The counterfactual this whole feature exists for: with `disabled` dropped, a user who
     // turned codemode off would silently keep losing ptc_run_code.
     //
-    // "only switch value", not "only value": ADR-0029 added a second way to reach `full` for a
+    // "only switch value", not "only value": ADR-0029 added a second way to reach `full_ptc` for a
     // present codemode -- an inactive one -- and claiming otherwise here would be a title that
     // has quietly stopped being true.
     const withoutDisabled = TABLE.filter(([, sw]) => sw !== "disabled").map(([presence, sw]) =>
       detectedSurfaceMode(presence, sw, "active"),
     );
-    expect(new Set(withoutDisabled)).toEqual(new Set(["subagents", "full"]));
-    expect(detectedSurfaceMode(PRESENT, "disabled", "active")).toBe("full");
+    expect(new Set(withoutDisabled)).toEqual(new Set(["codemode_ptc", "full_ptc"]));
+    expect(detectedSurfaceMode(PRESENT, "disabled", "active")).toBe("full_ptc");
   });
 });
 
@@ -217,7 +217,7 @@ describe("resolveCodemodeSwitch precedence", () => {
     // the basename AND the full posix path (package-manager.js:482-490). So `!builtin:cod*`
     // disables `builtin:codemode` in pi, where an exact-name comparison would not have matched.
     // Erring toward `disabled` is also the direction this package already chose everywhere else:
-    // "a probe that cannot answer must not be allowed to answer yes" — `subagents` as a failure
+    // "a probe that cannot answer must not be allowed to answer yes" — `codemode_ptc` as a failure
     // mode takes away the session's orchestrator (FALLBACK_SURFACE_MODE).
     for (const entry of ["!builtin:cod*", "!builtin:*codemode", "!*codemode"]) {
       expect(
@@ -393,7 +393,7 @@ describe("the switch is what decides, over real files", () => {
   // is no pinned surface any more, so there is nothing to disagree with anything: the table is the
   // only input. What is left to pin is that the table really is reached through the files, which
   // is the claim these two make in the only form that still exists.
-  test("a user settings file that disables codemode answers `full` with no key to disagree with", async () => {
+  test("a user settings file that disables codemode answers `full_ptc` with no key to disagree with", async () => {
     const root = await makeTempDir("pi-ptc-switch-");
     try {
       await writeFile(
@@ -406,7 +406,7 @@ describe("the switch is what decides, over real files", () => {
       expect(
         detectSurfaceMode(root, LOADOUT_WITH_CODEMODE, PRESENT, undefined, ACTIVE, root),
       ).toEqual({
-        surfaceMode: "full",
+        surfaceMode: "full_ptc",
         codemode: PRESENT,
         codemodeSwitch: { switch: "disabled", source: "user" },
         codemodeActivation: ACTIVE,
@@ -416,7 +416,7 @@ describe("the switch is what decides, over real files", () => {
     }
   });
 
-  test("the same agent dir with codemode enabled answers `subagents`", async () => {
+  test("the same agent dir with codemode enabled answers `codemode_ptc`", async () => {
     const root = await makeTempDir("pi-ptc-switch-");
     try {
       await writeFile(
@@ -426,14 +426,14 @@ describe("the switch is what decides, over real files", () => {
       expect(
         detectSurfaceMode(root, LOADOUT_WITH_CODEMODE, PRESENT, undefined, ACTIVE, root)
           .surfaceMode,
-      ).toBe("subagents");
+      ).toBe("codemode_ptc");
     } finally {
       await removeTempDir(root);
     }
   });
 
   test("a `surfaceMode` key in ptc.json is not an input at all", async () => {
-    // The direct counterfactual: a reader that still honoured the key would answer `subagents`
+    // The direct counterfactual: a reader that still honoured the key would answer `codemode_ptc`
     // here, where the switch says `disabled`. Every historical value is stated because the key is
     // reported as a whole and a filter to one of them would leave the others unannounced.
     for (const stale of ["off", "subagents", "full"]) {
@@ -448,7 +448,7 @@ describe("the switch is what decides, over real files", () => {
           detectSurfaceMode(root, LOADOUT_WITH_CODEMODE, PRESENT, undefined, ACTIVE, root)
             .surfaceMode,
           stale,
-        ).toBe("full");
+        ).toBe("full_ptc");
       } finally {
         await removeTempDir(root);
       }
@@ -462,8 +462,8 @@ describe("the registration the switch actually produces", () => {
     // tools a model can call. Asserting only on `detectedSurfaceMode` would pass even if the
     // factory stopped consulting the switch.
     //
-    // Activation is stated as `active` on purpose: with the switch disabled the answer is `full`
-    // whatever the loadout says, so this cell stays `full` even when codemode IS callable. That
+    // Activation is stated as `active` on purpose: with the switch disabled the answer is `full_ptc`
+    // whatever the loadout says, so this cell stays `full_ptc` even when codemode IS callable. That
     // makes it the one case where the switch overrides a working activation — and the only way
     // that assertion can be reached is by a reader that really read the switch.
     const { stub, dir } = await makeStubInAgentDir({

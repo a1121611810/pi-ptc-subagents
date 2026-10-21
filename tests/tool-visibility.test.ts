@@ -221,7 +221,7 @@ function runPi(args: string[], env: NodeJS.ProcessEnv, bin = "pi"): Promise<void
 async function capturePayload(options: {
   withDist?: boolean;
   narrow?: string;
-  /** ADR-0025: which surface the built extension registers. Defaults to `full`. */
+  /** ADR-0025: which surface the built extension registers. Defaults to `full_ptc`. */
   surfaceMode?: "off" | "subagents" | "full" | "detected";
   /** Which pi binary to spawn. Defaults to the bare name; see {@link CODEMODE_PI}. */
   bin?: string;
@@ -253,7 +253,7 @@ async function capturePayload(options: {
     // `-ne` keeps the developer's extensions out of the measurement, and it is safe for every
     // case that pins `surfaceMode` in ptc.json. It is NOT safe for the "detected" half, and
     // ADR-0027 is why: `-ne` resolves the codemode SWITCH to `disabled`, so with it the detected
-    // default is `full` and that half would never reach the cell it is named for. The
+    // default is `full_ptc` and that half would never reach the cell it is named for. The
     // PI_CODING_AGENT_DIR pin below already excludes the developer's real packages, so dropping
     // `-ne` for this one spawn costs no isolation and puts pi back in its default state --
     // built-ins loaded, which is the "ships codemode AND loads it" cell.
@@ -396,7 +396,7 @@ async function codemodeSupport(bin: string): Promise<boolean> {
  * That is why the caller passes a SUPERSET of both surfaces — every name either one could register,
  * plus `codemode`. With all of them allowed, a name missing from the registry is missing because the
  * factory did not register it, which is the only thing this test is trying to read. An allowlist
- * naming just the subagent face would also pass for a `full` session, which is the measurement this
+ * naming just the subagent face would also pass for a `full_ptc` session, which is the measurement this
  * exists to avoid making.
  */
 async function captureRegisteredPtcTools(options: {
@@ -555,7 +555,7 @@ test.skipIf(CODEMODE_PI.bin === undefined)(
       // rather than reach.
       //
       // `codemode` is activated through the agent-dir `defaultTools` the helper writes instead
-      // (the same path ADR-0029 names), so the session is genuinely on `subagents`, the pair IS
+      // (the same path ADR-0029 names), so the session is genuinely on `codemode_ptc`, the pair IS
       // in the registry, and the only thing that can keep it out of the request payload is its
       // exposure. `tests/unit/codemode-switch.test.ts` covers the activation mechanism; this
       // covers what the model ends up being offered on a real pi.
@@ -572,8 +572,8 @@ test.skipIf(CODEMODE_PI.bin === undefined)(
     ).toBe(true);
 
     // The default cell: a real pi that ships codemode, launched with nothing configured. Before
-    // ADR-0029 this was `subagents`, which meant `ptc_subagent` with no orchestrator and a
-    // warning on every session. It is now `full`, silently, which is the fix stated as a fact
+    // ADR-0029 this was `codemode_ptc`, which meant `ptc_subagent` with no orchestrator and a
+    // warning on every session. It is now `full_ptc`, silently, which is the fix stated as a fact
     // about the built artifact rather than about the probe.
     const plainPtc = plain.tools.filter((name) => name.startsWith("ptc_")).sort();
     expect(
@@ -639,11 +639,11 @@ test("a plain launch never delegates, whichever pi is on PATH (ADR-0029)", async
   // It is the same launch as its sibling — no `surfaceMode` key, no `--tools` — and the point is
   // that the answer no longer depends on whether the pi happens to ship codemode. It used to:
   // the previous version branched the expectation on `registryHasCodemode`, which on a developer
-  // machine with pi 1.0 on PATH made this test assert `subagents` and a CI machine with the
-  // pinned devDependency assert `full`, so it was measuring the PATH rather than the code.
+  // machine with pi 1.0 on PATH made this test assert `codemode_ptc` and a CI machine with the
+  // pinned devDependency assert `full_ptc`, so it was measuring the PATH rather than the code.
   //
   // ADR-0029 makes the expectation a constant, which is the honest form: with no loadout naming
-  // it, `codemode` is registered inactive on every pi, so `full` is the only correct answer
+  // it, `codemode` is registered inactive on every pi, so `full_ptc` is the only correct answer
   // whichever binary is under test. `registryHasCodemode` is still reported in the failure
   // message, because "this pi does not even ship codemode" is worth knowing when it goes red.
   const [registryHasCodemode, detected] = await Promise.all([

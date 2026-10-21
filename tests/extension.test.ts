@@ -79,24 +79,29 @@ const TASK_TOOLS = ["ptc_task_list", "ptc_task_output", "ptc_task_stop"] as cons
 // it is here as its own constant so a reader can see that distinction rather than infer it.
 const REPORT_TOOL = "ptc_child_report" as const;
 
-/** What `full` registers, in registration order. */
-const FULL_SURFACE_TOOLS = [...PTC_TOOLS, ...TASK_TOOLS, REPORT_TOOL] as const;
+/** What `full_ptc` registers, in registration order. */
+const FULL_PTC_SURFACE_TOOLS = [...PTC_TOOLS, ...TASK_TOOLS, REPORT_TOOL] as const;
 
 /**
- * What the `subagents` line registers, in registration order.
+ * What the `codemode_ptc` line registers, in registration order.
  *
  * The program pair is here at `codemode` reach — registered, callable from a pi `codemode` script,
- * and NOT declared to the model — so this list is the same length as `full`'s minus `ptc_subagent`,
+ * and NOT declared to the model — so this list is the same length as `full_ptc`'s minus `ptc_subagent`,
  * and what tells the two lines apart is exposure rather than presence. Asserted literally, in order,
  * because a tool dropped from one group has to turn these red.
  */
-const SUBAGENT_SURFACE_TOOLS = [...PTC_TOOLS, "ptc_subagent", ...TASK_TOOLS, REPORT_TOOL] as const;
+const CODEMODE_PTC_SURFACE_TOOLS = [
+  ...PTC_TOOLS,
+  "ptc_subagent",
+  ...TASK_TOOLS,
+  REPORT_TOOL,
+] as const;
 
 /**
- * The pi this file reasons about when it wants `full` and the pi it reasons about when it wants
- * `subagents`. The surface is DETECTED (ADR-0026/0027/0029), so a test states three axes rather
+ * The pi this file reasons about when it wants `full_ptc` and the pi it reasons about when it wants
+ * `codemode_ptc`. The surface is DETECTED (ADR-0026/0027/0029), so a test states three axes rather
  * than a surface: a tool this package cannot see, a tool pi will not load, and a tool the model
- * cannot call each resolve `full` on their own, and `subagents` needs all three to say yes.
+ * cannot call each resolve `full_ptc` on their own, and `codemode_ptc` needs all three to say yes.
  *
  * Left out of a stub, the activation axis would resolve against the DEVELOPER'S OWN
  * `~/.pi/agent/settings.json` and the switch against the repo — which is why every surface-bearing
@@ -108,7 +113,7 @@ const FOUND_CODEMODE = { present: true, how: "found" } as const;
 /** Repo root's `src/`, for the one source scan below. */
 const SRC_DIR = join(import.meta.dirname, "..", "src");
 /**
- * The three axes that resolve `subagents`, for a stub that does NOT redirect the agent dir.
+ * The three axes that resolve `codemode_ptc`, for a stub that does NOT redirect the agent dir.
  *
  * The switch has to be pinned here rather than left to be read: `detectSurfaceMode` falls back to
  * `readCodemodeSwitch(getAgentDir(), …)` when the seam is absent, so an unredirected stub would
@@ -175,7 +180,7 @@ async function emitSessionStartInAgentDir(
 test("full mode registers the orchestration tools and the lifecycle face", async () => {
   // The literal set, not a length: a tool dropped from one group has to turn this red.
   const tools = (await makeExtensionStub({ codemode: NO_CODEMODE })).tools;
-  expect([...tools.keys()]).toEqual([...FULL_SURFACE_TOOLS]);
+  expect([...tools.keys()]).toEqual([...FULL_PTC_SURFACE_TOOLS]);
 });
 
 test("subagents mode keeps the subagent face and the lifecycle face, and offers the program underneath codemode", async () => {
@@ -183,7 +188,7 @@ test("subagents mode keeps the subagent face and the lifecycle face, and offers 
   const tools = stub.tools;
   // The literal set, not a length: a tool dropped from one group has to turn this red.
   expect([...tools.keys()], "pi codemode orchestrates here; PTC is its execution layer").toEqual([
-    ...SUBAGENT_SURFACE_TOOLS,
+    ...CODEMODE_PTC_SURFACE_TOOLS,
   ]);
   // **Reach is what keeps this from being the duplicate surface ADR-0025 removed.** The pair is
   // registered, but at `codemode` reach, which does not declare a tool to the model — so the
@@ -229,9 +234,9 @@ test("a `surfaceMode` key left in ptc.json is reported as ignored, and the surfa
       "pi config",
     );
     // **And the key does not decide the surface.** `"off"` registered nothing before; it must not
-    // become a silent no-op that registers the whole `full` face as if the user had asked for it.
+    // become a silent no-op that registers the whole `full_ptc` face as if the user had asked for it.
     expect([...stub.tools.keys()], "an ignored key leaves detection in force").toEqual([
-      ...FULL_SURFACE_TOOLS,
+      ...FULL_PTC_SURFACE_TOOLS,
     ]);
   }
 });
@@ -562,20 +567,20 @@ test("the surface is resolved before anything is registered", async () => {
   // package with no setting to read: pi has no `unregisterTool`, so `session_start` has to know
   // the surface before its first `registerTool`. Both axes are stated here as the two possible
   // answers rather than as one expected set, because the invariant is that the registry reflects
-  // a DECIDED surface — a session that registered `full` and could not correct itself would be
+  // a DECIDED surface — a session that registered `full_ptc` and could not correct itself would be
   // indistinguishable from a correct one at registration time, and only the pair of sets shows
   // that the decision actually happened.
   const subagents = (await makeExtensionStub({ ...SUBAGENTS_AXES })).tools;
   const full = (await makeExtensionStub({ codemode: NO_CODEMODE })).tools;
-  expect([...subagents.keys()]).toEqual([...SUBAGENT_SURFACE_TOOLS]);
-  expect([...full.keys()]).toEqual([...FULL_SURFACE_TOOLS]);
-  // `subagents` adds exactly one name. If a future axis change moved a tool between the groups
+  expect([...subagents.keys()]).toEqual([...CODEMODE_PTC_SURFACE_TOOLS]);
+  expect([...full.keys()]).toEqual([...FULL_PTC_SURFACE_TOOLS]);
+  // `codemode_ptc` adds exactly one name. If a future axis change moved a tool between the groups
   // this turns red, which is the point of the subtraction rather than a second literal list.
   const onlyOnSubagents = [...subagents.keys()].filter((name) => !full.has(name));
   expect(onlyOnSubagents).toEqual(["ptc_subagent"]);
 });
 
-test("each surface registers a distinct set, and `subagents` differs from `full` by REACH not by presence", async () => {
+test("each surface registers a distinct set, and `codemode_ptc` differs from `full_ptc` by REACH not by presence", async () => {
   const sets = [
     [...(await makeExtensionStub({ ...SUBAGENTS_AXES })).tools.keys()].join(","),
     [...(await makeExtensionStub({ codemode: NO_CODEMODE })).tools.keys()].join(","),
@@ -585,7 +590,7 @@ test("each surface registers a distinct set, and `subagents` differs from `full`
   // The rest of the old claim — "no mode keeps both orchestrators" — was about the model being
   // offered two ways to compose tool calls. That is now a claim about REACH, and it is stated
   // that way: the same two tools exist on both lines, and only their reach differs. A mutation
-  // that put `direct` on `subagents` would leave every count above correct and would hand the
+  // that put `direct` on `codemode_ptc` would leave every count above correct and would hand the
   // model a second orchestrator, which is why this asserts the exposure rather than the set.
   const reachOf = (tools: Map<string, unknown>, name: string): string => {
     const tool = tools.get(name) as { exposure?: string } | undefined;
@@ -605,10 +610,10 @@ test("subagents mode without codemode warns once, and says what to do about it",
   // Constraint 3: the failure path is visible. A mode that quietly leaves the model with a
   // subagent tool and no orchestrator is the bug this warning exists to prevent.
   //
-  // **The shape is named because it is the whole subject.** On `subagents` the pair is
+  // **The shape is named because it is the whole subject.** On `codemode_ptc` the pair is
   // `codemode`-reach and pi declares neither, so a session that named `codemode` but got no
   // orchestrator is exactly the state this notice exists for. The stub used to append the pair to
-  // every session's active list — the `full` shape — which made this test describe a cell it was
+  // every session's active list — the `full_ptc` shape — which made this test describe a cell it was
   // not in.
   const stub = await makeExtensionStub({
     ...SUBAGENTS_AXES,
@@ -756,7 +761,7 @@ test("the warning is withheld when the program tools ARE declared — the 0.86 c
 });
 
 test("full mode never warns that it has no orchestrator, present or not", async () => {
-  // `full` brings its own orchestrator, so a missing codemode is not this package's problem.
+  // `full_ptc` brings its own orchestrator, so a missing codemode is not this package's problem.
   //
   // Scoped to THIS claim rather than to "any codemode warning", because one of the two loadouts
   // below legitimately raises a different one: the second reports a live `codemode` the probe
@@ -771,12 +776,14 @@ test("full mode never warns that it has no orchestrator, present or not", async 
       stub.notifications.filter((n) => n.message.includes("no orchestration tool")),
       "full mode orchestrates itself",
     ).toEqual([]);
-    // …and the surface really is `full` for both, so the silence is not "this session never
+    // …and the surface really is `full_ptc` for both, so the silence is not "this session never
     // reached the branch" wearing a pass.
-    expect([...stub.tools.keys()], "and it is the full surface").toEqual([...FULL_SURFACE_TOOLS]);
+    expect([...stub.tools.keys()], "and it is the full surface").toEqual([
+      ...FULL_PTC_SURFACE_TOOLS,
+    ]);
   }
   // An `info` notice is expected and correct here: a pi with no codemode on disk is a perfectly
-  // healthy `full` session, and the notice says so in those words. The old version of this test
+  // healthy `full_ptc` session, and the notice says so in those words. The old version of this test
   // could not have drawn that line — a pinned surface left `detected` undefined, so the notice
   // never fired and the test asserted silence over a session nobody had asked the question of.
   const absent = await makeExtensionStub({ codemode: NO_CODEMODE });
@@ -839,8 +846,8 @@ test("no ptc.json content decides the surface any more — the three axes do, wh
   // value the key used to take, the registered set is the one detection chose.
   //
   // Both directions are stated because either alone would pass for the wrong reason. A factory
-  // hardcoded to `full` satisfies the first row and fails the second; one hardcoded to
-  // `subagents` does the reverse.
+  // hardcoded to `full_ptc` satisfies the first row and fails the second; one hardcoded to
+  // `codemode_ptc` does the reverse.
   //
   // `defaultMode: false` rides along in one body on purpose: that key is still read from the same
   // file, so this also pins that a live key and a stale one coexist rather than one shadowing the
@@ -849,20 +856,24 @@ test("no ptc.json content decides the surface any more — the three axes do, wh
     { surfaceMode: "off" },
     { surfaceMode: "subagents" },
     { surfaceMode: "full" },
-    { defaultMode: false, surfaceMode: "subagents" },
+    { defaultMode: false, surfaceMode: "codemode_ptc" },
   ] as const;
   for (const [label, options, expected] of [
-    ["codemode on disk, nothing else configured", { codemode: FOUND_CODEMODE }, FULL_SURFACE_TOOLS],
-    ["codemode on disk and callable", { ...SUBAGENTS_AXES }, SUBAGENT_SURFACE_TOOLS],
+    [
+      "codemode on disk, nothing else configured",
+      { codemode: FOUND_CODEMODE },
+      FULL_PTC_SURFACE_TOOLS,
+    ],
+    ["codemode on disk and callable", { ...SUBAGENTS_AXES }, CODEMODE_PTC_SURFACE_TOOLS],
     [
       "codemode callable but not on disk",
       { ...SUBAGENTS_AXES, codemode: NO_CODEMODE },
-      FULL_SURFACE_TOOLS,
+      FULL_PTC_SURFACE_TOOLS,
     ],
     [
       "codemode on disk but pi will not load it",
       { ...SUBAGENTS_AXES, codemodeSwitch: { switch: "disabled", source: "user" } },
-      FULL_SURFACE_TOOLS,
+      FULL_PTC_SURFACE_TOOLS,
     ],
   ] as const) {
     for (const contents of legacy) {
@@ -880,14 +891,14 @@ test("no ptc.json content decides the surface any more — the three axes do, wh
 
 test("the surface is decided by the pi, in both directions, and neither is inherited from the machine", async () => {
   // This is the default, and the one behaviour that changes for an existing install. The previous
-  // version of this test asserted `full` and passed for the wrong reason: the factory ran the real
+  // version of this test asserted `full_ptc` and passed for the wrong reason: the factory ran the real
   // probe, the probe looked at vitest's argv, and vitest has no pi next to it. Both branches are
   // stated here rather than inherited from the machine.
   //
   // ADR-0029 added a column, and it is the column that decides the DEFAULT. pi ships codemode and
   // loads it by default while registering it `defaultActive: false`, so with no `defaultTools`
-  // anywhere the answer is `full` — the model cannot call the tool we would have handed
-  // orchestration to. The `subagents` cell is reachable only when the loadout names codemode, and
+  // anywhere the answer is `full_ptc` — the model cannot call the tool we would have handed
+  // orchestration to. The `codemode_ptc` cell is reachable only when the loadout names codemode, and
   // the last row pins that naming it cannot resurrect a pi without the tool.
   for (const options of [
     { codemode: FOUND_CODEMODE },
@@ -899,8 +910,8 @@ test("the surface is decided by the pi, in both directions, and neither is inher
     try {
       const expected =
         "codemodeActivation" in options && options.codemode.present
-          ? SUBAGENT_SURFACE_TOOLS
-          : FULL_SURFACE_TOOLS;
+          ? CODEMODE_PTC_SURFACE_TOOLS
+          : FULL_PTC_SURFACE_TOOLS;
       expect([...stub.tools.keys()], JSON.stringify(options)).toEqual([...expected]);
     } finally {
       await removeTempDir(dir);
@@ -918,7 +929,7 @@ test("the factory really reads the agent dir: a `settings.json` that disables co
   // `codemodeSwitch` only when a caller names it, so leaving it out runs the production
   // `readCodemodeSwitch` over the temp agent dir. Presence and activation are named because they
   // ARE pinned (see `stubFromAgentDir`) — and named as "everything else says yes", so this cell's
-  // answer is `full` for the switch's reason alone.
+  // answer is `full_ptc` for the switch's reason alone.
   const { stub, dir } = await stubFromAgentDir(null, SUBAGENTS_AXES_FROM_DISK, {
     extensions: ["-builtin:codemode"],
   });
@@ -926,23 +937,23 @@ test("the factory really reads the agent dir: a `settings.json` that disables co
     expect(
       [...stub.tools.keys()],
       "pi will not load codemode, so this session orchestrates itself",
-    ).toEqual([...FULL_SURFACE_TOOLS]);
+    ).toEqual([...FULL_PTC_SURFACE_TOOLS]);
   } finally {
     await removeTempDir(dir);
   }
 });
 
-test("the same agent dir with codemode enabled resolves the `subagents` surface", async () => {
+test("the same agent dir with codemode enabled resolves the `codemode_ptc` surface", async () => {
   // The other half of the pair above: same three axes, one line changed in the file on disk, and
   // `codemodeSwitch` still unnamed so the file is what decides. A factory that ignored
   // `settings.json` entirely would pass the first test only by accident; one that always resolved
-  // `full` would fail this one.
+  // `full_ptc` would fail this one.
   const { stub, dir } = await stubFromAgentDir(null, SUBAGENTS_AXES_FROM_DISK, {
     extensions: ["+builtin:codemode"],
   });
   try {
     expect([...stub.tools.keys()], "pi loads codemode and the model can call it").toEqual([
-      ...SUBAGENT_SURFACE_TOOLS,
+      ...CODEMODE_PTC_SURFACE_TOOLS,
     ]);
   } finally {
     await removeTempDir(dir);
@@ -958,8 +969,8 @@ test("a malformed ptc.json still gives the detected surface, and the problem is 
   // real probe ran against vitest's argv, and `not-found` was the only reason the full surface was
   // expected — the assertion would have passed just as happily on a pi that does ship codemode.
   for (const [options, expected] of [
-    [{ ...SUBAGENTS_AXES }, SUBAGENT_SURFACE_TOOLS],
-    [{ ...SUBAGENTS_AXES, codemode: NO_CODEMODE }, FULL_SURFACE_TOOLS],
+    [{ ...SUBAGENTS_AXES }, CODEMODE_PTC_SURFACE_TOOLS],
+    [{ ...SUBAGENTS_AXES, codemode: NO_CODEMODE }, FULL_PTC_SURFACE_TOOLS],
   ] as const) {
     const dir = await makeTempDir();
     const previous = process.env.PI_CODING_AGENT_DIR;
@@ -1000,13 +1011,13 @@ test("a detected subagents surface on a pi that does not register codemode says 
   process.env.PI_CODING_AGENT_DIR = dir;
   try {
     // No ptc.json at all: the surface is DETECTED, and the probe is told pi has codemode. The
-    // activation axis is what makes it a `subagents` surface at all (ADR-0029) — without it the
-    // factory answers `full` and neither warning under test is reachable.
+    // activation axis is what makes it a `codemode_ptc` surface at all (ADR-0029) — without it the
+    // factory answers `full_ptc` and neither warning under test is reachable.
     const stub = await makeExtensionStub({
       ...SUBAGENTS_AXES,
       active: ["read", "bash", "edit", "write"],
-      // On `subagents` the pair is `codemode`-reach and pi declares NEITHER. Without this the stub
-      // carries `full`'s default and reports both tools as declared, which makes the decision-4
+      // On `codemode_ptc` the pair is `codemode`-reach and pi declares NEITHER. Without this the stub
+      // carries `full_ptc`'s default and reports both tools as declared, which makes the decision-4
       // warning withhold itself — so the comment below would describe a notice that is not in the
       // list.
       declaredProgrammingTools: [],
@@ -1021,10 +1032,10 @@ test("a detected subagents surface on a pi that does not register codemode says 
     // get an orchestrator are both pi-side, so the message has to name them.
     expect(notices[0]?.message, "and it names a way to fix it").toContain("pi config");
     expect(notices[0]?.message, "and it names the other one too").toContain("codemode active");
-    // The surface this warning is about. Without it the test also passes on a `full` session,
+    // The surface this warning is about. Without it the test also passes on a `full_ptc` session,
     // where the cross-check cannot fire at all -- the notice is then vacuously absent.
     expect([...stub.tools.keys()], "and the session really is holding a subagent face").toEqual([
-      ...SUBAGENT_SURFACE_TOOLS,
+      ...CODEMODE_PTC_SURFACE_TOOLS,
     ]);
   } finally {
     if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
@@ -1042,18 +1053,18 @@ test("a detected subagents surface on a pi that DOES register codemode stays qui
     const stub = await makeExtensionStub({
       ...SUBAGENTS_AXES,
       active: ["read", "bash", "edit", "write", "codemode"],
-      // Same reason as the sibling above: `subagents` declares neither half of the pair, and this
+      // Same reason as the sibling above: `codemode_ptc` declares neither half of the pair, and this
       // test's silence has to come from `codemode` being ACTIVE, not from the stub reporting an
       // orchestrator the model already has.
       declaredProgrammingTools: [],
     });
-    // The surface, before the silence. Without this the test also passes on a `full` session --
+    // The surface, before the silence. Without this the test also passes on a `full_ptc` session --
     // where neither warning is reachable -- so "healthy" would be asserted about a session that
     // never had the problem. ADR-0029 made that reachable by default, which is why it is pinned.
     expect(
       [...stub.tools.keys()],
       "a healthy session is the subagents face beside an active codemode",
-    ).toEqual([...SUBAGENT_SURFACE_TOOLS]);
+    ).toEqual([...CODEMODE_PTC_SURFACE_TOOLS]);
     // Scoped the same way: the PTC-mode announcement is this file's pre-existing noise and says
     // nothing about detection.
     expect(

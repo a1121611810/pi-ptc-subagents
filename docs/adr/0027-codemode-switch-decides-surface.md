@@ -2,6 +2,8 @@
 
 status: accepted (2026-10-02)
 
+> **Amended by [ADR-0051](./0051-the-surface-names-the-orchestrator.md) (2026-10-21): the two surface values are renamed — `full` → `full_ptc`, `subagents` → `codemode_ptc` — and the surface now means _which orchestrator is responsible to the model_. This record's decisions stand unchanged; read its `full` / `subagents` as those names.**
+
 # The detected surface follows whether pi will LOAD codemode, not whether it ships it
 
 ## Context

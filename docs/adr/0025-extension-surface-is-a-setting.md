@@ -5,6 +5,8 @@ status: **withdrawn 2026-10-10** by
 setting — is false: the `surfaceMode` key, the `off` value, and `/ptc surface` are all removed, and
 the surface is detected only.
 
+> **Amended by [ADR-0051](./0051-the-surface-names-the-orchestrator.md) (2026-10-21): the two surface values are renamed — `full` → `full_ptc`, `subagents` → `codemode_ptc` — and the surface now means _which orchestrator is responsible to the model_. This record's decisions stand unchanged; read its `full` / `subagents` as those names.**
+
 What survives: the **§3 amendment of 2026-10-09**, which this record does not touch. On `subagents`,
 `ptc_run_code` / `ptc_workflow` register at `codemode` reach — callable from a script, not declared
 to the model — and that is now unconditional, since it is the only `subagents` there is. Also
