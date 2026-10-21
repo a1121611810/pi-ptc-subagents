@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>搜索能力的完整链路：表面 × 运行模式，全部实测</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f7f5f0; --card:#fff; --line:#e9e3d6; --line-soft:#f0ebe0;
+  --ink:#14171e; --ink-2:#3a4256; --muted:#7c7a72;
+  --primary:#2f6f5e; --primary-soft:rgba(47,111,94,.08);
+  --amber:#c97b3f; --amber-soft:rgba(201,123,63,.10);
+  --rose:#b06367; --rose-soft:rgba(176,99,103,.09);
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;background:var(--bg);color:var(--ink);
+  font-family:'Outfit',-apple-system,sans-serif;
+  font-size:15px;line-height:1.6;
+  background-image:
+    radial-gradient(ellipse 900px 500px at 8% -8%, rgba(47,111,94,.05), transparent 60%),
+    radial-gradient(ellipse 800px 460px at 96% 4%, rgba(201,123,63,.05), transparent 62%);
+}
+.wrap{max-width:1080px;margin:0 auto;padding:44px 24px 72px}
+h1{font-family:'DM Serif Display',serif;font-weight:400;font-size:33px;line-height:1.22;letter-spacing:-.01em;margin:0 0 12px}
+h2{font-family:'DM Serif Display',serif;font-weight:400;font-size:24px;line-height:1.25;margin:0 0 6px;display:flex;align-items:center;gap:10px}
+h2 svg{flex:none;color:var(--primary)}
+.sub{color:var(--muted);font-size:14px;margin:0 0 26px;max-width:74ch}
+section{margin:0 0 46px}
+p{margin:0 0 10px}
+code,.mono{font-family:'JetBrains Mono',monospace;font-size:.86em}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+@media(max-width:820px){.grid2,.grid3{grid-template-columns:1fr}}
+
+.chips{display:flex;flex-wrap:wrap;gap:7px;margin:0 0 16px}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;padding:4px 10px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--ink-2)}
+.chip i{width:8px;height:8px;border-radius:2px;display:block}
+.dot-p{background:var(--primary)} .dot-a{background:var(--amber)} .dot-r{background:var(--rose)} .dot-m{background:var(--muted)}
+
+.gap{background:var(--amber-soft);border:1px solid rgba(201,123,63,.34);border-radius:14px;padding:17px 19px;margin:0 0 20px}
+.gap h3{margin:0 0 7px;font-size:16px;display:flex;align-items:center;gap:8px;color:#8a5222}
+.gap h3 svg{flex:none}
+.gap p{margin:0 0 8px;color:#5c452c;font-size:14px}
+.gap p:last-child{margin:0}
+.gap b{color:#7a4818}
+
+.fix{background:var(--primary-soft);border:1px solid rgba(47,111,94,.34);border-radius:14px;padding:17px 19px;margin:0 0 20px}
+.fix h3{margin:0 0 7px;font-size:16px;display:flex;align-items:center;gap:8px;color:#1f5344}
+.fix h3 svg{flex:none}
+.fix p{margin:0 0 8px;color:#2c4a41;font-size:14px}
+.fix p:last-child{margin:0}
+.fix b{color:#17453a}
+
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{text-align:left;font-weight:600;color:var(--muted);font-size:12px;letter-spacing:.03em;text-transform:uppercase;padding:0 12px 8px 0;border-bottom:1px solid var(--line)}
+td{padding:9px 12px 9px 0;border-bottom:1px solid var(--line-soft);vertical-align:top;color:var(--ink-2)}
+td:first-child{color:var(--ink);font-weight:500}
+tr:last-child td{border-bottom:none}
+.yes{color:var(--primary);font-weight:600}
+.no{color:var(--rose);font-weight:600}
+.dim{color:var(--muted)}
+
+.flow{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+@media(max-width:900px){.flow{grid-template-columns:1fr}}
+.pane{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 17px}
+.pane-h{display:flex;align-items:baseline;gap:9px;margin:0 0 4px}
+.pane-h strong{font-size:16px;font-family:'DM Serif Display',serif;font-weight:400}
+.pane-h em{font-style:normal;font-size:12px;color:var(--muted)}
+.pane > p{font-size:13px;color:var(--muted);margin:0 0 12px}
+
+.steps{list-style:none;margin:0;padding:0;position:relative}
+.steps::before{content:"";position:absolute;left:7px;top:8px;bottom:8px;width:2px;background:var(--primary);opacity:.28}
+.steps li{position:relative;padding:0 0 15px 26px}
+.steps li:last-child{padding-bottom:0}
+.steps li::before{content:"";position:absolute;left:2px;top:5px;width:12px;height:12px;border-radius:50%;background:#fff;border:2px solid var(--primary)}
+.steps li.bad::before{border-color:var(--rose)}
+.steps li.warn::before{border-color:var(--amber)}
+.steps li.good::before{border-color:var(--primary)}
+.steps b{display:block;font-size:14px;margin-bottom:2px}
+.steps span{display:block;font-size:13px;color:var(--muted);line-height:1.55}
+.steps .mono{color:var(--ink-2)}
+
+.kv{display:grid;grid-template-columns:132px 1fr;row-gap:9px;column-gap:14px;margin:0;font-size:13.5px}
+.kv dt{color:var(--muted);border-bottom:1px dashed var(--line);padding-bottom:7px}
+.kv dd{margin:0;border-bottom:1px dashed var(--line);padding-bottom:7px;color:var(--ink-2)}
+
+.flowsvg{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;overflow-x:auto}
+.flowsvg svg{display:block;width:100%;height:auto;min-width:900px}
+.fn{font-family:'JetBrains Mono',monospace;font-size:11.5px}
+.ft{font-family:'Outfit',sans-serif;font-size:12.5px;fill:var(--ink)}
+.ft2{font-family:'Outfit',sans-serif;font-size:11.5px;fill:var(--muted)}
+.fp{font-family:'JetBrains Mono',monospace;font-size:11.5px;fill:#8a5222}
+
+footer{margin-top:52px;padding-top:20px;border-top:1px solid var(--line);color:var(--muted);font-size:12.5px}
+footer code{color:var(--ink-2)}
+ul.tight{margin:8px 0 0;padding-left:19px;color:var(--ink-2);font-size:13.5px}
+ul.tight li{margin-bottom:5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>搜索能力的完整链路：表面 × 运行模式</h1>
+<p class="sub">从「父会话想查一页网页」到「孩子的答案回到父会话」的每一个判定点。<b>表面</b>指本包注册哪些编排工具（<code>full</code> / <code>subagents</code>），<b>运行模式</b>指 pi 的 <code>tui</code> / <code>print</code> / <code>json</code> / <code>rpc</code>。本图每一格都是真机实测，行号与判据都对着源码。</p>
+
+<div class="chips">
+  <span class="chip"><i class="dot-p"></i>已验证的判定</span>
+  <span class="chip"><i class="dot-a"></i>实测暴露的缺口</span>
+  <span class="chip"><i class="dot-r"></i>能力缺失（静悄悄）</span>
+  <span class="chip"><i class="dot-m"></i>模式 / 开关门</span>
+</div>
+
+<div class="fix">
+  <h3>
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+    这一版修掉了上一版图里那个错误格子，并且补上了一个新的修复
+  </h3>
+  <p><b>上一版写错的地方</b>：我写的「TUI + codemode 激活 ⇒ 模式进入」<b>不成立</b>。实测：<code>decideModeEntry</code> 的第三个条件是「模型面前有 <code>ptc_run_code</code>/<code>ptc_workflow</code>」，而 <code>subagents</code> 表面上这两个是 <code>codemode</code> reach ⇒ <b>不是 model-facing</b> ⇒ 条件永不满足 ⇒ 报 <code>tools-unavailable</code> ⇒ <b>模式进不去</b>。</p>
+  <p><b>补上的新修复</b>：<b>「怎么派子代理」现在写进系统提示词的一个 section</b>（<code>&lt;ptc&gt;</code>），不再只挂在工具描述上。理由：pi 只从 <b>declared</b> 的工具收集 guidelines，而 <code>codemode</code> reach 的工具<b>连 guidelines 都进不了模型上下文</b> ⇒ 上一版那个「父会话连摔三次 <code>tools.pi.dispatch does not exist</code>」的缺陷，根因不是模型没读，而是<b>它无处可读</b>。section 是 pi 无条件并进系统提示词的，所以这一句对每个表面都到得了。</p>
+  <p><b>实测效果</b>：<code>subagents</code> 表面上，父会话从「写 codemode 脚本 → 三次 TypeError → 才退到 <code>ptc_subagent</code>」变成<b>直接调 <code>ptc_subagent</code>，零次 TypeError</b>。</p>
+</div>
+
+<section>
+<h2>
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg>
+  全景：一条链，四个判定点
+</h2>
+<p class="sub">竖着读是时间顺序。四个判定点分别是：<b>表面</b>（注册什么）、<b>模式</b>（模型面前剩什么）、<b>派单形状</b>（怎么叫到孩子）、<b>档位</b>（孩子的工具白名单）。</p>
+
+<div class="flowsvg">
+<svg viewBox="0 0 1180 1010" role="img" aria-label="搜索能力完整链路的流程图">
+  <defs>
+    <marker id="ar" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#9a978c"/></marker>
+    <marker id="arA" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#c97b3f"/></marker>
+    <marker id="arR" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#b06367"/></marker>
+  </defs>
+
+  <!-- lane 1: surface -->
+  <text x="24" y="30" class="fn" fill="#2f6f5e">① 表面检测 — detectedSurfaceMode()  src/mode/ptc-mode.ts:1331</text>
+  <rect x="24" y="42" width="1132" height="92" rx="10" fill="rgba(47,111,94,.045)" stroke="#2f6f5e" stroke-opacity=".26"/>
+  <rect x="46" y="62" width="196" height="52" rx="9" fill="#fff" stroke="#2f6f5e" stroke-opacity=".5"/>
+  <text x="144" y="82" class="ft" text-anchor="middle">pi 装了吗 codemode？</text>
+  <text x="144" y="100" class="ft2" text-anchor="middle">probeCodemodePresence</text>
+  <path d="M242 88 L286 88" stroke="#9a978c" stroke-width="1.6" marker-end="url(#ar)"/>
+  <text x="264" y="80" class="ft2" text-anchor="middle">是</text>
+  <rect x="290" y="62" width="196" height="52" rx="9" fill="#fff" stroke="#2f6f5e" stroke-opacity=".5"/>
+  <text x="388" y="82" class="ft" text-anchor="middle">switch = disabled？</text>
+  <text x="388" y="100" class="ft2" text-anchor="middle">readCodemodeSwitch</text>
+  <path d="M486 88 L530 88" stroke="#9a978c" stroke-width="1.6" marker-end="url(#ar)"/>
+  <text x="508" y="80" class="ft2" text-anchor="middle">否</text>
+  <rect x="534" y="62" width="212" height="52" rx="9" fill="#fff" stroke="#2f6f5e" stroke-opacity=".5"/>
+  <text x="640" y="82" class="ft" text-anchor="middle">activation = active？</text>
+  <text x="640" y="100" class="ft2" text-anchor="middle">pi.getActiveTools() 含 codemode</text>
+  <path d="M746 88 L790 88" stroke="#2f6f5e" stroke-width="1.6" marker-end="url(#ar)"/>
+  <text x="768" y="80" class="ft2" text-anchor="middle" fill="#2f6f5e">是</text>
+  <rect x="794" y="56" width="150" height="34" rx="8" fill="rgba(47,111,94,.13)" stroke="#2f6f5e" stroke-opacity=".55"/>
+  <text x="869" y="78" class="ft" text-anchor="middle" fill="#2f6f5e">表面 = subagents</text>
+  <path d="M144 114 L144 124 L1090 124 L1090 78" fill="none" stroke="#9a978c" stroke-width="1.4" stroke-dasharray="4 3"/>
+  <path d="M388 114 L388 132 L640 132" fill="none" stroke="#9a978c" stroke-width="1.4" stroke-dasharray="4 3"/>
+  <path d="M640 114 L640 140 L1090 140" fill="none" stroke="#9a978c" stroke-width="1.4" stroke-dasharray="4 3"/>
+  <text x="1130" y="130" class="ft2" text-anchor="end">任一否 →</text>
+  <rect x="960" y="56" width="182" height="34" rx="8" fill="rgba(122,122,114,.11)" stroke="#7c7a72" stroke-opacity=".5"/>
+  <text x="1051" y="78" class="ft" text-anchor="middle">表面 = full</text>
+  <path d="M958 73 L956 73" stroke="#9a978c" stroke-width="1.4" marker-end="url(#ar)"/>
+  <text x="24" y="152" class="ft2">full → ptc_run_code / ptc_workflow 直面模型；subagents → 它们降到 codemode reach（脚本可调、模型看不见），模型面前换成 pi 的 codemode ＋ 我们的 ptc_subagent。</text>
+
+  <!-- lane 2: mode -->
+  <text x="24" y="196" class="fn" fill="#7c7a72">② PTC 模式是否进入 — decideModeEntry()  src/mode/ptc-mode.ts:1586</text>
+  <rect x="24" y="208" width="1132" height="150" rx="10" fill="rgba(122,122,114,.05)" stroke="#7c7a72" stroke-opacity=".26"/>
+  <rect x="46" y="228" width="212" height="46" rx="9" fill="#fff" stroke="#7c7a72" stroke-opacity=".55"/>
+  <text x="152" y="248" class="ft" text-anchor="middle">ctx.mode === "tui"？</text>
+  <text x="152" y="265" class="ft2" text-anchor="middle">唯一能进的运行模式</text>
+  <path d="M258 251 L302 251" stroke="#b06367" stroke-width="1.6" marker-end="url(#arR)"/>
+  <text x="280" y="243" class="ft2" text-anchor="middle" fill="#b06367">否</text>
+  <rect x="306" y="228" width="188" height="46" rx="9" fill="rgba(176,99,103,.1)" stroke="#b06367" stroke-opacity=".55"/>
+  <text x="400" y="248" class="ft" text-anchor="middle" fill="#b06367">不进入 · not-tui</text>
+  <text x="400" y="265" class="ft2" text-anchor="middle">print / json / rpc</text>
+  <path d="M152 274 L152 296" stroke="#9a978c" stroke-width="1.6" marker-end="url(#ar)"/>
+  <text x="170" y="292" class="ft2">是</text>
+  <rect x="46" y="300" width="212" height="44" rx="9" fill="#fff" stroke="#7c7a72" stroke-opacity=".4"/>
+  <text x="152" y="318" class="ft" text-anchor="middle">模型面前有 ptc_run_code</text>
+  <text x="152" y="334" class="ft2" text-anchor="middle">或 ptc_workflow 吗？</text>
+  <path d="M258 322 L302 322" stroke="#c97b3f" stroke-width="1.6" marker-end="url(#arA)"/>
+  <text x="280" y="314" class="ft2" text-anchor="middle" fill="#8a5222">否</text>
+  <rect x="306" y="300" width="188" height="44" rx="9" fill="rgba(201,123,63,.1)" stroke="#c97b3f" stroke-opacity=".55"/>
+  <text x="400" y="318" class="ft" text-anchor="middle" fill="#8a5222">不进入 · tools-unavailable</text>
+  <text x="400" y="334" class="ft2" text-anchor="middle">★ subagents 表面必然走这条</text>
+  <path d="M494 322 L538 322" stroke="#2f6f5e" stroke-width="1.6" marker-end="url(#ar)"/>
+  <text x="516" y="314" class="ft2" text-anchor="middle" fill="#2f6f5e">是</text>
+  <rect x="542" y="296" width="614" height="52" rx="9" fill="rgba(47,111,94,.07)" stroke="#2f6f5e" stroke-opacity=".4"/>
+  <text x="849" y="316" class="ft" text-anchor="middle">进入 · 收窄工具表（七个内建工具从模型面前消失）</text>
+  <text x="849" y="334" class="ft2" text-anchor="middle">实测 TUI + full：session entry 记下 ptc-mode enabled:true，父的 toolsAdded 只剩 ptc_*</text>
+  <text x="24" y="380" class="ft2">★ 收窄只在「TUI + full 表面」这一格发生。其余三格父会话面前都有 bash ⇒ 能自己 curl 绕过去。</text>
+  <text x="24" y="400" class="ft2">★ 另一条独立的门：ctx.ui.notify 在 print/json 是 noOp（runner.js:136）⇒ 27 处通知在 print/json 全部消失（rpc 不在内：它把通知发成协议事件）。appendEntry 不依赖 TUI。</text>
+
+  <!-- lane 3: how to dispatch -->
+  <text x="24" y="436" class="fn" fill="#2f6f5e">③ 父会话要联网 → 怎么叫到孩子</text>
+  <rect x="24" y="448" width="1132" height="166" rx="10" fill="rgba(47,111,94,.045)" stroke="#2f6f5e" stroke-opacity=".26"/>
+  <rect x="46" y="468" width="220" height="52" rx="9" fill="#fff" stroke="#2f6f5e" stroke-opacity=".5"/>
+  <text x="156" y="488" class="ft" text-anchor="middle">父会话要问一件需要联网的事</text>
+  <text x="156" y="506" class="ft2" text-anchor="middle">父自己没有 web_ds_search</text>
+  <path d="M266 494 L310 494" stroke="#9a978c" stroke-width="1.6" marker-end="url(#ar)"/>
+  <rect x="314" y="462" width="228" height="64" rx="9" fill="#fff" stroke="#2f6f5e" stroke-opacity=".5"/>
+  <text x="428" y="482" class="ft" text-anchor="middle">系统提示词里的 &lt;ptc&gt; 段</text>
+  <text x="428" y="499" class="ft2" text-anchor="middle">full：写程序，程序内</text>
+  <text x="428" y="515" class="ft2" text-anchor="middle">await tools["pi.dispatch"]</text>
+  <path d="M542 494 L586 494" stroke="#9a978c" stroke-width="1.6" marker-end="url(#ar)"/>
+  <rect x="590" y="462" width="228" height="64" rx="9" fill="#fff" stroke="#2f6f5e" stroke-opacity=".5"/>
+  <text x="704" y="482" class="ft" text-anchor="middle">subagents：直接调 ptc_subagent</text>
+  <text x="704" y="499" class="ft2" text-anchor="middle">codemode 脚本的表里</text>
+  <text x="704" y="515" class="ft2" text-anchor="middle">没有 pi.dispatch</text>
+  <path d="M818 494 L862 494" stroke="#9a978c" stroke-width="1.6" marker-end="url(#ar)"/>
+  <rect x="866" y="462" width="272" height="64" rx="9" fill="#fff" stroke="#2f6f5e" stroke-opacity=".5"/>
+  <text x="1002" y="482" class="ft" text-anchor="middle">子进程：自己的上下文 ＋ 自己的工具</text>
+  <text x="1002" y="499" class="ft2" text-anchor="middle">父 → 子之间只靠</text>
+  <text x="1002" y="515" class="ft2" text-anchor="middle">dispatch-and-report 契约</text>
+  <text x="24" y="546" class="ft2">★ 这一段以前只挂在 ptc_run_code / ptc_workflow 的描述里 ⇒ subagents 表面上模型「无处可读」⇒ 连摔三次 TypeError 才退到 ptc_subagent。</text>
+  <text x="24" y="566" class="ft2">★ 现在写进 section：pi 把自定义 section 无条件并进系统提示词，不依赖哪些工具被声明给模型。</text>
+  <text x="24" y="586" class="ft2">★ 修完实测：subagents 表面上父直接调 ptc_subagent，零次 TypeError；四种运行模式全部 DISPATCHED。</text>
+  <text x="24" y="606" class="ft2">★ PTC 关掉时（ADR-0050）：这一段换成「派单已关」而不是教怎么派 ⇒ 父会话面前那三个任务工具也一并收走（没在跑的就没东西可管）。</text>
+
+  <!-- lane 4: tier -->
+  <text x="24" y="622" class="fn" fill="#2f6f5e">④ 孩子的 --tools 白名单 — childToolList()  src/runtime/dispatch.ts:1905</text>
+  <rect x="24" y="634" width="1132" height="188" rx="10" fill="rgba(47,111,94,.045)" stroke="#2f6f5e" stroke-opacity=".26"/>
+  <rect x="46" y="654" width="196" height="46" rx="9" fill="#fff" stroke="#2f6f5e" stroke-opacity=".5"/>
+  <text x="144" y="674" class="ft" text-anchor="middle">readOnly 档位？</text>
+  <text x="144" y="691" class="ft2" text-anchor="middle">strict / lenient / 不给</text>
+  <path d="M242 668 L286 668" stroke="#9a978c" stroke-width="1.6" marker-end="url(#ar)"/>
+  <text x="264" y="660" class="ft2" text-anchor="middle">strict</text>
+  <rect x="290" y="652" width="264" height="50" rx="9" fill="rgba(47,111,94,.09)" stroke="#2f6f5e" stroke-opacity=".5"/>
+  <text x="422" y="672" class="ft" text-anchor="middle">read, grep, find, ls</text>
+  <text x="422" y="690" class="ft2" text-anchor="middle">+ ptc_child_report（报告契约）</text>
+  <path d="M554 668 L598 668" stroke="#2f6f5e" stroke-width="1.6" marker-end="url(#ar)"/>
+  <text x="576" y="660" class="ft2" text-anchor="middle" fill="#2f6f5e">修后</text>
+  <rect x="602" y="652" width="264" height="50" rx="9" fill="rgba(176,99,103,.09)" stroke="#b06367" stroke-opacity=".5"/>
+  <text x="734" y="672" class="ft" text-anchor="middle" fill="#b06367">修前：web_ds_search 也不在</text>
+  <text x="734" y="690" class="ft2" text-anchor="middle">pi 把 --tools 当白名单 ⇒ 静悄悄没了</text>
+  <path d="M866 668 L910 668" stroke="#2f6f5e" stroke-width="1.6" marker-end="url(#ar)"/>
+  <rect x="914" y="652" width="220" height="50" rx="9" fill="rgba(47,111,94,.1)" stroke="#2f6f5e" stroke-opacity=".55"/>
+  <text x="1024" y="672" class="ft" text-anchor="middle" fill="#2f6f5e">+ web_ds_search</text>
+  <text x="1024" y="690" class="ft2" text-anchor="middle">只读网页 ≠ 写 ⇒ 留着</text>
+  <path d="M144 700 L144 722" stroke="#9a978c" stroke-width="1.6" marker-end="url(#ar)"/>
+  <text x="162" y="718" class="ft2">lenient / 不给</text>
+  <rect x="290" y="726" width="576" height="40" rx="9" fill="#fff" stroke="#2f6f5e" stroke-opacity=".4"/>
+  <text x="578" y="746" class="ft" text-anchor="middle">不传 --tools ⇒ 孩子保留 pi 的默认工具表 ＋ 它自己注册的那几个</text>
+  <text x="578" y="760" class="ft2" text-anchor="middle">（web_ds_search 在 depth&gt;0 时注册 ⇒ 直接可调）</text>
+  <path d="M866 746 L910 746" stroke="#9a978c" stroke-width="1.6" marker-end="url(#ar)"/>
+  <rect x="914" y="726" width="220" height="40" rx="9" fill="rgba(47,111,94,.1)" stroke="#2f6f5e" stroke-opacity=".5"/>
+  <text x="1024" y="746" class="ft" text-anchor="middle" fill="#2f6f5e">能力在</text>
+  <text x="24" y="790" class="ft2">★ agent 定义自己声明 tools: 时同理：白名单里没写 web_ds_search 就一样没有——但那条是 ADR-0049 明写的「有意为之」，与档位不同。</text>
+  <text x="24" y="810" class="ft2">★ 每个孩子进程一份配额（默认 30 次）——N 个孩子 ⇒ N×30 次成功请求；官方 5 元/千次成功请求。</text>
+  <text x="24" y="830" class="ft2">★ 记忆跨最近 5 次搜索，url 宽松匹配（模型不会逐字节抄 url）；命中记忆的 open / find 不发请求、不占配额。</text>
+
+  <!-- lane 5: the child searches -->
+  <text x="24" y="866" class="fn" fill="#2f6f5e">⑤ 孩子自己搜 — 三个动作</text>
+  <rect x="24" y="878" width="1132" height="120" rx="10" fill="rgba(47,111,94,.045)" stroke="#2f6f5e" stroke-opacity=".26"/>
+  <rect x="46" y="896" width="176" height="50" rx="9" fill="#fff" stroke="#2f6f5e" stroke-opacity=".5"/>
+  <text x="134" y="916" class="ft" text-anchor="middle">search</text>
+  <text x="134" y="934" class="ft2" text-anchor="middle">概览：title/url/score</text>
+  <rect x="238" y="896" width="176" height="50" rx="9" fill="#fff" stroke="#2f6f5e" stroke-opacity=".5"/>
+  <text x="326" y="916" class="ft" text-anchor="middle">open</text>
+  <text x="326" y="934" class="ft2" text-anchor="middle">整页正文</text>
+  <rect x="430" y="896" width="176" height="50" rx="9" fill="#fff" stroke="#2f6f5e" stroke-opacity=".5"/>
+  <text x="518" y="916" class="ft" text-anchor="middle">find</text>
+  <text x="518" y="934" class="ft2" text-anchor="middle">页内行号</text>
+  <path d="M606 921 L650 921" stroke="#9a978c" stroke-width="1.6" marker-end="url(#ar)"/>
+  <rect x="654" y="896" width="230" height="50" rx="9" fill="rgba(47,111,94,.08)" stroke="#2f6f5e" stroke-opacity=".45"/>
+  <text x="769" y="916" class="ft" text-anchor="middle">open / find 命中记忆</text>
+  <text x="769" y="934" class="ft2" text-anchor="middle">⇒ 不发请求、不占配额、零成本</text>
+  <path d="M884 921 L928 921" stroke="#9a978c" stroke-width="1.6" marker-end="url(#ar)"/>
+  <rect x="932" y="896" width="202" height="50" rx="9" fill="#fff" stroke="#2f6f5e" stroke-opacity=".45"/>
+  <text x="1033" y="916" class="ft" text-anchor="middle">ptc_child_report</text>
+  <text x="1033" y="934" class="ft2" text-anchor="middle">⇒ 逐字原文回到父</text>
+  <text x="24" y="978" class="ft2">★ 凭据缺失 ⇒ 工具仍注册但标注不可用，调用返回一句说清缺什么的话（这条告警在 TUI 说得出，print/json 静悄悄；rpc 走协议事件）。</text>
+</svg>
+</div>
+</section>
+
+<section>
+<h2>
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M8 3H3v5"/><path d="M21 16v5h-5"/><path d="M3 16v5h5"/><path d="M3 8h18v8H3z"/></svg>
+  八格全表：表面 × 运行模式
+</h2>
+<p class="sub">每格都是真机跑出来的。「收窄」指七个内建工具是否从模型面前消失；「父有 bash」决定父能不能绕过整个设计自己联网。</p>
+
+<div class="card" style="padding:18px 20px">
+<table>
+<thead><tr><th>表面</th><th>运行模式</th><th>收窄</th><th>父面前有什么</th><th>父有 bash</th><th>派单的路</th><th>实测</th></tr></thead>
+<tbody>
+<tr>
+  <td rowspan="2">full</td>
+  <td><b>tui</b></td>
+  <td class="yes">进</td>
+  <td class="mono">ptc_run_code / ptc_workflow / ptc_task_*</td>
+  <td class="no">没有</td>
+  <td>写程序 → 程序内 pi.dispatch</td>
+  <td class="yes">模式进入已实测</td>
+</tr>
+<tr>
+  <td>print / json / rpc</td>
+  <td class="no">不进（not-tui）</td>
+  <td class="mono">一切照常 + 我们的工具</td>
+  <td class="yes">有</td>
+  <td>同上（父自己 curl 也行）</td>
+  <td class="yes">DISPATCHED</td>
+</tr>
+<tr>
+  <td rowspan="2">subagents</td>
+  <td><b>tui</b></td>
+  <td class="no">不进（tools-unavailable）</td>
+  <td class="mono">codemode / ptc_subagent / ptc_task_* ＋ 内建</td>
+  <td class="yes">有</td>
+  <td>直接调 ptc_subagent</td>
+  <td class="yes">DISPATCHED</td>
+</tr>
+<tr>
+  <td>print / json / rpc</td>
+  <td class="no">不进（not-tui）</td>
+  <td class="mono">同上</td>
+  <td class="yes">有</td>
+  <td>直接调 ptc_subagent</td>
+  <td class="yes">DISPATCHED</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<p class="sub" style="margin-top:16px">**只有第一格**是「父不能自己联网」的形状。`subagents` 表面上 <code>ptc_run_code</code> 不是 model-facing ⇒ 收窄的前提不成立 ⇒ 模式进不去 ⇒ 父保留 bash。</p>
+</section>
+
+<section>
+<h2>
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+  这一轮真机测到了什么
+</h2>
+
+<div class="grid2">
+  <div class="card">
+    <p style="margin:0 0 10px"><b>subagents 面 · 修 section 之前</b></p>
+    <ul class="tight">
+      <li>父的第一反应：写 pi 的 codemode 脚本</li>
+      <li>连摔三次：<code>TypeError: tools.pi.dispatch does not exist</code></li>
+      <li>退到 <code>ptc_subagent</code>，派单成功</li>
+      <li>父自发加了 <code>readOnly:"strict"</code></li>
+      <li>孩子工具表 = <code>read,grep,find,ls,ptc_child_report</code>，<b>没有搜索工具</b></li>
+      <li>孩子自报「no web search, web fetch, or bash tool」并放弃</li>
+      <li>父如实回报「我没拿到那页内容」</li>
+    </ul>
+    <p style="font-size:13px;color:var(--muted);margin:12px 0 0">⇒ 能力不是被绕过的，是<b>不存在</b>，而且静悄悄。</p>
+  </div>
+
+  <div class="card">
+    <p style="margin:0 0 10px"><b>subagents 面 · 修完</b></p>
+    <ul class="tight">
+      <li>父<b>直接调 <code>ptc_subagent</code></b>，零次 TypeError</li>
+      <li>孩子工具表带 <code>web_ds_search</code>（strict 也保留）</li>
+      <li>孩子调了十几次 <code>web_ds_search</code> 并自己找到那页（json 17 次、rpc 14 次）</li>
+      <li>父拿到逐字原文</li>
+      <li>四种运行模式（tui / print / json / rpc）<b>全部 DISPATCHED</b></li>
+      <li>第一次 rpc 测量其实是<b>无效</b>的：脚本的进程代理把 stdin 设成了 ignore，提示词压根没送到父会话，于是报出「父什么也没调」——看着像模型拒绝派单，其实是 harness 自己坏了。现在代理会转发 stdin，且脚本会区分「模型拒绝派单」与「根本没跑」</li>
+    </ul>
+    <p style="font-size:13px;color:var(--muted);margin:12px 0 0">复现（四种模式各跑一遍）：<code>PTC_E2E_SURFACE=subagents PTC_E2E_MODE=json node scripts/verify-parent-dispatch-e2e.ts</code>；tui 需要 pty：<code>script -q /dev/null env PTC_E2E_MODE=tui PTC_E2E_SURFACE=subagents node scripts/verify-parent-dispatch-e2e.ts</code></p>
+  </div>
+</div>
+</section>
+
+<footer>
+<p>图上的每个判定点都对着源码行；行号是 2026-10-21 的。相关记录：<code>docs/adr/0049-the-search-lives-in-the-child.md</code>（搜索在孩子里）、<code>docs/adr/0041-read-only-is-a-call-site-tier.md</code>（档位）、<code>docs/adr/0029-surface-follows-codemode-activation.md</code>（表面与派单段）、<code>docs/adr/0025-extension-surface-is-a-setting.md</code>（<code>ptc_subagent</code> 这个面）。</p>
+</footer>
+
+</div>
+</body>
+</html>
