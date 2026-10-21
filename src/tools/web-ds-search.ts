@@ -52,6 +52,7 @@ import {
   toSearchParams,
   type WebDsSearchDeps,
 } from "../search/run.ts";
+import { renderDescription, TOOLS, type DescriptionSlot } from "../routes/registry.ts";
 import { defineCompatTool, type ToolExposure } from "./pi-compat-types.ts";
 import { TaskPanelRow } from "./task-panel-render.ts";
 import { sanitizeText } from "./text.ts";
@@ -68,24 +69,15 @@ export const WEB_DS_SEARCH_LABEL = "Web search (DeepSeek)";
  * **The unavailable notice is a per-session truth, so the description is built per session.**
  * A model that can see that search exists but is unusable can tell the user what is missing; a
  * model that cannot see search at all cannot.
+ *
+ * The text itself lives in the route registry (`src/routes/registry.ts`), together with every
+ * other piece of model-facing prose this package writes; this function is the wiring that decides
+ * whether this session's search has a credential.
  */
 export function webDsSearchDescription(unavailable: boolean): string {
-  const lines = [
-    "Search the web through DeepSeek's Search API, or open one page.",
-    "**Three actions, one at a time.** `query` searches, `open` opens one page, `find` looks for a string inside one page. Give exactly one of them.",
-    "**Call it directly, the way you call any other tool.** It is not a PTC binding, so a program you write cannot call it: `tools.web_ds_search` is not a function.",
-    "A search returns an OVERVIEW — one entry per result: title, url, authority, rerank_score, date, and DeepSeek's own short snippet. It does NOT return each page's full text.",
-    "**Want a page's substance? Call `open` with that result's url.** It costs nothing when the page came from a search you just did, and one request otherwise.",
-    "**Want one passage out of a long page? Call `find` with the url and the string you are looking for** — you get the line numbers where it appears, not the whole page.",
-    "`url` is the only source identifier in a result, so build citations from it.",
-    "Set `need_content` only when you want each result's whole body — it makes the search's payload much larger.",
-    "A fetched page's body may carry backslash escapes before punctuation (`\\|`, `\\-`, `\\.`): that is the API's own formatting, not corruption, and the text is still readable.",
-    "A failure comes back as a sentence saying whether to retry, change the source or recharge; read it and act on it.",
-  ];
-  if (unavailable) {
-    lines.push(SEARCH_UNAVAILABLE_NOTICE);
-  }
-  return lines.join("\n");
+  const filled: Partial<Record<DescriptionSlot, string>> = {};
+  if (unavailable) filled.searchUnavailable = SEARCH_UNAVAILABLE_NOTICE;
+  return renderDescription(TOOLS.web_ds_search, filled);
 }
 
 /**
@@ -104,11 +96,8 @@ export function createWebDsSearchTool(options: {
     name: WEB_DS_SEARCH_TOOL_NAME,
     label: WEB_DS_SEARCH_LABEL,
     description: webDsSearchDescription(unavailable),
-    promptSnippet: "Search the web, or fetch a page, through DeepSeek's Search API",
-    promptGuidelines: [
-      "Prefer `summary` over `content` when you only need to judge a result — `content` is the whole page and it makes the result large.",
-      "A search that matched nothing is not an error: it comes back with an empty `results` and a sentence saying so.",
-    ],
+    promptSnippet: TOOLS.web_ds_search.snippet,
+    promptGuidelines: [...TOOLS.web_ds_search.guidelines],
     parameters: WEB_DS_SEARCH_PARAMETERS,
     outputSchema: WEB_DS_SEARCH_PAYLOAD_SCHEMA,
     // `direct` on every surface: this tool is SUPPOSED to be model-facing — in the child. The

@@ -2,6 +2,8 @@
 
 Status: accepted (2026-10-21). Ticket #241（spec #234 实现决定 6 的最后一段与决定 7）。修订：[ADR-0022](./0022-background-dispatch.md) 的后台生命周期与 §"What we add" 6、[ADR-0050](./0050-ptc-off-stops-new-dispatch.md) 决定 1 与决定 3、[ADR-0053](./0053-every-dispatch-is-a-task.md) 决定 4 的露面条件、[ADR-0056](./0056-admission-queues-instead-of-rejecting.md) 决定 7 与 §"遗留"。**本篇与这四篇读得不一样的地方，以本篇为准。**
 
+> **Amended by [ADR-0059](./0059-route-registry.md) (2026-10-21): the shared sentence this record introduced (`TASK_STOP_SEMANTICS`) moved into the route registry (`src/routes/registry.ts`) — one home for every piece of model-facing prose. The two surfaces it reaches are unchanged, and the test still asserts both carry it.**
+
 ## Context
 
 ADR-0056 把「满了不拒绝」落地了：超出并发上限的请求**进队列等**，而**入队即建记录**——排队的那个任务当场就是一条 `queued` 记录，有 id、有标签、在 `ptc_task_list` 里看得见。

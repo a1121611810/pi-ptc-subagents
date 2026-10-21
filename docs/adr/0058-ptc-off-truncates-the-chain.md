@@ -2,6 +2,8 @@
 
 Status: accepted (2026-10-21). Ticket #242（spec #234 实现决定 7）。修订：[ADR-0050](./0050-ptc-off-stops-new-dispatch.md) 决定 1 与决定 3、[ADR-0052](./0052-the-two-doors-share-one-prefix.md) 决定 6。**本篇与这两篇读得不一样的地方，以本篇为准。**
 
+> **Amended by [ADR-0059](./0059-route-registry.md) (2026-10-21): the shared sentence this record introduced (`PTC_TRUNCATED_NO_NEW_TASK`) moved into the route registry (`src/routes/registry.ts`) — one home for every piece of model-facing prose. The model's section and the user's notice still carry the same sentence, and the test still asserts both.**
+
 ## Context
 
 ADR-0050 把 `/ptc off` 做成**一道闸**：门还留在模型面前，调用被拒。闸落在 `dispatch()` 里，两个面都经过它，所以「停收新的」这件事在两个面上都成立。

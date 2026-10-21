@@ -2,6 +2,8 @@
 
 Status: accepted (2026-10-21). Ticket #239（spec #234 实现决定 5 与决定 8）。修订：[ADR-0016](./0016-ptc-dispatch-binding.md)、[ADR-0022](./0022-background-dispatch.md)、[ADR-0053](./0053-every-dispatch-is-a-task.md)、[ADR-0054](./0054-the-two-doors-give-one-object.md)。**本篇与这四篇读得不一样的地方，以本篇为准。**
 
+> **Amended by [ADR-0059](./0059-route-registry.md) (2026-10-21): the model-facing wording of the two waiting modes is retired with the modes — the task tools now say "task", not "background task", and the `wait` parameter is the only choice. The wording the model reads now lives in the route registry (`src/routes/registry.ts`). The parameter, the default and the shape this record decided are unchanged.**
+
 ## Context
 
 到 2026-10-21 为止，本包里有**一个**派发入口、**两条**派发路径。`pi_task_ptc`（ADR-0052 之后的门名）接受一个 `background` 布尔量：带它走「后台」那条，不带它走「前台」那条。

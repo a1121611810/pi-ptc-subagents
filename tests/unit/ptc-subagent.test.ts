@@ -567,7 +567,7 @@ describe("pi_task_codemode", () => {
     // this goes red on the first line.
     expect(collapsed).toContain("└─ task → (generalist)");
     expect(collapsed, "and the retired word is not on the row").not.toContain("subagent");
-    expect(collapsed).toContain("foreground · read-only:lenient");
+    expect(collapsed).toContain("not waited · read-only:lenient");
     expect(collapsed).toContain("│ do the thing");
     expect(collapsed).toContain("… 还有 1 行");
     // context.expanded is consumed: label/why rows appear only in the expanded render.

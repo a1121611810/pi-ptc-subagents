@@ -14,10 +14,10 @@ import { expect, test, vi } from "vitest";
 import type { AgentToolResult, Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
   createSubCallUpdater,
-  PTC_BINDING_REACH_NOTE,
   SUB_CALL_UPDATE_THROTTLE_MS,
   type PtcToolDetails,
 } from "../src/tools/common.ts";
+import { PTC_BINDING_REACH_NOTE } from "../src/routes/registry.ts";
 import { createPtcRunCodeTool } from "../src/tools/run-code.ts";
 import {
   captureRegisteredTools,
@@ -282,8 +282,8 @@ test("the description documents the always-bound pi_task_ptc door (pitfalls #1/#
   expect(description, "shows the dot call form").toContain("await tools.pi_task_ptc(");
   expect(description, "does not teach string indexing").not.toContain('tools["pi_task_ptc"]');
   // Pitfall #4: the run deadline bounds in-flight foreground tasks too.
-  expect(description, "foreground tasks compose under Promise.all").toContain(
-    "foreground tasks compose under `Promise.all`",
+  expect(description, "independent tasks compose under Promise.all").toContain(
+    "independent tasks compose under `Promise.all`",
   );
   // Pitfall #5: the program reads this run's actual binding names instead of assuming a set.
   expect(description, "names the introspection global").toContain("`ptcBindings`");
@@ -298,7 +298,7 @@ test("the timeoutMs parameter description warns that the deadline kills in-fligh
   const description = parameters.properties?.timeoutMs?.description ?? "";
   // Same fact the model needs in prose form (pitfall #4): a timed-out run takes the
   // program's in-flight foreground dispatches with it.
-  expect(description).toContain("in-flight foreground tasks");
+  expect(description).toContain("in-flight tasks");
   expect(description).toContain("terminated with it");
 });
 

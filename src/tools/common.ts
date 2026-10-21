@@ -165,71 +165,15 @@ export function resolveBindingNames(
 }
 
 /**
- * One-line entry for the system prompt's "Available tools" section.
+ * The prose this module used to own now lives in the route registry
+ * (`src/routes/registry.ts`): the two tools' snippets, the guidelines they share,
+ * and the note that says how a `codemode` script reaches a child.
  *
- * Custom tools are omitted from that section unless they set this, which matters most in PTC mode:
- * there the two PTC surfaces are the *only* callable tools, so a prompt that lists no usable tool
- * would contradict the tool declarations. `promptGuidelines` cannot substitute for it — those
- * bullets land in the flat `Guidelines` section, which does not tell the model what it can call.
+ * **They moved because a sentence that two surfaces need must be written once.**
+ * The registry is that one place, and the tool files render from it — so the copy
+ * that used to sit here (and the other copy that used to sit in the sibling tool
+ * file) cannot drift apart.
  */
-export const PTC_RUN_CODE_SNIPPET =
-  "Run a TypeScript program that composes pi's tools in one shot (tools.<name>(args)); only its return value and console.log come back";
-
-export const PTC_WORKFLOW_SNIPPET =
-  "Run a structured TypeScript workflow with named phases, narration (log/phase) and structured concurrency (parallel/pipeline)";
-
-/**
- * Guidelines are appended flat to the `Guidelines` section with no tool-name prefix, so each bullet
- * must name its tool explicitly (pi's docs call this out; "Use this tool when…" is ambiguous).
- * These are the normal-mode hints — in PTC mode the injected briefing supersedes them.
- */
-export const PTC_TOOL_GUIDELINES: readonly string[] = [
-  // DSH states this contract in `run_code`'s own description ("Image-bearing subtool results are
-  // attached after the run."); the model has to know because the images never appear in the value it
-  // returns (ADR-0014).
-  "Image-bearing tool results inside a program (a `tools.read` on a PNG, say) are attached to you after the run — never return image data as the completion value.",
-  "Use ptc_run_code when a task needs several tool calls whose intermediate output you do not need to see — gather it inside the program and return only the final value.",
-  "Use ptc_workflow instead of ptc_run_code when the work has named phases and the user benefits from seeing progress narration.",
-];
-
-/**
- * How a `codemode` script reaches a child, stated on both PTC surfaces.
- *
- * Measured 2026-10-16 (spike round 2, the dispatch-loop e2e note,
- * `docs/research/dispatch-loop-e2e-spike-20261016.md`): a
- * `codemode` script that decides to fan out looks in its own tool table, finds no `pi.dispatch`,
- * and nothing model-facing says the two-hop path exists — the script's author then reads the
- * silence as "this install does not register the binding" and falls back. The binding's own
- * calling convention is already stated in both descriptions, but those sentences address a reader
- * *inside* a program; this note is the one that addresses a reader inside the script.
- *
- * **Measured again 2026-10-20, on the `codemode_ptc` surface**, and the finding was sharper than
- * the first one: the note was in the parent's context (it rides in `ptc_run_code`'s description, which
- * pi's own `codemode` description enumerates for the script) and the parent STILL wrote
- * `await tools["pi.dispatch"]({ task })` into a `codemode` script, and got
- * `TypeError: tools.pi.dispatch does not exist`. It burned three calls that way before it fell
- * back to the codemode door and created the task successfully. So the note's positive half — "call
- * `ptc_run_code` and use the binding inside the program" — was true, and it was not enough: the
- * note sat BELOW an example that read `await tools["pi.dispatch"]({ task: "..." })` with no scope
- * on it, and a model copying an example does not check the paragraph under it. Hence two changes
- * that this record exists to justify:
- *
- * 1. The example is now scoped to a program ("inside the program"), in both descriptions.
- * 2. This note names the ONE-HOP route first, and points the reader at its own tool table rather
- *    than at a route it has to infer. The codemode door is registered only on the `codemode_ptc`
- *    surface, so the note cannot promise it unconditionally — but a script can SEE its own table,
- *    and `ptc_run_code` / `ptc_workflow` are on every surface.
- *
- * One shared constant rather than a sentence per surface, so the two cannot drift — the same
- * reason `BINDING_CONTRACT` is a module-owned string (ADR-0024). ADR-0052 changed the two door
- * names it names and the word it uses for what a script does: a script CREATES A TASK, and the
- * model-facing word is never "dispatch".
- */
-export const PTC_BINDING_REACH_NOTE: string =
-  "A `codemode` script cannot call the PTC binding directly: `pi_task_ptc` is never in " +
-  "that script's own tool table, on any surface. A script creates a task through the door " +
-  "that IS in its own table: `pi_task_codemode` if the session has it, and otherwise `ptc_run_code` " +
-  "or `ptc_workflow` with the binding used inside the program.";
 
 /** Tool name per worker surface — the names the model calls and reads in failure messages. */
 export const SURFACE_TOOL_NAME: Record<PtcSurface, string> = {

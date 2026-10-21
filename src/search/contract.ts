@@ -149,12 +149,14 @@ export const SEARCH_QUERY_MAX_LENGTH = 128;
  * writing a task that said "use bash/curl", and the child duly curled instead of using
  * `web_ds_search`.
  *
- * **It is ONE sentence in ONE place, carried by THREE model-facing surfaces**: the two PTC tool
- * descriptions (`ptc_run_code`, `ptc_workflow`), the `<ptc>` section, and the mode briefing.
- * Those are the three places the parent's model reads when it decides what to write, and three
- * copies of one fact are three things that can drift — the `<ptc>` section and the briefing
- * already had their own wording, and the section's had been rewritten while the briefing's had
- * not.
+ * **It is ONE sentence in ONE place, and that place is the route registry**
+ * (`src/routes/registry.ts`) — the module that holds every piece of model-facing prose this
+ * package writes. This module re-exports it for the readers that already import it from here,
+ * so the claim has one home and no copy. The model-facing surfaces that carry it are the two PTC
+ * tool descriptions, the `<ptc>` section, and the mode briefing: those are the places the
+ * parent's model reads when it decides what to write, and four copies of one fact are four
+ * things that can drift — the `<ptc>` section and the briefing already had their own wording,
+ * and the section's had been rewritten while the briefing's had not.
  *
  * **The vocabulary is TASK, not "dispatch"** (ADR-0052). The thing the model creates is a task;
  * "dispatch" is what the task side does with a task afterwards, and it is not the model's word.
@@ -164,10 +166,7 @@ export const SEARCH_QUERY_MAX_LENGTH = 128;
  * to the web would be false there. "This package gives you no web tool of your own" is the claim
  * that survives that.
  */
-export const PTC_CHILD_SEARCH_NOTE: string =
-  "This package gives you no web tool of your own, but a child does: it can search the web with" +
-  " its `web_ds_search` tool (and fetch a page's text). When the task needs the web — a fact you" +
-  " cannot know, or a page you have to find — create a task and let the child search.";
+export { PTC_CHILD_SEARCH_NOTE } from "../routes/registry.ts";
 export const SEARCH_COUNT_MIN = 1;
 export const SEARCH_COUNT_MAX = 50;
 

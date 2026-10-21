@@ -27,6 +27,7 @@ Status: accepted (2026-10-21). Spec #234 决定 2。修订：[ADR-0013](./0013-p
 [ADR-0053](./0053-every-dispatch-is-a-task.md)——修订的只有**名字**，决定本身不变（逐篇的指针在各记录正文顶部）。
 
 > **Amended by [ADR-0058](./0058-ptc-off-truncates-the-chain.md) (2026-10-21): decision 6's shared search sentence now reaches a THIRD surface — the mode briefing — and its one home is the search module's own constant (`PTC_CHILD_SEARCH_NOTE` in `src/search/contract.ts`), which the `<ptc>` section, the briefing and the two PTC tool descriptions all carry. The decision itself is unchanged: one sentence, one constant, and a test that asserts every surface contains that constant. The old name is not aliased — it is gone, and this record's line was corrected to the new one.**
+> **Amended by [ADR-0059](./0059-route-registry.md) (2026-10-21): the shared prose this record named now has one home — the route registry (`src/routes/registry.ts`). The reach note (`PTC_BINDING_REACH_NOTE`) and the web sentence (`PTC_CHILD_SEARCH_NOTE`) moved there, and the modules that used to hold them re-export it. Decision 6 stands: one sentence, one constant, and a test asserting both surfaces contain that constant.**
 
 ## Context
 

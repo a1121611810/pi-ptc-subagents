@@ -58,7 +58,7 @@ import {
 import type { DispatchHandle } from "../runtime/task-registry.ts";
 import type { ULID } from "../runtime/task-storage.ts";
 import { renderChildReportText, renderSubagentToolCall, type SubagentCallArgs } from "./render.ts";
-import { TASK_DOOR_RESULT_NOTE } from "./binding-contract.ts";
+import { renderDescription, TOOLS, WHY_SUPPRESSED_DESCRIPTION } from "../routes/registry.ts";
 import { renderReadOnlyTierText } from "./read-only-tier-text.ts";
 import { renderWhySuppressedText } from "./why-suppressed-text.ts";
 
@@ -350,8 +350,7 @@ export const SUBAGENT_OUTPUT_SCHEMA: SubagentOutputSchema = Type.Object({
   ),
   whySuppressed: Type.Optional(
     Type.Boolean({
-      description:
-        "`true` when you passed a `why` and this session's `whyEnabled` switch was off, so the child's prompt carried no <pi-ptc-why> block (ADR-0043). ABSENT means no `why` was passed — that is the distinction the key exists to make. The child was never told your reason; it did not ignore one. A handle does not carry this key; read it from `ptc_task_output` instead.",
+      description: WHY_SUPPRESSED_DESCRIPTION,
     }),
   ),
   usage: Type.Optional(
@@ -474,42 +473,9 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
     // On the `codemode_ptc` surface the orchestrator responsible to the model is pi's own
     // `codemode`; this door sits underneath it, and only a `codemode` script can call it.
     exposure: "codemode",
-    description: [
-      "Create a task: start a fresh pi agent as a child process — it gets its own context and tools, and it cannot see or change this session except through what it returns. Omit `model` and the child inherits this session's current model (when this pi exposes one; otherwise it falls back to pi's configured default); pass `model`, or let its agent definition pin one, to override that. Use it for work that would otherwise flood this context: a survey, a second opinion, or a task that can run while you do something else.",
-      // ADR-0055: the wait mode is the ONE thing a caller has to decide, and the default is the
-      // half that surprises — the call hands back a handle, not an answer. So the description
-      // says what the default does AND how to ask for the result instead, in the same breath.
-      "The call returns a handle right away — the task id and its label — and the task runs on; pass `wait: true` when you need the result before you go on, and read a task you did not wait for with ptc_task_output.",
-      // T4 (#181): the model cannot learn where agent definitions come from by reading a tool
-      // list, so it goes looking -- and in the session that motivated this it spent twenty-plus
-      // tool calls inspecting the install and guessing at argument values. The two directories
-      // and what the argument does are the whole of what it needed.
-      //
-      // #185 rewrote the first clause. It used to open with the absence of a default, which was
-      // true and discouraging: the answer to "can I use this?" was "write a file first". The
-      // child is a generalist pi unless a definition narrows it, so the omission is the normal
-      // case and the names are the exception.
-      //
-      // Both sentences point at the refusal rather than restating it: the actionable detail
-      // (which names are registered, and what a definition file looks like) is rendered by
-      // `describeRegisteredAgents` from the same resolver a dispatch uses. A copy here would be
-      // the copy that goes stale. Same one-home rule the child-report work established.
-      "`agent` is optional — omit it and the child is a fresh generalist pi, with pi's own system prompt and pi's full toolset. Name one to narrow the child instead: an agent is a markdown file in ~/.pi/agent/agents/ for your machine, or <project>/.pi/agents/ for one project, and naming one can restrict the child's tools, pin its model, or append a role. A name with no definition behind it is refused; the refusal lists what IS registered and how to write one.",
-      // ADR-0054: what the call resolves to, and what a refusal looks like. The SAME sentence the
-      // PTC plane's binding contract carries (one constant, two surfaces) — a script and a program
-      // read one statement about one object, so the two cannot drift apart.
-      TASK_DOOR_RESULT_NOTE,
-      // The pre-decision view (see describeRegisteredAgentRoster): names alone only help
-      // someone who already suspects a name, and this reaches the model BEFORE any refusal.
-      // Both this and the refusal render from listRegisteredAgentEntries — one traversal, one
-      // home for the data — they are two moments (registration vs. failure), not two sources.
-      roster,
-    ].join("\n"),
-    promptSnippet:
-      "Create a task: start a fresh pi agent as a child process (it runs on; wait: true to wait for the result)",
-    promptGuidelines: [
-      "Prefer one subagent over many tool calls when the work is a question with an answer rather than a fact you can look up, or when the raw output would be larger than the answer.",
-    ],
+    description: renderDescription(TOOLS.pi_task_codemode, { agentRoster: roster }),
+    promptSnippet: TOOLS.pi_task_codemode.snippet,
+    promptGuidelines: [...TOOLS.pi_task_codemode.guidelines],
     parameters: DISPATCH_PARAMETERS,
     // Inert on the declared floor (#193). `outputSchema` did not exist on pi's
     // ToolDefinition below 0.99.0 -- measured: 0.86.0's interface runs
@@ -536,9 +502,9 @@ export function createPtcSubagentTool(options: CreatePtcSubagentToolOptions): An
       // retro-change a child that is already running.
       const sessionModel = readContextModel(ctx);
       // The union is asserted, not inferred: `dispatch()`'s overloads narrow by a LITERAL
-      // `{ background: true }`, and this tool's parameters are dynamic, so the call resolves
+      // `{ wait: true }`, and this tool's parameters are dynamic, so the call resolves
       // against the general overload whose declared type is `DispatchResult` alone. At runtime the
-      // dispatcher returns a handle exactly when `input.background` is true, so the union is the
+      // dispatcher returns a handle exactly when `input.wait` is not true, so the union is the
       // truth of the call. Narrowing it afterwards is `isDispatchHandle`'s job, not a cast's.
       const outcome = (await dispatch(
         params as DispatchInput,

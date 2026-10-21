@@ -225,7 +225,7 @@ describe("task-list row shape", () => {
 
   test("empty list renders the placeholder", () => {
     const out = renderResult("task-list", { tasks: [], count: 0 });
-    expect(out).toContain("(no background tasks)");
+    expect(out).toContain("(no tasks)");
   });
 });
 

@@ -82,6 +82,8 @@ Status: accepted (2026-09-24). Behavior change on the program-visible side (new 
 
 > **Amended by [ADR-0056](./0056-admission-queues-instead-of-rejecting.md) (2026-10-21): the concurrency cap is a queue, not a rejection.** §"What we deliberately don't add" 2 ("There is no in-task queue (`queued` state absent, per G1). Spawn above the cap resolves with `rejected` immediately.") and G1's "`queued` deliberately absent in v1" are both superseded: a spawn above the cap now JOINS a FIFO wait list — unbounded, no timeout — and its child starts when it reaches the head of the queue. §2's state machine therefore grows a seventh state, `queued`, with the edges `queued -> running` (dequeue), `queued -> canceled` (a withdrawn queue entry) and `queued -> lost` (recovery). Queueing CREATES the task record, so the admission queue IS the set of `queued` records and a waiting task is already visible in `ptc_task_list`. A background dispatch returns its handle at once and does NOT wait for a slot — the child waits. The two concurrency refusal shapes and their messages are gone, because the cap is no longer a rejection reason. The record schema, the subscription cursor, the delivery decisions and the signal layering are unchanged; where this record and ADR-0056 read differently, ADR-0056 governs.
 
+> **Amended by [ADR-0059](./0059-route-registry.md) (2026-10-21): the model-facing wording of the lifecycle face no longer says "background task" — after ADR-0055 there is one path and a `wait` parameter, so the tasks are just tasks. The feature is unchanged: the same three tools, the same record, the same lifecycle.**
+
 ## Context
 
 This ADR closes the bgdispatch map. The four research/decision tickets it crystallizes are:

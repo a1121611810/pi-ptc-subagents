@@ -1615,15 +1615,23 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     "docs/adr/0032-child-report.md:24 -> src/tools/subagent.ts:271":
       "export const SUBAGENT_OUTPUT_SCHEMA",
     "docs/adr/0032-child-report.md:37 -> src/runtime/dispatch.ts:2336": "function accumulateUsage(",
-    "docs/adr/0032-child-report.md:59 -> src/tools/subagent.ts:646":
+    "docs/adr/0032-child-report.md:59 -> src/tools/subagent.ts:612":
       "structuredContent: outcome as unknown as OutcomeJson,",
-    "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:290":
+    "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:279":
       "outputSchema: LIST_OUTPUT_SCHEMA,",
+    // 2026-10-21（#243 · route registry）：散文搬进册子，`src/tools/subagent.ts` 与
+    // `src/tools/ptc-task.ts` 的行数变了（本表四条），`docs/adr/0049` 的**引用所在行**也因为本轮
+    // 加了一条修订指针而下移一行（15 → 16，目标行未动、标识符未变）。四条目标行逐条**按内容**
+    // 核对后重钉（不做算术平移）：
+    //   subagent.ts 646 → 612（`structuredContent: outcome as unknown as OutcomeJson,` —— 同一行
+    //     在文件里有两处，另一处 551 是句柄那一支；ADR-0032 引的是结算那一支，取 612）
+    //   ptc-task.ts 290 → 279、646 → 627、881 → 858（三处 `outputSchema:` 声明）
+    // 正文里那一条引用同步改为 612 / 284, 632, 863。
     // 2026-10-19（#219-#222 · retro）：抽取器现在展开逗号后的数字，这两行才第一次进入判定面。
     // 它们一直是对的，只是以前没有任何东西检查；在这里补上，从此漂移会红。
-    "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:646":
+    "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:627":
       "outputSchema: OUTPUT_OUTPUT_SCHEMA,",
-    "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:881":
+    "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:858":
       "outputSchema: STOP_OUTPUT_SCHEMA,",
     "docs/adr/0032-child-report.md:134 -> src/runtime/dispatch.ts:2154":
       "export function childToolList(",
@@ -1643,7 +1651,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     "docs/adr/0048-deepseek-search-gate.md:44 -> src/index.ts:880": "ctx.ui.notify(",
     "docs/adr/0048-deepseek-search-gate.md:72 -> src/runtime/limits.ts:154":
       "WORKER_ENV_ALLOW_LIST",
-    "docs/adr/0049-the-search-lives-in-the-child.md:15 -> docs/agents/pi-compat-matrix.md:63":
+    "docs/adr/0049-the-search-lives-in-the-child.md:16 -> docs/agents/pi-compat-matrix.md:63":
       "`ToolDefinition.exposure` field",
     "docs/specs/0044-deepseek-search-module.md:98 -> docs/agents/pi-compat-matrix.md:63":
       "`ToolDefinition.exposure` field",
@@ -1894,10 +1902,10 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     "docs/adr/0032-child-report.md:15 -> src/runtime/dispatch.ts:2313",
     "docs/adr/0032-child-report.md:24 -> src/tools/subagent.ts:271",
     "docs/adr/0032-child-report.md:37 -> src/runtime/dispatch.ts:2336",
-    "docs/adr/0032-child-report.md:59 -> src/tools/subagent.ts:646",
-    "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:290",
-    "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:646",
-    "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:881",
+    "docs/adr/0032-child-report.md:59 -> src/tools/subagent.ts:612",
+    "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:279",
+    "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:627",
+    "docs/adr/0032-child-report.md:59 -> src/tools/ptc-task.ts:858",
     "docs/adr/0032-child-report.md:134 -> src/runtime/dispatch.ts:2154",
     // 新增 1 条（2026-10-12，ADR-0039）：目标行已逐条核对。
     // 2026-10-20（搜索模块改形）：目标行随 src/index.ts 的改动从 620 移到 598，逐条核对内容未变。
@@ -1917,7 +1925,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     "docs/adr/0047-deepseek-search-is-program-internal.md:107 -> docs/agents/pi-compat-matrix.md:63",
     "docs/adr/0048-deepseek-search-gate.md:44 -> src/index.ts:880",
     "docs/adr/0048-deepseek-search-gate.md:72 -> src/runtime/limits.ts:154",
-    "docs/adr/0049-the-search-lives-in-the-child.md:15 -> docs/agents/pi-compat-matrix.md:63",
+    "docs/adr/0049-the-search-lives-in-the-child.md:16 -> docs/agents/pi-compat-matrix.md:63",
     "docs/specs/0044-deepseek-search-module.md:98 -> docs/agents/pi-compat-matrix.md:63",
     "docs/specs/0044-deepseek-search-module.md:146 -> src/index.ts:880",
     "docs/specs/0044-deepseek-search-module.md:173 -> src/runtime/limits.ts:154",

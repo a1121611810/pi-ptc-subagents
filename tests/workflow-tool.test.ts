@@ -6,7 +6,8 @@
  */
 import { expect, test } from "vitest";
 import type { AgentToolResult, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { PTC_BINDING_REACH_NOTE, type PtcToolDetails } from "../src/tools/common.ts";
+import { type PtcToolDetails } from "../src/tools/common.ts";
+import { PTC_BINDING_REACH_NOTE } from "../src/routes/registry.ts";
 import { createPtcWorkflowTool } from "../src/tools/workflow.ts";
 import { captureRegisteredTools, RUN_TIMEOUT_MS, toolContext } from "./helpers/ptc.ts";
 
