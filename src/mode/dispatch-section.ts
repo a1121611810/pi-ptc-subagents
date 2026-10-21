@@ -40,17 +40,12 @@
  * constant, carried by this section and by the user's notice alike.
  */
 import type { SurfaceMode } from "./ptc-mode.ts";
-/**
- * The search module's own sentence: the parent has no web tool of this package's own, and the
- * child is where the web is.
- *
- * **It is the search module's constant, not a copy of it**, and that is the point: the same fact
- * reaches the model through three surfaces — the two PTC tool descriptions, this section, and the
- * mode briefing — and a copy here would be a fourth wording of a sentence that has to mean one
- * thing. The module owns the claim, and it states it as what this package PROVIDES, not as what
- * the model can reach by any means (a session that still has `bash` can always curl).
- */
-import { PTC_CHILD_SEARCH_NOTE } from "../search/contract.ts";
+import {
+  PTC_CHILD_SEARCH_NOTE,
+  PTC_TRUNCATED_SECTION_LINE,
+  PTC_TRUNCATION_SECTION_LINES,
+  TASK_ROUTE_LINES,
+} from "../routes/registry.ts";
 
 /**
  * The section name pi renders as `<ptc>…</ptc>`.
@@ -61,39 +56,14 @@ import { PTC_CHILD_SEARCH_NOTE } from "../search/contract.ts";
 export const DISPATCH_SECTION_NAME = "ptc";
 
 /**
- * How to create a task, per surface.
- *
- * `full_ptc` names the program form because that is the only form the model has: the two PTC
- * tools are offered to it directly. `codemode_ptc` names the codemode door, and says the one
- * thing that is false everywhere else — a `codemode` script's tool table has no `pi_task_ptc`
- * in it.
- *
- * ADR-0052: the model-facing word is TASK, never "dispatch" — the door creates a task, and
- * dispatching is what the task side does with it afterwards. Both names are plain JavaScript
- * identifiers, so both planes call them with a dot.
- */
-const DISPATCH_LINES: Record<SurfaceMode, string> = {
-  full_ptc:
-    "To create a task, write a program and run it with `ptc_run_code`; inside that program the " +
-    "binding is `await tools.pi_task_ptc({ task })`.",
-  codemode_ptc:
-    "To create a task, call `tools.pi_task_codemode` from your `codemode` script. A `codemode` " +
-    "script's tool table does not contain `pi_task_ptc` — that name is not a tool there, and " +
-    "calling it from a script fails.",
-};
-
-/**
  * The one sentence a truncated session says, whichever surface it is (ADR-0058).
  *
- * One constant, because it is ONE sentence in one place — and it is carried by BOTH the model's
- * section and the user's notice, so the two cannot drift into telling the model one thing and the
- * user another.
- *
- * It states the fact and nothing about how it happened: the switch withdraws this package's
- * segment of the chain, and what that means for the model is the same on both surfaces — no task
- * can be created any more.
+ * It lives in the route registry, together with every other piece of model-facing prose this
+ * package writes; this module re-exports it for the readers that already import it from here —
+ * the user's `/ptc off` notice carries the same sentence, and one sentence in one place is the
+ * whole point.
  */
-export const PTC_TRUNCATED_NO_NEW_TASK: string = "No new task can be created from here on.";
+export { PTC_TRUNCATED_NO_NEW_TASK } from "../routes/registry.ts";
 
 /**
  * What each surface lost, and what is left (ADR-0058).
@@ -107,21 +77,17 @@ export const PTC_TRUNCATED_NO_NEW_TASK: string = "No new task can be created fro
  * calling convention — telling a model HOW to create a task in a session where it cannot is an
  * instruction it cannot follow (ADR-0050 decision 6).
  */
-export const PTC_TRUNCATION_SECTION_LINES: Record<SurfaceMode, string> = {
-  full_ptc:
-    "The PTC program tools (`ptc_run_code`, `ptc_workflow`) are withdrawn — there is no " +
-    "orchestrator left, so the built-in tools are what the model calls now.",
-  codemode_ptc:
-    "The PTC execution layer (`ptc_run_code`, `ptc_workflow`) and the task door " +
-    "(`pi_task_codemode`) are withdrawn — `codemode` still orchestrates, but it can no longer " +
-    "create a task.",
-};
+export { PTC_TRUNCATION_SECTION_LINES };
 
 /**
  * Build the dispatch section body (pi wraps it in `<ptc>…</ptc>` itself).
  *
  * Returns `""` when there is nothing to say, which is the caller's cue to remove the section
  * rather than leave an empty one behind.
+ *
+ * The body is the route registry's: the per-surface route line, the shared web sentence, and
+ * the truncation lines. What this module owns is the ORDER and the decision about which of
+ * them this session has.
  */
 export function buildDispatchSection(input: {
   surfaceMode: SurfaceMode;
@@ -133,12 +99,9 @@ export function buildDispatchSection(input: {
   // — and the search sentence goes with it: "create a task and let the child search" is exactly
   // the thing that cannot happen right now.
   if (!input.dispatchEnabled) {
-    return [
-      "PTC is off in this session. " + PTC_TRUNCATED_NO_NEW_TASK + " Do not try to create one.",
-      PTC_TRUNCATION_SECTION_LINES[input.surfaceMode],
-    ].join("\n");
+    return [PTC_TRUNCATED_SECTION_LINE, PTC_TRUNCATION_SECTION_LINES[input.surfaceMode]].join("\n");
   }
-  const lines: string[] = [DISPATCH_LINES[input.surfaceMode]];
+  const lines: string[] = [TASK_ROUTE_LINES[input.surfaceMode]];
   if (input.childCanSearch) lines.push(PTC_CHILD_SEARCH_NOTE);
   return lines.join("\n");
 }

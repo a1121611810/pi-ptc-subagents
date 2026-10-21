@@ -5,6 +5,7 @@ status: accepted (2026-10-20). Ticket #227 (map #226) 的形状部分。配套�
 > **修订：[ADR-0051](./0051-the-surface-names-the-orchestrator.md)（2026-10-21）：两个表面值改名——`full` → `full_ptc`、`subagents` → `codemode_ptc`——且「表面」现在指**哪个编排器对模型负责**。本记录的决定不变；读到它的 `full` / `subagents` 时，读作那两个新名字。**
 
 > **Amended by [ADR-0052](./0052-the-two-doors-share-one-prefix.md) (2026-10-21): the two task doors are renamed — `pi.dispatch` → `pi_task_ptc` (the PTC door, a binding inside a program) and `ptc_subagent` → `pi_task_codemode` (the codemode door, reachable from a `codemode` script) — with no alias and no compatibility shim. This record's decisions stand unchanged; read its `pi.dispatch` / `ptc_subagent` as those names.**
+> **Amended by [ADR-0059](./0059-route-registry.md) (2026-10-21): the web sentence's one home is now the route registry (`src/routes/registry.ts`), not the search module — the search module re-exports it. The decision is unchanged: one sentence, carried by every surface that names the route to the web, with a test asserting each one contains that constant.**
 
 ## Context
 

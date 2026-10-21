@@ -55,7 +55,7 @@ import {
   type AnyTool,
   type PtcTaskStopDetails,
 } from "../../src/tools/ptc-task.ts";
-import { TASK_STOP_SEMANTICS } from "../../src/tools/task-stop-text.ts";
+import { TASK_STOP_SEMANTICS } from "../../src/routes/registry.ts";
 import { makeTempDir, removeTempDir, waitFor } from "../helpers/ptc.ts";
 
 const AGENT = "withdrawal-probe";

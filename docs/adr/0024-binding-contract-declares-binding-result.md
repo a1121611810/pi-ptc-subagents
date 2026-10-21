@@ -16,6 +16,7 @@ every existing program keeps working unchanged. Everything is additive -- text
 the model did not previously receive.
 
 > **Amended by [ADR-0052](./0052-the-two-doors-share-one-prefix.md) (2026-10-21): the two task doors are renamed — `pi.dispatch` → `pi_task_ptc` (the PTC door, a binding inside a program) and `ptc_subagent` → `pi_task_codemode` (the codemode door, reachable from a `codemode` script) — with no alias and no compatibility shim. This record's decisions stand unchanged; read its `pi.dispatch` / `ptc_subagent` as those names.**
+> **Amended by [ADR-0059](./0059-route-registry.md) (2026-10-21): the binding contract stays OUTSIDE the route registry — it answers "what does a call resolve to", a different question from "when do I call it". The registry says only WHERE the contract goes (one slot in the description's paragraph order); the text, the token budget and the two-way tests stay here. The shared door note (`TASK_DOOR_RESULT_NOTE`) moved into the registry, because two surfaces carry it.**
 
 ## Context
 

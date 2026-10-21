@@ -27,7 +27,7 @@ the string `"Started background task 01JABC…"` and had to regex the id out.
 
 ```js
 // pi 0.99.1+ / 1.0.0
-const started = await tools.pi_task_codemode({ task: "survey the auth module", background: true });
+const started = await tools.pi_task_codemode({ task: "survey the auth module" });
 text(`spawned ${started.taskId}`); // an object, not a string
 
 const rows = await tools.ptc_task_list({ status: ["running"] });
@@ -41,7 +41,7 @@ for (const t of rows.tasks) {
 | `ptc_task_list`    | `{ tasks: [{ id, status, agent, depth, label, output_bytes?, error_message? }], count }`                                                             |
 | `ptc_task_output`  | `{ task_id, status, output, output_bytes, output_preview?, output_truncated, output_full_path?, report_channel?, read_only_tier?, report?, usage? }` |
 | `ptc_task_stop`    | `{ task_id, status, from_status, stop_reason? }`                                                                                                     |
-| `pi_task_codemode` | the **raw** task result: `{ text, status, started, agentName, durationMs, exitCode, reportChannel, recordId?, recordLabel?, … }`                     |
+| `pi_task_codemode` | the **raw** task result: `{ text, status, started, agentName, durationMs, exitCode, reportChannel, taskId?, label?, … }`                             |
 
 Optional keys are **omitted**, never present-and-null, so `Object.hasOwn(t, "error_message")` is
 the test for "this task had an error", not `t.error_message !== undefined`.
@@ -50,8 +50,8 @@ Two fields carry the useful asymmetry:
 
 - `pi_task_codemode`: `status` is the discriminant. `"running"` is a handle to poll with
   `ptc_task_output`; `"fulfilled"` is a child that already answered; `"rejected"` is a call that was
-  refused, with `errorMessage` saying which gate said no. A settled call names the task it created
-  under `recordId`, and a handle names the task it is polling under `taskId`.
+  refused, with `errorMessage` saying which gate said no. A settled call and a handle name the
+  task the same way, under `taskId` (ADR-0055).
 - `ptc_task_output`: `status` is the task's current state, so a polling script does not need a
   second `ptc_task_list` call.
 
@@ -66,8 +66,8 @@ rather than from the report. That is what makes it readable for a child with **n
 `report_channel` of `none` or `opted-out`, and a failed or canceled `ptc_task_output`, still
 account for what the child cost. Absent means no top-level count was recorded: a running task,
 a `lost` record, a record written before the field existed (its report, when one exists, still
-renders the report's own host-stamped numbers), or a background handle in
-`pi_task_codemode`. The text block states the same four numbers on its `usage` line, so the two
+renders the report's own host-stamped numbers), or a handle in `pi_task_codemode` (a call that
+did not wait). The text block states the same four numbers on its `usage` line, so the two
 channels never disagree about a measurement.
 
 ## What it is not
@@ -87,10 +87,10 @@ channels never disagree about a measurement.
   `status` is `"rejected"` and whose `errorMessage` says which gate said no. A gate that said no is
   not a broken call, and one child's refusal must not take its siblings down with it.
 
-`pi_task_ptc` declares no `structuredContent` and is unchanged: it resolves to `{ text, status, … }`
-with no `content` at all, and the binding contract already names it as the exception. That value is
-the same one `pi_task_codemode` hands a script, so the two doors are one object seen from two
-planes.
+`pi_task_ptc` declares no `structuredContent` and is unchanged: it resolves with a handle
+(`taskId`, `label`) unless you pass `wait: true`, and it never resolves with a `content` at all.
+The binding contract already names it as the exception. That value is the same one
+`pi_task_codemode` hands a script, so the two doors are one object seen from two planes.
 
 ## Which surface am I on?
 

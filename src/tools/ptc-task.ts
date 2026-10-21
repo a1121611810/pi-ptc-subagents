@@ -1,15 +1,15 @@
 /**
- * The three model-facing background-dispatch tools (ADR-0022 §3/§6/§8, BG-06 + BG-07 + BG-08):
+ * The three model-facing task-lifecycle tools (ADR-0022 §3/§6/§8, BG-06 + BG-07 + BG-08):
  *
- *   - `ptc_task_list`   - "what background tasks exist / how are they doing" (read-only)
+ *   - `ptc_task_list`   - "what tasks exist / how are they doing" (read-only)
  *   - `ptc_task_output` - "give me task X's output" (read-only, ADR-0015-truncated)
  *   - `ptc_task_stop`   - "ask task X to stop" (lifecycle; the *dispatcher* owns the signal)
  *
  * ADR-0057: `ptc_task_stop` reaches a task that has not started too — a queued task is
  * withdrawn from the queue instead of being signaled.
- * These tools are the *only* model-facing lifecycle face of a background child: the
- * `pi.dispatch({ background: true })` binding returns a thin `DispatchHandle` at spawn
- * (ADR-0022 §4) and never updates it, so live state is read through `ptc_task_list`.
+ * These tools are the *only* model-facing lifecycle face of a child that outlives the call:
+ * the `pi_task_ptc` binding returns a thin `DispatchHandle` at spawn (ADR-0022 §4) and never
+ * updates it, so live state is read through `ptc_task_list`.
  *
  * Layering: the tools own the model-facing presentation (flat params, truncated text, structured
  * `details`) and nothing else. State lives in {@link TaskRegistry} (BG-02); bytes live behind
@@ -28,7 +28,9 @@
  * stop. `src/index.ts` constructs all three factories against the session-scoped stable holder
  * (registry / outputStorage / lifecycle) and registers them with `pi.registerTool(...)`, so
  * they stay callable while PTC mode is off. This module is the factory layer only, and the
- * prose about what a stop does lives in `task-stop-text.ts`.
+ * prose about what a stop does lives in the route registry
+ * (`src/routes/registry.ts`), together with the rest of the model-facing prose this package
+ * writes.
  */
 
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -50,7 +52,7 @@ import { formatObservedModel } from "../runtime/session-model.ts";
 import { renderReadOnlyTierText } from "./read-only-tier-text.ts";
 import { renderWhySuppressedText } from "./why-suppressed-text.ts";
 import { createTaskPanelRenderers } from "./task-panel-render.ts";
-import { TASK_STOP_SEMANTICS } from "./task-stop-text.ts";
+import { renderDescription, TOOLS, WHY_SUPPRESSED_DESCRIPTION } from "../routes/registry.ts";
 import { sanitizeText } from "./text.ts";
 
 /**
@@ -114,14 +116,6 @@ const STOP_CALLER_FALLBACK = "ptc_task_stop";
 function taskFaceExposure(registry: TaskRegistry): ToolExposure {
   return registry.taskFaceVisible() ? "direct" : "hidden";
 }
-
-/** Shared guidance for the three tools; the stop guideline carries ADR-0057's shared sentence. */
-export const PTC_TASK_TOOL_GUIDELINES: readonly string[] = [
-  "Use ptc_task_list to see the background tasks this session dispatched and their live status.",
-  "Use ptc_task_output to read a task's captured output (it is tail-truncated; the footer names the full-output file). A succeeded task's child report is rendered there, ahead of the prose.",
-  "Use ptc_task_stop to stop a task: " + TASK_STOP_SEMANTICS,
-  "PTC off stops NEW children from being started, pulls the queued ones out of the queue, and takes these tools out of reach while the session has no task record; a task already running keeps going and stays listed here.",
-];
 
 /**
  * The 7-state status set (ADR-0022 §2, as amended by ADR-0056), exposed to the model as a
@@ -278,14 +272,9 @@ export function createPtcTaskListTool(registry: TaskRegistry): AnyTool {
   return defineCompatTool({
     name: PTC_TASK_LIST_TOOL_NAME,
     label: "PTC Task List",
-    description: [
-      "List the background tasks this session has created (from pi_task_ptc({ background: true })).",
-      "Returns each task's id, status, agent, depth, label and output size, newest first.",
-      'Filter with status (e.g. ["running"]); limit caps the row count (default 100).',
-    ].join("\n"),
-    promptSnippet:
-      "List background tasks and their live status (id, status, agent, label, output size)",
-    promptGuidelines: [...PTC_TASK_TOOL_GUIDELINES],
+    description: renderDescription(TOOLS.ptc_task_list),
+    promptSnippet: TOOLS.ptc_task_list.snippet,
+    promptGuidelines: [...TOOLS.ptc_task_list.guidelines],
     parameters: LIST_PARAMETERS,
     outputSchema: LIST_OUTPUT_SCHEMA,
     // ADR-0053: live reach — the face is in the model's face once the session has a task
@@ -301,7 +290,7 @@ export function createPtcTaskListTool(registry: TaskRegistry): AnyTool {
       });
       const text =
         records.length === 0
-          ? "(no background tasks)"
+          ? "(no tasks)"
           : records.map((record) => formatTaskLine(record)).join("\n");
       const structuredContent: Static<typeof LIST_OUTPUT_SCHEMA> = {
         tasks: records.map((record) => projectTaskRow(record)),
@@ -366,7 +355,7 @@ export interface PtcTaskOutputDetails {
   /** The full-output temp file; present only when `outputTruncated` is true. */
   outputFullPath?: string;
   /**
-   * ADR-0032: the background child's report, read off the record the pump persisted it on.
+   * ADR-0032: the child's report, read off the record the pump persisted it on.
    * Absent for every task that has not reached `succeeded` — a running child has not reported
    * yet and a failed one did not report at all, and neither is the same claim as "reported
    * nothing", which arrives as `reportChannel: "none"` with no `report`.
@@ -519,7 +508,7 @@ export function renderChildReport(record: TaskRecord): string | undefined {
 
 const OUTPUT_PARAMETERS = Type.Object({
   taskId: Type.String({
-    description: "The background task's id (as returned by ptc_task_list or the dispatch handle).",
+    description: "The task's id (as returned by ptc_task_list or the task handle).",
   }),
   sinceBytes: Type.Optional(
     Type.Number({
@@ -531,7 +520,7 @@ const OUTPUT_PARAMETERS = Type.Object({
 
 /** `structuredContent` for `ptc_task_output`; see the codemode projection note above. */
 const OUTPUT_OUTPUT_SCHEMA = Type.Object({
-  task_id: Type.String({ description: "The background task id that was asked for." }),
+  task_id: Type.String({ description: "The task id that was asked for." }),
   status: Type.String({
     description:
       "The task's status at read time (ADR-0022 §2's six states), so a polling script does not need a second ptc_task_list call.",
@@ -578,8 +567,7 @@ const OUTPUT_OUTPUT_SCHEMA = Type.Object({
   ),
   why_suppressed: Type.Optional(
     Type.Boolean({
-      description:
-        "`true` when you passed a `why` and this session's `whyEnabled` switch was off, so the child's prompt carried no <pi-ptc-why> block (ADR-0043). ABSENT means no `why` was passed — that is the distinction the key exists to make. The child was never told your reason; it did not ignore one. The dropped value is not stored.",
+      description: WHY_SUPPRESSED_DESCRIPTION,
     }),
   ),
   report: Type.Optional(
@@ -632,16 +620,9 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
   return defineCompatTool({
     name: PTC_TASK_OUTPUT_TOOL_NAME,
     label: "PTC Task Output",
-    description: [
-      "Read a background task's captured output.",
-      'A succeeded task also renders its child report (summary, findings, files touched, usage) ahead of the prose, and says which channel delivered it; a channel of "none" means the child ignored the report contract.',
-      "A failed or lost task also states the record's error message — the reason it did not succeed — ahead of the output, so an empty output.log is not mistaken for an infrastructure fault.",
-      "The text is tail-truncated to pi's ADR-0015 limits (50 KB / 2000 lines); when anything is cut, outputFullPath names a file with the complete output.",
-      "Pass sinceBytes to skip a prefix of the stored output when paging.",
-    ].join("\n"),
-    promptSnippet:
-      "Read a background task's output (tail-truncated, with the full-output file path)",
-    promptGuidelines: [...PTC_TASK_TOOL_GUIDELINES],
+    description: renderDescription(TOOLS.ptc_task_output),
+    promptSnippet: TOOLS.ptc_task_output.snippet,
+    promptGuidelines: [...TOOLS.ptc_task_output.guidelines],
     parameters: OUTPUT_PARAMETERS,
     outputSchema: OUTPUT_OUTPUT_SCHEMA,
     // ADR-0053: live reach — the face is in the model's face once the session has a task
@@ -755,13 +736,13 @@ export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputS
       const text = head === undefined ? body : `${head}\n${body}`;
       // ADR-0041 §Reporting: the tier, on the THIRD model-facing surface. `structuredContent`
       // and `details` both carry it below, but neither reaches the model — this tool is `direct`,
-      // and a parent PTC program that polls a SETTLED background child reads this text and
-      // nothing else. Without the line, the background front is the one front that stays silent
+      // and a parent PTC program that polls a SETTLED child reads this text and
+      // nothing else. Without the line, the task front is the one front that stays silent
       // about the tier, which is the exact thing the field was added to prevent.
       const tierText = renderReadOnlyTierText(record.readOnlyTier);
       const textWithTier = tierText.length === 0 ? text : `${tierText}\n${text}`;
       // ADR-0043 on the same surface, for the same reason the tier line above needed one: this
-      // tool is `direct`, so a parent PTC program polling a settled background child reads this
+      // tool is `direct`, so a parent PTC program polling a settled child reads this
       // text and nothing else. Without the line, a suppressed `why` would be visible on the
       // record and on the structured projection but silent where a program actually looks.
       const suppressedText = renderWhySuppressedText(record.whySuppressed);
@@ -831,7 +812,7 @@ const STOP_PARAMETERS = Type.Object({
 
 /** `structuredContent` for `ptc_task_stop`; see the codemode projection note above. */
 const STOP_OUTPUT_SCHEMA = Type.Object({
-  task_id: Type.String({ description: "The background task id that was asked to stop." }),
+  task_id: Type.String({ description: "The task id that was asked to stop." }),
   status: Type.String({
     description:
       "The task's status AFTER the stop command — `stopping` for a task that is running (the dispatcher pump owns the terminal `canceled`, ADR-0022 §8), or `canceled` straight away for a task that was still queued and has been withdrawn (ADR-0057).",
@@ -870,13 +851,9 @@ export function createPtcTaskStopTool(
   return defineCompatTool({
     name: PTC_TASK_STOP_TOOL_NAME,
     label: "PTC Task Stop",
-    description: [
-      "Ask a background task to stop.",
-      TASK_STOP_SEMANTICS,
-      "The call is idempotent when the task is already stopping, and errors when the task is already terminal.",
-    ].join("\n"),
-    promptSnippet: "Ask a task to stop (queued: withdrawn, running: signaled)",
-    promptGuidelines: [...PTC_TASK_TOOL_GUIDELINES],
+    description: renderDescription(TOOLS.ptc_task_stop),
+    promptSnippet: TOOLS.ptc_task_stop.snippet,
+    promptGuidelines: [...TOOLS.ptc_task_stop.guidelines],
     parameters: STOP_PARAMETERS,
     outputSchema: STOP_OUTPUT_SCHEMA,
     // ADR-0053: live reach — the face is in the model's face once the session has a task

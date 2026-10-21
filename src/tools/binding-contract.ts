@@ -30,6 +30,7 @@
  *    rather than a silently orphaned note.
  */
 import { DISPATCH_BINDING_NAME, type BuiltinBindingName } from "../runtime/bindings.ts";
+import { TASK_DOOR_RESULT_NOTE } from "../routes/registry.ts";
 
 /** The ceiling is a decision (ADR-0024 section 5), never a baseline to re-fit. */
 export const BINDING_CONTRACT_TOKEN_CEILING = 320;
@@ -61,10 +62,10 @@ const SHAPE_LINES = [
 /**
  * What a task door resolves to, and what a refusal looks like (ADR-0054).
  *
- * ONE constant, TWO surfaces: the PTC door's note below, and the codemode door's description
- * (`src/tools/subagent.ts`). They say the same thing to a model on two different planes, and a
- * sentence written twice is a sentence that will drift — the failure this whole module exists to
- * prevent. A test asserts that both sides contain this exact text.
+ * The sentence itself lives in the route registry (`src/routes/registry.ts`) — it is
+ * carried by TWO surfaces, this note and the codemode door's description, and a
+ * sentence written twice is a sentence that will drift. The registry holds the one
+ * copy; this module imports it.
  *
  * Door-agnostic on purpose ("a task door", not a name): the note has to name the binding it is
  * about, and the description belongs to a tool that is not a binding, so a name would be wrong in
@@ -80,10 +81,7 @@ const SHAPE_LINES = [
  * them — and it says which one you get by default, because that is the half a reader gets
  * wrong.
  */
-export const TASK_DOOR_RESULT_NOTE: string =
-  "A task door never throws and has no `content`: without `wait: true` it resolves with a " +
-  'handle (`taskId`, `label`), and a refusal is a result with `status: "rejected"` and an ' +
-  "`errorMessage`, so read those two.";
+export { TASK_DOOR_RESULT_NOTE };
 
 /**
  * Per-binding departures from the shared shape, keyed by binding name. A binding

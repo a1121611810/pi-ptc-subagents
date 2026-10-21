@@ -288,7 +288,7 @@ describe("ptc_task_list", () => {
     const result = await callTool<PtcTaskListDetails>(tool, {});
 
     expect(result.details).toEqual({ tasks: [], count: 0 });
-    expect(textOf(result)).toBe("(no background tasks)");
+    expect(textOf(result)).toBe("(no tasks)");
   });
 
   test("rejects a negative limit through the registry's explicit error", async () => {

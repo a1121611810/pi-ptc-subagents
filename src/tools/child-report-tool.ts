@@ -41,6 +41,7 @@ import { Type } from "typebox";
 import type { TArray, TObject, TString } from "typebox";
 
 import { CHILD_REPORT_TOOL_NAME } from "../runtime/child-report.ts";
+import { CHILD_REPORT_DESCRIPTION, TOOLS } from "../routes/registry.ts";
 // Reused rather than re-declared: `task-panel-render.ts` reaches only pi, `text.ts` and a
 // TYPE-only import of the task storage, so this edge cannot close the `bindings <-> dispatch`
 // cycle. It is the same row component the `ptc_task_*` rows are built from.
@@ -109,15 +110,12 @@ export const CHILD_REPORT_PAYLOAD_SCHEMA: ChildReportPayloadSchema = Type.Object
  * home"). Each line earns its place: what the call is FOR, the shape, the two fields whose
  * meaning is not guessable (`evidence`, `files_touched`), the fact that its prose survives, and
  * the one thing it must not send.
+ *
+ * The text lives in the route registry (`src/routes/registry.ts`) with every other piece of
+ * model-facing prose this package writes; this module re-exports it for the readers that
+ * already import it from here.
  */
-export const CHILD_REPORT_DESCRIPTION: string = [
-  "Hand the host a child report: what you did in this run, in the shape it can read without parsing English.",
-  "Call it once, at the end. The exact shape is stated in your instructions, which also tell you what to do if this tool is unavailable to you.",
-  "Evidence is the point of a finding. Put in the independent thing you read, ran or checked — the claim restated is not evidence, and a finding with none is worse than no finding.",
-  "files_touched lists only paths you actually created or modified; leave it empty rather than guessing.",
-  "Your prose answer is kept alongside this report and is never replaced by it, so still answer in words.",
-  "Do not report usage or token counts — those are measured by the host, and anything you send under them is discarded.",
-].join("\n");
+export { CHILD_REPORT_DESCRIPTION } from "../routes/registry.ts";
 
 /**
  * What `structuredContent` carries: the report, as a plain JSON value.
@@ -146,12 +144,8 @@ export function createChildReportTool(activeByDefault: boolean): AnyTool {
     name: CHILD_REPORT_TOOL_NAME,
     label: "Child Report",
     description: CHILD_REPORT_DESCRIPTION,
-    promptSnippet: "Hand the host a child report when you finish",
-    promptGuidelines: [
-      "Call " +
-        CHILD_REPORT_TOOL_NAME +
-        ' once before you finish, even when the answer is "I changed nothing": a child that reports an empty result is a different thing from a child that never reported, and only the first one says so.',
-    ],
+    promptSnippet: TOOLS.ptc_child_report.snippet,
+    promptGuidelines: [...TOOLS.ptc_child_report.guidelines],
     parameters: CHILD_REPORT_PAYLOAD_SCHEMA,
     outputSchema: CHILD_REPORT_PAYLOAD_SCHEMA,
     // `false` in a parent is what makes this tool invisible to the parent's own model. pi

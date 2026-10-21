@@ -31,66 +31,21 @@ import { readContextModel } from "../runtime/session-model.ts";
 import type { WorkerPool } from "../runtime/worker-pool.ts";
 import { DEFAULT_CONFIG } from "../runtime/limits.ts";
 import { BINDING_CONTRACT } from "./binding-contract.ts";
-import { PTC_CHILD_SEARCH_NOTE } from "../search/contract.ts";
+import {
+  PTC_CHILD_SEARCH_NOTE,
+  PROGRAM_BODY_DESCRIPTION,
+  renderDescription,
+  TOOLS,
+} from "../routes/registry.ts";
 import {
   codeRunFailedError,
   createSubCallUpdater,
-  PTC_BINDING_REACH_NOTE,
-  PTC_RUN_CODE_SNIPPET,
-  PTC_TOOL_GUIDELINES,
   renderToolResult,
   resolveBindingNames,
   resolveToolCwd,
 } from "./common.ts";
 import type { PtcToolDetails, PtcToolOptions } from "./common.ts";
 import { createPtcRenderers } from "./render.ts";
-
-const DESCRIPTION_BASE = [
-  "Run a TypeScript program that composes pi's tools in one shot. Required arguments: `code` —",
-  "the body of an async function (top-level `return` and `await` work; type annotations are",
-  "advisory, the code runs type-stripped) — and `description`, a 5-10 word summary of what the",
-  "program does.",
-  "",
-  "Inside the program, call this session's enabled built-in tools as `tools.<name>(args)` — e.g.",
-  '`await tools.read({ path: "src/index.ts" })`.',
-  "The bound names are this session's active built-in tools, less any binding the install has not",
-  "explicitly opted in — this surface is narrower than the session's tool list on purpose;",
-  "independent calls may overlap under `Promise.all`.",
-  "",
-  "The PTC door `pi_task_ptc` is always available — inside the program, call it with a dot,",
-  'e.g. `await tools.pi_task_ptc({ task: "..." })`;',
-  "**the `agent` name is optional** — omit it and the child is a fresh generalist pi with pi's own",
-  'prompt and toolset; add `agent: "reviewer"` only to narrow it to a registered definition,',
-  "because a name with no definition behind it is refused. It",
-  "fans work out to child pi agents, and independent",
-  "foreground tasks compose under `Promise.all` exactly like the built-in calls. The run's",
-  "actual bound names (this run, not a static list) are on the `ptcBindings` global, so the program",
-  "never has to guess what is bound.",
-  "",
-  PTC_BINDING_REACH_NOTE,
-  "",
-  BINDING_CONTRACT,
-  "",
-  "Only the program's return value and its `console.log` output come back. This surface has no",
-  "helpers: `log` / `phase` / `parallel` / `pipeline` exist only in `ptc_workflow`.",
-  "",
-  "Image-bearing tool results inside the program (a `tools.read` on a PNG, say) are attached to you",
-  "after the run, so never return image data as the completion value — that only spends your context",
-  "on base64.",
-].join("\n");
-
-/**
- * Splice the child's-search sentence into a description, when the search module is on.
- *
- * **It has to be per session, not a constant.** The sentence is a claim about what a dispatched
- * child can do, and that is true only when the search switch is on — a parent told otherwise
- * would dispatch a child that cannot search. The switch is read once at extension load, so the
- * claim is stable for the session.
- */
-function withChildSearchNote(description: string, childCanSearch: boolean): string {
-  if (!childCanSearch) return description;
-  return `${description}\n\n${PTC_CHILD_SEARCH_NOTE}`;
-}
 
 /** Schema type written out explicitly for `isolatedDeclarations` (emit must not infer it). */
 type RunCodeParameters = TObject<{
@@ -101,7 +56,7 @@ type RunCodeParameters = TObject<{
 
 const PARAMETERS: RunCodeParameters = Type.Object({
   code: Type.String({
-    description: "The program: the body of an async TypeScript function.",
+    description: PROGRAM_BODY_DESCRIPTION,
   }),
   description: Type.String({
     description:
@@ -113,7 +68,7 @@ const PARAMETERS: RunCodeParameters = Type.Object({
         `Elapsed deadline in milliseconds for the whole run, including tool calls. ` +
         `Omit it (or pass 0) for the default of ${DEFAULT_CONFIG.timeoutMs / 1000} s; ` +
         `anything above ${DEFAULT_CONFIG.maxTimeoutMs / 1000} s is capped. ` +
-        `The deadline bounds the whole run: if it expires, in-flight foreground tasks ` +
+        `The deadline bounds the whole run: if it expires, in-flight tasks ` +
         `spawned by the program are terminated with it.`,
     }),
   ),
@@ -183,9 +138,12 @@ export function createPtcRunCodeTool(
     name: "ptc_run_code",
     label: "PTC Run Code",
     exposure: options.exposure,
-    description: withChildSearchNote(DESCRIPTION_BASE, options.childCanSearch === true),
-    promptSnippet: PTC_RUN_CODE_SNIPPET,
-    promptGuidelines: [...PTC_TOOL_GUIDELINES],
+    description: renderDescription(TOOLS.ptc_run_code, {
+      bindingContract: BINDING_CONTRACT,
+      ...(options.childCanSearch === true ? { childSearchNote: PTC_CHILD_SEARCH_NOTE } : {}),
+    }),
+    promptSnippet: TOOLS.ptc_run_code.snippet,
+    promptGuidelines: [...TOOLS.ptc_run_code.guidelines],
     parameters: PARAMETERS,
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const cwd = resolveToolCwd(ctx);

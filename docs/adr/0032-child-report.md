@@ -56,7 +56,7 @@ Measured against the installed artifact, not the release notes.
 3. **`tool_execution_end.result.structuredContent` _is_ reachable.** It is the full
    `AgentToolResult` (`pi-agent-core/dist/types.d.ts:370-391`), emitted verbatim at
    `pi-agent-core/dist/agent-loop.js:640-648`. This repo already depends on that mechanism
-   (`src/tools/subagent.ts:646`, `src/tools/ptc-task.ts:290, 646, 881`).
+   (`src/tools/subagent.ts:612`, `src/tools/ptc-task.ts:279, 627, 858`).
 
 So a structured return is reachable exactly two ways, and neither is enforced by pi: prompt the
 child into emitting JSON, or give it a tool whose declared schema the host reads back.
