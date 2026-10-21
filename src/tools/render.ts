@@ -1188,7 +1188,7 @@ function subRowsFor(subCalls: readonly SubCallRecord[], theme: Theme): RowLine[]
     const isLast = idx === visible.length - 1 && tail === 0;
     const connector = isLast ? "└─ " : "├─ ";
     // `padEnd` alone leaves a name longer than the gutter unpadded, which glues it to the
-    // status text (`pi.dispatchrejected: …`). The extra space keeps a separator at any length.
+    // status text (`pi_task_ptcrejected: …`). The extra space keeps a separator at any length.
     const label =
       record.name.length >= LABEL_WIDTH ? `${record.name} ` : record.name.padEnd(LABEL_WIDTH);
     const preview = previewArgs(record.name, record.args);

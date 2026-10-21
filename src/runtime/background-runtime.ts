@@ -1,6 +1,6 @@
 /**
  * BackgroundTaskRuntime: the session-scoped holder for everything a `ptc_task_*` tool and the
- * background branch of `pi.dispatch` need (BG-14, ADR-0022 §3/§5/§6/§8/§9).
+ * background branch of `pi_task_ptc` need (BG-14, ADR-0022 §3/§5/§6/§8/§9).
  *
  * ## Why a holder
  *
@@ -12,7 +12,7 @@
  *
  *   - the three `ptc_task_*` tools take a `TaskRegistry` / `OutputStorage` in their constructors;
  *   - the two PTC tools forward a `DispatchDeps` bag to `runPtcProgram` so a program's
- *     `pi.dispatch({ background: true })` writes into the real session registry instead of the
+ *     `pi_task_ptc({ background: true })` writes into the real session registry instead of the
  *     process-global in-memory fallback in `dispatch.ts`.
  *
  * A pi session, however, starts later (`session_start`) and can be re-bound (resume / fork). This

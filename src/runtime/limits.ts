@@ -88,7 +88,7 @@ export interface PtcConfig {
    * dispatch slot and vice versa.
    */
   dispatchConcurrency: number;
-  /** Maximum recursion depth for `pi.dispatch`. The child PTC run spawned by
+  /** Maximum recursion depth for `pi_task_ptc`. The child PTC run spawned by
    *  the (depth+1)-th dispatch is allowed only when childDepth <= maxDispatchDepth.
    *  Default 3. Aligns with dsh's `SubagentCapabilities.depthLimit` and codex's
    *  `agent_max_depth`. ADR-0016 Recursive dispatch section. */

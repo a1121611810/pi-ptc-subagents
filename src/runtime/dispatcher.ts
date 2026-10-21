@@ -17,7 +17,7 @@
  *   `maxPendingCalls` admission control, the `maxParallelSubCalls` builtin
  *   forwarding cap (ADR-0004 consequence: the overflow FIFO-queues for a
  *   slot), and the per-run `dispatchConcurrency` hard cap on in-flight
- *   `pi.dispatch` calls (ADR-0016 §2: the overflow resolves immediately as
+ *   `pi_task_ptc` calls (ADR-0016 §2: the overflow resolves immediately as
  *   rejected, it is never queued). The two caps have independent counters:
  *   neither throttles the other.
  * - collect logs / narration / phases and enforce the joint output budget,
@@ -81,8 +81,8 @@ export interface RunPtcProgramOptions {
   /** Cancels the run; the worker gets a cooperative cancel window before termination. */
   signal?: AbortSignal;
   /**
-   * Depth of this run in the `pi.dispatch` recursion chain (ADR-0016 Recursive section):
-   * 0 for the parent turn's run, 1+ for a run inside a child spawned by `pi.dispatch`.
+   * Depth of this run in the `pi_task_ptc` recursion chain (ADR-0016 Recursive section):
+   * 0 for the parent turn's run, 1+ for a run inside a child spawned by `pi_task_ptc`.
    * Handed to the binding context so the dispatch binding can bound recursion. The
    * extension entrypoint derives it from `PI_PTC_DEPTH`; direct library use defaults
    * to 0.
@@ -90,7 +90,7 @@ export interface RunPtcProgramOptions {
   depth?: number;
   /**
    * ADR-0022 §3/reopen R-m12: this process's own background task id, when the run is inside a
-   * child spawned by `pi.dispatch({ background: true })`. The entrypoint reads it from
+   * child spawned by `pi_task_ptc({ background: true })`. The entrypoint reads it from
    * `PI_PTC_TASK_ID` and threads it to the binding context so a nested spawn records
    * `TaskRecord.parentTaskId`. Absent for a top-level session.
    */
@@ -99,20 +99,20 @@ export interface RunPtcProgramOptions {
   runId?: string;
   /**
    * ADR-0022 R1: the session dir background children persist into, when the host has one.
-   * Threaded to the binding context so `pi.dispatch({ background: true })` can stamp the R1
+   * Threaded to the binding context so `pi_task_ptc({ background: true })` can stamp the R1
    * session flags; absent means the background spawn keeps the foreground no-session shape.
    */
   sessionDir?: string;
   /**
    * ADR-0022 §3/§9: session-level dispatch dependencies (TaskRegistry / OutputStorage /
    * lifecycle / clock / logger). The dispatcher merges its per-run `DispatchSlotCounter`
-   * into this bag before handing it to the `pi.dispatch` binding, so background tasks count
+   * into this bag before handing it to the `pi_task_ptc` binding, so background tasks count
    * against this run's `dispatchConcurrency` for their whole lifetime.
    */
   dispatchDeps?: DispatchDeps;
   /**
    * ADR-0044: the caller session's current model, read by the entrypoint off pi's
-   * tool-execution context. Threaded to every binding call's context so `pi.dispatch` can
+   * tool-execution context. Threaded to every binding call's context so `pi_task_ptc` can
    * inherit it when the call site and the agent markdown both name no model. Absent means
    * no inheritance -- exactly the pre-ADR-0044 behaviour, which is what every direct library
    * caller and every pi too old to pass `ctx.model` gets.
@@ -191,7 +191,7 @@ export interface PtcRunOutcome {
 }
 
 /**
- * Classify a `pi.dispatch` return value that did not succeed.
+ * Classify a `pi_task_ptc` return value that did not succeed.
  *
  * `DispatchResult.status: "rejected"` covers two different things, and the sub-call tree colours
  * them differently (ADR-0021 §6):
@@ -227,7 +227,7 @@ function messageOf(error: unknown): string {
  * First non-empty line of a binding result's text content, for the sub-row's `resultSummary`.
  *
  * Builtins wrap their model-facing payload as `{ content: [{ type: "text", text: ... }, ...] }`;
- * the `pi.dispatch` binding returns a flat `DispatchResult` (no `content`). Both are handled
+ * the `pi_task_ptc` binding returns a flat `DispatchResult` (no `content`). Both are handled
  * here so the tracker doesn't have to know which adapter produced the value. Returns
  * `undefined` when nothing readable is on the record — the tracker's `resultSummary` is then
  * simply absent, which is the same shape a tracker-only test sees.
@@ -431,7 +431,7 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
     let pendingCalls = 0;
     let outputBytes = 0;
     /**
-     * Concurrently in-flight `pi.dispatch` calls, counted so the per-run hard cap
+     * Concurrently in-flight `pi_task_ptc` calls, counted so the per-run hard cap
      * (ADR-0016 §2) can reject the overflow immediately. There is deliberately no
      * waiter queue behind this counter: the N+1th concurrent call resolves as
      * rejected instead of waiting for a slot. Independent of `activeBuiltinCalls`.
@@ -453,8 +453,8 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
      */
     let activeBuiltinCalls = 0;
     const builtinWaiters: Array<() => void> = [];
-    // Per-run depth for `pi.dispatch` (ADR-0016 Recursive section).
-    // The parent turn's PTC run is depth 0; a run inside a child spawned by `pi.dispatch`
+    // Per-run depth for `pi_task_ptc` (ADR-0016 Recursive section).
+    // The parent turn's PTC run is depth 0; a run inside a child spawned by `pi_task_ptc`
     // starts at the depth the child was stamped with (`PI_PTC_DEPTH` → the `depth`
     // option). The dispatcher itself does not change it within a single run.
     const runDepth = options.depth ?? 0;
@@ -684,7 +684,7 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
       //
       // The observable refusal is unchanged for every gate that still refuses: `dispatch()`
       // returns a settled DispatchResult the binding never throws (ADR-0016 §3), so a
-      // Promise.all over pi.dispatch calls still sees a settled record, not a throw. The
+      // Promise.all over pi_task_ptc calls still sees a settled record, not a throw. The
       // concurrency cap is no longer one of those gates (ADR-0056): over the cap a call is
       // queued and waits for a slot, so it settles later rather than being refused.
       if (!isDispatch) {
@@ -773,7 +773,7 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
           }
         }
         // Mid-flight cancellation can also resolve normally: a binding that observed the abort
-        // and surfaced it through the return value (the `pi.dispatch` binding does this — its
+        // and surfaced it through the return value (the `pi_task_ptc` binding does this — its
         // promise never rejects) lands here even when `bindingAbort.signal.aborted` is true.
         // `bash` and the other built-ins reject on abort, so they hit the catch branch below.
         // The discriminator is the signal itself: if the abort fired, the binding's outcome is a
@@ -783,7 +783,7 @@ export async function runPtcProgram(options: RunPtcProgramOptions): Promise<PtcR
             errorMessage: "binding aborted by run cancellation",
           });
         } else {
-          // A `pi.dispatch` that did not succeed resolves rather than throwing, so its outcome
+          // A `pi_task_ptc` that did not succeed resolves rather than throwing, so its outcome
           // has to come off the value — recording every one of them as `ok` would tell the reader
           // a dispatch worked when it was either declined or failed (ADR-0021 §6).
           const outcome = isDispatch ? dispatchOutcome(value) : undefined;

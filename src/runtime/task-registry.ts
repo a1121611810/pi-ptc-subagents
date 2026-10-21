@@ -3,7 +3,7 @@
  * (ADR-0022, BG-02).
  *
  * This module is the *only* legal writer of a TaskRecord's lifecycle. Every producer
- * (the background branch of `pi.dispatch`, the `ptc_task_stop` tool, the restart
+ * (the background branch of `pi_task_ptc`, the `ptc_task_stop` tool, the restart
  * reconciler) routes through {@link TaskRegistry.transition}; the single-terminal-writer
  * rule — this file's own invariant that exactly one writer applies the terminal state — is
  * enforced by the explicit transition table in this file, not by convention.
@@ -653,7 +653,7 @@ export class DefaultTaskRegistry implements TaskRegistry {
    * process is dead — or when the record predates task ownership (no `ownerPid`) and can only
    * be pre-upgrade staleness. Records owned by a LIVE pid are skipped: our own in-flight tasks,
    * and — the field-report pitfall #3 fix — records written by a sibling pi process that shares
-   * this session dir (every background `pi.dispatch` child does, via `--session-dir`). Without
+   * this session dir (every background `pi_task_ptc` child does, via `--session-dir`). Without
    * the scoping, a child's boot flipped every sibling record to `lost`, and its exit sweep
    * (`session_ended_while_running`) killed the rest. Idempotent: a second call finds no
    * non-terminal dead-owned records and returns an empty array.

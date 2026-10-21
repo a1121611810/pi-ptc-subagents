@@ -1,11 +1,11 @@
 /**
- * ChildProcessLifecycle: the seam between `pi.dispatch` and the OS process.
+ * ChildProcessLifecycle: the seam between `pi_task_ptc` and the OS process.
  *
  * BG-03 extracts the spawn / kill / JSONL-parse / exit-wait dance that used to live
  * inline in `src/runtime/dispatch.ts` into a typed interface with two adapters:
  *
  *   - `RealChildProcessLifecycle`  - wraps `node:child_process.spawn`; this is what the
- *                                    production foreground `pi.dispatch` path uses.
+ *                                    production foreground `pi_task_ptc` path uses.
  *   - `MockChildProcessLifecycle`  - in-memory event queue + exit signal; lets unit tests
  *                                    drive the dispatch code without spawning anything.
  *
@@ -122,7 +122,7 @@ export interface ChildHandle {
 /**
  * Spawn options shared by both adapters. `promptFile` / `sessionDir` / `sessionId` /
  * `sessionName` are the R1 fields the background dispatch consumes (ADR-0022 §1/R1). The
- * foreground `pi.dispatch` path passes only `cwd` / `env` / `signal` / `promptFile`.
+ * foreground `pi_task_ptc` path passes only `cwd` / `env` / `signal` / `promptFile`.
  */
 export interface ChildSpawnOptions {
   cwd: string;
