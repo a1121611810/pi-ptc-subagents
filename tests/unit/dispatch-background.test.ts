@@ -18,6 +18,7 @@ import { EventEmitter } from "node:events";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  isDispatchHandle,
   DISPATCH_KILL_GRACE_MS,
   DispatchSlotCounter,
   dispatch,
@@ -200,7 +201,7 @@ async function allTasks(storage: InMemoryTaskStorage): Promise<TaskRecord[]> {
 
 /** Narrow a background result to its handle or fail loudly. */
 function asHandle(value: DispatchHandle | DispatchResult): DispatchHandle {
-  if (!("taskId" in value)) {
+  if (!isDispatchHandle(value)) {
     throw new Error("expected a DispatchHandle, got a DispatchResult refusal");
   }
   return value;
@@ -208,7 +209,7 @@ function asHandle(value: DispatchHandle | DispatchResult): DispatchHandle {
 
 /** Narrow a background result to its DispatchResult refusal or fail loudly. */
 function asResult(value: DispatchHandle | DispatchResult): DispatchResult {
-  if ("taskId" in value) {
+  if (isDispatchHandle(value)) {
     throw new Error("expected a DispatchResult refusal, got a DispatchHandle");
   }
   return value;
@@ -738,7 +739,7 @@ describe("dispatch background gates", () => {
         h.deps,
       );
 
-      expect("taskId" in result, "the generalist spawns rather than refusing").toBe(true);
+      expect(isDispatchHandle(result), "the generalist spawns rather than refusing").toBe(true);
       const handle = asHandle(result);
       expect(h.lifecycle.spawnCount).toBe(1);
       const record = await h.storage.loadTask(handle.taskId);
@@ -1504,7 +1505,7 @@ describe("dispatch foreground", () => {
       expect(result.errorMessage).toBe("dispatch produced no final text");
       expect(result.exitCode).toBe(0);
       expect(result.started).toBe(true);
-      expect("taskId" in result).toBe(false);
+      expect(isDispatchHandle(result)).toBe(false);
 
       // One child, launched through the INJECTED lifecycle. That is the change round 5 made:
       // the foreground branch used to read the module-level lifecycle only, so this line used
@@ -1515,8 +1516,18 @@ describe("dispatch foreground", () => {
       expect(spawnRecorder.calls, "the module-level lifecycle was not used").toBe(0);
       // The slot is back: finalize is the one release, and this call reached it.
       expect(h.slots.active).toBe(0);
-      // The BACKGROUND seams really are still untouched, which is what this test is for.
-      expect(await allTasks(h.storage)).toEqual([]);
+      // ADR-0053: the foreground front is no longer a trace-free path. It creates its own task
+      // record now, so the registry seam IS touched -- what stayed untouched is the BACKGROUND
+      // machinery: no detached pump drove this record, the foreground's own close did.
+      const records = await allTasks(h.storage);
+      expect(records, "the foreground dispatch left exactly one record behind").toHaveLength(1);
+      expect(records[0]?.id, "the record carries the id the result handed back").toBe(
+        result.recordId,
+      );
+      expect(records[0]?.status, "the record was closed by the foreground's own close").toBe(
+        "failed",
+      );
+      expect(records[0]?.errorMessage).toBe("dispatch produced no final text");
     });
   });
 

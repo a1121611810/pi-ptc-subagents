@@ -28,7 +28,7 @@ import {
   type ChildHandle,
   type ChildSpawnOptions,
 } from "../../src/runtime/child-process-lifecycle.ts";
-import { dispatch, type DispatchResult } from "../../src/runtime/dispatch.ts";
+import { dispatch, isDispatchHandle, type DispatchResult } from "../../src/runtime/dispatch.ts";
 import {
   createTaskRegistry,
   type DispatchHandle,
@@ -143,7 +143,7 @@ async function withAgent<T>(body: (dir: string) => Promise<T>): Promise<T> {
 }
 
 function asHandle(value: DispatchHandle | DispatchResult): DispatchHandle {
-  if (!("taskId" in value))
+  if (!isDispatchHandle(value))
     throw new Error("expected a DispatchHandle, got " + JSON.stringify(value));
   return value;
 }

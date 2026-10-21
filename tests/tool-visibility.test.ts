@@ -165,6 +165,23 @@ const FULL_SURFACE = [
 ];
 
 /**
+ * What a session that has dispatched NOTHING declares to the model.
+ *
+ * **ADR-0053: the three task tools are REGISTERED in both surfaces, but they are only
+ * DECLARED once the session has a task record.** The lifecycle face's presence is a
+ * CONSEQUENCE of the session having dispatched — a task record is the only trace a dispatch
+ * leaves — so a session with no record has nothing to list, read or stop, and the face is out
+ * of the model's face. The tools stay registered (pi cannot unregister a tool); they are just
+ * not in the request payload.
+ *
+ * So the two literals above answer different questions, and the difference is the point:
+ * `FULL_SURFACE` / `SUBAGENTS_SURFACE` are what the REGISTRY holds, and this is what the
+ * MODEL is offered. A registry assertion would still see the three task tools; the payload
+ * assertion must not.
+ */
+const DECLARED_PTC_SURFACE = ["ptc_run_code", "ptc_workflow"];
+
+/**
  * Run pi until it exits.
  *
  * stdin is `/dev/null`, not a pipe: in print mode pi reads piped stdin and merges it into the
@@ -562,8 +579,10 @@ test.skipIf(CODEMODE_PI.bin === undefined)(
     expect(
       plainPtc,
       "a plain launch on a pi that ships codemode gets the PTC surfaces, because codemode is " +
-        "registered inactive and the model cannot call it (ADR-0029)",
-    ).toEqual(FULL_SURFACE);
+        "registered inactive and the model cannot call it (ADR-0029). The three task tools are " +
+        "registered but not DECLARED: the session has dispatched nothing, so it has no task " +
+        "record and the lifecycle face is out of the model's face (ADR-0053)",
+    ).toEqual(DECLARED_PTC_SURFACE);
 
     // The delegated cell, same binary, same everything but the loadout. Asked of the REGISTRY, so
     // the registration set is what is asserted here rather than what a loadout filtered out of an
@@ -638,8 +657,10 @@ test("a plain launch never delegates, whichever pi is on PATH (ADR-0029)", async
     "this pi " +
       (registryHasCodemode ? "ships" : "does not ship") +
       " codemode, and this launch does not put it in the tool list, so the detected default " +
-      "must be full (ADR-0029)",
-  ).toEqual(FULL_SURFACE);
+      "must be full (ADR-0029). The three task tools are registered but not DECLARED: this " +
+      "session has dispatched nothing, so it has no task record and the lifecycle face is out " +
+      "of the model's face (ADR-0053)",
+  ).toEqual(DECLARED_PTC_SURFACE);
   expect(
     detectedPtc.includes("ptc_run_code"),
     "a session that cannot call codemode keeps the front, or the delegation hands over to nothing",

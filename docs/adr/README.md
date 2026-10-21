@@ -54,6 +54,7 @@ ADRs for pi-ptc-subagents, per `docs/agents/domain.md` (single-context repo).
 | [0048](./0048-deepseek-search-gate.md)                     | The DeepSeek search gate: an off-by-default switch plus a credential verdict; a missing key is stated         | accepted              |
 | [0049](./0049-the-search-lives-in-the-child.md)            | The search lives in the dispatched child, and the child's own model calls it                                  | accepted              |
 | [0050](./0050-ptc-off-stops-new-dispatch.md)               | PTC off stops new children; the ones already running are unaffected, and the user is told so                  | accepted              |
+| [0053](./0053-every-dispatch-is-a-task.md)                 | Every dispatch is a task: the foreground front registers a record, persists its output, and the face follows  | accepted              |
 
 Numbering gaps are deliberate: 0001/0006 were reserved while wayfinder map #7 was charting and dropped when G1 resolved; keeping their slots means every cross-reference in the map and its tickets stays valid.
 

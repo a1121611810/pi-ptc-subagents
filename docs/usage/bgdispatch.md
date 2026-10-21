@@ -11,6 +11,12 @@ spawning program, the spawning turn, and `/ptc off`; it is **owned by the dispat
 and ends only when that session ends or is replaced (`session_ended_while_running`) or when the
 owner process dies before completion (`lost_on_session_restart`).
 
+**Both forms are tasks** ([ADR-0053](../adr/0053-every-dispatch-is-a-task.md)). Since 2026-10-21 the
+foreground form registers a task record too, persists the child's output to
+`<sessionDir>/tasks/<id>/output.log`, and keeps the record after the call returns — so a foreground
+child is readable later instead of evaporating with the return value. The gates stay above the
+record creation, so a refused call leaves no record behind.
+
 Reach for it when the work is longer than the program's useful lifetime, or when the model should be
 able to check on it later: a scout over a large tree, a review that runs while the model does
 something else, a batch of children fanned out from one program.
@@ -22,13 +28,18 @@ something else, a batch of children fanned out from one program.
 | return             | `DispatchResult`, after the child exits | `DispatchHandle`, immediately after spawn                                                                                                      |
 | blocks the program | yes, until the child exits              | no                                                                                                                                             |
 | child lifetime     | the awaited `Promise`                   | the dispatching pi process's lifetime — survives the program, the turn, and `/ptc off`; ends on session end/replacement or owner process death |
-| observation        | the return value                        | `ptc_task_list` / `ptc_task_output` / `ptc_task_stop` and `<bg-task-notification>` events                                                      |
+| observation        | the return value, plus the task record  | `ptc_task_list` / `ptc_task_output` / `ptc_task_stop` and `<bg-task-notification>` events                                                      |
 | failure            | `status: "rejected"` on the result      | a terminal `TaskStatus` on the `TaskRecord`                                                                                                    |
 
 Both forms share the same depth and concurrency gates — and, since the concurrency gate moved into
 `dispatch()`, they share one **counter** for them rather than one each (see [Limits](#limits)). A
 pre-spawn refusal uses the foreground `DispatchResult` shape, so a background call returns either a
 `DispatchHandle` **or** a refusal `DispatchResult`.
+
+A foreground result also carries the record it created: `recordId` and `recordLabel`
+([ADR-0053](../adr/0053-every-dispatch-is-a-task.md)). That is how a program — or the model, through
+the tool that projects it — looks the child up after the fact with `ptc_task_output`. Both fields are
+absent on a refusal, because a refused call left no record.
 
 ## Spawning
 
@@ -215,9 +226,21 @@ ptc_task_output({ taskId: "01JBZ000000000000000000002" });
 
 ### Management tools
 
-All three tools are always active: they are **not** part of the PTC-mode loadout, so `/ptc off`
-does not remove them. `/ptc off` only blocks _new_ spawns (ADR-0016 R6); in-flight tasks keep
-updating and keeping their output reachable.
+The three tools are **not** part of the PTC-mode loadout, so `/ptc off` does not remove them from the
+registration — and what is withheld from the model is a different question now
+([ADR-0053](../adr/0053-every-dispatch-is-a-task.md)):
+
+> **The lifecycle face is in the model's face exactly when the session has a task record.**
+>
+> A task record is the only trace a dispatch leaves, so "is there something for these three tools to
+> do?" and "does this session have a task record?" are one question. Before the session's first
+> dispatch there is nothing to list, read or stop, and the three tools are out of the model's face;
+> the moment a dispatch creates a record they are back, and they stay for the rest of the session.
+> A resumed session that already has records shows them from its first request.
+
+The tools stay **registered** either way (pi cannot unregister a tool); what changes is whether the
+model is offered them. `/ptc off` still stops new spawns, and an in-flight task still has to stay
+readable and stoppable.
 
 **`ptc_task_list`** — list this session's background tasks.
 
@@ -268,6 +291,13 @@ foreground loop runs, and the registry persists it on the `TaskRecord`, so it su
 exactly as the rest of the record does. `ptc_task_output` renders it above the child's prose —
 conclusion first, reasoning second — bounded at 20 findings with the withheld count stated in
 band.
+
+**A foreground child's report is now inspectable too**
+([ADR-0053](../adr/0053-every-dispatch-is-a-task.md)). The foreground front persists the report on
+its own record and writes the child's output to the same `<sessionDir>/tasks/<id>/output.log` the
+background front writes — so after the call returns, `ptc_task_output` on the result's `recordId`
+renders the report and the prose, exactly as it does for a background task. Before that, a foreground
+child's report existed only in the return value and nowhere else.
 
 ```text
 <child-report channel="prompt-json">
@@ -347,6 +377,11 @@ is already terminal is an illegal-transition error.
 `TaskStatus` has six values. `queued` is deliberately absent: the concurrency cap is a hard reject,
 there is no in-task queue.
 
+A foreground dispatch's record uses the same six states and the same transitions
+([ADR-0053](../adr/0053-every-dispatch-is-a-task.md)) — the foreground front writes the same
+`running -> succeeded | failed | canceled` edges, with the same rules about what counts as a
+success (exit 0 **and** assistant text).
+
 | status      | terminal | can move to                                           |
 | ----------- | -------- | ----------------------------------------------------- |
 | `running`   | no       | `stopping`, `succeeded`, `failed`, `canceled`, `lost` |
@@ -390,6 +425,11 @@ Esc-identifiable signal (ADR-0022 §8).
 
 When a `TaskRecord` changes, the change is delivered to the model as a user-role batch: one
 `<bg-task-notifications>` parent carrying N per-event `<bg-task-notification>` children.
+
+**A foreground task's completion is not pushed.** Its result was handed to the caller inline, so a
+completion message would spend a turn telling the model something it already holds
+([ADR-0053](../adr/0053-every-dispatch-is-a-task.md)). The record still exists and is still
+readable with `ptc_task_output`; it just never becomes a message.
 
 ```xml
 <bg-task-notifications batch-id="01JBZ0000000000000000000A1" delivered-at-ms="1758700000123">

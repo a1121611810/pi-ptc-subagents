@@ -23,7 +23,12 @@
  * `setImmediate` flushes (a macrotask, not a timer).
  */
 import { vi } from "vitest";
-import { DispatchSlotCounter, dispatch, type DispatchDeps } from "../../../src/runtime/dispatch.ts";
+import {
+  DispatchSlotCounter,
+  dispatch,
+  isDispatchHandle,
+  type DispatchDeps,
+} from "../../../src/runtime/dispatch.ts";
 import {
   MockChildProcessLifecycle,
   type ChildHandle,
@@ -297,7 +302,7 @@ export async function spawnTask(h: Harness, options: SpawnOptions = {}): Promise
     },
     h.deps,
   );
-  if (!("taskId" in result)) {
+  if (!isDispatchHandle(result)) {
     throw new Error("spawn refused: " + (result.errorMessage ?? "unknown reason"));
   }
   h.subscribers.set(result.taskId, callerId);
