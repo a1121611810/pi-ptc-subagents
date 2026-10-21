@@ -20,6 +20,8 @@
   "files": [
     "dist/**/*.js",
     "dist/**/*.d.ts",
+    "docs/routes/**/*.md",
+    "docs/usage/**/*.md",
     "README.md",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",

@@ -7,7 +7,7 @@
 import { expect, test } from "vitest";
 import type { AgentToolResult, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { type PtcToolDetails } from "../src/tools/common.ts";
-import { PTC_BINDING_REACH_NOTE } from "../src/routes/registry.ts";
+import { IMAGE_HOISTING_NOTE } from "../src/routes/registry.ts";
 import { createPtcWorkflowTool } from "../src/tools/workflow.ts";
 import { captureRegisteredTools, RUN_TIMEOUT_MS, toolContext } from "./helpers/ptc.ts";
 
@@ -73,8 +73,8 @@ test("the description lists the four helpers and says there is no agent()", asyn
   // binding manifest. ADR-0052: the door no longer needs string indexing on any plane.
   expect(description, "shows the dot call form").toContain("await tools.pi_task_ptc(");
   expect(description, "names the introspection global").toContain("ptcBindings");
-  expect(description, "carries the same reach note as ptc_run_code").toContain(
-    PTC_BINDING_REACH_NOTE,
+  expect(description, "carries the same image contract as ptc_run_code").toContain(
+    IMAGE_HOISTING_NOTE,
   );
   expect(description).toMatch(/`meta\.phases`/);
   expect(description).toMatch(/`args`/);

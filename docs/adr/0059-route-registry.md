@@ -2,6 +2,8 @@
 
 Status: accepted (2026-10-21). Ticket #243（spec #234 实现决定 8 的散文那一半）。修订：[ADR-0022](./0022-background-dispatch.md)、[ADR-0024](./0024-binding-contract-declares-binding-result.md)、[ADR-0049](./0049-the-search-lives-in-the-child.md)、[ADR-0052](./0052-the-two-doors-share-one-prefix.md)、[ADR-0054](./0054-the-two-doors-give-one-object.md)、[ADR-0055](./0055-wait-is-one-parameter.md)、[ADR-0057](./0057-cancellation-only-reaches-queued-tasks.md)、[ADR-0058](./0058-ptc-off-truncates-the-chain.md)。**本篇与这八篇读得不一样的地方，以本篇为准。**
 
+> **Amended by [ADR-0061](./0061-the-route-index-and-its-detail-files.md) (2026-10-21): the `ROUTES` zone is filled and the resident index is rendered from it — one line per road, the details in packaged files under `docs/routes/`, and the four prose channels retired. This record's decisions stand unchanged: model-facing prose has one home, and a tool's description / guidelines / snippet are still the registry's rendering. What this record listed as "not done here" is done now.**
+
 ## Context
 
 到 2026-10-21 为止，本包里有**八十七处**模型面散文，散在二十三个源文件里。散文本身没有问题——问题是**同一句话被写了两遍**，而两遍会漂。

@@ -17,7 +17,7 @@ import {
   SUB_CALL_UPDATE_THROTTLE_MS,
   type PtcToolDetails,
 } from "../src/tools/common.ts";
-import { PTC_BINDING_REACH_NOTE } from "../src/routes/registry.ts";
+import { IMAGE_HOISTING_NOTE, ROUTES } from "../src/routes/registry.ts";
 import { createPtcRunCodeTool } from "../src/tools/run-code.ts";
 import {
   captureRegisteredTools,
@@ -194,60 +194,71 @@ test("the description tells the model how to reach tools and what comes back", a
   expect(description).toMatch(/return value/);
   expect(description, "states the surface has no helpers").toMatch(/has no\s+helpers/i);
   expect(description, "points at the surface that does").toMatch(/ptc_workflow/);
-  expect(description, "states how a codemode script reaches the binding").toContain(
-    PTC_BINDING_REACH_NOTE,
-  );
   expect(description).not.toMatch(/sandbox/i);
 });
 
-test("the reach note names the reader, the entry points and the table the binding is absent from", () => {
-  // The one model-facing sentence that answers "I am a `codemode` script; how do I create a task?".
+test("the road that replaced the reach note says the thing the note said", () => {
+  // The reach note RETIRED with ADR-0061: under the new model the door is a codemode-reachable
+  // tool, so the "the two-hop path is the only way" constraint it carried is gone. The fact it
+  // was protecting did not go with it — a `codemode` script's tool table still has no
+  // `pi_task_ptc` in it — and that fact now lives in the ROAD for creating a task, per surface.
+  //
   // Measured 2026-10-16 (spike round 2): without it, a script author enumerates its own tool
   // table, finds no `pi_task_ptc`, and reads the silence as "this install does not register the
-  // binding". What these assertions pin: the tokens/clauses below, so deleting or rewording
-  // any half turns a named test red. What they do NOT pin: polarity — a rewrite that keeps every
-  // pinned token and inverts the meaning still passes (round-2 review measured four such
-  // paraphrases green). The oracle for polarity is the A/B run recorded on #200, not this test;
-  // do not add more substring pins chasing it.
-  expect(PTC_BINDING_REACH_NOTE, "names the reader").toContain("`codemode`");
-  expect(PTC_BINDING_REACH_NOTE, "names the binding it is about").toContain("`pi_task_ptc`");
-  expect(PTC_BINDING_REACH_NOTE, "states the absence from the tool table").toMatch(/never in/);
-  expect(PTC_BINDING_REACH_NOTE, "names the first entry point").toContain("`ptc_run_code`");
-  expect(PTC_BINDING_REACH_NOTE, "names the second entry point").toContain("`ptc_workflow`");
-  expect(PTC_BINDING_REACH_NOTE, "states the positive half: the way out is a call").toMatch(
-    /reaches it by calling|creates a task through the door/,
+  // binding". Measured again 2026-10-20: the parent read the note and still wrote
+  // `tools["pi.dispatch"]` into a script, got a TypeError, and burned three calls.
+  //
+  // Counterfactual: reword the road's codemode line and drop the fact — this goes red.
+  const road = ROUTES.find((candidate) => candidate.id === "create-a-task");
+  expect(road, "the create-a-task road exists").toBeDefined();
+  const codemode = (road as { how: Record<string, string> }).how.codemode_ptc ?? "";
+  expect(codemode, "names the reader").toContain("`codemode`");
+  expect(codemode, "names the binding it is about").toContain("`pi_task_ptc`");
+  expect(codemode, "states the absence from the tool table").toMatch(
+    /does not contain `pi_task_ptc`/,
   );
-  expect(PTC_BINDING_REACH_NOTE, "states where the binding is used: inside the program").toMatch(
-    /using the binding inside the program|with the binding used inside the program/,
-  );
-  // Measured 2026-10-20 on the `codemode_ptc` surface: the note was in the parent's context and the
-  // parent STILL wrote `tools["pi.dispatch"]` into a codemode script, got a TypeError, and burned
-  // three calls that way before falling back to the codemode door. So the note now names the
-  // one-hop route too, and points the reader at its own tool table rather than at a route it has
-  // to infer.
-  expect(PTC_BINDING_REACH_NOTE, "names the one-hop door").toContain("`pi_task_codemode`");
-  expect(PTC_BINDING_REACH_NOTE, "points the reader at its own tool table").toMatch(
-    /in its own table/,
-  );
-  // ADR-0052: the model-facing word is TASK. The note is read by a script author, so the internal
-  // word must not be in it.
-  expect(PTC_BINDING_REACH_NOTE, "does not say dispatch").not.toMatch(/dispatch/i);
+  expect(codemode, "names the door that IS in the table").toContain("pi_task_codemode");
+  // ADR-0052: the model-facing word is TASK. The line is read by a script author, so the
+  // internal word must not be in it.
+  expect(codemode, "does not say dispatch").not.toMatch(/dispatch/i);
 });
 
-test("both PTC descriptions carry the SAME reach note, so the sentence cannot drift between them", async () => {
-  // One constant in two descriptions is only drift-proof if the test reads BOTH sides and compares
-  // them. The binding contract has its own byte-comparison; the reach note sits outside the
-  // contract, so the contract's guards never see it and this is the only place the two copies can
-  // be checked against each other.
+test("the retired reach note is nowhere in the model-facing prose", async () => {
+  // ADR-0061 retired the note. A retirement is only genuine when bringing it back turns a
+  // named test red — otherwise the note is merely unfashioned, and the next person who finds it
+  // in a description has no reason to know it was retired on purpose.
   //
-  // Counterfactual: a description that reworded the note in place — "a script creates a task
-  // through the door that IS in its own table" becoming "a script should create a task somehow" —
-  // leaves every other assertion in this file green, because they all read the CONSTANT. This one
-  // reads the rendered text, so it goes red.
+  // Counterfactual: paste the note back into `ptc_run_code`'s description — this goes red.
   const runCode = (await captureRegisteredTools()).get("ptc_run_code")?.description ?? "";
   const workflow = (await captureRegisteredTools()).get("ptc_workflow")?.description ?? "";
-  expect(runCode, "ptc_run_code carries the shared note").toContain(PTC_BINDING_REACH_NOTE);
-  expect(workflow, "ptc_workflow carries the shared note").toContain(PTC_BINDING_REACH_NOTE);
+  for (const [name, description] of [
+    ["ptc_run_code", runCode],
+    ["ptc_workflow", workflow],
+  ] as const) {
+    expect(description, `${name} does not carry the retired note`).not.toContain(
+      "cannot call the PTC binding directly",
+    );
+    expect(description, `${name} does not carry the retired note's other half`).not.toContain(
+      "is never in that script's own tool table",
+    );
+  }
+});
+
+test("both PTC descriptions carry the SAME image contract, so the sentence cannot drift between them", async () => {
+  // One constant in two descriptions is only drift-proof if the test reads BOTH sides and compares
+  // them. The binding contract has its own byte-comparison; the image contract sits outside the
+  // contract, so the contract's guards never see it and this is the only place the two copies can
+  // be checked against each other. (It used to be the reach note here; that note retired with
+  // ADR-0061 and the road for creating a task carries its fact now.)
+  //
+  // Counterfactual: a description that reworded the contract in place — "never return image data
+  // as the completion value" becoming "images are handled for you" — leaves every other assertion
+  // in this file green, because they all read the CONSTANT. This one reads the rendered text, so
+  // it goes red.
+  const runCode = (await captureRegisteredTools()).get("ptc_run_code")?.description ?? "";
+  const workflow = (await captureRegisteredTools()).get("ptc_workflow")?.description ?? "";
+  expect(runCode, "ptc_run_code carries the shared contract").toContain(IMAGE_HOISTING_NOTE);
+  expect(workflow, "ptc_workflow carries the shared contract").toContain(IMAGE_HOISTING_NOTE);
 });
 
 test("the binding example is scoped to a program, so a script author does not copy it into a script", async () => {

@@ -64,6 +64,7 @@ ADRs for pi-ptc-subagents, per `docs/agents/domain.md` (single-context repo).
 | [0058](./0058-ptc-off-truncates-the-chain.md)              | `/ptc off` truncates the chain: each surface cuts at its own point, not one shared one                        | accepted              |
 | [0059](./0059-route-registry.md)                           | Model-facing prose has one home: a typed route registry holds the `TOOLS` and `ROUTES` zones                  | accepted              |
 | [0060](./0060-ptc-programs-run-in-strict-mode.md)          | PTC programs run in strict mode, matching upstream DSH                                                        | accepted              |
+| [0061](./0061-the-route-index-and-its-detail-files.md)     | The route index: one line per road, the details in packaged files, and four prose channels retired            | accepted              |
 
 Numbering gaps are deliberate: 0001/0006 were reserved while wayfinder map #7 was charting and dropped when G1 resolved; keeping their slots means every cross-reference in the map and its tickets stays valid.
 

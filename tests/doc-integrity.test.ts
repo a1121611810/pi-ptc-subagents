@@ -622,6 +622,14 @@ const EXTERNAL_VOCABULARY: ReadonlyMap<string, string> = new Map([
     "backgroundDispatchDepthLimitReached",
     "本仓已删除的后台深度拒绝工厂（ADR-0055 并成单个 dispatchDepthLimitReached，按等法取键）；ADR-0055 点名它是为了记录合并事实",
   ],
+  // A8. 同类的第五个：ADR-0061 把 reach note（`PTC_BINDING_REACH_NOTE`）退役了——新模型下门是
+  // codemode 可达的工具而不是绑定，那条 note 承载的约束不存在了，它保护的事实改由 route
+  // registry 的「建一条任务」那条路按表面说。常量已从 `src/` 删除（连注释里都不留），而
+  // ADR-0052 的正文不改写（历史不改写，只加指针），所以名字继续留在那些记录里。
+  [
+    "PTC_BINDING_REACH_NOTE",
+    "本仓已删除的 reach note 常量（ADR-0061 随路表的两层输出把它退役）；0052 保留这个名字是为了记录退役事实——那条 note 保护过的事实现在由 route registry 的「建一条任务」那条路按表面说",
+  ],
   // D3. **libuv 的符号**。ADR-0056 把准入队列的形状照着 libuv 的线程池写，所以 ADR 点名了
   // libuv 源码里的几个常量与函数。libuv 是本仓不依赖、不声明、只引用的第三方 C 库。
   [
@@ -1595,6 +1603,10 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     //   index.ts:784 → 880（缺凭据告警的 `ctx.ui.notify(`）
     //   ptc-mode.ts:1331 → 1360（`export function detectedSurfaceMode(`）
     // PIN_TOKENS 的 value 一个未变。
+    // 2026-10-21（#246 · ADR-0061：路表的两层输出）：**本轮没有位移**。简报要把静态的那一半
+    // 搬进册子（图像契约因此不再由简报自带），`src/mode/ptc-mode.ts` 的 import 行数不变 ——
+    // 正因为多一行 import 会把这条钉住的行号顶下去。目标行 1360 仍是
+    // `export function detectedSurfaceMode(`，逐字相同。
     "docs/adr/0039-an-omitted-agent-dispatches-a-generalist.md:117 -> src/index.ts:740":
       "createChildReportTool(ptcDepth > 0)",
     "docs/adr/0029-surface-follows-codemode-activation.md:33 -> ptc-mode.ts:1360":
@@ -1651,7 +1663,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     "docs/adr/0048-deepseek-search-gate.md:44 -> src/index.ts:880": "ctx.ui.notify(",
     "docs/adr/0048-deepseek-search-gate.md:72 -> src/runtime/limits.ts:154":
       "WORKER_ENV_ALLOW_LIST",
-    "docs/adr/0049-the-search-lives-in-the-child.md:16 -> docs/agents/pi-compat-matrix.md:63":
+    "docs/adr/0049-the-search-lives-in-the-child.md:17 -> docs/agents/pi-compat-matrix.md:63":
       "`ToolDefinition.exposure` field",
     "docs/specs/0044-deepseek-search-module.md:98 -> docs/agents/pi-compat-matrix.md:63":
       "`ToolDefinition.exposure` field",
@@ -1796,6 +1808,12 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     // 因本轮实现整体下移，逐条**按内容**核对后重钉（不按算术平移）：
     //   ptc-mode.ts:1331 → 1360、index.ts:1272 → 1393、index.ts:1323 → 1444、
     //   index.ts:644 → 740、index.ts:784 → 880（两处）。逐条打开核对：内容逐字未变，只是行号。
+    // 2026-10-21（#246 · ADR-0061）：本轮**没有位移**（`ptc-mode.ts` 的 import 行数不变，见
+    // PIN_TOKENS 上方的说明），1360 行仍是 `export function detectedSurfaceMode(`，逐字相同。
+    // 2026-10-21（#246 · ADR-0061）：唯一一条位移的是 ADR-0049 里引 `pi-compat-matrix.md` 的那条
+    // ——本篇在那篇记录顶部加了一行修订指针，引用所在的那一行整体下移一行。**目标行没动**
+    // （`docs/agents/pi-compat-matrix.md` 本轮未改），逐条打开核对：目标行仍是
+    // `ToolDefinition.exposure` 那一行，逐字相同；只有引用侧的行号变了。
     "docs/adr/0029-surface-follows-codemode-activation.md:33 -> ptc-mode.ts:1360",
     "docs/adr/0029-surface-follows-codemode-activation.md:36 -> src/index.ts:1444",
     "docs/adr/0029-surface-follows-codemode-activation.md:147 -> src/index.ts:1444",
@@ -1925,7 +1943,7 @@ describe("断言四：规范文档里 file:line 的行号落在目标文件行�
     "docs/adr/0047-deepseek-search-is-program-internal.md:107 -> docs/agents/pi-compat-matrix.md:63",
     "docs/adr/0048-deepseek-search-gate.md:44 -> src/index.ts:880",
     "docs/adr/0048-deepseek-search-gate.md:72 -> src/runtime/limits.ts:154",
-    "docs/adr/0049-the-search-lives-in-the-child.md:16 -> docs/agents/pi-compat-matrix.md:63",
+    "docs/adr/0049-the-search-lives-in-the-child.md:17 -> docs/agents/pi-compat-matrix.md:63",
     "docs/specs/0044-deepseek-search-module.md:98 -> docs/agents/pi-compat-matrix.md:63",
     "docs/specs/0044-deepseek-search-module.md:146 -> src/index.ts:880",
     "docs/specs/0044-deepseek-search-module.md:173 -> src/runtime/limits.ts:154",
