@@ -1,6 +1,6 @@
 # DeepSeek 搜索的门禁：一个默认关的开关 + 一条凭据判定
 
-status: accepted (2026-10-20). Ticket #228 (map #226). 配套记录：[ADR-0047](./0047-deepseek-search-is-program-internal.md)（形状）。凭据面的取证来自已关的研究票 #230。
+status: accepted (2026-10-20). Ticket #228 (map #226). 配套记录：[ADR-0049](./0049-the-search-lives-in-the-child.md)（形状）。凭据面的取证来自已关的研究票 #230。
 
 ## Context
 
@@ -26,23 +26,22 @@ pi 的凭据有**三条路**（`auth.json` 存储凭据 / `models.json` 的 `api
 { "webDsSearch": { "enabled": false, "maxCallsPerSession": 100 } }
 ```
 
-- **配置键为什么也带 `ds`**：这个能力只走 DeepSeek（检索源固定，不做可插拔），键名要让人一眼看出它绑在哪家服务商上；理由与命名三连见 [ADR-0047](./0047-deepseek-search-is-program-internal.md) §命名。
+- **配置键为什么也带 `ds`**：这个能力只走 DeepSeek（检索源固定，不做可插拔），键名要让人一眼看出它绑在哪家服务商上；理由与命名三连见 [ADR-0049](./0049-the-search-lives-in-the-child.md) §命名（原始论证在被它撤销的 [ADR-0047](./0047-deepseek-search-is-program-internal.md) §命名，那三条**继续成立**）。
 - **独立键，不并进 `optInBindings`**：`optInBindings` 是一个**许可**（"给我这个已知的 pi 内置 binding"，目前只有 `bash`），fail closed；搜索是**包自有能力**的开关。两者的语义与失败方向都不同，混在一个家族里会让两个开关的读法互相干扰。
 - **默认 `false`**：贴 `bash` opt-in 的 fail-closed 家族。用户必须显式开。
 - **读一次**（扩展加载时）：与 `optInBindings` / `whyEnabled` 同纪律——一次运行内第 3 次 dispatch 看到不同答案、而 transcript 里什么都不留，是 #73 拒绝的那种形状。要改就重载。
 
 ### 2. 开关关 ⇒ 工具**不注册**
 
-两个面都不出现：`pi.getAllTools()` 里没有它，binding 表里也没有它。**不注册 = 模型面干净 = 模型不会去调一个调不了的东西。** 先例：OpenCode 的 `delete event.tools[name]`、Codex 的 `create_web_search_tool` 返回 `None`。
+任何地方都不出现：父会话里没有，子代理里也没有。**不注册 = 模型面干净 = 模型不会去调一个调不了的东西。** 先例：OpenCode 的 `delete event.tools[name]`、Codex 的 `create_web_search_tool` 返回 `None`。
 
 ### 3. 开关开但缺 key ⇒ 工具**仍注册**，但标注不可用
 
 **业界没有完全同形先例**——研究覆盖的 7 种缺 key 行为里，没有一个是「总开关打开 + 缺 key 时既保留工具又只在启动时告警一次」。所以本契约自己写死。三件事同时发生：
 
-1. **标注不可用**：工具描述里写明「本会话未配置 DeepSeek 凭据，调用会失败」。**这句话出现两处，且是同一份共享常量**（one-home rule）：**codemode 工具的描述**（它每会话注册一次，所以那一句说的是这一会话的真话）与**程序内调用失败时返回的那句**。模型在哪一面读到它，措辞完全一致。
-   **PTC 面的模型读不到 codemode 工具的描述**（它在 `exposure: "codemode"` 上，模型面看不见），所以那一面靠 `WEB_DS_SEARCH_USAGE`——一段**静态**的调用约定（名字、参数、绑定条件、无凭据时的失败），拼进 `ptc_run_code` / `ptc_workflow` 的描述。**binding contract 只讲结果形状**：ADR-0024 说契约不列参数，因为 pi 会在同一个请求里声明工具参数——而 binding 不在 pi 的工具表里，所以参数只能由描述给出，与 `pi.dispatch` 同一分工。
-   **为什么是静态的一段而不是每会话一句**：契约与描述都是静态的，而「缺没缺凭据」是每会话的状态；把状态写进静态文本会撒谎，所以那一段说的是**条件**（开关开着才有绑定、没有凭据就会失败），而**这一会话到底缺不缺**，由工具描述里那句共享常量如实说。
-2. **启动告警一次**：`ctx.ui.notify(..., "warning")`（先例：codemode drift 告警，`src/index.ts:653`）。once-only latch，不刷屏。
+1. **标注不可用**：工具描述里写明「本会话未配置 DeepSeek 凭据，调用会失败」。**这句话出现两处，且是同一份共享常量**（one-home rule）：**工具的描述**（它每会话注册一次，所以那一句说的是这一会话的真话）与**调用失败时抛出的那句**。模型在调用前后读到的措辞完全一致。
+   **调用约定由工具描述给出**：工具在 pi 的工具表里，参数由 pi 原生声明——这正是 ADR-0024 说的分工（契约只讲结果形状，因为它不列参数；描述给调用约定）。搜索**不再是 binding**，所以契约里没有它、也不需要它。
+2. **启动告警一次**：`ctx.ui.notify(..., "warning")`（先例：codemode drift 告警，`src/index.ts:783`）。once-only latch，不刷屏。**只在子代理里发**——父会话根本没有这个能力，也就没有可告警的东西。
 3. **调用返回面向模型的可读错误**，不是原始 `401`。
 
 **为什么「仍注册」而不是「不注册」**：不注册的话，模型分不清「没这功能」和「缺凭据」，不会主动告诉用户去配 key。注册并标注，模型能自己转告。
@@ -66,7 +65,7 @@ pi 的凭据有**三条路**（`auth.json` 存储凭据 / `models.json` 的 `api
 - **不得用 `readStoredCredential` 的「有没有返回条目」当判定**（它不解析 `!command` / `$VAR` ⇒ 双向误判）。要已解析的 key 的**唯一公开路**是 `ModelRuntime.getAuth(providerId)`（根导出的公开类）。
 - **不要用 `getProviderAuthStatus`**——快照未刷新会假阴性。
 - 路径走 `getAgentDir()`，**不写死 `~/.pi/agent`**（`getAuthPath()` 未从根导出）。
-- **开关关时完全不读凭据文件**（连路径都不解析）。
+- **开关关时完全不读凭据文件**（连路径都不解析）；**父会话时也完全不读**——搜索只活在子代理里（[ADR-0049](./0049-the-search-lives-in-the-child.md)），父进程里不持有一把能开网络出口的 key。
 
 ### 5. 泄露禁令
 
@@ -91,12 +90,13 @@ key **不得**出现在：工具描述、错误文案、日志、异常栈、请
 - **凭据判定的正确性有一条明确的回归护栏**：`!command` 与 `$VAR` 两种形态各一例测试——用 `readStoredCredential` 的实现会在这两例上红。
 - **门禁读一次**：改开关要重载，和 `optInBindings` / `whyEnabled` 的既有纪律一致。
 - **配额与门禁共用一个配置对象**（`webDsSearch`），但两者是独立的键：关掉开关时配额不生效，开着开关时配额照样兜底。
+- **这条门禁只管「能不能用」，不管「在谁手里」**：搜索只活在子代理里，那是 [ADR-0049](./0049-the-search-lives-in-the-child.md) 的形状决定。两条门禁**同时**成立才有这个工具。
 
 ## See also
 
 - ADR-0040 —— `bash` 是 opt-in binding（fail-closed 的先例）
 - ADR-0041 —— read-only 是 call site 上的一档
-- ADR-0047 —— 搜索是程序内可达的能力，不是 model-facing 工具
+- ADR-0049 —— 搜索只活在子代理里，由子代理的模型直接调用
 - ADR-0042 / ADR-0043 —— `why` 开关：一个 fail-open 的开关长什么样
 - `docs/specs/0044-deepseek-search-module.md` —— 本决策的规格
 - `docs/research/pi-credential-surface-20261020.md` —— 凭据面的完整取证

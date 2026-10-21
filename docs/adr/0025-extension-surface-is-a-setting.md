@@ -144,6 +144,18 @@ values, the _orchestration surface_ it chooses between, and the _subagent surfac
   deliberate omission. This one is genuinely inherited: decision 4 belongs to this record.
   It is **not** true of the two notices ADR-0026 adds, which are new with detection and are
   measured silent on `--print` — see ADR-0026's known-gap paragraph.
+- **Every notice this package raises goes through one channel, and that channel is empty in
+  `print` and `json`.** All 27 `ui.notify` call sites are in `src/index.ts`; pi binds
+  extensions in `print`/`json` without a `uiContext`, so the runner substitutes its all-no-op
+  UI context, whose `notify` is an empty function. Measured 2026-10-21 with the same
+  deliberately malformed `ptc.json` in both modes: in `json` the run ends with **0 bytes on
+  stderr** and no notice anywhere in stdout, while in `rpc` that same notice arrives as an
+  `extension_ui_request` event carrying the message text. The pair is what makes this a
+  measurement rather than an inference — `rpc` proves the notice was raised, `json` proves it
+  was dropped. The notices do not fail loudly; they simply do not exist. `rpc` is **not** in
+  the dropped set, so the gap is `print`/`json` only: it is inherited from pi rather than
+  chosen here, but it is inherited by every notice in the package, not only by the
+  decision-4 one above.
 - The decision-4 warning asks whether `codemode` is **active**, so it cannot see the one case
   that produces a `subagents` surface with no orchestrator at all: `--no-extensions`, or
   `--exclude-tools codemode`, where the probe finds `codemode` on disk and the session has no

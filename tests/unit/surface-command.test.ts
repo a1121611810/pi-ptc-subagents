@@ -267,7 +267,11 @@ describe("the /ptc surface subcommand is gone", () => {
         stub.entries.filter((entry) => entry.customType === PTC_MODE_ENTRY_TYPE).at(-1),
         "the mode record flipped to off",
       ).toMatchObject({ data: { enabled: false } });
-      expect(stub.notifications.at(-1)?.message, "and the user is told").toContain("PTC mode off");
+      expect(stub.notifications.at(-1)?.message, "and the user is told").toContain("PTC off");
+      expect(
+        stub.notifications.at(-1)?.message,
+        "and what off means is said, not just that it happened",
+      ).toContain("no new child can be started");
     });
   });
 });

@@ -47,6 +47,8 @@
     "test:watch": "pnpm exec vp test",
     "test:ui": "pnpm exec vp test --ui",
     "verify:dist": "node scripts/verify-dist-render.mjs",
+    "verify:search-e2e": "node scripts/verify-search-e2e.ts",
+    "verify:parent-dispatch-e2e": "node scripts/verify-parent-dispatch-e2e.ts",
     "prepublishOnly": "npm run typecheck && npm run lint && npm run fmt:check && npm run build && npm run test && npm run verify:dist"
   },
   "dependencies": {

@@ -29,7 +29,7 @@ import { createBuiltinBindings } from "../runtime/bindings.ts";
 import { runPtcProgram, type PtcRunOutcome } from "../runtime/dispatcher.ts";
 import { readContextModel } from "../runtime/session-model.ts";
 import { BINDING_CONTRACT } from "./binding-contract.ts";
-import { WEB_DS_SEARCH_USAGE } from "../search/contract.ts";
+import { PTC_CHILD_SEARCH_NOTE } from "../search/contract.ts";
 import { describeValue } from "../runtime/protocol.ts";
 import type { WorkerPool } from "../runtime/worker-pool.ts";
 import {
@@ -45,7 +45,7 @@ import {
 import type { PtcToolDetails, PtcToolOptions } from "./common.ts";
 import { createPtcRenderers } from "./render.ts";
 
-const DESCRIPTION = [
+const DESCRIPTION_BASE = [
   "Run a structured TypeScript workflow: a named plan that reports phases and narration as it",
   "goes. `script` is the body of an async function, `meta` names it (`{ name, description, phases? }`,",
   "where `phases` is the ordered plan), and optional `args` is plain-JSON input bound to the",
@@ -59,13 +59,15 @@ const DESCRIPTION = [
   "Tools are reachable as `tools.<name>(args)` exactly as in `ptc_run_code`, and the bound names",
   "are this session's enabled built-ins less any binding the install has not opted in. The parallel",
   "binding `pi.dispatch` is always available under",
-  'its literal dot name — call it with string indexing: `await tools["pi.dispatch"]({ agent, task })`;',
+  "its literal dot name — inside the program, call it with string indexing:",
+  '`await tools["pi.dispatch"]({ task })`;',
+  "**the `agent` name is optional** — omit it and the child is a fresh generalist pi with pi's own",
+  'prompt and toolset; add `agent: "reviewer"` only to narrow it to a registered definition,',
+  "because a name with no definition behind it is refused.",
   "the run's actual bound names are on the `ptcBindings` global. What comes back is the script's",
   "return value, its `log`/`phase` narration and its `console.log` output.",
   "",
   PTC_BINDING_REACH_NOTE,
-  "",
-  WEB_DS_SEARCH_USAGE,
   "",
   BINDING_CONTRACT,
   "",
@@ -238,6 +240,17 @@ export interface PtcWorkflowToolOptions extends PtcToolOptions {
  * spawns a worker. Everything after dispatch is identical to `ptc_run_code`, plus the phase
  * roll-up.
  */
+/**
+ * Splice the child's-search sentence into a description, when the search module is on.
+ *
+ * **It has to be per session, not a constant** — the sentence claims a dispatched child can
+ * search, and that is true only when the search switch is on.
+ */
+function withChildSearchNote(description: string, childCanSearch: boolean): string {
+  if (!childCanSearch) return description;
+  return `${description}\n\n${PTC_CHILD_SEARCH_NOTE}`;
+}
+
 export function createPtcWorkflowTool(
   options: PtcWorkflowToolOptions = {},
 ): ToolDefinition<WorkflowParameters, PtcToolDetails> {
@@ -245,7 +258,7 @@ export function createPtcWorkflowTool(
     name: "ptc_workflow",
     label: "PTC Workflow",
     exposure: options.exposure,
-    description: DESCRIPTION,
+    description: withChildSearchNote(DESCRIPTION_BASE, options.childCanSearch === true),
     promptSnippet: PTC_WORKFLOW_SNIPPET,
     promptGuidelines: [...PTC_TOOL_GUIDELINES],
     parameters: PARAMETERS,
@@ -256,9 +269,6 @@ export function createPtcWorkflowTool(
         options.getBindingSourceNames?.(),
         options.getOptInBindings?.(),
       );
-      // The DeepSeek search binding, when the capability is switched on. Absent means the
-      // binding is not in the table at all — the default, because the switch defaults to off.
-      const search = options.getSearchBinding?.();
       const startedAt = Date.now();
       const pool = options.getPool?.();
       // ADR-0022 R1: hand the host session dir to background children (same seam as
@@ -282,7 +292,6 @@ export function createPtcWorkflowTool(
             cwd,
             names,
             includeDispatch: true,
-            ...(search === undefined ? {} : { includeSearch: true, searchDeps: search.searchDeps }),
           }),
           ...(sessionDir === undefined ? {} : { sessionDir }),
           ...(dispatchDeps === undefined ? {} : { dispatchDeps }),

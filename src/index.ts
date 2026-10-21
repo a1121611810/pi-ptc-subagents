@@ -16,8 +16,7 @@ import type { WebSearchConfig } from "./mode/ptc-mode.ts";
 import { createDeepSeekClient } from "./search/client.ts";
 import { resolveDeepSeekCredential } from "./search/credentials.ts";
 import { createSearchQuota } from "./search/quota.ts";
-import type { WebDsSearchBindingOptions, WebDsSearchDeps } from "./search/run.ts";
-import { createWebDsSearchTool } from "./tools/web-ds-search.ts";
+import { createSearchResultMemory, type WebDsSearchDeps } from "./search/run.ts";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -25,10 +24,12 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { createPtcRunCodeTool } from "./tools/run-code.ts";
 import { createPtcWorkflowTool } from "./tools/workflow.ts";
+import { createWebDsSearchTool } from "./tools/web-ds-search.ts";
 import {
   createPtcTaskListTool,
   createPtcTaskOutputTool,
   createPtcTaskStopTool,
+  PTC_TASK_TOOL_NAMES,
 } from "./tools/ptc-task.ts";
 import {
   resolveBindingNames,
@@ -80,6 +81,7 @@ import type {
   WhyEnabledConfig,
 } from "./mode/ptc-mode.ts";
 import { buildPtcSkillsSection, skillsSectionDropped } from "./mode/skills-section.ts";
+import { buildDispatchSection, DISPATCH_SECTION_NAME } from "./mode/dispatch-section.ts";
 import { createPtcSubagentTool } from "./tools/subagent.ts";
 import { createChildReportTool } from "./tools/child-report-tool.ts";
 
@@ -247,6 +249,40 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
   const mode = initialModeState();
 
   /**
+   * ADR-0050: whether this session may start a NEW child.
+   *
+   * **Separate from `mode.enabled`, and it has to be.** The mode is the NARROWING (ADR-0010), and
+   * it only exists on the `full` surface in a TUI: measured 2026-10-20, the `subagents` surface
+   * never enters it (`tools-unavailable`), because `ptc_run_code` is not model-facing there. A
+   * switch hung off `mode.enabled` would therefore read "off" for the whole session on that
+   * surface — and that surface's ONLY orchestration route is `ptc_subagent`, so it would have no
+   * way to start a child at all.
+   *
+   * It is session-scoped, like ADR-0043's `why` switch: `/ptc off` writes it into a session
+   * entry, so it survives a resume and a reload, and it never touches a file.
+   */
+  let dispatchEnabled = true;
+
+  /**
+   * ADR-0050: whether the three task tools are currently withheld from the model.
+   *
+   * They are withheld exactly when there is nothing for them to do — PTC is off and no task is in
+   * flight. With a task running they stay, because that task has to stay inspectable and
+   * stoppable: the off switch is about what starts from here on, and it must not strand what is
+   * already running.
+   */
+  let taskToolsHidden = false;
+
+  /**
+   * The loadout as it was before the task tools were withheld, so putting them back is exact.
+   *
+   * An APPEND would be wrong: a loadout that never had the three would gain them, and the
+   * narrowed loadout is derived from the live one — so a phantom tool would ride along for the
+   * rest of the session.
+   */
+  let loadoutBeforeHiding: readonly string[] | undefined;
+
+  /**
    * The session's detected surface, assigned once by `session_start` before anything can reach it.
    *
    * It used to be a `const` computed here, on the grounds that registration happens in the factory
@@ -349,26 +385,6 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
   const searchConfig: WebSearchConfig = readWebSearchConfig(getAgentDir());
 
   /**
-   * The session's search quota.
-   *
-   * **One per pi process**, which is one per pi session in practice: a dispatched child is a
-   * separate process and therefore has its own quota, which is what "per session" has to mean
-   * for a child to be bounded at all. The counter itself only grows on a SUCCESSFUL call, and
-   * a call in flight holds a slot so concurrent calls cannot all pass the check first
-   * (`search/quota.ts`).
-   */
-  const searchQuota = createSearchQuota({ maxCallsPerSession: searchConfig.maxCallsPerSession });
-
-  /**
-   * What the PTC tool factories hand to the binding table, or `undefined` while the capability
-   * is switched off. It is assigned at `session_start`, once the credential verdict is in hand,
-   * and read per RUN — so a program never sees a surface different from the one the prompt
-   * described.
-   */
-  let searchBinding: WebDsSearchBindingOptions | undefined;
-  const getSearchBinding = (): WebDsSearchBindingOptions | undefined => searchBinding;
-
-  /**
    * Depth baseline for PTC runs this pi process starts (ADR-0016 Recursive section).
    * Inside a pi process spawned by `pi.dispatch`, the env carries `PI_PTC_DEPTH`; a
    * normal pi session has none, and the parent turn's runs stay at depth 0.
@@ -406,6 +422,11 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     createBackgroundTaskRuntime({
       concurrency: resolveConfig({}).dispatchConcurrency,
       whyEnabled: whyConfig.whyEnabled,
+      // ADR-0049: the search module's switch, read once at load like `whyEnabled`. It decides
+      // whether a STRICT child keeps the search tool — the tool only reads the web, and the
+      // tier's promise is that the child cannot write. Measured 2026-10-20: without this the
+      // child lost the tool entirely and reported having no web access at all.
+      searchEnabled: searchConfig.enabled,
     });
 
   /** R2: whether an agent turn is in flight. `turn_start` sets it; `agent_settled` clears it. */
@@ -533,7 +554,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
         createPtcRunCodeTool({
           getBindingSourceNames,
           getOptInBindings,
-          getSearchBinding,
+          childCanSearch: searchConfig.enabled,
           getPool: () => turnPools.get("run_code"),
           depth: ptcDepth,
           exposure: programmingToolExposure,
@@ -545,7 +566,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
         createPtcWorkflowTool({
           getBindingSourceNames,
           getOptInBindings,
-          getSearchBinding,
+          childCanSearch: searchConfig.enabled,
           getPool: () => turnPools.get("workflow"),
           depth: ptcDepth,
           exposure: programmingToolExposure,
@@ -581,8 +602,10 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
 
     /*
      * Always-on management tools (ADR-0022 "What we add" #6), OUTSIDE the PTC mode loadout.
-     * `/ptc off` only gates new spawns; it must never hide the lifecycle face of in-flight tasks.
-     * The mode's `modeLoadout` keeps non-built-in names, so these survive both entry and exit
+     * The mode gates nothing about dispatch — it narrows which built-in tools the model may call
+     * directly, and a child dispatched with the mode off still runs — so hiding this face would
+     * strand a running child with no way to read or stop it. The mode's `modeLoadout` keeps
+     * non-built-in names, so these survive both entry and exit
      * (proved in tests/unit/extension-background.test.ts).
      *
      * ADR-0025: unconditional from here on, and now literally so. The one mode that would not keep
@@ -695,22 +718,45 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
   });
 
   /**
-   * Register the DeepSeek search module for this session, if the switch is on.
+   * Register the DeepSeek search tool — **inside a dispatched child only**.
    *
-   * **The credential verdict is awaited here, and that is why this is not in the factory.** The
-   * verdict needs pi's own resolution — `ModelRuntime.getAuth` is the only public path to a
-   * RESOLVED key, and resolving means running a `!command` and interpolating a `$VAR` — which
-   * is asynchronous. The factory is synchronous, so the verdict lands at `session_start`, the
-   * first moment a session exists.
+   * ## The parent does not have this capability at all
    *
-   * **The capability is registered even when the credential is missing.** That is the whole
-   * point of ADR-0048's second state: a model that can see that search exists but is
-   * unavailable can tell the user what is missing, and a model that cannot see search at all
-   * cannot. The description says so, and a call returns the same sentence.
+   * **Not "registered but hidden" — ABSENT.** The parent session never registers the tool, and
+   * it never resolves a DeepSeek credential either: `ptcDepth > 0` is checked before anything
+   * else happens here, so a parent process does not even hold the key. That is the whole point of
+   * handing the capability to the sub-agent (ADR-0047): the parent keeps a clean context and does
+   * not grow a dependency on the tool's shape — it depends on the dispatch-and-report contract it
+   * already has.
+   *
+   * **The child's own model calls the tool directly** (`exposure: "direct"`), so a search costs the
+   * child one tool call, not a program.
+   *
+   * ## Why the credential verdict is awaited here
+   *
+   * The verdict needs pi's own resolution — `ModelRuntime.getAuth` is the only public path to a
+   * RESOLVED key, and resolving means running a `!command` and interpolating a `$VAR` — which is
+   * asynchronous. The factory is synchronous, so the verdict lands at `session_start`, the first
+   * moment a session exists.
+   *
+   * **The capability is registered even when the credential is missing.** That is ADR-0048's
+   * second state: a model that can see that search exists but is unavailable can tell the user
+   * what is missing, and a model that cannot see search at all cannot. The description says so,
+   * and a call returns the same sentence.
    */
   let searchNoticeShown = false;
   const registerSearchModule = async (ctx: ExtensionContext): Promise<void> => {
+    // **The parent stops here.** No tool, no credential, no network capability in this process.
+    if (ptcDepth <= 0) return;
     if (!searchConfig.enabled) return;
+    // The session's search quota. **One per pi process**, and a dispatched child IS a separate
+    // process, so the quota bounds the CHILD — see ADR-0047 §配额 for what that means for a
+    // parent that dispatches several children. The counter only grows on a SUCCESSFUL call, and a
+    // call in flight holds a slot so concurrent calls cannot all pass the check first
+    // (`search/quota.ts`).
+    const searchQuota = createSearchQuota({
+      maxCallsPerSession: searchConfig.maxCallsPerSession,
+    });
     // The resolver never throws — a failed resolution is reported, not raised — so the notice
     // channel is handed to it rather than wrapped around it.
     const credential = await resolveDeepSeekCredential({
@@ -723,18 +769,15 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
         : {}),
       quota: searchQuota,
       maxCallsPerSession: searchConfig.maxCallsPerSession,
+      // The session's memory of the last search's results: what makes `open` and `find` free.
+      memory: createSearchResultMemory(),
     };
-    searchBinding = { searchDeps: deps };
-    // The codemode face is registered ONLY on a pi that ships a `codemode` — which is the same
-    // pi that reads `exposure` (both arrive in 0.99.0; `docs/agents/pi-compat-matrix.md:63`).
-    // **Below that, `exposure` does not exist, so the tool would fall back to `direct` and be
-    // declared TO THE MODEL** — a network-egress, per-call-billed tool in the model's direct
-    // face, on the one version where nothing can reach it from a program. ADR-0047's first
-    // hard constraint forbids exactly that. The PTC binding face below is NOT gated: it runs
-    // in this package's own worker and needs no pi API newer than the declared floor.
-    if (surface.codemode.present) {
-      pi.registerTool(createWebDsSearchTool({ deps }));
-    }
+    pi.registerTool(
+      createWebDsSearchTool({
+        deps,
+        unavailable: !credential.configured || credential.key === undefined,
+      }),
+    );
     if (!credential.configured && !searchNoticeShown) {
       searchNoticeShown = true;
       ctx.ui.notify(
@@ -791,8 +834,47 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     pi.appendEntry(opts.customType, { enabled: false });
     paintStatus(ctx);
     if (opts.announce) {
-      ctx.ui.notify("PTC mode off — built-in tools are directly callable again.", "info");
+      ctx.ui.notify(
+        "PTC mode off — built-in tools are directly callable again. Dispatching a child and the " +
+          "background-task tools still work; the mode never gated those.",
+        "info",
+      );
     }
+  };
+
+  /**
+   * Withhold the three task tools from the model, or put them back (ADR-0050).
+   *
+   * `setActiveTools` is the only lever pi leaves for this: a registered tool cannot be
+   * unregistered (the mode narrows the loadout the same way), and the three are registered at
+   * session_start, so they are active until this runs.
+   *
+   * It never overlaps the narrowing: turning PTC off turns the narrowing off too, so the loadout
+   * being narrowed here is always the restored one.
+   */
+  const applyTaskToolVisibility = (hidden: boolean): void => {
+    if (taskToolsHidden === hidden) return;
+    const active = pi.getActiveTools();
+    if (hidden) {
+      // Remember the loadout as it was, so putting the tools back is EXACT rather than an
+      // append: a loadout that never had them must not gain them.
+      loadoutBeforeHiding = active;
+      pi.setActiveTools(active.filter((name) => !PTC_TASK_TOOL_NAMES.includes(name)));
+    } else {
+      pi.setActiveTools([...(loadoutBeforeHiding ?? active)]);
+    }
+    taskToolsHidden = hidden;
+  };
+
+  /**
+   * How many background tasks are still running in this session (ADR-0050).
+   *
+   * The off switch has to know one thing: whether something is already running. That is what
+   * decides whether the task tools stay in the model's face, and what the warning is about.
+   */
+  const countInFlightTasks = async (): Promise<number> => {
+    const records = await background.registry.query({ status: ["running", "stopping"] });
+    return records.length;
   };
 
   /** Restore the persisted mode record, if this session has one. */
@@ -813,6 +895,43 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     return undefined;
   };
 
+  /**
+   * The last dispatch record in this session, or `undefined` when it has none (ADR-0050).
+   *
+   * Backwards, for the same reason `readPersistedMode` scans backwards: the LAST record is the
+   * user's most recent explicit intent.
+   */
+  const readPersistedDispatch = (ctx: ExtensionContext): { enabled: boolean } | undefined => {
+    const entries = ctx.sessionManager.getEntries();
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      const entry = entries[index];
+      if (entry?.type !== "custom" || entry.customType !== PTC_DISPATCH_ENTRY_TYPE) continue;
+      const data = entry.data as { enabled?: unknown } | undefined;
+      return { enabled: data?.enabled === true };
+    }
+    return undefined;
+  };
+
+  /**
+   * Restore the dispatch switch from the session record (ADR-0050).
+   *
+   * The same three properties ADR-0043's `why` restore has: effective for the NEXT dispatch (the
+   * one shared deps object every front reads), durable for the session (the entry itself), and
+   * nothing else (no file is written, and the narrowing is not touched here).
+   *
+   * The task tools follow the switch, and they are withheld only when there is nothing for them
+   * to do — a task that is still running keeps them, because it has to stay stoppable.
+   */
+  const applyPersistedDispatch = async (
+    persisted: { enabled: boolean } | undefined,
+  ): Promise<void> => {
+    if (persisted === undefined) return;
+    dispatchEnabled = persisted.enabled;
+    background.dispatchDeps.dispatchEnabled = persisted.enabled;
+    const inFlight = persisted.enabled ? 0 : await countInFlightTasks();
+    applyTaskToolVisibility(!persisted.enabled && inFlight === 0);
+  };
+
   pi.registerCommand("ptc", {
     description: "Show or toggle PTC mode",
     handler: async (args, ctx) => {
@@ -821,24 +940,63 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
       // two switches. `surface` went with `surfaceMode`; the one in force reports at session start.
       if (action === "why" || action.startsWith("why ")) return applyWhy(action.slice(4), ctx);
       if (action === "off") {
-        if (!mode.enabled) {
-          ctx.ui.notify("PTC mode is already off.", "info");
+        // ADR-0050: PTC off stops NEW children AND restores the built-in tools. The narrowing
+        // goes with it, because "off" has to mean one thing.
+        if (!mode.enabled && !dispatchEnabled) {
+          ctx.ui.notify("PTC is already off.", "info");
           return;
         }
-        exitMode(ctx, { announce: true, customType: PTC_MODE_ENTRY_TYPE });
+        // The flag FIRST: `dispatch()` reads it per call, so this takes effect before the user's
+        // next turn rather than at the next extension load.
+        dispatchEnabled = false;
+        background.dispatchDeps.dispatchEnabled = false;
+        pi.appendEntry(PTC_DISPATCH_ENTRY_TYPE, { enabled: false });
+        if (mode.enabled) {
+          exitMode(ctx, { announce: false, customType: PTC_MODE_ENTRY_TYPE });
+        }
+        // The task tools stay exactly as long as there is something for them to do.
+        const inFlight = await countInFlightTasks();
+        applyTaskToolVisibility(inFlight === 0);
+        paintStatus(ctx);
+        const one = inFlight === 1;
+        ctx.ui.notify(
+          inFlight > 0
+            ? `PTC off — no new child can be started from here on. The ${inFlight} background ${one ? "task" : "tasks"} already running ${one ? "is" : "are"} NOT affected: ${one ? "it keeps" : "they keep"} running and stay manageable through ptc_task_list / ptc_task_output / ptc_task_stop.`
+            : "PTC off — no new child can be started from here on, and the background-task tools are gone because nothing was running.",
+          "info",
+        );
         return;
       }
       if (action !== "on") {
         ctx.ui.notify(
           mode.enabled
-            ? `PTC mode is ON — run /ptc off to restore built-in tools.\nBindings: ${resolveBindingNames(mode.base, optInBindings).join(", ") || "(none)"}`
-            : "PTC mode is OFF — run /ptc on to enter it.",
+            ? `PTC mode is ON — run /ptc off to restore built-in tools and stop new children.\nBindings: ${resolveBindingNames(mode.base, optInBindings).join(", ") || "(none)"}`
+            : dispatchEnabled
+              ? "PTC mode is OFF — built-in tools are directly callable, and new children can still be started. Run /ptc off to stop dispatching, or /ptc on to enter the mode."
+              : "PTC is OFF — no new child can be started, and the background-task tools are gone unless a task is still running. Run /ptc on to allow dispatching again.",
           "info",
         );
         return;
       }
+      // ADR-0050: "on" re-enables dispatching as well as the narrowing, and the two are not the
+      // same switch — so this runs whether or not the narrowing is already on.
+      const reEnabledDispatch = !dispatchEnabled;
+      if (reEnabledDispatch) {
+        dispatchEnabled = true;
+        background.dispatchDeps.dispatchEnabled = true;
+        pi.appendEntry(PTC_DISPATCH_ENTRY_TYPE, { enabled: true });
+        // Put the task tools back BEFORE the mode decision below: that decision reads the live
+        // loadout as its `base`, and a base without them would keep them hidden for the rest of
+        // the session.
+        applyTaskToolVisibility(false);
+      }
       if (mode.enabled) {
-        ctx.ui.notify("PTC mode is already on.", "info");
+        ctx.ui.notify(
+          reEnabledDispatch
+            ? "PTC is on — new children can be started again (the narrowing was already on)."
+            : "PTC mode is already on.",
+          "info",
+        );
         return;
       }
       // Manual entry bypasses the config and the restricted-session policy; a restricted session
@@ -851,10 +1009,12 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
         hide: MODE_HIDE_STRATEGY,
       });
       if (!decision.enter) {
-        ctx.ui.notify(
+        const why =
           decision.reason === "tools-unavailable"
             ? "Cannot enter PTC mode: ptc_run_code / ptc_workflow are not active in this session."
-            : "Cannot enter PTC mode in this run mode.",
+            : "Cannot enter PTC mode in this run mode.";
+        ctx.ui.notify(
+          reEnabledDispatch ? `${why} New children can be started again.` : why,
           "warning",
         );
         return;
@@ -905,6 +1065,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     // The DeepSeek search module (ADR-0047 / ADR-0048). Registered AFTER the surface, and
     // after the await that resolves the credential — pi can add a tool at any point in a
     // session, but it cannot remove one, so this is the order that does not have to guess.
+    // **In a parent session this registers nothing at all** — see `registerSearchModule`.
 
     // BG-14: bind the session-scoped background runtime before anything else. The records this
     // returns were reconciled to `lost`; delivering them through the one notification path is the
@@ -954,7 +1115,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     if (searchConfig.error !== undefined) {
       ctx.ui.notify(
         `pi-ptc-subagents: ${searchConfig.error}. The search module's switch was read as ` +
-          "OFF and its quota as the default, so the search surface stays narrow.",
+          "OFF and its quota as the default, so no dispatched child will get the search tool.",
         "warning",
       );
     }
@@ -1188,6 +1349,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     notifyCodemodeDrift(ctx);
 
     const persisted = readPersistedMode(ctx);
+    const persistedDispatch = readPersistedDispatch(ctx);
     const active = pi.getActiveTools();
     const { base, restoreFirst } = resolveBaseOnStart(persisted, active);
     // Undo our own narrowing before deciding, so the decision sees the loadout this pi process
@@ -1203,7 +1365,14 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     });
     // A persisted record is the user's most recent explicit intent: `/ptc off` survives a resume
     // even when the config still says default-on.
-    const wantMode = persisted?.enabled ?? decision.enter;
+    //
+    // ADR-0050: the two records always agree in practice (`/ptc off` writes both, `/ptc on`
+    // clears both), but the narrowing and the dispatch switch are NOT one switch — so the mode
+    // decision also honours the dispatch record. The invariant that keeps the two loadout
+    // manipulations from overlapping is the one this line establishes: **dispatch off ⇒ the
+    // narrowing is off**, so the task tools are never withheld from a narrowed loadout (whose
+    // snapshot would then keep them withheld for the rest of the session).
+    const wantMode = (persistedDispatch?.enabled ?? true) && (persisted?.enabled ?? decision.enter);
     applyPersistedWhy(ctx);
     if (decision.enter && wantMode) {
       enterMode(
@@ -1212,17 +1381,20 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
         ctx,
         describeEntry(base, MODE_HIDE_STRATEGY, optInBindings),
       );
-      return;
-    }
-    paintStatus(ctx);
-    if (!decision.enter && decision.reason !== "not-tui" && persisted === undefined) {
-      if (decision.reason === "restricted-session") {
-        ctx.ui.notify(
-          "PTC mode skipped: this session was launched with an explicit tool restriction.",
-          "info",
-        );
+    } else {
+      paintStatus(ctx);
+      if (!decision.enter && decision.reason !== "not-tui" && persisted === undefined) {
+        if (decision.reason === "restricted-session") {
+          ctx.ui.notify(
+            "PTC mode skipped: this session was launched with an explicit tool restriction.",
+            "info",
+          );
+        }
       }
     }
+    // Last, because it manipulates the loadout: the mode decision above reads the live loadout
+    // as its `base`, and a base missing the task tools would keep them missing.
+    await applyPersistedDispatch(persistedDispatch);
   });
 
   /**
@@ -1273,10 +1445,38 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
     skillsSectionInjected = true;
   };
 
+  /**
+   * Put the dispatch section in the system prompt — how to reach a child, on this surface.
+   *
+   * The same seam the skills section uses, for the same reason: a tool's own description only
+   * reaches the model while that tool is offered to it, and on the `subagents` surface the pair
+   * that carries the calling convention is not offered. Measured 2026-10-20: a parent on that
+   * surface had no way to learn the convention, wrote `await tools["pi.dispatch"]` into a
+   * `codemode` script, and got `TypeError: tools.pi.dispatch does not exist`.
+   *
+   * **Written on every turn, and removed when there is nothing to say.** The options object is
+   * reused across turns, so a section written for one surface must not outlive the surface it was
+   * written for; the removal is the same one `syncSkillsSection` does.
+   */
+  const syncDispatchSection = (options: NormalizedBuildSystemPromptOptions | undefined): void => {
+    if (options === undefined) return;
+    const section = buildDispatchSection({
+      surfaceMode: surface.surfaceMode,
+      childCanSearch: searchConfig.enabled,
+      dispatchEnabled,
+    });
+    if (section.length === 0) {
+      delete options.sections[DISPATCH_SECTION_NAME];
+      return;
+    }
+    options.sections[DISPATCH_SECTION_NAME] = section;
+  };
+
   pi.on("before_agent_start", async (event, ctx) => {
     // A live pi always supplies these; the test stub emits a bare event, hence the undefined case.
     const options = event.systemPromptOptions;
     syncSkillsSection(options, skillsSectionDropped(pi.getActiveTools()));
+    syncDispatchSection(options);
     if (!mode.enabled) return;
     if (detectExternalLoadoutChange(mode, pi.getActiveTools())) {
       // Another extension owns the loadout now; hand it back rather than fight over it.
@@ -1293,6 +1493,7 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
         content: buildModeInstruction(
           resolveBindingNames(mode.base, optInBindings),
           MODE_HIDE_STRATEGY,
+          { childCanSearch: searchConfig.enabled },
         ),
         display: false,
       },
@@ -1453,3 +1654,18 @@ export default function ptcSubagents(pi: ExtensionAPI, options: PtcSubagentsOpti
  * everything it touches lives in this file.
  */
 export const PTC_WHY_ENTRY_TYPE = "ptc-why";
+
+/**
+ * `customType` for this session's dispatch record (`pi.appendEntry`).
+ *
+ * ADR-0050. Separate from `PTC_MODE_ENTRY_TYPE` for the same reason `PTC_WHY_ENTRY_TYPE` is:
+ * both readers scan the SAME entry list backwards for their own type, so a shared one would let
+ * one switch restore as another. The narrowing and the dispatch switch are two switches — the
+ * `subagents` surface never narrows at all, and still dispatches — and neither is recoverable
+ * as the other.
+ *
+ * Declared here rather than beside `PTC_MODE_ENTRY_TYPE` in `src/mode/ptc-mode.ts` because that
+ * module is PTC MODE's state machine; this switch is about what this session may start, and it
+ * has nothing to say about the loadout.
+ */
+export const PTC_DISPATCH_ENTRY_TYPE = "ptc-dispatch";

@@ -1,6 +1,7 @@
 # A read-only tier is a call-site decision, and it is a narrowing rather than a boundary
 
-status: accepted (2026-10-15). Spec #198.
+status: accepted (2026-10-15). Spec #198. **§"The strict set is derived, not a constant" amended
+2026-10-20 by ADR-0049**: a strict child keeps the web-search tool when the search module is on.
 
 ## Context
 
@@ -139,6 +140,30 @@ The read set plus the report tool is a computed list, because the report tool is
 must not be handed the report tool: the flag would activate a tool the child's prompt never asked
 it to call, which is the "registered, documented, never called" state ADR-0032's merge exists to
 prevent.
+
+**Amended 2026-10-20 (ADR-0049): the web-search tool joins that derived list when the search
+module is on.** It is a READ tool — it fetches pages and writes nothing — so keeping it costs this
+record's promise ("it cannot write anything") nothing, and the tier's purpose ("a child that
+cannot touch the workspace") is unaffected.
+
+The reason it is derived rather than written into the constant is the measurement that forced the
+amendment. On 2026-10-20, against a real pi on the `subagents` surface, a parent dispatched with
+`readOnly: "strict"`, and the child's `--tools` list came out
+`read,grep,find,ls,ptc_child_report`. pi reads that list as an **allowlist**, so the child's
+`web_ds_search` was filtered out of existence: the child reported "this session has no web search,
+web fetch, or bash tool" and gave up, and the parent reported that it could not retrieve the page.
+
+So the tier removed a **read-only** capability — and did it silently, on the most ordinary dispatch
+shape there is (a parent that wants a read-only child). ADR-0049 puts the web in the child and
+nowhere else, so a narrowing that drops it does not narrow the child's reach "in the way the tier is
+about"; it removes the only route the capability had. The list is now derived from the tier's
+promise — no write tool — rather than from an enumeration of pi's read tools, which is the same
+distinction this section was already drawing when it made the report tool conditional.
+
+The amendment is conditional on the search module being ON, which is the shipped default OFF
+(ADR-0048: the absence of a decision is not a decision to allow it). An install that never opted
+into web search sees no change at all, and one that did had already accepted child network egress
+and a per-child bill.
 
 ### `bash` is absent from the strict set, and that is the whole caveat
 

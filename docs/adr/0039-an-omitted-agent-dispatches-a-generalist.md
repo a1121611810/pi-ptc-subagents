@@ -112,7 +112,7 @@ differently about `agent`, this one governs** — that is the only field either 
   its child.
 - **The generalist has no report opt-out.** With no definition there is no `childReport: false` to
   read, so the child-report contract is on, and because pi's full toolset stays in place the report
-  tool is registered in the child — the registration is depth-gated (`src/index.ts:620`,
+  tool is registered in the child — the registration is depth-gated (`src/index.ts:643`,
   `createChildReportTool(ptcDepth > 0)`), and a dispatched child always runs above depth zero.
   Measured on a real dispatch with the argument omitted: `report_channel: "tool"`, with the child
   filing a summary and findings. Same channels as any other dispatch; only the opt-out is

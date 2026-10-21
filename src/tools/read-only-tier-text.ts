@@ -36,7 +36,8 @@ export function renderReadOnlyTierText(tier: ReadOnlyTier | undefined): string {
   if (tier === undefined) return "";
   const row =
     tier === "strict"
-      ? "the child's tool list was narrowed to the read set, so it was never offered a write tool"
+      ? "the child's tool list was narrowed to the read set, so it was never offered a write tool " +
+        "— reading the web is not writing, so it kept the search tool"
       : "the child's tool list is UNCHANGED — it was told to work without modifying anything, and " +
         "nothing here prevents it from doing so";
   return `${READ_ONLY_TIER_HEADER} (${tier})\n${TREE_LAST}${row}`;

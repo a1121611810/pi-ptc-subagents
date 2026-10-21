@@ -30,7 +30,7 @@ import { readContextModel } from "../runtime/session-model.ts";
 import type { WorkerPool } from "../runtime/worker-pool.ts";
 import { DEFAULT_CONFIG } from "../runtime/limits.ts";
 import { BINDING_CONTRACT } from "./binding-contract.ts";
-import { WEB_DS_SEARCH_USAGE } from "../search/contract.ts";
+import { PTC_CHILD_SEARCH_NOTE } from "../search/contract.ts";
 import {
   codeRunFailedError,
   createSubCallUpdater,
@@ -44,7 +44,7 @@ import {
 import type { PtcToolDetails, PtcToolOptions } from "./common.ts";
 import { createPtcRenderers } from "./render.ts";
 
-const DESCRIPTION = [
+const DESCRIPTION_BASE = [
   "Run a TypeScript program that composes pi's tools in one shot. Required arguments: `code` —",
   "the body of an async function (top-level `return` and `await` work; type annotations are",
   "advisory, the code runs type-stripped) — and `description`, a 5-10 word summary of what the",
@@ -57,15 +57,16 @@ const DESCRIPTION = [
   "independent calls may overlap under `Promise.all`.",
   "",
   "The parallel binding `pi.dispatch` is always available, registered under its literal dot name —",
-  'call it with string indexing, e.g. `await tools["pi.dispatch"]({ agent: "reviewer", task: "..." })`;',
-  "`tools.pi.dispatch` does not exist. It fans work out to child pi agents, and independent",
+  'inside the program, call it with string indexing, e.g. `await tools["pi.dispatch"]({ task: "..." })`;',
+  "**the `agent` name is optional** — omit it and the child is a fresh generalist pi with pi's own",
+  'prompt and toolset; add `agent: "reviewer"` only to narrow it to a registered definition,',
+  "because a name with no definition behind it is refused. `tools.pi.dispatch` does not exist. It",
+  "fans work out to child pi agents, and independent",
   "foreground dispatches compose under `Promise.all` exactly like the built-in calls. The run's",
   "actual bound names (this run, not a static list) are on the `ptcBindings` global, so the program",
   "never has to guess what is bound.",
   "",
   PTC_BINDING_REACH_NOTE,
-  "",
-  WEB_DS_SEARCH_USAGE,
   "",
   BINDING_CONTRACT,
   "",
@@ -76,6 +77,19 @@ const DESCRIPTION = [
   "after the run, so never return image data as the completion value — that only spends your context",
   "on base64.",
 ].join("\n");
+
+/**
+ * Splice the child's-search sentence into a description, when the search module is on.
+ *
+ * **It has to be per session, not a constant.** The sentence is a claim about what a dispatched
+ * child can do, and that is true only when the search switch is on — a parent told otherwise
+ * would dispatch a child that cannot search. The switch is read once at extension load, so the
+ * claim is stable for the session.
+ */
+function withChildSearchNote(description: string, childCanSearch: boolean): string {
+  if (!childCanSearch) return description;
+  return `${description}\n\n${PTC_CHILD_SEARCH_NOTE}`;
+}
 
 /** Schema type written out explicitly for `isolatedDeclarations` (emit must not infer it). */
 type RunCodeParameters = TObject<{
@@ -168,7 +182,7 @@ export function createPtcRunCodeTool(
     name: "ptc_run_code",
     label: "PTC Run Code",
     exposure: options.exposure,
-    description: DESCRIPTION,
+    description: withChildSearchNote(DESCRIPTION_BASE, options.childCanSearch === true),
     promptSnippet: PTC_RUN_CODE_SNIPPET,
     promptGuidelines: [...PTC_TOOL_GUIDELINES],
     parameters: PARAMETERS,
@@ -178,9 +192,6 @@ export function createPtcRunCodeTool(
         options.getBindingSourceNames?.(),
         options.getOptInBindings?.(),
       );
-      // The DeepSeek search binding, when the capability is switched on. Absent means the
-      // binding is not in the table at all — the default, because the switch defaults to off.
-      const search = options.getSearchBinding?.();
       const startedAt = Date.now();
       const pool = options.getPool?.();
       // ADR-0022 R1: hand the host session dir to background children. Read defensively
@@ -208,7 +219,6 @@ export function createPtcRunCodeTool(
             cwd,
             names,
             includeDispatch: true,
-            ...(search === undefined ? {} : { includeSearch: true, searchDeps: search.searchDeps }),
           }),
           ...(sessionDir === undefined ? {} : { sessionDir }),
           ...(dispatchDeps === undefined ? {} : { dispatchDeps }),

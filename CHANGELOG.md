@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **A child can search the web, through DeepSeek's Search API.** A new tool, `web_ds_search`,
+  reaches the live web from a dispatched child: `search` returns an overview (title, url,
+  authority, rerank score, date and DeepSeek's own short `snippet` per hit), `open` pulls one
+  page's text, and `find` returns the line numbers where a pattern occurs inside a page. It is
+  **off by default** — turn it on with `{"webDsSearch": {"enabled": true}}` in
+  `~/.pi/agent/ptc.json` — and it **exists only inside a dispatched child**: a parent session
+  neither registers the tool nor reads a DeepSeek credential, so the capability never reaches
+  the session that would otherwise be tempted to use it. The budget is per child process
+  (30 successful requests by default), and a page already fetched is free to re-read: `open` and
+  `find` are served from the last five searches' results, so a child does not pay twice for
+  the same page (ADR-0048, ADR-0049).
+- **The system prompt says how to reach a child, on whichever surface is in play.** The
+  calling convention used to live only in the `ptc_run_code` / `ptc_workflow` descriptions, so
+  it reached the model only while those tools were offered to it. On the `subagents` surface
+  they are not — they are reachable from a script, not from the model — and pi collects a
+  tool's guidelines from the declared tools only. Measured: a parent on that surface had no way
+  to learn that a `codemode` script's tool table has no `pi.dispatch` in it, wrote
+  `await tools["pi.dispatch"]({ task })` into a script, and got
+  `TypeError: tools.pi.dispatch does not exist` three times before falling back to
+  `ptc_subagent`. A `ptc` section in the system prompt now states the convention for the
+  surface in play, and pi merges custom sections into the prompt unconditionally.
+
+### Changed
+
+- **`/ptc off` now stops new children, and says what it did not stop.** PTC off used to mean
+  only "stop narrowing the built-in tools": measured against a real pi, a parent still
+  dispatched a child with it off, so "PTC is off" did not mean what the name says — and the
+  three background-task tools stayed in front of the model with nothing to explain them.
+  `/ptc off` is now one switch that means one thing: **no new child can be started**, on the
+  foreground front (`pi.dispatch` inside a program) and the background one alike, while the
+  children already running keep running and stay manageable. The tools themselves leave the
+  model's face exactly while nothing is in flight — with a task running they stay, because that
+  task has to stay stoppable — and the switch tells you so at the moment you turn it. The
+  switch is session-scoped and survives a resume, exactly like `/ptc why`; no file is written,
+  and `pi config` remains the way to take the package out of your sessions entirely
+  (ADR-0050).
+
+### Fixed
+
+- **A read-only child keeps its web access.** `readOnly: "strict"` narrows a child's tool list
+  to the tools that cannot write, and pi reads that list as an allowlist — so the search tool
+  was filtered out of a strict child entirely. Measured: the child reported having no web tool
+  at all and gave up on the task. Reading the web is not writing, so the search tool now stays
+  in the list when the search module is on (ADR-0041, ADR-0049).
+
 ## [5.0.1] - 2026-10-20
 
 ### Changed

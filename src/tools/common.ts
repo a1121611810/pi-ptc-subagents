@@ -35,11 +35,18 @@ import type { PtcRunOutcome } from "../runtime/dispatcher.ts";
 import type { PtcConfig, PtcSurface } from "../runtime/limits.ts";
 import type { PtcJsonValue, SubCallRecord } from "../runtime/protocol.ts";
 import type { ULID } from "../runtime/task-storage.ts";
-import type { WebDsSearchBindingOptions } from "../search/run.ts";
 import { renderModelValue, sanitizeText } from "./text.ts";
 
 /** Options every PTC tool factory accepts. */
 export interface PtcToolOptions {
+  /**
+   * Whether a dispatched child can search the web — i.e. whether the search module is on.
+   *
+   * **It changes what the tool description claims.** The parent has no web tool of its own, so
+   * the only route to the web is a child; the description says so only when it is true, and the
+   * switch is read once at extension load, so the claim is stable for the session.
+   */
+  childCanSearch?: boolean;
   /**
    * Per-run limit overrides, merged over `DEFAULT_CONFIG` by the dispatcher (`resolveConfig`).
    *
@@ -70,20 +77,6 @@ export interface PtcToolOptions {
    * a closure that re-reads whatever it likes.
    */
   getOptInBindings?: () => readonly string[];
-  /**
-   * The DeepSeek search binding's options, or `undefined` when the capability is switched off
-   * (ADR-0047 / ADR-0048).
-   *
-   * **A getter, like the two above, and for the same reason**: the surface a program sees is
-   * decided once and must not change under a running program. The switch lives in
-   * `~/.pi/agent/ptc.json` and is read at load time; this closure carries the result of that
-   * read, not the file.
-   *
-   * `undefined` means the binding is NOT in the table — which is the default, because the
-   * switch defaults to off. A deps whose `client` is absent (no credential resolved) is still
-   * a binding: the capability is registered and says so, rather than vanishing.
-   */
-  getSearchBinding?: () => WebDsSearchBindingOptions | undefined;
   /**
    * Depth baseline for PTC runs this tool starts inside a child pi process: the depth of
    * the run that dispatched them, 0 for the parent turn's run (ADR-0016 Recursive
@@ -200,7 +193,7 @@ export const PTC_TOOL_GUIDELINES: readonly string[] = [
 ];
 
 /**
- * How a `codemode` script reaches the parallel binding, stated on both PTC surfaces.
+ * How a `codemode` script reaches a child, stated on both PTC surfaces.
  *
  * Measured 2026-10-16 (spike round 2, the dispatch-loop e2e note,
  * `docs/research/dispatch-loop-e2e-spike-20261016.md`): a
@@ -210,13 +203,31 @@ export const PTC_TOOL_GUIDELINES: readonly string[] = [
  * calling convention is already stated in both descriptions, but those sentences address a reader
  * *inside* a program; this note is the one that addresses a reader inside the script.
  *
+ * **Measured again 2026-10-20, on the `subagents` surface**, and the finding was sharper than the
+ * first one: the note was in the parent's context (it rides in `ptc_run_code`'s description, which
+ * pi's own `codemode` description enumerates for the script) and the parent STILL wrote
+ * `await tools["pi.dispatch"]({ task })` into a `codemode` script, and got
+ * `TypeError: tools.pi.dispatch does not exist`. It burned three calls that way before it fell
+ * back to `ptc_subagent` and dispatched successfully. So the note's positive half — "call
+ * `ptc_run_code` and use the binding inside the program" — was true, and it was not enough: the
+ * note sat BELOW an example that read `await tools["pi.dispatch"]({ task: "..." })` with no scope
+ * on it, and a model copying an example does not check the paragraph under it. Hence two changes
+ * that this record exists to justify:
+ *
+ * 1. The example is now scoped to a program ("inside the program"), in both descriptions.
+ * 2. This note names the ONE-HOP route first, and points the reader at its own tool table rather
+ *    than at a route it has to infer. `ptc_subagent` is registered only on the `subagents` surface,
+ *    so the note cannot promise it unconditionally — but a script can SEE its own table, and
+ *    `ptc_run_code` / `ptc_workflow` are on every surface.
+ *
  * One shared constant rather than a sentence per surface, so the two cannot drift — the same
  * reason `BINDING_CONTRACT` is a module-owned string (ADR-0024).
  */
 export const PTC_BINDING_REACH_NOTE: string =
   "A `codemode` script cannot call the parallel binding directly: `pi.dispatch` is never in " +
-  "that script's own tool table, on any surface. A script reaches it by calling `ptc_run_code` " +
-  "or `ptc_workflow` and using the binding inside the program.";
+  "that script's own tool table, on any surface. A script dispatches through the dispatch tools " +
+  "that ARE in its own table: `ptc_subagent` if the session has it, and otherwise `ptc_run_code` " +
+  "or `ptc_workflow` with the binding used inside the program.";
 
 /** Tool name per worker surface — the names the model calls and reads in failure messages. */
 export const SURFACE_TOOL_NAME: Record<PtcSurface, string> = {

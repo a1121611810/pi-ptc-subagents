@@ -10,6 +10,7 @@ import {
   discoverAgent,
   dispatch,
   dispatchConcurrencyLimitReached,
+  DISPATCH_DISABLED_MESSAGE,
   listRegisteredAgentEntries,
   listRegisteredAgents,
   parseAgentEvent,
@@ -1257,6 +1258,47 @@ describe("dispatch depth propagation (ADR-0016 Recursive section)", () => {
 
   test("the concurrency-gate refusal is marked 'not started' too", () => {
     expect(dispatchConcurrencyLimitReached().started).toBe(false);
+  });
+
+  test("a session with PTC off refuses every NEW dispatch, foreground and background", async () => {
+    // ADR-0050: "off" is about what starts from here on, so the refusal has to cover BOTH
+    // fronts — the program's foreground call and the background one that would enter the task
+    // registry — and it has to happen before anything is minted, reserved or spawned.
+    spawnRecorder.calls.length = 0;
+    const ctx = { callId: 9, cwd: process.cwd(), depth: 0, maxDispatchDepth: 3 };
+
+    const foreground = await dispatch({ agent: "anyone", task: "ping" }, ctx, {
+      dispatchEnabled: false,
+    });
+    expect(foreground.status).toBe("rejected");
+    expect(foreground.errorMessage).toBe(DISPATCH_DISABLED_MESSAGE);
+    expect(foreground.started).toBe(false);
+
+    const background = await dispatch({ agent: "anyone", task: "ping", background: true }, ctx, {
+      dispatchEnabled: false,
+    });
+    expect(background).toMatchObject({
+      status: "rejected",
+      errorMessage: DISPATCH_DISABLED_MESSAGE,
+    });
+    // Nothing was spawned on either front.
+    expect(spawnRecorder.calls).toHaveLength(0);
+  });
+
+  test("the switch is absent by default, so an ordinary dispatch is not refused for being off", async () => {
+    // The counterfactual. "Absent means ON" is a decision, and this is what holds it: the
+    // alternative reading (absent means off) would be an equally consistent implementation of
+    // the same field, and every session would refuse to dispatch.
+    //
+    // The assertion is on the REFUSAL, not on the outcome: this agent name resolves to the
+    // generalist child, whose spawn this file's recorder answers in its own way, so what matters
+    // is WHICH refusal came back — not whether the dispatch went on to succeed.
+    spawnRecorder.calls.length = 0;
+    const result = await dispatch(
+      { agent: "anyone", task: "ping" },
+      { callId: 10, cwd: process.cwd(), depth: 0, maxDispatchDepth: 3 },
+    );
+    expect(result.errorMessage).not.toBe(DISPATCH_DISABLED_MESSAGE);
   });
 
   test("a spawn that never happened is marked 'not started' (ENOENT arrives as `error`)", async () => {

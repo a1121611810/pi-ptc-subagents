@@ -44,6 +44,10 @@ import type {
 // the same import-free vocabulary module the types do, so this edge pulls in nothing that could
 // cycle (see the note at the head of `child-report.ts`).
 import { CHILD_REPORT_SHAPE, CHILD_REPORT_TOOL_NAME } from "./child-report.ts";
+// The search tool's NAME, from the search module's own import-free vocabulary module (ADR-0049).
+// `buildArgv` has to name it in the child's tool list, exactly as it names the report tool, and
+// that module imports nothing -- so this edge cannot cycle.
+import { WEB_DS_SEARCH_TOOL_NAME } from "../search/contract.ts";
 import { DEFAULT_CONFIG } from "./limits.ts";
 import {
   DefaultTaskRegistry,
@@ -186,6 +190,43 @@ export interface DispatchDeps {
    * from the transcript that a user changed it rather than finding it had moved underneath a run.
    */
   whyEnabled?: boolean;
+  /**
+   * ADR-0049: whether the DeepSeek search module is ON for this session.
+   *
+   * Carried for the same reason as {@link whyEnabled} — it is a session-level switch read once at
+   * extension load, and the answer changes what the child's tool list may be.
+   *
+   * **It is what decides whether a STRICT child keeps the search tool.** The strict tier narrows
+   * the child to read-only tools (ADR-0041), and the search tool IS one: it reads the web and
+   * writes nothing. Measured 2026-10-20 on the `subagents` surface: a parent that asked for a
+   * read-only child lost the child's search tool entirely, because pi reads the child's `--tools`
+   * list as an ALLOWLIST and the strict list did not name it — so the child reported "this session
+   * has no web search, web fetch, or bash tool" and gave up. The capability was not bypassed; it
+   * was ABSENT. A narrowing that removes a read-only capability the caller was told the child has
+   * is a silent failure, and this one is reachable by the most ordinary dispatch shape.
+   *
+   * Absent means the search module is off, which is the shipped default (ADR-0048: the absence of
+   * a decision is not a decision to allow it) — so a strict child is unchanged unless an operator
+   * turned the module on for the install, and that install already accepted child network egress
+   * and a per-child bill.
+   */
+  searchEnabled?: boolean;
+  /**
+   * ADR-0050: whether this session may start a NEW child.
+   *
+   * **Absent means ON**, which is the shipped default: the only thing that turns it off is
+   * `/ptc off`, a deliberate session-scoped switch the user flips (the same shape, and the same
+   * "mutate the one deps object every front reads" mechanics, as {@link whyEnabled}).
+   *
+   * It is checked ONCE per call, above every gate, so a request that may not start a child never
+   * mints a task id, never reserves a concurrency slot and never spawns a process. Both fronts
+   * get it, because both go through this function: the binding a program calls and the
+   * top-level subagent tool.
+   *
+   * The switch does NOT touch children that are already running. A child is its own process and
+   * the mode's lifecycle never reaches it, so "off" is about what starts from here on.
+   */
+  dispatchEnabled?: boolean;
 }
 
 /**
@@ -831,6 +872,37 @@ export function dispatchConcurrencyLimitReached(): DispatchResult {
     exitCode: -1,
     reportChannel: "none",
     errorMessage: DISPATCH_CONCURRENCY_LIMIT_MESSAGE,
+  };
+}
+
+/**
+ * Verbatim ADR-0050 message for a dispatch refused because this session turned PTC off.
+ *
+ * Exported as a named constant so the contract string has one definition and cannot drift
+ * (the same reason `DISPATCH_CONCURRENCY_LIMIT_MESSAGE` is one), and it names the way out,
+ * because a refusal the caller cannot act on is a refusal the model will retry.
+ */
+export const DISPATCH_DISABLED_MESSAGE =
+  "PTC is off in this session: no new child can be started (run /ptc on to allow them again)";
+
+/**
+ * Result returned when the session has PTC off and may not start a new child (ADR-0050).
+ *
+ * Shaped like every other refusal: `status: "rejected"`, `started: false`, no report channel.
+ * The readOnly guard stays the FIRST refusal a call can hit (it is about the request's own
+ * arguments); this one is about the session's state, so it sits just below it and above the
+ * background branch — which is what makes both fronts get it.
+ */
+export function dispatchDisabledResult(): DispatchResult {
+  return {
+    text: "",
+    status: "rejected",
+    started: false,
+    agentName: "unknown",
+    durationMs: 0,
+    exitCode: -1,
+    reportChannel: "none",
+    errorMessage: DISPATCH_DISABLED_MESSAGE,
   };
 }
 
@@ -1833,15 +1905,26 @@ export function unknownAgentResult(
 export function childToolList(
   agent: Pick<AgentConfigLike, "tools" | "childReport">,
   readOnly?: DispatchInput["readOnly"],
+  searchEnabled?: boolean,
 ): readonly string[] | undefined {
   const tier = resolveReadOnlyTier(readOnly);
   if (tier === "strict") {
     // Derived rather than a constant, for the same reason the merge below is derived: an
     // agent that opted out of the report contract must not be handed the report tool, or it
     // ends up with a tool the flag activated and nothing ever asked it to call.
-    return isReportContractOn(agent)
-      ? [...READ_ONLY_TOOL_NAMES, CHILD_REPORT_TOOL_NAME]
-      : READ_ONLY_TOOL_NAMES;
+    //
+    // ADR-0049: the search tool joins the strict set when the search module is on. It is a
+    // READ tool -- it fetches pages and writes nothing -- so including it keeps the tier's
+    // promise ("it cannot write anything") intact, and excluding it does not narrow the
+    // child's reach in any way the tier is about. Measured 2026-10-20: a parent that asked
+    // for a read-only child LOST the child's search tool entirely (pi reads `--tools` as an
+    // allowlist), so the child reported having no web tool and gave up. The capability was
+    // not bypassed; it was absent, and silently so.
+    const readOnlyTools =
+      searchEnabled === true
+        ? [...READ_ONLY_TOOL_NAMES, WEB_DS_SEARCH_TOOL_NAME]
+        : READ_ONLY_TOOL_NAMES;
+    return isReportContractOn(agent) ? [...readOnlyTools, CHILD_REPORT_TOOL_NAME] : readOnlyTools;
   }
   // `lenient` falls through untouched. It narrows nothing, and a tier that quietly removed a
   // tool would be a half-strict wearing the name of a promise it cannot keep.
@@ -1873,6 +1956,7 @@ export function buildArgv(
   agent: AgentConfigLike,
   promptFilePath: string,
   sessionModel?: SessionModel,
+  searchEnabled?: boolean,
 ): string[] {
   const args: string[] = ["--mode", "json", "-p", "--no-session"];
   // `||`, not `??`: a discovered agent whose markdown declares no `model:` reports that as the
@@ -1896,7 +1980,7 @@ export function buildArgv(
   // accept an --agent-scope flag (the subagent extension does not pass one either), and
   // in --no-session mode pi loads user-scope agents from ~/.pi/agent/agents by default.
   // Project agents would need a different mechanism (e.g. PI_CODING_AGENT_DIR override).
-  const tools = childToolList(agent, input.readOnly);
+  const tools = childToolList(agent, input.readOnly, searchEnabled);
   if (tools !== undefined) {
     args.push("--tools", tools.join(","));
   }
@@ -2377,7 +2461,7 @@ async function dispatchBackground(
     tmp = written;
     // ADR-0044: the session tier is resolved here, at spawn, so a model switch later in the
     // caller's session cannot retro-change a child that is already running.
-    const argv = buildArgv(input, agent, written.filePath, ctx.sessionModel);
+    const argv = buildArgv(input, agent, written.filePath, ctx.sessionModel, deps.searchEnabled);
 
     const spawnOptions: ChildSpawnOptions = {
       cwd,
@@ -2729,6 +2813,17 @@ export async function dispatch(
     return finish(invalidReadOnlyRequestResult(input.readOnly));
   }
 
+  // ADR-0050: the session turned PTC off, so no NEW child may start from here on. Above the
+  // background branch, so both fronts get it, and above every gate below it, so a refused call
+  // mints no task id, reserves no slot and spawns no process.
+  //
+  // It says nothing about children that are ALREADY running: those are separate processes and
+  // the off switch never reaches them. They keep running and stay manageable — which is why the
+  // task tools stay in the model's face while one of them is still in flight.
+  if (deps.dispatchEnabled === false) {
+    return finish(dispatchDisabledResult());
+  }
+
   // ADR-0022 §1: the background opt switches the binding's tail. Pre-spawn refusals reuse
   // the foreground shapes, so the union stays even for a statically-background call.
   if (input.background === true) {
@@ -2800,7 +2895,7 @@ export async function dispatch(
   let argv: readonly string[];
   try {
     tmp = await promptFileWriter(agent.name, fullPrompt);
-    argv = buildArgv(input, agent, tmp.filePath, ctx.sessionModel);
+    argv = buildArgv(input, agent, tmp.filePath, ctx.sessionModel, deps.searchEnabled);
   } catch (error) {
     slots.release();
     throw error;

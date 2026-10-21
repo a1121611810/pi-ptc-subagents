@@ -35,9 +35,11 @@ who runs `pi install npm:pi-ptc-subagents` immediately gets the PTC tools
 Mechanism: pi reads the npm package's `package.json` `pi.extensions` field
 and registers the extension in `~/.pi/agent/settings.json` automatically.
 **Not** a postinstall hook. **Not** a manual `pi-ptc install` CLI command.
-This is the package's **activation**; what the model may call inside a
+This is the package's **activation**; what the model may CALL inside a
 session is a separate question, answered by the _narrowing mode_
-(`GLOSSARY.md` §Narrowing mode). The two are independent: the tools are
+(`GLOSSARY.md` §Narrowing mode), and what the session may START is a third,
+answered by the _dispatch switch_ (§Background dispatch and task lifecycle).
+The three are independent: the tools are
 available whether or not the mode is on.
 
 ## pi-side terms
@@ -214,7 +216,8 @@ below already names ours), "code mode" (the pre-August-2026 DSH name).
 
 **surface mode** — which model-facing tools this package registers,
 independent of the _narrowing mode_ (which decides which of the registered tools are
-_active_). **Detected, not configured**: there is no key for it, and the
+_active_) and of the _dispatch switch_ (which withholds the _lifecycle face_ from
+the model while nothing is running). **Detected, not configured**: there is no key for it, and the
 former `surfaceMode` key in `ptc.json` was removed 2026-10-10 (ADR-0034).
 Two values, in increasing order of what this package takes responsibility
 for: `subagents`, `full`. The detection asks three questions, not one. Does
@@ -373,8 +376,12 @@ face, which can inspect and stop tasks but cannot start one).
 `ptc_task_stop` trio. Registered on **every** surface mode, `subagents` included,
 and outside the _narrowing mode_ loadout on purpose:
 turning the _narrowing mode_ off must never hide the lifecycle of a task that is
-still in flight. ADR-0022, ADR-0025 (withdrawn by ADR-0034, which removed the
-`off` value this entry used to except). _Avoid_: "task tools", "subagent
+still in flight. Since ADR-0050 they are withheld from the MODEL exactly when
+the _dispatch switch_ is off and no task is in flight — with nothing to manage
+there is nothing for them to do — and they come back the moment a task is
+running, so that task stays inspectable and stoppable. ADR-0022, ADR-0025
+(withdrawn by ADR-0034, which removed the `off` value this entry used to
+except), ADR-0050. _Avoid_: "task tools", "subagent
 tools" (they manage tasks other things started).
 
 **worker surface** — which of the two PTC program surfaces a worker was spawned
@@ -689,12 +696,14 @@ DSH's `subagent-context` injection; the only difference is the depth /
 max-depth attributes, which are pi-ptc-specific. ADR-0016 Recursive section, ADR-0039.
 
 **read-only tier** — the optional `readOnly` argument on a `pi.dispatch` call, in two tiers:
-`"strict"` narrows the dispatched **child pi process's** tool list to the read set; `"lenient"`
-narrows nothing and only adds one clause to the _`pi-ptc-context` hint_. Strings only — a boolean
-was tried first, and pi's validator coerced `readOnly: 0` into "no tier", a silent
-full-capability child for a caller who asked to be read-only; the string enum refuses every
-wrong-typed value at the schema (ADR-0041 §Decision). Which side it narrows is load-bearing: the
-child's own tools, decided at the call site — **not** the PTC worker's binding surface, which is
+`"strict"` narrows the dispatched **child pi process's** tool list to the read set — the tools that
+**cannot write** — so a child that can search the web keeps that ability (ADR-0049: reading is not
+writing, and a narrowing that silently removed the only route to the web left the child with no
+web tool at all); `"lenient"` narrows nothing and only adds one clause to the _`pi-ptc-context`
+hint_. Strings only — a boolean was tried first, and pi's validator coerced `readOnly: 0` into "no
+tier", a silent full-capability child for a caller who asked to be read-only; the string enum refuses
+every wrong-typed value at the schema (ADR-0041 §Decision). Which side it narrows is load-bearing:
+the child's own tools, decided at the call site — **not** the PTC worker's binding surface, which is
 what the _R3 read-only PTC surface_ narrows (an explicit `names` list curating the binding
 table). The two axes meet at one point: a strict tier at the call site decides the child's tool
 list outright. ADR-0041.
@@ -743,8 +752,9 @@ floor), "0.99.0 is the floor" (true of these four capabilities, false of
 
 ## Narrowing mode
 
-The session-level switch that makes a session work the PTC way. This is the
-subsystem behind `/ptc on` and `/ptc off`; it is a _toggle_, not the technology
+The session-level switch that makes a session work the PTC way. It is one of
+the two switches `/ptc on` and `/ptc off` control — the other is the
+_dispatch switch_ (ADR-0050); it is a _toggle_, not the technology
 (see _PTC mode_ in §Project terms).
 
 **narrowing mode** — the session-level tool-restriction state machine: while
@@ -754,10 +764,17 @@ separate execution path — same worker, same dispatcher, same bindings; it
 changes only _what the model may call directly_. It is decided per session at
 `session_start`, announced once, and always reversible (`/ptc off` restores the
 loadout). TUI-only: print, JSON and RPC sessions are left exactly as launched,
-because forcing the shape on a CI script buys nothing and breaks it. Distinct
-from _surface mode_, which decides which model-facing tools are REGISTERED, and
+because forcing the shape on a CI script buys nothing — nobody is watching a
+CI run's tool list — and what it costs there is measurable but small: measured
+2026-10-21 against a real pi, removing the TUI-only check narrows an ordinary
+`pi -p` session (the built-ins leave the model's loadout) while the JSON output
+contract, the binding table and the run itself all survive. So the cost is
+_what the model is offered_, not a broken run — an earlier version of this
+entry called it "breaks it", and the measurement did not support that.
+Distinct from _surface mode_, which decides which model-facing tools are
+REGISTERED, from _dispatch switch_, which decides what may be STARTED, and
 from _PTC mode_, which is the technology this switch puts to use.
-ADR-0010, ADR-0025. _Avoid_: "PTC mode" (that is the acronym — see
+ADR-0010, ADR-0025, ADR-0050. _Avoid_: "PTC mode" (that is the acronym — see
 §Project terms), "mode" unqualified (ambiguous: _surface mode_ and the
 _narrowing mode_ both exist), "restriction mode" (that is the _read-only tier_'s
 shape, applied to a child rather than to a session), "PTC default mode"
@@ -849,6 +866,25 @@ where `read` is hidden and the way in is `tools.read` from inside a program.
 ADR-0011. _Avoid_: "the skills prompt" (it is a section of the system prompt,
 and "prompt" is the thing it is part of), "skill loading" (that is the
 instruction the section carries, not the section).
+
+**`<ptc>` section** — the custom system-prompt section this package writes on
+every turn, carrying how to reach a child on the surface in play. It exists
+because a tool's own description reaches the model only while that tool is
+offered to it, and on the `subagents` surface the pair that carried the calling
+convention was offered to a SCRIPT rather than to the model: measured
+2026-10-20, a parent there had no way to learn that a `codemode` script's tool
+table holds no `pi.dispatch`, wrote `await tools["pi.dispatch"]({ task })` into
+a script, and got `TypeError: tools.pi.dispatch does not exist` three times
+before falling back to `ptc_subagent`. A section does not have that dependency:
+pi merges every custom section into the system prompt unconditionally, so the
+text reaches the model on every surface and in every run mode. Its content
+follows the surface — the program form on `full`, the top-level face on
+`subagents` — and when the _dispatch switch_ is off it says only that
+dispatching is off, because handing a model a convention it cannot follow is a
+wasted call. Distinct from the _skills section_, which is pi's own block and
+this package's duty to keep. ADR-0029, ADR-0050.
+_Avoid_: "the PTC prompt" (it is one section of the system prompt), "dispatch
+section" (that is ADR-0016's recursive-dispatch section, a different thing).
 
 ## PTC run outcomes
 
@@ -1026,7 +1062,7 @@ selector misses — **the only place** `JSON.stringify` is acceptable on a
 sub-row. ADR-0021 §3. _Avoid_: "args display" (vague), "args format"
 (implies the JSON-format capability).
 
-## Background dispatch and task lifecycle (ADR-0022, ADR-0023)
+## Background dispatch and task lifecycle (ADR-0022, ADR-0023, ADR-0050)
 
 **ULID** — the identifier format every task-scoped id uses: 26 characters of
 Crockford base32, `TTTTTTTTTTRRRRRRRRRRRRRRRR` — 10 characters (48 bits) of
@@ -1068,6 +1104,25 @@ The child survives the spawning program, the spawning turn, and
 and ends when that session ends or is replaced
 (`session_ended_while_running`) or when the owner process dies before
 completion (`lost_on_session_restart`). See ADR-0022 + ADR-0023.
+
+**dispatch switch** — whether this session may start NEW children. A
+session-level switch, on by default, turned off by `/ptc off` together with the
+_narrowing mode_ — "off" has to mean one thing (ADR-0050). It is not the
+_narrowing mode_ (which decides what the model may CALL directly) and not
+_surface mode_ (which decides what is REGISTERED); it decides what may be
+STARTED. It never reaches a child that is already running: a child is its own
+process, so a refusal to start a new one cannot touch it — which is also why
+the _lifecycle face_ stays in front of the model while a task is in flight, and
+why the user is told at the moment of the switch that the running ones are NOT
+affected. A refused call comes back as `{ status: "rejected", started: false }`
+with the message `PTC is off in this session: no new child can be started (run /ptc on to allow them again)` — it names the
+way out, because a refusal the caller cannot act on is one the model retries.
+Measured 2026-10-21: before ADR-0050 the switch did not exist and `/ptc off`
+gated nothing about dispatch at all — a parent still dispatched a child with it
+off, and the _lifecycle face_ stayed in front of the model with nothing to
+explain it. _Avoid_: "dispatch gate" (that is the _dispatch concurrency_ /
+_dispatch depth_ caps, which refuse for capacity rather than for policy),
+"narrowing mode" (the other switch), "PTC mode" (the technology).
 
 **TaskRecord** — session-level _TaskRegistry_ row tracking the full
 lifecycle of one background child. 28 fields today: ADR-0022 §3's code block lists
@@ -1159,8 +1214,10 @@ has no file), "task output" (that is the text; this is where it lives), "log"
 (the file is `output.log`, but the concept is the seam, and the truncation
 contract is not the same as a log rotation).
 
-**`ptc_task_*` (model-facing management tools)** — three tools always
-on (not gated by `/ptc off`, per ADR-0022 + map Notes clause 5):
+**`ptc_task_*` (model-facing management tools)** — the _lifecycle face_: three
+tools, offered to the model whenever a task may need managing, and withheld
+from it only while the _dispatch switch_ is off and no task is in flight
+(ADR-0050; before that they were never gated at all):
 `ptc_task_list({ status?, limit? })` returns matching TaskRecords
 (newest first, default limit 100); `ptc_task_output({ taskId, sinceBytes? })`
 dereferences `outputRef`, applies ADR-0015 truncateTail, and renders the
@@ -1183,49 +1240,56 @@ cut, and XML-escaped), optional `<report-channel>` on a `succeeded` event (`tool
 **dispatch sub-row** — the variant of a sub-row for `pi.dispatch(...)`
 calls. Uses the binding's `agent` argument for the args preview and reads
 its state from `DispatchResult`: a refusal (`status: "rejected"` with
-`started: false` — depth or concurrency gate, unknown agent, a spawn that
+`started: false` — depth or concurrency gate, the _dispatch switch_, unknown
+agent, a spawn that
 never happened) is `rejected`, a child that ran and failed
 (`started: true`) is `error`, and everything else is `ok`. One per dispatch call; no recursion into the child PTC run's
 tree (ADR-0021 §7).
 
-## DeepSeek search module (ADR-0047, ADR-0048)
+## DeepSeek search module (ADR-0049, ADR-0048)
 
-**program-internal reach** — a capability the model reaches **only from inside a
-program**, never by calling it directly. Two carriers exist in this package: the
-**PTC binding** table (the Node worker's `tools["<name>"]`) and pi's **codemode
-face** (a pi tool registered with `exposure: "codemode"`, which pi's codemode
-scripts may call but the model is never told about). It is a property of a
-capability's _reach_, not of a session's state — the _narrowing mode_ is the
-session-level toggle, and `exposure: "hidden"` is the opposite of this (hidden
-means unreachable at all). _Avoid_: "hidden tool" (hidden is unreachable, the
-opposite), "internal" (says nothing about reach), "narrowed" (that is the
-_narrowing mode_), "private" (it is not private — the model can still call it from
-a program).
+**child-only search tool** — a capability that exists **only inside a dispatched
+child** and is **model-facing there**: the child's own model calls it as a
+tool of its own, one call, with no program in between. The parent's
+capability is _absence_, not _hiding_ — the tool is not in a parent
+session's registry at all, and a parent does not even resolve the
+credential that would unlock it. The depth test is the same one that
+gates `ptc_child_report`: the process carries `PI_PTC_DEPTH` when it was
+dispatched. It is a property of a capability's _reach_, not of a session's
+state — the _narrowing mode_ is the session-level toggle, and
+`exposure: "hidden"` is the opposite of this (hidden means unreachable at
+all). _Avoid_: "hidden tool" (hidden is unreachable, the opposite),
+"internal" (says nothing about reach), "narrowed" (that is the _narrowing
+mode_), "private" (it is not private — the child's model calls it
+directly), "program-internal" (the shape this replaced; a program's
+binding table is a different thing).
 
 **DeepSeek search module** — this package's built-in web retrieval: DeepSeek's
 **Search** and **Fetch** APIs, which are model-agnostic raw JSON endpoints
 (`POST /v1/tools/search` and `/v1/tools/fetch`) carrying no `model` field, so
-they are decoupled from the chat model entirely. One implementation, two
-**program-internal** faces, gated by the _search gate_, results passed through
-unchanged (no citation assembly — `url` is the only source identifier, and the
-program assembles its own citations). The retrieval source is **fixed**, not
-pluggable. Its three names all carry `ds`, because the capability needs a
-DeepSeek key and bills DeepSeek: the pi tool is `web_ds_search`, the PTC
-binding is `web.ds.search`, and the config key is `webDsSearch`. _Avoid_: "web
+they are decoupled from the chat model entirely. One implementation, one
+**child-only** face, gated by the _search gate_, results passed through
+unchanged (no citation assembly — `url` is the only source identifier, and
+the model assembles its own citations). The retrieval source is **fixed**, not
+pluggable. Its two names both carry `ds`, because the capability needs a
+DeepSeek key and bills DeepSeek: the pi tool is `web_ds_search` and the
+config key is `webDsSearch`. _Avoid_: "web
 search" unqualified (it does not say which provider — `web_search` is DSH's
-tool, see _Out-of-glossary_), "search tool" unqualified (the model never calls
-it directly).
+tool, see _Out-of-glossary_), "search tool" unqualified (the parent's model
+never calls it — its children do).
 
-**search gate** — the two conditions that decide whether the DeepSeek search
+**search gate** — the conditions that decide whether the DeepSeek search
 module is usable in a session: a **switch** (`webDsSearch.enabled` in
-`~/.pi/agent/ptc.json`, **off by default**) and a **credential verdict** (the
-DeepSeek credential is present and resolves to a non-empty key). Switch off ⇒
-the capability is not registered on either face. Switch on but no credential ⇒
-it **is** registered, marked unusable, and announced once at session start — the
+`~/.pi/agent/ptc.json`, **off by default**), a **credential verdict** (the
+DeepSeek credential is present and resolves to a non-empty key), and
+**being a dispatched child**. Switch off ⇒ the capability is not registered
+anywhere. Switch on but no credential ⇒ it
+**is** registered in the child, marked unusable, and announced once at session
+start — the
 missing key is a stated state, never a silent failure. The verdict follows pi's
 own resolution order (stored credential → provider config → environment) and
 must use a **resolved** key, not the raw stored one. _Avoid_: "enabled" /
-"disabled" unqualified (the switch is one of two conditions), "configured"
+"disabled" unqualified (the switch is one of three conditions), "configured"
 unqualified (means the key is present, which is only half the gate).
 
 ## Release & supply chain
@@ -1268,12 +1332,24 @@ when to revisit. _Avoid_: "draft release" (that is a GitHub Releases concept).
 dsh-side concept. pi has no equivalent preset system today; this package
 is _only_ the PTC mode implementation, not a preset framework.
 
+**"PTC off" is not "the package is off".** `/ptc off` turns off the
+_narrowing mode_ and the _dispatch switch_ (ADR-0050): this session stops
+working the PTC way and stops starting new children. It does NOT take the
+package out of your sessions — that is its _activation_ (see _default-on_),
+and the way to do it is `pi config` or not installing it, after which the tools
+are not registered at all. A session with PTC off still has the package
+loaded, still answers `/ptc why`, and still runs programs. The confusion this
+entry records is not hypothetical: "PTC is off, so these three tools should be
+gone too" was a real question about a real session, and the answer was that
+those tools were still there because dispatching was still possible — the
+switch had not been given that meaning yet (ADR-0050).
+
 **DSH `web_search`** (the `dsh-tool-web` tool) is NOT the same object as this
 package's **DeepSeek search module**. DSH's is a dsh-side tool that takes 1–4
 merged queries and returns summaries plus source URLs; ours is a
-program-internal binding and pi tool over DeepSeek's raw Search/Fetch
-endpoints, reached only from inside a program. The names are deliberately
-different in both directions — ours is `web_ds_search` / `web.ds.search`, not
+child-only pi tool over DeepSeek's raw Search/Fetch
+endpoints, reached only from inside a dispatched child. The names are deliberately
+different in both directions — ours is `web_ds_search`, not
 `web_search` — because pi's tool registry is keyed by tool name
 (`toolRegistry.set(tool.name, tool)`), so two extensions registering the same
 name **overwrite each other** rather than coexisting. _Avoid_: "the web_search

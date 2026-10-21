@@ -93,7 +93,9 @@ This ADR closes the bgdispatch map. The four research/decision tickets it crysta
 
 5. **`<sessionDir>/event-log/<eventId>.json`** (append-only) per Q3, indexed by `(subscriptionId, cursor)`. On subscription creation, the buffer replays events since the cursor; on idle wake, the buffer drains in one wake (Decision section 6).
 
-6. **`ptc_task_list`, `ptc_task_output`, `ptc_task_stop`** model-facing tools per G1. Constant model surface; **not** affected by `/ptc off` -- `/ptc off` only gates new spawn (ADR-0016 R6), it does not orphan in-flight tasks (per map Notes clause 5).
+6. **`ptc_task_list`, `ptc_task_output`, `ptc_task_stop`** model-facing tools per G1. Constant model surface: registered on every surface, and **not** part of the narrowing's loadout. Since ADR-0050 they are withheld from the MODEL exactly while PTC is off and nothing is in flight — with a task running they stay, because that task has to stay readable and stoppable.
+
+   **Amended 2026-10-21, twice.** This used to read "`/ptc off` only gates new spawn (ADR-0016 R6)". That half was true when it was written: the `off` surface value, removed by ADR-0034 on 2026-10-10, skipped the orchestration tools entirely, so nothing new could be spawned. ADR-0034 deleted the switch the clause was about, so no switch has stopped a spawn since — measured 2026-10-21 against a real pi: with PTC off the parent still dispatched a child. **ADR-0050 then changed the behaviour to match the clause**: `/ptc off` stops new dispatches on both fronts, and these three leave the model's face while nothing is in flight. The citation to ADR-0016 R6 pointed at nothing: ADR-0016 has no R6.
 
 7. **`ptc_task_resubscribe(taskId, since: ULID | "initial")`** per Q3 fork semantics. Default `max(parent, child) cursor` for forked branches; explicit reset to `"initial"` for full-replay observation. **v1 status: deferred to v2.** The v1 `subscribe(since?)` seam takes the starting cursor from the caller, so a fork integration supplies `max(parent, child)` itself; neither the helper nor the reset tool ships in v1.
 
@@ -118,7 +120,7 @@ TaskStorage interface is unchanged and both adapters are kept.
 
 ## What we deliberately don't add
 
-1. **No `/ptc off` orphan** -- map Notes clause 5: in-flight tasks continue to deliver notifications and update TaskRecord even when `/ptc off` is on. The mode toggle affects _new spawn_ (ADR-0016 R6); it does not affect in-flight lifecycle.
+1. **No `/ptc off` orphan** -- map Notes clause 5: in-flight tasks continue to deliver notifications and update TaskRecord even when `/ptc off` is on. The toggle does not affect in-flight lifecycle. It **does** affect new spawns, since ADR-0050: `/ptc off` stops new children on both fronts, while the ones already running keep going -- a child is a separate process, and nothing in the off switch's lifecycle reaches it. That is exactly why the three tools stay in the model's face while a task is running: the task has to stay stoppable.
 
 2. **No spawned-into-quota** -- the existing `dispatchConcurrency` (default 8, ADR-0016) is the only concurrency gate, and since the round-4 amendment it is one session-wide counter shared with the foreground path rather than a gate background alone. There is no in-task queue (`queued` state absent, per G1). Spawn above the cap resolves with `rejected` immediately. codex's `agent_max_depth` analogue maps to the existing `maxDispatchDepth` (default 3, ADR-0016 recursive section).
 

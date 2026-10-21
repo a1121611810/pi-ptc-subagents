@@ -200,11 +200,11 @@ test("the description tells the model how to reach tools and what comes back", a
   expect(description).not.toMatch(/sandbox/i);
 });
 
-test("the reach note names the reader, both entry points and the table the binding is absent from", () => {
+test("the reach note names the reader, the entry points and the table the binding is absent from", () => {
   // The one model-facing sentence that answers "I am a `codemode` script; how do I fan out?".
   // Measured 2026-10-16 (spike round 2): without it, a script author enumerates its own tool
   // table, finds no `pi.dispatch`, and reads the silence as "this install does not register the
-  // binding". What these assertions pin: the six tokens/clauses below, so deleting or rewording
+  // binding". What these assertions pin: the tokens/clauses below, so deleting or rewording
   // any half turns a named test red. What they do NOT pin: polarity — a rewrite that keeps every
   // pinned token and inverts the meaning still passes (round-2 review measured four such
   // paraphrases green). The oracle for polarity is the A/B run recorded on #200, not this test;
@@ -215,11 +215,39 @@ test("the reach note names the reader, both entry points and the table the bindi
   expect(PTC_BINDING_REACH_NOTE, "names the first entry point").toContain("`ptc_run_code`");
   expect(PTC_BINDING_REACH_NOTE, "names the second entry point").toContain("`ptc_workflow`");
   expect(PTC_BINDING_REACH_NOTE, "states the positive half: the way out is a call").toMatch(
-    /reaches it by calling/,
+    /reaches it by calling|dispatches through the dispatch tools/,
   );
   expect(PTC_BINDING_REACH_NOTE, "states where the binding is used: inside the program").toMatch(
-    /using the binding inside the program/,
+    /using the binding inside the program|with the binding used inside the program/,
   );
+  // Measured 2026-10-20 on the `subagents` surface: the note was in the parent's context and the
+  // parent STILL wrote `tools["pi.dispatch"]` into a codemode script, got a TypeError, and burned
+  // three calls that way before falling back to `ptc_subagent`. So the note now names the one-hop
+  // route too, and points the reader at its own tool table rather than at a route it has to infer.
+  expect(PTC_BINDING_REACH_NOTE, "names the one-hop dispatch face").toContain("`ptc_subagent`");
+  expect(PTC_BINDING_REACH_NOTE, "points the reader at its own tool table").toMatch(
+    /in its own table/,
+  );
+});
+
+test("the binding example is scoped to a program, so a script author does not copy it into a script", async () => {
+  // The counterfactual for the 2026-10-20 measurement above: the example sat directly above the
+  // reach note with no scope on it, and a model copying an example does not read the paragraph
+  // under it. The example now says where it applies. Both surfaces carry it, so both are checked.
+  const runCode = (await captureRegisteredTools()).get("ptc_run_code")?.description ?? "";
+  const workflow = (await captureRegisteredTools()).get("ptc_workflow")?.description ?? "";
+  for (const [name, description] of [
+    ["ptc_run_code", runCode],
+    ["ptc_workflow", workflow],
+  ] as const) {
+    const at = description.indexOf('await tools["pi.dispatch"]');
+    expect(at, `${name} states the pi.dispatch call form`).toBeGreaterThan(-1);
+    // The window AROUND the example, not the sentence it sits in: the example itself contains a
+    // `.` (`{ task: "..." }`), so a sentence-scoped match would stop in the middle of it. The
+    // scope marker is what precedes the example, and that is what the claim is about.
+    const window = description.slice(Math.max(0, at - 200), at);
+    expect(window, `${name} scopes that example to a program`).toMatch(/inside the program/);
+  }
 });
 
 test("the description documents the always-bound pi.dispatch binding (pitfalls #1/#4/#5)", async () => {

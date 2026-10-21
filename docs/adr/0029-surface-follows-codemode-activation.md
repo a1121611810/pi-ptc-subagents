@@ -26,10 +26,10 @@ chain runs:
 | ---------- | -------------------------------------------------------------- | ----------------------------------------------- |
 | presence   | `dist/extensions/codemode` exists                              | `probeCodemodePresence`                         |
 | switch     | no entry anywhere ⇒ `"absent"` ⇒ pi loads built-ins by default | `resolveCodemodeSwitch`                         |
-| ⇒ surface  | `subagents`                                                    | `detectedSurfaceMode` (`ptc-mode.ts:1320-1319`) |
+| ⇒ surface  | `subagents`                                                    | `detectedSurfaceMode` (`ptc-mode.ts:1331-1319`) |
 | activation | `codemode` registers with **`defaultActive: false`**           | `dist/extensions/codemode/index.js:26`          |
 | ⇒ loadout  | pi's default active names are `["read","bash","edit","write"]` | `settings-manager.js:35`                        |
-| ⇒ warning  | `getActiveTools()` has no `codemode`                           | `src/index.ts:1161`                             |
+| ⇒ warning  | `getActiveTools()` has no `codemode`                           | `src/index.ts:1322`                             |
 
 So `subagents` hands orchestration to a tool that is loaded, registered, and not callable, and the
 session is left with nothing to orchestrate with ~~because `subagents` deliberately does not
@@ -62,6 +62,29 @@ over all three.
 | yes              | enabled  | `inactive` | `full`      | **it is loaded but the model cannot call it — do not delegate** |
 
 The last row is the one this ADR adds, and it is the default.
+
+### The model is told how to reach a child, in a section
+
+> **Added 2026-10-21.** The two surfaces differ in **which tools the model is offered**, and the
+> guidance that said how to dispatch a child used to live only in the descriptions of the pair
+> (`ptc_run_code` / `ptc_workflow`). So the guidance reached the model only while those tools were
+> offered to it — and on `subagents` they are registered at `codemode` reach, so they are **not**
+> offered. pi collects a tool's guidelines from the DECLARED tools only, so on that surface the
+> model's `rules` section carried the guidance for `ptc_subagent` and the three task tools, and
+> carried nothing for the pair.
+>
+> Measured, on that surface: a parent that needed a child had no way to learn that a `codemode`
+> script's tool table has no `pi.dispatch` in it. It wrote `await tools["pi.dispatch"]({ task })`
+> into a script, got `TypeError: tools.pi.dispatch does not exist`, and burned three calls that
+> way before falling back to `ptc_subagent`. The capability was reachable the whole time; the
+> **calling convention** was not readable.
+>
+> The fix is a `ptc` section in the system prompt: pi merges custom sections into the prompt
+> unconditionally, so the text no longer depends on which tools are declared. It states the
+> convention **for the surface in play** — the program form and the in-program binding on
+> `full`; `ptc_subagent` and the fact that a script's table has no `pi.dispatch` on `subagents` —
+> and the two surfaces share one sentence about the web, because it is one sentence. The section
+> is rewritten every turn and removed when there is nothing to say.
 
 ### Absence of evidence is `inactive`
 
@@ -117,7 +140,7 @@ are not symmetric:
 
 - **Over-reporting activation** — we say `active`, pi does not activate it. The surface is
   `subagents` with no orchestrator, which is the bug this ADR exists to remove. It is caught, and
-  caught by measurement rather than by this probe: the decision-4 warning at `src/index.ts:1161`
+  caught by measurement rather than by this probe: the decision-4 warning at `src/index.ts:1322`
   asks `pi.getActiveTools()` at `session_start`, where the answer is the real one. The failure
   degrades to exactly the behaviour that exists today, loudly.
 - **Under-reporting activation** — we say `inactive`, pi would have activated it. The surface is
@@ -185,7 +208,7 @@ so the unspecified case is the ordinary one rather than the dangerous one.
   are paid on the explicit-key path too, for the same reason ADR-0027 pays its two: the
   disagreement notice needs the table's own answer.
 - **A message that could now lie.** The `detected.present && !known` notice at
-  `src/index.ts:1110` hard-codes the string `"subagents"` as the detected surface. With a fifth
+  `src/index.ts:1271` hard-codes the string `"subagents"` as the detected surface. With a fifth
   cell, `detected` can be `full` while `present && !known` still holds (activation predicted
   `active` from a project `defaultTools`, and the project turned out to be untrusted —
   `settings-manager.js:327` drops project settings in that case, which this probe cannot observe).

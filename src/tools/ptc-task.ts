@@ -21,8 +21,11 @@
  * never sees it: pi documents `structuredContent` as "Not sent to the model", and the three text
  * blocks and `details` shapes are unchanged by it.
  *
- * Always-on (ADR-0022 "What we deliberately don't add" 1 + map Notes clause 5): `/ptc off` gates
- * *new spawn*, not in-flight lifecycle, so these tools are not part of PTC mode's gated loadout.
+ * Conditional, not always-on (ADR-0050): PTC off stops NEW children from being started, and
+ * while nothing is running these three leave the model's face — there is nothing for them to do.
+ * They come back the moment a task is in flight, because that task has to stay readable and
+ * stoppable: off is about what starts from here on, and hiding the lifecycle face of a running
+ * task would strand it (ADR-0022 "What we deliberately don't add" 1).
  * `src/index.ts` constructs all three factories against the session-scoped stable holder
  * (registry / outputStorage / lifecycle) and registers them with `pi.registerTool(...)` outside
  * the `/ptc` mode loadout, so they stay callable while PTC mode is off. This module is the
@@ -62,6 +65,22 @@ export type AnyTool = ToolDefinition<any, any, any>;
 /** Default number of records `ptc_task_list` returns when the model does not pass `limit`. */
 export const DEFAULT_TASK_LIST_LIMIT = 100;
 
+/**
+ * The three task tools' names.
+ *
+ * ADR-0050 withholds them from the model when PTC is off and nothing is running, so the set has
+ * to be readable from outside this module. One list, built from the three constants the
+ * registrations use, so the set and the registrations cannot drift apart.
+ */
+export const PTC_TASK_LIST_TOOL_NAME: string = "ptc_task_list";
+export const PTC_TASK_OUTPUT_TOOL_NAME: string = "ptc_task_output";
+export const PTC_TASK_STOP_TOOL_NAME: string = "ptc_task_stop";
+export const PTC_TASK_TOOL_NAMES: readonly string[] = [
+  PTC_TASK_LIST_TOOL_NAME,
+  PTC_TASK_OUTPUT_TOOL_NAME,
+  PTC_TASK_STOP_TOOL_NAME,
+];
+
 /** `ptc_task_stop`'s reason when the model omits one (wording from ADR-0022 §8's table). */
 export const DEFAULT_STOP_REASON = "model stop";
 
@@ -73,7 +92,7 @@ export const PTC_TASK_TOOL_GUIDELINES: readonly string[] = [
   "Use ptc_task_list to see the background tasks this session dispatched and their live status.",
   "Use ptc_task_output to read a task's captured output (it is tail-truncated; the footer names the full-output file). A succeeded task's child report is rendered there, ahead of the prose.",
   "Use ptc_task_stop to ask a running task to stop; the dispatcher delivers the actual signal, so the task transitions through stopping to canceled.",
-  "These background-task tools stay callable when PTC mode is off — /ptc off only blocks new dispatches.",
+  "PTC off stops NEW children from being started, and takes these tools out of reach while nothing is running; a task already running keeps going and stays listed here.",
 ];
 
 /** The 6-state status set (ADR-0022 §2), exposed to the model as a schema union. */
@@ -220,7 +239,7 @@ function formatTaskLine(record: TaskRecord): string {
  */
 export function createPtcTaskListTool(registry: TaskRegistry): AnyTool {
   return defineCompatTool({
-    name: "ptc_task_list",
+    name: PTC_TASK_LIST_TOOL_NAME,
     label: "PTC Task List",
     description: [
       "List the background tasks this session has dispatched (from pi.dispatch({ background: true })).",
@@ -569,7 +588,7 @@ const OUTPUT_OUTPUT_SCHEMA = Type.Object({
  */
 export function createPtcTaskOutputTool(registry: TaskRegistry, storage: OutputStorage): AnyTool {
   return defineCompatTool({
-    name: "ptc_task_output",
+    name: PTC_TASK_OUTPUT_TOOL_NAME,
     label: "PTC Task Output",
     description: [
       "Read a background task's captured output.",
@@ -800,7 +819,7 @@ export function createPtcTaskStopTool(
   }
   const clock = options.clock ?? (() => Date.now());
   return defineCompatTool({
-    name: "ptc_task_stop",
+    name: PTC_TASK_STOP_TOOL_NAME,
     label: "PTC Task Stop",
     description: [
       "Ask a running background task to stop.",

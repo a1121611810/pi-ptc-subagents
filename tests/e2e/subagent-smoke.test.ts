@@ -28,6 +28,7 @@ import { fileURLToPath } from "node:url";
 import { DISPATCH_CONTEXT } from "../helpers/ptc.ts";
 import { dispatch } from "../../src/runtime/dispatch.ts";
 import { DispatchSlotCounter, type DispatchInput } from "../../src/runtime/dispatch.ts";
+import { WEB_DS_SEARCH_TOOL_NAME } from "../../src/search/contract.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FAKE_PI = join(HERE, "fixtures", "fake-pi.mjs");
@@ -247,6 +248,47 @@ describe("a read-only tier is decided at the call site (ADR-0041)", () => {
   });
 
   test("strict narrows the child to the read set plus the report tool", async () => {
+    await withFakePi(async (cwd) => {
+      const result = await dispatchReadOnly(cwd, "strict");
+      expect(result.status).toBe("fulfilled");
+      expect(toolsTheChildWasHanded(result.text)).toBe("read,grep,find,ls,ptc_child_report");
+    });
+  });
+
+  test("a strict child KEEPS the search tool, because reading the web is not writing", async () => {
+    /*
+     * ADR-0049. Measured 2026-10-20 on the `subagents` surface, against a real pi: the parent
+     * dispatched with `readOnly: "strict"`, and the child's `--tools` list was
+     * `read,grep,find,ls,ptc_child_report` — pi reads that list as an ALLOWLIST, so the child's
+     * `web_ds_search` was filtered out and the child reported "this session has no web search,
+     * web fetch, or bash tool" and gave up. The capability was not bypassed; it was ABSENT, and
+     * silently so — a narrowing that removed a read-only capability the caller was told the
+     * child has.
+     *
+     * The tier's promise is that the child cannot WRITE. The search tool only reads the web, so
+     * keeping it costs the promise nothing and keeps ADR-0049's shape reachable under the most
+     * ordinary dispatch shape.
+     *
+     * Counterfactual: drop `searchEnabled` from the strict branch in `childToolList` and the
+     * assertion below goes red — it is the only difference between the two tool lists.
+     */
+    await withFakePi(async (cwd) => {
+      const result = await dispatch(
+        { task: "say PONG", agentScope: "both", cwd, readOnly: "strict" },
+        { callId: 0, cwd, depth: 0, maxDispatchDepth: 3 },
+        { slots: new DispatchSlotCounter(2), taskRegistry: undefined, searchEnabled: true },
+      );
+      expect(result.status).toBe("fulfilled");
+      expect(toolsTheChildWasHanded(result.text)).toBe(
+        "read,grep,find,ls," + WEB_DS_SEARCH_TOOL_NAME + ",ptc_child_report",
+      );
+    });
+  });
+
+  test("a strict child gets no search tool when the search module is off", async () => {
+    // The other half of the same row, and the reason the first one is conditional: the shipped
+    // default is the module OFF (ADR-0048 — the absence of a decision is not a decision to allow
+    // it), so a strict child for an install that never opted in is unchanged.
     await withFakePi(async (cwd) => {
       const result = await dispatchReadOnly(cwd, "strict");
       expect(result.status).toBe("fulfilled");

@@ -55,9 +55,10 @@ Documentation site: **[pi-ptc-subagents on GitHub Pages](https://a1121611810.git
   surface.
 - `ptc_task_list` / `ptc_task_output` / `ptc_task_stop` — manage background dispatches
   (see [Background dispatch](#background-dispatch)). They stay available when PTC mode is off.
-- `web.ds.search` — a PTC **binding** that searches the web (or fetches one page) through
-  DeepSeek's Search API. **Off by default** and reachable only from inside a program, never
-  as a tool of the model's own — see [Web search](./docs/usage/web-ds-search.md).
+- `web_ds_search` — searches the web (or fetches one page) through DeepSeek's Search API.
+  **Off by default**, and it exists **only inside a dispatched child** — a parent session does
+  not have it at all, and the child's own model calls it as a tool of its own. See
+  [Web search](./docs/usage/web-ds-search.md).
 
 Long output follows pi's own truncation contract ([ADR-0015](./docs/adr/0015-pi-truncation-contract.md)):
 the text block keeps the tail (50 KB / 2000 lines), the untruncated text is written to a temp

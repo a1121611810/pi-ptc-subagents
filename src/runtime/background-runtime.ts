@@ -195,6 +195,18 @@ export interface BackgroundRuntimeOptions {
    * has a transcript entry naming the user's action.
    */
   whyEnabled?: boolean;
+  /**
+   * ADR-0049: whether the DeepSeek search module is ON for this session.
+   *
+   * It arrives HERE for the same reason `whyEnabled` does: `dispatchDeps` is already the one
+   * object every front reads its session-level facts from, and the answer changes what the child's
+   * tool list may be. A strict child keeps the search tool when the module is on, because the tool
+   * only READS the web and the tier's promise is that the child cannot write.
+   *
+   * Absent means the module is off — the shipped default (ADR-0048) — so a strict child is
+   * unchanged for an install that never opted in.
+   */
+  searchEnabled?: boolean;
   /** Child lifecycle factory; defaults to the real `node:child_process` adapter. */
   createLifecycle?: () => ChildProcessLifecycle;
   /**
@@ -552,6 +564,7 @@ class DefaultBackgroundTaskRuntime implements BackgroundTaskRuntime {
       clock: this.clock,
       logger: this.#logger,
       ...(options.whyEnabled === undefined ? {} : { whyEnabled: options.whyEnabled }),
+      ...(options.searchEnabled === undefined ? {} : { searchEnabled: options.searchEnabled }),
     };
     this.registry.onTransition(this.#handleTransition);
   }

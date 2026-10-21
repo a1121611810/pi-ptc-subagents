@@ -47,6 +47,7 @@ import {
   type DispatchResult,
 } from "../../src/runtime/dispatch.ts";
 import { CHILD_REPORT_SHAPE, CHILD_REPORT_TOOL_NAME } from "../../src/runtime/child-report.ts";
+import { WEB_DS_SEARCH_TOOL_NAME } from "../../src/search/contract.ts";
 import {
   CHILD_REPORT_DESCRIPTION,
   createChildReportTool,
@@ -1751,6 +1752,61 @@ describe("the report tool is activated in the child and not in the parent", () =
       "read",
       CHILD_REPORT_TOOL_NAME,
     ]);
+  });
+
+  test("a strict child keeps the search tool when the search module is on", () => {
+    /*
+     * ADR-0049, and the fix for a defect this repo's own live e2e measured (2026-10-20): on the
+     * `subagents` surface the parent dispatched with `readOnly: "strict"`, and the child's
+     * `--tools` list came out `read,grep,find,ls,ptc_child_report` — pi reads that list as an
+     * ALLOWLIST, so the child's `web_ds_search` was filtered out of existence and the child
+     * reported having no web tool at all. The capability was absent, silently.
+     *
+     * The tier's promise is that the child cannot WRITE. The search tool only reads the web, so
+     * keeping it under strict costs the promise nothing.
+     *
+     * Counterfactual: remove the `searchEnabled` branch from `childToolList` and this goes red,
+     * and so does the argv-level assertion below.
+     */
+    expect(childToolList({}, "strict", true)).toEqual([
+      "read",
+      "grep",
+      "find",
+      "ls",
+      WEB_DS_SEARCH_TOOL_NAME,
+      CHILD_REPORT_TOOL_NAME,
+    ]);
+
+    // The other half, and the reason the first is conditional: the module is OFF by default
+    // (ADR-0048), so a strict child for an install that never opted in is unchanged.
+    expect(childToolList({}, "strict")).toEqual([
+      "read",
+      "grep",
+      "find",
+      "ls",
+      CHILD_REPORT_TOOL_NAME,
+    ]);
+    expect(childToolList({}, "strict", false)).toEqual([
+      "read",
+      "grep",
+      "find",
+      "ls",
+      CHILD_REPORT_TOOL_NAME,
+    ]);
+
+    // The argv is what the child actually receives, so the claim is also read there: without this
+    // the list could be computed correctly and still never reach the child.
+    const agent: AgentConfigLike = { name: "a", source: "user", systemPrompt: "" };
+    const argv = buildArgv(
+      { agent: "a", task: "t", readOnly: "strict" },
+      agent,
+      "/tmp/p.md",
+      undefined,
+      true,
+    );
+    expect(argv[argv.indexOf("--tools") + 1]).toBe(
+      "read,grep,find,ls," + WEB_DS_SEARCH_TOOL_NAME + "," + CHILD_REPORT_TOOL_NAME,
+    );
   });
 
   test("the report tool is NOT active in the parent's ordinary surface", async () => {

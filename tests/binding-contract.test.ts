@@ -16,7 +16,6 @@ import {
   createBuiltinBindings,
   DISPATCH_BINDING_NAME,
 } from "../src/runtime/bindings.ts";
-import { WEB_DS_SEARCH_BINDING_NAME } from "../src/search/contract.ts";
 import * as contract from "../src/tools/binding-contract.ts";
 
 const PTC_SURFACES = ["ptc_run_code", "ptc_workflow"] as const;
@@ -69,7 +68,6 @@ function backtickedTokens(text: string): string[] {
 const NON_BINDING_VOCABULARY: readonly string[] = [
   "tools.<name>(args)",
   'tools["pi.dispatch"]',
-  'tools["web.ds.search"]',
   "{ content, details }",
   "content",
   "details",
@@ -157,13 +155,7 @@ function withinBudget(text: string): boolean {
  * counterfactual both read this, so the counterfactual compares against the
  * decision rather than against the thing under test.
  */
-const EXPECTED_NOTED: readonly string[] = [
-  "bash",
-  "edit",
-  "write",
-  DISPATCH_BINDING_NAME,
-  WEB_DS_SEARCH_BINDING_NAME,
-].sort();
+const EXPECTED_NOTED: readonly string[] = ["bash", "edit", "write", DISPATCH_BINDING_NAME].sort();
 
 /**
  * The bindings a note map carries, in a stable order. This extracts; it does not
@@ -326,7 +318,7 @@ describe("the contract states the facts that kill the measured crash classes", (
 });
 
 describe("a note exists only where behaviour genuinely differs", () => {
-  test("the noted bindings are exactly the five that deviate", () => {
+  test("the noted bindings are exactly the four that deviate", () => {
     expect(
       notedBindingNames(contract.BINDING_NOTES),
       "only deviating bindings carry a note",

@@ -330,8 +330,19 @@ export interface WebSearchConfig {
   error?: string;
 }
 
-/** The default per-session quota, used when the file says nothing about it. */
-export const DEFAULT_SEARCH_MAX_CALLS_PER_SESSION = 100;
+/**
+ * The default per-child quota, used when the file says nothing about it.
+ *
+ * **Sized for the CONTEXT, not for the money.** 30 calls at the overview's measured size
+ * (1,505–4,452 characters) is 45k–135k characters — roughly a 128k context's worth of search
+ * results, which is where a child stops being able to think. The money is not the binding
+ * constraint: 30 calls at 5 CNY per 1,000 is **0.15 CNY**, so the context is the axis that
+ * decides the number and the bill follows it.
+ *
+ * The measurement is in `docs/prototypes/search-context-budget-measurements.md`; the reasoning
+ * is in `docs/research/agent-search-result-delivery-patterns-20261020.md`.
+ */
+export const DEFAULT_SEARCH_MAX_CALLS_PER_SESSION = 30;
 
 /**
  * Read the search module's `webDsSearch` key from the agent-dir config file — ADR-0048's
@@ -1649,7 +1660,11 @@ export function resolveBaseOnStart(
  * (`base` is whatever the session was launched with) and a stale list would have the model calling
  * names that are not bound.
  */
-export function buildModeInstruction(bindings: readonly string[], hide: ModeHideStrategy): string {
+export function buildModeInstruction(
+  bindings: readonly string[],
+  hide: ModeHideStrategy,
+  options: { childCanSearch?: boolean } = {},
+): string {
   const builtinNote =
     hide === "all-but-ptc"
       ? "Every built-in tool is hidden from you, and so are other extensions' tools."
@@ -1685,6 +1700,14 @@ export function buildModeInstruction(bindings: readonly string[], hide: ModeHide
     "intermediate output yourself and returning only what matters is the point of this mode.",
     "Image-bearing tool results inside a program are attached to you after the run — never return",
     "base64 image data as your program's value.",
+    // The parent has no web tool of its own (the search module lives in the CHILD), so the only
+    // route to the web is a child. Saying so is what turns "I need the web" into "dispatch a
+    // child" — and it is conditional, because a child with the switch off cannot search either.
+    options.childCanSearch === true
+      ? "You have no web tool of your own, but a dispatched child does: it can search the web with" +
+        " its `web_ds_search` tool. When the task needs the web — a fact you cannot know, a page" +
+        " you have to find — dispatch a child and let it search."
+      : "",
     "If the PTC surfaces cannot express what you need, say so and the user can run /ptc off.",
   ]
     .filter((line) => line.length > 0)

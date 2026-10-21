@@ -30,7 +30,6 @@
  *    rather than a silently orphaned note.
  */
 import { DISPATCH_BINDING_NAME, type BuiltinBindingName } from "../runtime/bindings.ts";
-import { WEB_DS_SEARCH_BINDING_NAME } from "../search/contract.ts";
 
 /** The ceiling is a decision (ADR-0024 section 5), never a baseline to re-fit. */
 export const BINDING_CONTRACT_TOKEN_CEILING = 320;
@@ -78,19 +77,12 @@ const SHAPE_LINES = [
  * A pi caret bump can falsify any of the three with a green suite, so re-verify
  * them on a dependency bump -- the suite pins the write case against real pi.
  */
-type NotedBindingName =
-  | BuiltinBindingName
-  | typeof DISPATCH_BINDING_NAME
-  | typeof WEB_DS_SEARCH_BINDING_NAME;
+type NotedBindingName = BuiltinBindingName | typeof DISPATCH_BINDING_NAME;
 
 const NOTE_ENTRIES: ReadonlyArray<readonly [NotedBindingName, string]> = [
   ["bash", "`bash` rejects on a non-zero exit rather than resolving with its output."],
   ["write", "`write` always reports `details: null`."],
   ["edit", "`edit` always reports a `details` object carrying `diff` and `patch`."],
-  [
-    WEB_DS_SEARCH_BINDING_NAME,
-    '`tools["web.ds.search"]` puts the payload in `details`, not in `content`; bound only while the search is on.',
-  ],
   [
     DISPATCH_BINDING_NAME,
     '`tools["pi.dispatch"]` is the exception: it resolves to `{ text, status, ... }` with no `content` and' +

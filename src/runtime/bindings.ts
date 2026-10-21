@@ -16,10 +16,6 @@
  * get from the native pipeline.
  */
 import { validateToolArguments } from "@earendil-works/pi-ai";
-import { WEB_DS_SEARCH_BINDING_NAME, WEB_DS_SEARCH_TOOL_NAME } from "../search/contract.ts";
-import { WEB_DS_SEARCH_PARAMETERS } from "../search/schema.ts";
-import { describeSearchPayload, runWebDsSearch, toSearchParams } from "../search/run.ts";
-import type { WebDsSearchDeps } from "../search/run.ts";
 import type { SessionModel } from "./session-model.ts";
 import type { ULID } from "./task-storage.ts";
 import {
@@ -295,7 +291,8 @@ export const DISPATCH_PARAMETERS: DispatchParameters = Type.Object({
     Type.Union([Type.Literal("strict"), Type.Literal("lenient")], {
       description:
         'Ask for a read-only child. "strict": its tools are narrowed to the read set, so it ' +
-        'cannot write anything. "lenient": its tools are left exactly as they would have been ' +
+        "cannot write anything. Reading the web is not writing, so a child that can search " +
+        'keeps that ability. "lenient": its tools are left exactly as they would have been ' +
         "and it is only told to work without modifying anything. Omit for today\u2019s behaviour.",
     }),
   ),
@@ -369,23 +366,6 @@ export interface CreateBuiltinBindingsOptions {
    * binding is part of every production surface.
    */
   includeDispatch?: boolean;
-  /**
-   * Whether the DeepSeek search binding (`web.ds.search`, ADR-0047) joins the table.
-   *
-   * **Defaults to absent, which means the binding is NOT there.** The capability is a network
-   * egress with a per-call bill, so it is opt-in at the SWITCH level (`webDsSearch.enabled` in
-   * `ptc.json`) and this option is how the switch reaches the table. A caller that curates an
-   * explicit `names` list has said what the surface is, so this option — not the switch — is
-   * what decides, and it defaults to off for the same reason `includeDispatch` defaults to
-   * "did the caller curate".
-   */
-  includeSearch?: boolean;
-  /**
-   * What the search binding calls: the HTTP client, the session's quota, and the quota's
-   * ceiling. Required whenever `includeSearch` is true — a binding with no client could only
-   * fail, and failing at the call site would be a worse place to learn that than here.
-   */
-  searchDeps?: WebDsSearchDeps;
 }
 
 /**
@@ -628,63 +608,5 @@ export function createBuiltinBindings(options: CreateBuiltinBindingsOptions): Bi
     });
   }
 
-  // The DeepSeek search binding (ADR-0047). The same implementation the codemode face uses is
-  // reachable here as `tools["web.ds.search"]`, so a PTC program can compose a search with the
-  // rest of its bindings — and this binding is a PARALLEL binding in the sense ADR-0016 gave
-  // the word: it is a non-builtin name in the same table, not one of the seven pi built-ins.
-  //
-  // It is added AFTER the dispatch binding so that an explicit `names` list — the R3 read-only
-  // surface pattern — keeps meaning "exactly these", with neither parallel binding in it unless
-  // the caller asked.
-  if (options.includeSearch === true) {
-    const deps = options.searchDeps;
-    if (deps === undefined) {
-      throw new TypeError(
-        "includeSearch was requested without searchDeps; a search binding with no client could only fail.",
-      );
-    }
-    const toolLike = {
-      name: WEB_DS_SEARCH_TOOL_NAME,
-      description:
-        "Search the web through DeepSeek's Search API, or fetch one known page as Markdown.",
-      parameters: WEB_DS_SEARCH_PARAMETERS,
-    };
-    table.set(WEB_DS_SEARCH_BINDING_NAME, {
-      name: WEB_DS_SEARCH_BINDING_NAME,
-      execute: async (args, context) => {
-        const toolCallId = `ptc:${context.callId}`;
-        const toolCall = {
-          type: "toolCall",
-          id: toolCallId,
-          name: WEB_DS_SEARCH_TOOL_NAME,
-          arguments: args,
-        } as unknown as ToolCallLike;
-        let validated: unknown;
-        try {
-          validated = validateToolArguments(toolLike, toolCall);
-        } catch (error) {
-          // Same channel the other bindings use: a rejected call, not a resolved one (ADR-0024).
-          throw new Error(
-            bindingFailureMessage(
-              WEB_DS_SEARCH_BINDING_NAME,
-              error instanceof Error ? error.message : String(error),
-            ),
-          );
-        }
-        const outcome = await runWebDsSearch(deps, toSearchParams(validated));
-        if (!outcome.ok) {
-          throw new Error(bindingFailureMessage(WEB_DS_SEARCH_BINDING_NAME, outcome.text));
-        }
-        // ADR-0024's shared shape: `content` is an array of content blocks, `details` is the
-        // tool's own detail object. The PAYLOAD goes in `details` — it is structured, ten fields
-        // per result, and a program that has to parse a flattened string to get at it would be
-        // doing this module's work. `content` carries the readable index instead.
-        return {
-          content: [{ type: "text" as const, text: describeSearchPayload(outcome.payload) }],
-          details: outcome.payload,
-        };
-      },
-    });
-  }
   return table;
 }

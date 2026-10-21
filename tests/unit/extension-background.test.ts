@@ -216,7 +216,7 @@ describe("always-on registration", () => {
     }
   });
 
-  test("/ptc on and /ptc off cannot remove the three tools from the loadout", async () => {
+  test("/ptc off withholds the three task tools while nothing runs, and /ptc on brings them back", async () => {
     const { stub } = await wiredStub();
     const ctx = stubContext(stub);
 
@@ -229,14 +229,38 @@ describe("always-on registration", () => {
     const command = stub.commands.get("ptc");
     if (command === undefined) throw new Error("ptc command missing");
     await command.handler("off", ctx);
-    // The spec: /ptc off only gates new spawn, it does not hide the lifecycle face.
-    for (const name of TASK_TOOLS) expect(stub.active).toContain(name);
-    expect(stub.active).toEqual(ACTIVE);
+    // ADR-0050: with nothing running there is nothing for these tools to do, so they leave the
+    // model's face. They stay REGISTERED — pi cannot unregister a tool — but the model is no
+    // longer offered them.
+    for (const name of TASK_TOOLS) expect(stub.active).not.toContain(name);
+    expect(stub.tools.has("ptc_task_list"), "registered all the same").toBe(true);
 
     await command.handler("on", ctx);
     for (const name of TASK_TOOLS) expect(stub.active).toContain(name);
     // The narrowed loadout is exactly the five PTC tools (built-ins hidden, extension tools kept).
     expect(stub.active).toEqual([...TASK_TOOLS, ...PTC_TOOLS]);
+  });
+
+  test("/ptc off keeps the three task tools while a task is running, and says so", async () => {
+    const { stub, storage } = await wiredStub();
+    // A record owned by a LIVE owner survives the startup reconcile, so it is still running at
+    // the moment the user turns PTC off.
+    await seedForeignRunningTask(storage, TASK_RUNNING, OWNER, { pid: process.pid, bootMs: 1 });
+    const ctx = stubContext(stub);
+    await stub.emit("session_start", ctx);
+
+    const command = stub.commands.get("ptc");
+    if (command === undefined) throw new Error("ptc command missing");
+    await command.handler("off", ctx);
+
+    // The running task has to stay inspectable and stoppable: off is about what starts from here
+    // on, and it must not strand what is already running.
+    for (const name of TASK_TOOLS) expect(stub.active).toContain(name);
+    // And the user is told that the running one is NOT affected — otherwise "off" reads as
+    // "everything stopped", which is the opposite of what happened.
+    const said = stub.notifications.at(-1)?.message ?? "";
+    expect(said).toContain("NOT affected");
+    expect(said).toContain("1 background task");
   });
 
   test("the factory body never calls pi.* (R2): it only subscribes handlers", () => {
