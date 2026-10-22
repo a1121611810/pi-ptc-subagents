@@ -118,7 +118,7 @@ ADR-0028)。连接符 / `Array(n)` / 标签槽沿用 value tree 的形状,行宽
    不要混用 ASCII fallback(+-- / |)。 [机械: tests/render-ptc.test.ts]
 
 5. 不做 JSON.stringify:返回值渲染走 renderModelValue,禁止对 completion value 走 JSON.stringify。
-   那会让 report 退化成换行符噪声(ADR-0013)。 [机械: tests/text.test.ts]
+   那会让 report 退化成换行符噪声(ADR-0013)。 [机械: tests/run-code-tool.test.ts, tests/workflow-tool.test.ts, tests/binding-policy.test.ts]
 
 ## 阻塞触发
 

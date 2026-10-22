@@ -14,6 +14,7 @@
  *   - delete `CONTRIBUTING.md` from the skill's standards list -> the upstream-rule test goes red
  *   - drop the skill's "no call edge is not no tests" discipline -> the blast-radius test goes red
  *   - copy the three-layer table into a second file -> the one-home test goes red
+ *   - copy the three layer-routing questions into a second file -> the one-home test goes red
  *   - write "21 篇 ADR" back into the skill -> the no-hard-coded-count test goes red
  *   - restore the old ".yml 在 OCR 选择层不可见" sentence -> the yml test goes red
  *
@@ -23,12 +24,11 @@
  * deleted along with the copy -- a guard whose object no longer exists has nothing to assert.
  *
  * Expected-value sources are independent of the skill file itself: the filesystem (`existsSync`,
- * `git ls-files`) for CONTRIBUTING.md and for the one-home check, `.opencodereview/rule.json` for
- * the rule anchors, and issue #254's brief for the three-layer contract. Nothing here infers an
- * expectation from the implementation it checks.
+ * a directory walk) for CONTRIBUTING.md and for the one-home checks, `.opencodereview/rule.json`
+ * for the rule anchors, and issue #254's brief for the three-layer contract. Nothing here infers
+ * an expectation from the implementation it checks.
  */
-import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
@@ -38,6 +38,10 @@ const SKILL_PATH = join(REPO_ROOT, ".agents/skills/code-review/SKILL.md");
 const BASELINE_PATH = join(REPO_ROOT, "docs/agents/code-review-upstream.md");
 const RULE_JSON_PATH = join(REPO_ROOT, ".opencodereview/rule.json");
 const RULE_AUTHORING_MANUAL_PATH = join(REPO_ROOT, "docs/agents/ocr-rules.md");
+const AGENTS_PATH = join(REPO_ROOT, "AGENTS.md");
+
+/** Directories the markdown walk skips: dependencies, build output, and VCS metadata. */
+const SKIP_DIRS = new Set(["node_modules", "dist", ".git", ".scratch", "coverage"]);
 
 /** Patterns that match every path; a rule on one of these is filler, not a claim about a file. */
 const UNIVERSAL = new Set(["**", "**/*", "**/**", "**/*.*"]);
@@ -69,6 +73,100 @@ function readRuleJson(): { rules: { path: string; rule: string }[] } {
 const skill = readText(SKILL_PATH, "the code-review skill");
 const baseline = readText(BASELINE_PATH, "the upstream baseline doc");
 const ruleAuthoringManual = readText(RULE_AUTHORING_MANUAL_PATH, "the rule-authoring manual");
+const agents = readText(AGENTS_PATH, "AGENTS.md");
+
+interface MarkdownFile {
+  /** Path relative to the repository root, with forward slashes. */
+  readonly path: string;
+  readonly text: string;
+}
+
+/**
+ * Every markdown file in the repository, found by WALKING THE FILESYSTEM.
+ *
+ * Not `git ls-files`: that command throws outside a git worktree (so the guard would error
+ * instead of asserting) and it only sees TRACKED files (a copy added but not yet staged would be
+ * invisible — the exact drift the one-home checks exist to catch). The walk also sees files a
+ * reviewer has just written and not yet staged.
+ */
+function repositoryMarkdown(): MarkdownFile[] {
+  const found: MarkdownFile[] = [];
+  const walk = (dir: string, prefix: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const relative = prefix + entry.name;
+      if (entry.isDirectory()) {
+        if (SKIP_DIRS.has(entry.name)) continue;
+        walk(join(dir, entry.name), relative + "/");
+        continue;
+      }
+      if (!entry.name.endsWith(".md")) continue;
+      found.push({ path: relative, text: readFileSync(join(dir, entry.name), "utf8") });
+    }
+  };
+  walk(REPO_ROOT, "");
+  return found.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+}
+
+/**
+ * The first cell of a markdown table row, normalized (the padding a formatter adds removed).
+ */
+function firstCellOf(line: string): string {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("|")) return "";
+  const cells = trimmed.replace(/^\|/, "").split("|");
+  return (cells[0] ?? "").trim();
+}
+
+/**
+ * A markdown table's separator row: every cell is dashes (optionally colon-delimited).
+ */
+function isSeparatorRow(row: string): boolean {
+  const cells = row.trim().replace(/^\|/, "").replace(/\|$/, "").split("|");
+  return cells.length > 0 && cells.every((cell) => /^:?-{2,}:?$/.test(cell.trim()));
+}
+
+/**
+ * Does this text hold a table whose FIRST column is 「层」?
+ *
+ * Matching on the first column rather than on the whole header row is deliberate: a copy whose
+ * other column names differ, or whose columns are in a different order, is still a second copy
+ * of the same table and still has to be caught. The price is that the repository must not grow a
+ * second table whose first column is 「层」 for an unrelated purpose — the guard's own failure
+ * message says so.
+ */
+function hasLayerTable(text: string): boolean {
+  const lines = text.split("\n");
+  return lines.some(
+    (line, index) => firstCellOf(line) === "层" && isSeparatorRow(lines[index + 1] ?? ""),
+  );
+}
+
+/**
+ * Which files hold the three-layer table. Pure over the file list, so the counterfactual can
+ * add a synthetic copy and watch the count go to two without writing into the repository.
+ */
+function layerTableHolders(files: readonly MarkdownFile[]): string[] {
+  return files.filter((file) => hasLayerTable(file.text)).map((file) => file.path);
+}
+
+/**
+ * The three layer-routing questions, quoted verbatim from the rule-authoring manual §7.5.
+ *
+ * A file "holds the three questions" when it contains all three. The guard is first-match-wins
+ * in the other direction: exactly one file may hold them, so the manual is their single home.
+ */
+const ROUTING_QUESTIONS: readonly string[] = [
+  "**能被写成确定性脚本吗?**",
+  "**它要回答的是「谁调用了它 / 影响半径」吗?**",
+  "都不是 ⇒ **判断层**。OCR 逐条检查。",
+];
+
+/** Which files hold all three routing questions. */
+function routingQuestionHolders(files: readonly MarkdownFile[]): string[] {
+  return files
+    .filter((file) => ROUTING_QUESTIONS.every((question) => file.text.includes(question)))
+    .map((file) => file.path);
+}
 
 /**
  * Extract one `## <title>` section of the skill, heading excluded.
@@ -122,34 +220,6 @@ function escalationSection(ruleFile: string): string | null {
   const rest = lines.slice(start + 1);
   const end = rest.findIndex((line) => line.startsWith("## "));
   return (end === -1 ? rest : rest.slice(0, end)).join("\n");
-}
-
-/**
- * Every git-tracked markdown file, as paths relative to the repository root.
- *
- * The one-home check has to see the whole repository: a copy of the three-layer table in a file
- * nobody happens to read is still a second fact to keep in step.
- */
-function trackedMarkdown(): string[] {
-  const out = execFileSync("git", ["ls-files", "*.md"], { cwd: REPO_ROOT, encoding: "utf8" });
-  return out
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line !== "");
-}
-
-/**
- * One markdown table row, normalized: the padding `oxfmt` puts on table cells removed.
- *
- * The one-home marker is matched on the normalized form so that reformatting the table (which
- * the repo's formatter does, and does again on every version bump) does not silently disarm the
- * guard -- while a copy with a different column set or a different column order still misses.
- */
-function normalizeTableRow(line: string): string {
-  return line
-    .split("|")
-    .map((cell) => cell.trim())
-    .join("|");
 }
 
 describe("the code-review skill's standards sources", () => {
@@ -292,15 +362,63 @@ describe("the three-layer review apparatus", () => {
   test("the three-layer table lives in exactly one file", () => {
     // One fact, one home. A second copy of the table is a second thing to keep in step -- the
     // failure this repo already paid for with the hand-copied Q9-D rule table.
-    // Expected value source: the filesystem (the git-tracked markdown).
-    const marker = normalizeTableRow("| 层 | 载体 | 接口 | 归属（这层拥有的关注点） | 不归它管 |");
-    const holders = trackedMarkdown().filter((relative) =>
-      readText(join(REPO_ROOT, relative), relative)
-        .split("\n")
-        .some((line) => line.trim().startsWith("|") && normalizeTableRow(line) === marker),
+    // Expected value source: the filesystem (every markdown file in the repository, walked --
+    // not `git ls-files`, which throws outside a worktree and cannot see an untracked copy).
+    const files = repositoryMarkdown();
+    expect(files.length, "no markdown file was found; the guard would be vacuous").toBeGreaterThan(
+      0,
     );
 
-    expect(holders).toEqual(["docs/agents/review-layers.md"]);
+    const holders = layerTableHolders(files);
+
+    expect(
+      holders,
+      "the three-layer table's first column is 「层」; a second holder is a second copy of it " +
+        "(if the new table is NOT a copy, rename its first column)",
+    ).toEqual(["docs/agents/review-layers.md"]);
+  });
+
+  test("a copy of the three-layer table anywhere else turns the one-home check red", () => {
+    // The counterfactual, run on a SYNTHETIC file list: a copy of the table in another file
+    // makes the holder count two, which is what the assertion above rejects. Nothing is
+    // written into the repository -- a guard that edits its own subject can go green by
+    // editing it back.
+    const files = repositoryMarkdown();
+    const home = files.find((file) => file.path === "docs/agents/review-layers.md");
+    expect(home, "the one home of the table is missing").toBeDefined();
+
+    const copied = { path: "docs/agents/a-second-copy.md", text: home?.text ?? "" };
+
+    expect(layerTableHolders([...files, copied])).toContain("docs/agents/a-second-copy.md");
+    expect(layerTableHolders(files)).not.toContain("docs/agents/a-second-copy.md");
+  });
+
+  test("the three layer-routing questions live in exactly one file", () => {
+    // The three questions are the rule-authoring manual's job (you judge the layer while you
+    // write the rule), so their single home is `docs/agents/ocr-rules.md` §7.5. The
+    // review-layers doc points at them; it does not copy them. Copying a fact is how the
+    // hand-copied Q9-D table lost a row.
+    // Expected value source: the questions' own text, quoted verbatim from the manual.
+    const files = repositoryMarkdown();
+    const holders = routingQuestionHolders(files);
+
+    expect(
+      holders,
+      "the three layer-routing questions must live in exactly one file (the rule-authoring manual)",
+    ).toEqual(["docs/agents/ocr-rules.md"]);
+  });
+
+  test("a copy of the three layer-routing questions anywhere else turns the check red", () => {
+    // The counterfactual, again on a synthetic file list: a copy in another file makes the
+    // holder count two, which is what the assertion above rejects.
+    const files = repositoryMarkdown();
+    const home = files.find((file) => file.path === "docs/agents/ocr-rules.md");
+    expect(home, "the one home of the three questions is missing").toBeDefined();
+
+    const copied = { path: "docs/agents/a-second-copy.md", text: home?.text ?? "" };
+
+    expect(routingQuestionHolders([...files, copied])).toContain("docs/agents/a-second-copy.md");
+    expect(routingQuestionHolders(files)).not.toContain("docs/agents/a-second-copy.md");
   });
 
   test("the skill and the rule-authoring manual point at that one home", () => {
@@ -309,11 +427,32 @@ describe("the three-layer review apparatus", () => {
     expect(ruleAuthoringManual).toContain("docs/agents/review-layers.md");
   });
 
+  test("AGENTS.md points at the review-layers doc", () => {
+    // The repo's entry file names the single home of the three-layer apparatus. Without this
+    // assertion, deleting that pointer leaves every other check green.
+    // Expected value source: AGENTS.md's own text.
+    expect(agents).toContain("docs/agents/review-layers.md");
+  });
+
   test("the flow tells the author to pick a layer before adding a rule", () => {
     // Issue #254 (ticket ④): adding a check item has a layer decision attached to it.
     const flow = section("流程");
     expect(flow).toContain("新增规则前先判层");
+    expect(flow).toContain("docs/agents/ocr-rules.md");
     expect(flow).toContain("docs/agents/review-layers.md");
+  });
+
+  test("the flow builds the checklist through the checklist-building step", () => {
+    // The ownership markers are only分流 if something reads them. The skill's step 4 has to
+    // say that the checklist handed to the Spec sub-agent comes from
+    // `scripts/build-review-checklist.mjs`, not from raw `ocr delegate rule` output, and that
+    // the host agent reports the handover list.
+    // Expected value source: the script's own path in the repository.
+    expect(existsSync(join(REPO_ROOT, "scripts", "build-review-checklist.mjs"))).toBe(true);
+
+    const flow = section("流程");
+    expect(flow).toContain("scripts/build-review-checklist.mjs");
+    expect(flow).toContain("交接清单");
   });
 });
 

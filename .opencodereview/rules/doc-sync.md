@@ -37,7 +37,7 @@
    2000 lines。声明了但生产代码零读点 = 阻塞,处置按 `.opencodereview/rules/ptc-config-wiring.md`
    的读点纪律走(给出 `file:line` 读点,或显式挂账:订正文档 + follow-up issue 号)。
    反向也要走一遍:本次 diff 改的 `src/` 行为若落在某篇 ADR 的语义范围内,在报告里点名那篇 ADR 的章节号。
-   完成判据:每条声明都有读点证据或显式挂账行,零「后续处理」字样。 [机械: tests/doc-integrity.test.ts]
+   完成判据:每条声明都有读点证据或显式挂账行,零「后续处理」字样。 [待补守卫: tests/doc-integrity.test.ts 的断言二只查「具名声明在 src/ 里出现过」(扫 docs/adr/、docs/specs/、docs/usage/、README.md、GLOSSARY.md),不覆盖读点证据、显式挂账行、零「后续处理」字样与 src→ADR 反向对照]
 
 3. **代码改动是否需要 ADR**。三条触发线,任一命中就要求本次 diff 带 ADR 改动:新增对外契约(新 binding /
    新 model-facing tool / 新 frame kind)、语义翻转(同一入口的判定条件或默认值改变)、状态机增删边
@@ -62,7 +62,7 @@
    `2026-09-29-field-report-fix-code-review.md`。按 AGENTS.md 闭环纪律 (a):closure 只有在**回滚修复能让
    某个具名测试变红**时才算真闭环,「线上有这条路径」不是闭环,测试全绿也不是。
    完成判据:每个 closed 行能引出一个具名测试 + 回滚后变红的陈述;账本引用的 SHA 在 `git log` 里可解析;
-   账本 `Evidence` 列的行号仍指向正确段落。 [机械: tests/doc-integrity.test.ts]
+   账本 `Evidence` 列的行号仍指向正确段落。 [待补守卫: tests/doc-integrity.test.ts 的断言三只校验账本 SHA 能在 git 解析,断言四只查规范文档(docs/reviews/** 是快照,不在行号校验面),不覆盖 closed 行的具名测试 + 回滚变红陈述与 Evidence 行号指向正确段落]
 
 7. **文档里的行号 / 路径 / 常量值仍然有效**。这类漂移完全 silent:链接 404、行号错位、常量值过期
    都没有拦截。逐条验证本次 diff 触碰的文档里的 `./xxx.md` 相对链接、`file.ts:123` 行号、具体数字
@@ -70,7 +70,7 @@
    §3 开头 / §3 标题四处,而 §3 的 code block 只列 19 个字段——ADR-0023 §Boundary 已把它记为
    authoring miscount 并声明以 ADR-0023 为准,这种**已显式挂账**的漂移不开新阻塞 finding,同类的
    未挂账漂移要报。
-   完成判据:文档中每个引用都能被一条命令验证(链接存在、行号落在目标文件范围内、常量与 `src/` 定义相等)。 [机械: tests/doc-integrity.test.ts]
+   完成判据:文档中每个引用都能被一条命令验证(链接存在、行号落在目标文件范围内、常量与 `src/` 定义相等)。 [待补守卫: tests/doc-integrity.test.ts 覆盖相对链接存在(断言一)与 file:line 行号落在目标文件行数内(断言四),断言二只断言符号名出现,不覆盖「常量与 `src/` 定义相等」的取值相等]
 
 - **移动的代码块必须重读其注释**。当 diff 的一个 hunk 是纯移动(块的位置变了、内容基本没动)时,块内
   描述**自己的**注释要当成会过期来重读——「registered at factory time」「在 `off` 早退之后」这类声明,

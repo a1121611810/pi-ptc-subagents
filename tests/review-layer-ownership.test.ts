@@ -19,8 +19,15 @@
  *                                    marker that names only the first guard would be a
  *                                    half-true claim, and a half-true claim is what
  *                                    this whole apparatus exists to prevent.
- *   [待补守卫: <reason>]            — would be mechanical, but no guard exists yet. A gap
- *                                    in the mechanical layer, not the judgement layer's job.
+ *   [待补守卫: <reason>]            — would be mechanical, but the guard is ABSENT or
+ *                                    INCOMPLETE. A gap in the mechanical layer, not the
+ *                                    judgement layer's job. "Incomplete" means the guard
+ *                                    exists but covers only part of the item's completion
+ *                                    criterion — so the reason has to say what the existing
+ *                                    guard DOES cover and what part has no guard. A
+ *                                    待补守卫 reason that names a guard file must name one
+ *                                    that exists (checked below): a marker that points at a
+ *                                    file nobody can open is a broken pointer, not a gap.
  *   [判断层: <reason>]              — owned by the judgement layer; the reason says why it
  *                                    is not mechanizable.
  *
@@ -429,6 +436,40 @@ describe("review-layer ownership markers", () => {
 
     expect(seen, "no 待补守卫 marker is exercised; the guard would be vacuous").toBeGreaterThan(0);
     expect(problems, "待补守卫 markers with no reason").toEqual([]);
+  });
+
+  test("a 待补守卫 marker that names a guard file names one that exists", () => {
+    // The "the guard is incomplete" form of the marker: the reason says which existing guard
+    // covers part of the item, so the reason can point at a file. A pointer at a file nobody
+    // can open is a broken pointer, not a gap — and a broken pointer is exactly the kind of
+    // half-true claim this apparatus exists to prevent.
+    // Expected-value source: the repo-relative path, checked against the filesystem.
+    const problems: string[] = [];
+    let named = 0;
+    for (const { spec, item, marker } of allMarkers()) {
+      if (marker.kind !== "待补守卫") continue;
+      for (const match of marker.body.matchAll(/[\w./-]*\.test\.ts\b/g)) {
+        named += 1;
+        const path = match[0];
+        if (!repoFileExists(path)) {
+          problems.push(
+            spec.path +
+              ":" +
+              item.line +
+              " 待补守卫 names a guard file that does not exist: " +
+              path,
+          );
+        }
+      }
+    }
+
+    // Non-vacuity: the "incomplete guard" form is in use today (doc-sync 必查 2 / 6 / 7 name
+    // the doc-integrity fixture they only partly cover).
+    expect(
+      named,
+      "no 待补守卫 marker names a guard file; the guard would be vacuous",
+    ).toBeGreaterThan(0);
+    expect(problems, "待补守卫 markers pointing at a file that does not exist").toEqual([]);
   });
 
   test("every 判断层 marker carries a reason", () => {

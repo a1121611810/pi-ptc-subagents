@@ -21,7 +21,8 @@
  * into a guess.
  *
  * Scope: this fixture reads the rule files' `## 严重性升级(Q9-D)` sections ONLY. It never reads
- * or asserts on their check items -- another agent is editing those sections concurrently.
+ * or asserts on their check items — those carry the ownership markers, and
+ * `tests/review-layer-ownership.test.ts` is the fixture for them.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -111,21 +112,54 @@ function escalationSection(ruleFile: string): string | null {
 }
 
 /**
+ * The two signals a `## 严重性升级(Q9-D)` section can carry.
+ *
+ * Read them independently, because the order of the two checks used to decide the verdict, and
+ * that made a legitimate clarification flip it: an escalate section that says 「以下情况不升级」
+ * mentions 不升级, and checking 不升级 first turned that section into a no-escalate verdict.
+ * The verdict must not depend on which signal a section happens to mention first.
+ */
+function escalationSignals(section: string): { noEscalate: boolean; escalate: boolean } {
+  return {
+    noEscalate: section.includes("不升级"),
+    escalate: /delegate[^\n]{0,12}复核/.test(section),
+  };
+}
+
+/**
  * The prose verdict, read off the section above.
  *
- * Three outcomes, and the third one matters: a section that commits to neither escalation nor
+ * Four outcomes, and the third one matters: a section that commits to neither escalation nor
  * non-escalation is AMBIGUOUS, not a default. It must go red for a human to re-confirm rather
  * than flip the verdict silently -- the failure mode this whole ticket exists to prevent.
  *
  *   - no section at all  -> no-escalate  (the convention; see the convention test below)
  *   - "不升级"           -> no-escalate  (an explicit veto)
  *   - delegate 复核     -> escalate     (the section commits to a delegate review)
+ *   - BOTH of the two   -> ambiguous    (a human must re-confirm: the section contradicts
+ *                                         itself, or a clarification inside it reads as a veto)
  */
 function verdictOf(section: string | null): "escalate" | "no-escalate" | "ambiguous" {
   if (section === null) return "no-escalate";
-  if (section.includes("不升级")) return "no-escalate";
-  if (/delegate[^\n]{0,12}复核/.test(section)) return "escalate";
+  const { noEscalate, escalate } = escalationSignals(section);
+  if (noEscalate && escalate) return "ambiguous";
+  if (noEscalate) return "no-escalate";
+  if (escalate) return "escalate";
   return "ambiguous";
+}
+
+/**
+ * Why a section came out ambiguous, in words. The failure message has to NAME what it found:
+ * "states neither 升级 nor 不升级" and "mentions both 不升级 and delegate 复核" call for different
+ * fixes, and a message that says only "ambiguous" sends the reader back to the file to work out
+ * which of the two it is.
+ */
+function ambiguityReason(section: string): string {
+  const { noEscalate, escalate } = escalationSignals(section);
+  if (noEscalate && escalate) {
+    return "the section mentions both 不升级 and delegate 复核; re-confirm by hand";
+  }
+  return "the section states neither 升级 nor 不升级; re-confirm it by hand";
 }
 
 /** The distinct rule files rule.json dispatches -- the repo's own anchor list. */
@@ -184,6 +218,25 @@ describe("the Q9-D fact and the rule files' 严重性升级 sections", () => {
     expect(verdictOf("## 严重性升级(Q9-D)\n\n这一节只说了一句跟判定无关的话。")).toBe("ambiguous");
   });
 
+  test("a section carrying BOTH signals is ambiguous, and the reason names which", () => {
+    // The order-sensitivity this pins: a clarification inside an escalate section (「以下情况
+    // 不升级」) mentions 不升级, and a reader that checks 不升级 first flips the verdict to
+    // no-escalate. Both signals present => a human re-confirms; the reason says which case it
+    // is, because the two cases need different fixes.
+    // Expected value source: the two signal shapes the rule files really use, plus
+    // `docs/agents/review-layers.md`'s "判断层给证据,判断层不替它下事实结论" discipline —
+    // an ambiguous escalation is a question for a human, not a default.
+    const both = "## 严重性升级(Q9-D)\n\n以下情况不升级:任何其他命中 → delegate 复核。";
+
+    expect(verdictOf(both)).toBe("ambiguous");
+    expect(ambiguityReason(both)).toBe(
+      "the section mentions both 不升级 and delegate 复核; re-confirm by hand",
+    );
+    expect(ambiguityReason("## 严重性升级(Q9-D)\n\n这一节只说了一句跟判定无关的话。")).toBe(
+      "the section states neither 升级 nor 不升级; re-confirm it by hand",
+    );
+  });
+
   test("the machine-side verdict equals the rule file's own 严重性升级 verdict", () => {
     // The two-way alignment. Expected value source: the rule file's section (prose) against
     // rule.json's q9d map (machine). Counterfactuals: change either side alone and this goes
@@ -193,9 +246,13 @@ describe("the Q9-D fact and the rule files' 严重性升级 sections", () => {
     const mismatched: string[] = [];
 
     for (const ruleFile of dispatchedRuleFiles(parsed.rules)) {
-      const prose = verdictOf(escalationSection(ruleFile));
+      const section = escalationSection(ruleFile);
+      const prose = verdictOf(section);
       if (prose === "ambiguous") {
-        ambiguous.push(ruleFile);
+        // The message has to NAME what was found: "mentions both" and "states neither" are
+        // different defects, and a reader told only "ambiguous" has to go re-read the file to
+        // find out which one it is.
+        ambiguous.push(`${ruleFile}: ${ambiguityReason(section ?? "")}`);
         continue;
       }
       const machine = parsed.q9d[ruleFile]?.escalate;
@@ -208,9 +265,47 @@ describe("the Q9-D fact and the rule files' 严重性升级 sections", () => {
 
     expect(
       ambiguous,
-      "a rule file's 严重性升级 section states neither 升级 nor 不升级; re-confirm it by hand",
+      "a rule file's 严重性升级 section does not resolve to one verdict; re-confirm it by hand",
     ).toEqual([]);
     expect(mismatched).toEqual([]);
+  });
+
+  test("the nine rule files still resolve as before: 7 escalate, 1 no-escalate, 1 by convention", () => {
+    // The reader change (both signals => ambiguous) must not have moved any rule file's
+    // verdict. Expected value source: rule.json's q9d map, cross-checked against each rule
+    // file's own section -- the two artifacts are independent, and the counts are pinned so a
+    // reader change that silently re-resolves a section is visible.
+    const parsed = parseRuleJson(readText(RULE_JSON_PATH, ".opencodereview/rule.json"));
+    const dispatched = dispatchedRuleFiles(parsed.rules);
+    const verdicts = dispatched.map((ruleFile) => ({
+      ruleFile,
+      hasSection: escalationSection(ruleFile) !== null,
+      verdict: verdictOf(escalationSection(ruleFile)),
+    }));
+
+    expect(dispatched.length, "the rule.json anchor list is empty").toBe(9);
+    expect(
+      verdicts.filter((entry) => entry.verdict === "escalate").map((entry) => entry.ruleFile),
+      "the rule files that escalate",
+    ).toEqual([
+      ".opencodereview/rules/doc-sync.md",
+      ".opencodereview/rules/ptc-bgdispatch-contract.md",
+      ".opencodereview/rules/ptc-config-wiring.md",
+      ".opencodereview/rules/ptc-protocol-pair-correctness.md",
+      ".opencodereview/rules/ptc-worker-lifecycle.md",
+      ".opencodereview/rules/test-discipline-oracle.md",
+      ".opencodereview/rules/test-discipline.md",
+    ]);
+    expect(
+      verdicts
+        .filter((entry) => entry.verdict === "no-escalate" && entry.hasSection)
+        .map((entry) => entry.ruleFile),
+      "the rule file that says 不升级 in its own section",
+    ).toEqual([".opencodereview/rules/ptc-render-bounds.md"]);
+    expect(
+      verdicts.filter((entry) => !entry.hasSection).map((entry) => entry.ruleFile),
+      "the rule file that carries no 严重性升级 section at all",
+    ).toEqual([".opencodereview/rules/general.md"]);
   });
 
   test("a rule file without a 严重性升级 section is recorded as no-escalation", () => {
