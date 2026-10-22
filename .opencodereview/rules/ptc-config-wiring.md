@@ -62,7 +62,7 @@
    - 生产路径读点的 `file:line` 清单;
    - 该值如何流入承诺行为(哪一行把值交给了哪个行为)。
      报不出读点的键 = 断言「本键未接线」, 直接进阻塞触发。改名与删除最容易漏:改名后旧名残留读点
-     (写了新键、忘了改读点)是 `silent misconfiguration` 的经典形态, 要同时 grep 新名和旧名。
+     (写了新键、忘了改读点)是 `silent misconfiguration` 的经典形态, 要同时 grep 新名和旧名。 [机械: tests/config-read-points.test.ts]
 
 2. **接线证据的唯一标准:读点存在, 且值流入承诺行为。** 以下一律**不计**为接线证据:
    - `PtcConfig` 接口里的字段声明(`limits.ts:19-86`);
@@ -71,7 +71,7 @@
    - schema 校验 / typebox `PARAMETERS` 声明(`run-code.ts:68-90`);
    - 备份、回放、迁移路径上的读点 —— 这些路径**不产生生产行为**, 只在恢复历史状态;
    - 只有测试引用了该键。
-     报读点时要给「读点到行为」的中间那一跳, 不能只贴一个 `config.maxXxx` 出现的行号就算交差。
+     报读点时要给「读点到行为」的中间那一跳, 不能只贴一个 `config.maxXxx` 出现的行号就算交差。 [判断层: 「值流入承诺行为」要靠翻旋钮的反事实来判断,读点扫描证明不了这一跳]
 
 3. **禁止以「机制存在」替代读点证明。** 以下都不是证据, 见到就要追问:
    - 「API 里有 guard」(`effectiveTimeoutMs` 会 clamp, 不代表调用方真的走了它);
@@ -79,14 +79,14 @@
    - 「键已注册 / 已导出 / 已校验」(`index.ts:118-145` 的 re-export 只是门面);
    - 「注释写了它是这样工作的」。
      单测尤其危险:测试断言的是 `resolveConfig({...})` 的返回值, 不是生产行为。必须追问「哪条生产路径
-     会因这个键不同而给出不同结果」。
+     会因这个键不同而给出不同结果」。 [判断层: 「见到就要追问」是评审的举证义务,没有可机械化的形状]
 
 4. **双形态检索。** 每个键查两遍:
    - 字面量形态:键名在 `src/` 全量 grep(例如 `maxOldGenerationSizeMb`);
    - 常量 / 载体形态:值可能被包在结构体里再消费(例如 `resourceLimits` at `worker-pool.ts:70-73`、
      `env` at `worker-pool.ts:62`、`workerData` at `worker-pool.ts:65-68`、
      `serialize`/`serializedBytes` at `dispatcher.ts:595`)。
-     只查键名会漏掉「键换了名字但仍被消费」的接线, 只查结构体名会漏掉「结构体还在但键被摘掉」。
+     只查键名会漏掉「键换了名字但仍被消费」的接线, 只查结构体名会漏掉「结构体还在但键被摘掉」。 [待补守卫: 缺一条 fixture,除键名形态外还扫载体形态(resourceLimits / env / workerData / serialize)]
 
 5. **双计数器不得混淆。** `maxParallelSubCalls`(builtin 绑定扇出, `dispatcher.ts:622`)与
    `dispatchConcurrency`(`pi.dispatch` 在飞调用, owner 在 `background-runtime.ts:505` 的会话计数器)
@@ -100,7 +100,7 @@
    - 新增并发上限时, 必须说明它挂在哪个计数器上, 以及它与另一个计数器的关系;
    - 若 diff 让其中一个的占用去消耗另一个的额度(`limits.ts` 注释里禁止的形状), 这是契约变更, 阻塞级。
      附带的第三对:`poolSize`(常驻 worker 数)与 `dispatchConcurrency`(在飞调用数)也是两个天花板
-     (`limits.ts:63-69`), 同样不得互相推导。
+     (`limits.ts:63-69`), 同样不得互相推导。 [判断层: 必须说明新上限挂在哪个计数器上,这是一次说明与取舍,不是可判定的谓词]
 
 6. **显式挂账是唯一合法退路。** 「值读到了但不完全生效」的偏差, 只有两种合法形态:
    - 写进**源码注释**, 写明哪条路径惰性、为什么(参考 `turn-pools.ts:51-62`: per-run `PtcConfig` override
@@ -109,7 +109,7 @@
    - 写进 `docs/adr/` 并**建 follow-up issue**。
      「后续处理」「TODO 待优化」「不在本次范围」不算挂账 —— 没有 issue 号、没有可点击入口的挂账是
      无挂账。`turn-pools.ts:51-62` 是正面样板:它同时写清了惰性字段、冷路径的行为、以及调用方想要不同设置时
-     应该怎么构造(`TurnPools` 或不用池)。
+     应该怎么构造(`TurnPools` 或不用池)。 [判断层: 挂账是否成立、有没有可点击入口,只能由人读出来]
 
 7. **机器防线。** 每次新增 config 键, 必须配一条 source-scan fixture, 断言「每个 config 键在 `src/`
    有读点」。**已落地**:`tests/config-read-points.test.ts`(PtcConfig 15 键 / BUILTIN_BINDING_NAMES 7 个 /
@@ -129,7 +129,7 @@
      扫描要么恒红、要么只能放宽成「声明体里出现过」= 恒真。`WORKER_ENV_ALLOW_LIST` 就是这种形态:
      六个名字在 `src/` 里只以字符串字面量存在于声明体内。这种面必须换成
      「名单常量被读 + 消费函数在生产路径被调用 + 每个名字逐个走行为断言」三条,**并把降级理由写进注释**。
-     把判据放松到恒真比没有判据更糟 —— 它不会红,只会假装自己扫到了。
+     把判据放松到恒真比没有判据更糟 —— 它不会红,只会假装自己扫到了。 [机械: tests/config-read-points.test.ts]
 
 ## 反事实判据(接线专属,每个键必问)
 

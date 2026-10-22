@@ -106,19 +106,19 @@ ADR-0028)。连接符 / `Array(n)` / 标签槽沿用 value tree 的形状,行宽
    `TREE_VALUE_MAX_LINE_CHARS`;分块与文本块的在上面几张登记表里逐个列出),不是 magic number 散落在
    render 函数里。改上限时所有引用点必须联动。**新增上限必须同时登记进本文件的表格**——
    `tests/render-bounds-registry.test.ts` 会因为漏登记变红,这是本规则唯一的机器防线。
-   反向不要求:规则写得比常量更细不算缺陷。
+   反向不要求:规则写得比常量更细不算缺陷。 [机械: tests/render-bounds-registry.test.ts]
 
 2. 截断后元信息:文本块超过 50 KiB / 2000 lines 时必须显式标 truncated(参考 ADR-0015),
-   不可静默丢弃。
+   不可静默丢弃。 [机械: tests/unit/adr0015-truncation.test.ts]
 
 3. 截断保留符号:容器被截断时必须出保留符号(形如 '...+N more keys' 或尾部省略号),
-   用户能看出还有更多。写死的字面量要保持单一来源。
+   用户能看出还有更多。写死的字面量要保持单一来源。 [机械: tests/render-ptc.test.ts]
 
 4. 连接符正确:├─ / └─ / │ / space 四种字符用于区分 nesting vs continuation,
-   不要混用 ASCII fallback(+-- / |)。
+   不要混用 ASCII fallback(+-- / |)。 [机械: tests/render-ptc.test.ts]
 
 5. 不做 JSON.stringify:返回值渲染走 renderModelValue,禁止对 completion value 走 JSON.stringify。
-   那会让 report 退化成换行符噪声(ADR-0013)。
+   那会让 report 退化成换行符噪声(ADR-0013)。 [机械: tests/text.test.ts]
 
 ## 阻塞触发
 

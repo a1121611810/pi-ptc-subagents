@@ -12,15 +12,15 @@ dist/index.js(host)和 dist/worker.js(worker)分别 build,静态 import 自同�
 
 1. frame kinds 出口统一:所有 host 端读 HOST_FRAME_KIND.* 的地方都是 import 而非字面量。
    - 检索:在 src/runtime/(除 protocol.ts 本文件)中 grep 字面量 'connect' / 'init' / 'call-result' / 'cancel' / 'ready' / 'call' / 'log' / 'narration' / 'phase' / 'result' / 'error'
-   - 命中 = 阻断 finding,要求改为常量引用。
+   - 命中 = 阻断 finding,要求改为常量引用。 [待补守卫: 缺一条 source-scan fixture,扫 src/runtime/ 的 frame kind 字面量(排除 protocol.ts 自身)]
 
 2. log levels 出口统一:所有 'log' / 'info' / 'warn' / 'error' / 'debug' 字面量(在非协议文件里)→ 改为 PTC_LOG_LEVEL.*。
-   - 例外:用户可见 UI 文案不算。
+   - 例外:用户可见 UI 文案不算。 [待补守卫: 缺一条 source-scan fixture,扫非协议文件里的 log level 字面量]
 
-3. error kinds 出口统一:'exception' / 'timeout' / 'abort' / ... 字面量必须从 PTC_ERROR_KIND 取。
+3. error kinds 出口统一:'exception' / 'timeout' / 'abort' / ... 字面量必须从 PTC_ERROR_KIND 取。 [待补守卫: 缺一条 source-scan fixture,扫非协议文件里的 error kind 字面量]
 
 4. describeValue 共享:protocol.ts 同时被 host bundle 和 worker bundle import,
-   任何 describeValue 的输出格式变更都会破坏两端对齐。改它时必须附 grep 两侧 consumer。
+   任何 describeValue 的输出格式变更都会破坏两端对齐。改它时必须附 grep 两侧 consumer。 [判断层: 举证义务 —— 改它时必须附上两侧 consumer 的 grep,脚本不能替评审交这份证据]
 
 ## 阻塞触发条件
 

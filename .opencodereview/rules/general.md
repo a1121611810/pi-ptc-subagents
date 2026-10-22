@@ -3,6 +3,8 @@
 适用文件:未命中 `.opencodereview/rule.json` 里任何专用 path 规则的所有文件。**本文件挂在 `**` catch-all 锚上
 (`merge_system_rule: true`), 与通用系统检查并存。**
 
+[判断层: judgement call 兜底层 —— 12 条 smell 与 A–F 维度问的都是「这次改动有没有伤到可观察行为」,逐条挂守卫字段没有语义]
+
 ## 背景
 
 本文件是兜底 checklist, 不是重点审查对象:契约类文件(protocol / worker 生命周期 / 后台派发 / 渲染边界 /

@@ -11,7 +11,7 @@
 tests/dispatch-e2e.test.ts 等同名的 e2e 测试,禁止在没 spawn 真实 pi 子进程的情况下 PASS。
 const result = await dispatch({ agent: ..., task: ... }, ...); // OK 真 spawn
 与仅测 dispatchConcurrencyLimitReached() / decideCloseOutcome() / discoverAgent() 的单元测试是不同层级,
-后者不能冠 e2e / end-to-end 名。
+后者不能冠 e2e / end-to-end 名。 [待补守卫: 缺一条 fixture,扫 tests/ 里的 e2e 文件断言它们真的 spawn 子进程而不是只调单元函数]
 
 ### T2. agent fixture scope 必须与 discoverAgent 一致
 
@@ -22,7 +22,7 @@ Test fixture 要么:
 - 或写 ~/.pi/agent/agents/<name>.md(用户级,但留全局残留要清理)。
 
 Fixture 写在 <cwd>/.pi/agents/ 但 dispatch 调用没传 agentScope = scope mismatch = dispatch 必 reject,
-e2e 必然失败 — 但若断言是 F1 accept-both,则 PASS 在错误路径上。
+e2e 必然失败 — 但若断言是 F1 accept-both,则 PASS 在错误路径上。 [待补守卫: 缺一条 fixture,断言 e2e 的 agent fixture 目录与 discoverAgent 的 agentScope 一致]
 
 ### T3. 必须断言 fulfilled + 期望文本
 
@@ -31,14 +31,14 @@ e2e 必然失败 — 但若断言是 F1 accept-both,则 PASS 在错误路径上�
     expect(result.usage).toBeDefined();          // OK
     expect(result.usage?.turns).toBeGreaterThan(0);  // OK 真跑过
 
-禁止 F1(accept-both) / F2(conditional) 模式。
+禁止 F1(accept-both) / F2(conditional) 模式。 [机械: tests/test-meta-discipline.test.ts]
 
 ### T4. PT_DISPATCH_E2E gate 必须显式 skip
 
     import { test } from 'vitest';
     test.skipIf(process.env.PT_DISPATCH_E2E !== '1')('...', async () => { ... });  // OK
 
-或不设 gate,默认必跑(CI 跑得起)。
+或不设 gate,默认必跑(CI 跑得起)。 [机械: tests/test-meta-discipline.test.ts]
 
 ## 阻塞 finding(命中即 PR 阻塞)
 

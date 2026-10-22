@@ -29,7 +29,7 @@
    `docs/adr/0023-background-task-ownership.md:82`)。单边指针 = 阻塞。
    新增 ADR 必须进 `docs/adr/README.md` 的表格三列(# / Decision / Status);编号缺口只能在表格里以
    `(reserved — dropped: ...)` 显式占位(既有先例:0001 / 0006),不允许静默跳号。
-   完成判据:本次 diff 涉及的每个 ADR 编号在 README.md 表格里能查到,且表格每一行指向的文件存在。
+   完成判据:本次 diff 涉及的每个 ADR 编号在 README.md 表格里能查到,且表格每一行指向的文件存在。 [待补守卫: 缺一条 fixture,断言每个 ADR 都登记进 docs/adr/README.md 表格、编号缺口显式占位、amendment 指针双向可达]
 
 2. **ADR 声明 → 生产实现双向对照**。ADR 正文里出现的每个具名符号 / 字段 / 状态字符串都要在 `src/`
    找到读点:例 ADR-0022/0023 的 `ownerPid` / `ownerBootMs` / 21-field TaskRecord /
@@ -37,24 +37,24 @@
    2000 lines。声明了但生产代码零读点 = 阻塞,处置按 `.opencodereview/rules/ptc-config-wiring.md`
    的读点纪律走(给出 `file:line` 读点,或显式挂账:订正文档 + follow-up issue 号)。
    反向也要走一遍:本次 diff 改的 `src/` 行为若落在某篇 ADR 的语义范围内,在报告里点名那篇 ADR 的章节号。
-   完成判据:每条声明都有读点证据或显式挂账行,零「后续处理」字样。
+   完成判据:每条声明都有读点证据或显式挂账行,零「后续处理」字样。 [机械: tests/doc-integrity.test.ts]
 
 3. **代码改动是否需要 ADR**。三条触发线,任一命中就要求本次 diff 带 ADR 改动:新增对外契约(新 binding /
    新 model-facing tool / 新 frame kind)、语义翻转(同一入口的判定条件或默认值改变)、状态机增删边
    (TaskRecord 6 态、worker 状态机)。未触发也要在报告里写明「已有 ADR-00XX 覆盖,本次不改变其
-   Decision」并给章节号,不能默认略过。
+   Decision」并给章节号,不能默认略过。 [判断层: 三条触发线要拿本次 diff 逐条判,判定结果只能由评审给]
 
 4. **CHANGELOG 与用户可见变更**。`CHANGELOG.md` 走 Keep a Changelog + SemVer。判定标准是「下游
    `pi install npm:pi-ptc-subagents` 装到的能不能察觉」:program-visible / model-visible /
    wire-visible / 发布产物(tarball 内容、minify、source map 排除)算;纯内部重构与测试不算。
    版本号必须与 `package.json` 的 `version` 一致(`CHANGELOG.md` 里有同名条目)。**别在本规则里写死当前版本号**——版本一升就过期,而过期的版本号会让评审照着错的区段核对。
-   完成判据:用户可见变更 100% 有条目;反过来每条 CHANGELOG 条目都能在 diff 里指出对应改动。
+   完成判据:用户可见变更 100% 有条目;反过来每条 CHANGELOG 条目都能在 diff 里指出对应改动。 [判断层: 「下游装到的能不能察觉」是可见性判断,仓库里没有守卫能替代这次判断]
 
 5. **GLOSSARY.md 词条与实现同步**。仓库根 `GLOSSARY.md` 是单上下文领域词表,它里面的 _Avoid:_ 约束
    (如 output / result 的四义拆分)只有在实现统一后才成立。本次 diff 新引入的领域名词(新 TaskRecord
    字段、新 model-facing tool、新 lost reason 字符串)必须给出词条,或明确说明为何不进词表。
    词表说禁用、实现照用 = 阻塞。
-   完成判据:新名词有词条或有意排除的说明;被本次 diff 触碰的词条,其定义与 `src/` 里的常量逐字一致。
+   完成判据:新名词有词条或有意排除的说明;被本次 diff 触碰的词条,其定义与 `src/` 里的常量逐字一致。 [判断层: 新名词要不要进词表、词条定义与实现是否逐字一致,都要人读]
 
 6. **docs/reviews/ 账本与实际 commit 对齐**。账本每一行要四元对上:finding → 证据(`file:line` 或
    未截断 grep 计数)→ 处置 → 闭环 commit / snapshot SHA。现存四份:
@@ -62,7 +62,7 @@
    `2026-09-29-field-report-fix-code-review.md`。按 AGENTS.md 闭环纪律 (a):closure 只有在**回滚修复能让
    某个具名测试变红**时才算真闭环,「线上有这条路径」不是闭环,测试全绿也不是。
    完成判据:每个 closed 行能引出一个具名测试 + 回滚后变红的陈述;账本引用的 SHA 在 `git log` 里可解析;
-   账本 `Evidence` 列的行号仍指向正确段落。
+   账本 `Evidence` 列的行号仍指向正确段落。 [机械: tests/doc-integrity.test.ts]
 
 7. **文档里的行号 / 路径 / 常量值仍然有效**。这类漂移完全 silent:链接 404、行号错位、常量值过期
    都没有拦截。逐条验证本次 diff 触碰的文档里的 `./xxx.md` 相对链接、`file.ts:123` 行号、具体数字
@@ -70,19 +70,19 @@
    §3 开头 / §3 标题四处,而 §3 的 code block 只列 19 个字段——ADR-0023 §Boundary 已把它记为
    authoring miscount 并声明以 ADR-0023 为准,这种**已显式挂账**的漂移不开新阻塞 finding,同类的
    未挂账漂移要报。
-   完成判据:文档中每个引用都能被一条命令验证(链接存在、行号落在目标文件范围内、常量与 `src/` 定义相等)。
+   完成判据:文档中每个引用都能被一条命令验证(链接存在、行号落在目标文件范围内、常量与 `src/` 定义相等)。 [机械: tests/doc-integrity.test.ts]
 
 - **移动的代码块必须重读其注释**。当 diff 的一个 hunk 是纯移动(块的位置变了、内容基本没动)时,块内
   描述**自己的**注释要当成会过期来重读——「registered at factory time」「在 `off` 早退之后」这类声明,
   一旦块被搬走立刻变成假的,而 diff 工具默认只报「移动」,review 看的是变化、往往会漏掉移动的块里没变的
   注释。review 侧查点:diff 含纯移动块时,逐项打开块内注释、核对其描述的行为在**新位置**是否仍成立。
-  这是判断类规则(review 侧),机械的那半由 `tests/doc-integrity.test.ts` 的符号存在性检查兜。
+  这是判断类规则(review 侧),机械的那半由 `tests/doc-integrity.test.ts` 的符号存在性检查兜。 [判断层: 判断类规则 —— 要逐项打开搬移后的注释核对行为在新位置是否仍成立]
 
 8. **文档里写死的整跑门禁必须真的能跑**。文档若把某条命令写成「发布前必须跑」,它就得在任何 diff 外
    的场景成立。仓库的发布门禁逐字对应 `package.json` 的 scripts 字段:
    `pnpm run typecheck && pnpm run lint && pnpm run fmt:check && pnpm run build && pnpm exec vp test --run --coverage && pnpm run verify:dist`。
    文档改动若涉及 `verify:dist` / `scripts/verify-dist-render.mjs` 的断言形状,必须在同一次改动里
-   同步断言与文档两处。
+   同步断言与文档两处。 [待补守卫: 缺一条 fixture,断言文档里写死的发布门禁命令与 package.json 的 scripts 字段逐字对应]
 
 ## 阻塞触发
 

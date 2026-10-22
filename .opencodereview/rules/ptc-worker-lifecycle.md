@@ -26,19 +26,19 @@
 
 1. 状态转换守卫:每个 post() / on() handler 都校验自己是否仍拥有这个 worker。
    run identity(runId / callId)在 init 到达时锁定,后续所有出站 frame 路由到该 run 当时捕获的 port。
-   禁止通过 whichever port is open 路由。
+   禁止通过 whichever port is open 路由。 [机械: tests/worker-state.test.ts]
 
 2. warm reuse 清理:reset() 在结束 run 时必须证明我仍拥有这个 worker 才清状态。
-   切换 run 时,新 init 的 ready 与旧 run 的 terminal frame 不能相互 settle 对方的生命周期。
+   切换 run 时,新 init 的 ready 与旧 run 的 terminal frame 不能相互 settle 对方的生命周期。 [机械: tests/worker-state.test.ts]
 
 3. signal 处理:取消时 SIGTERM → 5s grace → SIGKILL。
-   跳过 grace 直接 kill 会让子进程留 zombie。
+   跳过 grace 直接 kill 会让子进程留 zombie。 [待补守卫: 缺一条 fixture,断言取消路径上 worker 走的是 SIGTERM → grace → SIGKILL 阶梯]
 
 4. handover:connect frame 是 handover 不是 wait(ADR-0017 §10(h))。
-   任何被宿主放弃的 worker 都要能被下一个 run 接手。
+   任何被宿主放弃的 worker 都要能被下一个 run 接手。 [机械: tests/worker-state.test.ts]
 
 5. drain 永不挂起(worker-pool.ts):drain() 必须在 drainGraceMs(默认 5s)后强制 resolve,
-   而不是 reject / hang。turn-end hook 不能因为一个坏 worker 挂掉。
+   而不是 reject / hang。turn-end hook 不能因为一个坏 worker 挂掉。 [机械: tests/worker-pool.test.ts]
 
 ## 阻塞触发
 
