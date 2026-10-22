@@ -12,14 +12,22 @@
  * So the guard asserts on **claims the skill makes about this repo**, and each one has a clean
  * counterfactual:
  *   - delete `CONTRIBUTING.md` from the skill's standards list -> the upstream-rule test goes red
- *   - delete a row from the skill's hand-copied rule table -> the rule.json alignment test goes red
+ *   - drop the skill's "no call edge is not no tests" discipline -> the blast-radius test goes red
+ *   - copy the three-layer table into a second file -> the one-home test goes red
  *   - write "21 篇 ADR" back into the skill -> the no-hard-coded-count test goes red
  *   - restore the old ".yml 在 OCR 选择层不可见" sentence -> the yml test goes red
  *
- * Expected-value sources are independent of the skill file itself: the filesystem (`existsSync`)
- * for CONTRIBUTING.md, `.opencodereview/rule.json` for the rule table, and the upstream rule for
- * what must be on the list. Nothing here infers an expectation from the implementation it checks.
+ * The skill's hand-copied Q9-D rule table is GONE (issue #254, ticket ②): the fact now lives in
+ * `.opencodereview/rule.json`'s top-level `q9d` map, one entry per rule file, and the guard for
+ * it is `tests/review-layer-q9d-alignment.test.ts`. The describe group that guarded the copy was
+ * deleted along with the copy -- a guard whose object no longer exists has nothing to assert.
+ *
+ * Expected-value sources are independent of the skill file itself: the filesystem (`existsSync`,
+ * `git ls-files`) for CONTRIBUTING.md and for the one-home check, `.opencodereview/rule.json` for
+ * the rule anchors, and issue #254's brief for the three-layer contract. Nothing here infers an
+ * expectation from the implementation it checks.
  */
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,6 +37,7 @@ const REPO_ROOT = fileURLToPath(new URL("../", import.meta.url));
 const SKILL_PATH = join(REPO_ROOT, ".agents/skills/code-review/SKILL.md");
 const BASELINE_PATH = join(REPO_ROOT, "docs/agents/code-review-upstream.md");
 const RULE_JSON_PATH = join(REPO_ROOT, ".opencodereview/rule.json");
+const RULE_AUTHORING_MANUAL_PATH = join(REPO_ROOT, "docs/agents/ocr-rules.md");
 
 /** Patterns that match every path; a rule on one of these is filler, not a claim about a file. */
 const UNIVERSAL = new Set(["**", "**/*", "**/**", "**/*.*"]);
@@ -59,6 +68,7 @@ function readRuleJson(): { rules: { path: string; rule: string }[] } {
 
 const skill = readText(SKILL_PATH, "the code-review skill");
 const baseline = readText(BASELINE_PATH, "the upstream baseline doc");
+const ruleAuthoringManual = readText(RULE_AUTHORING_MANUAL_PATH, "the rule-authoring manual");
 
 /**
  * Extract one `## <title>` section of the skill, heading excluded.
@@ -78,6 +88,68 @@ function section(title: string): string {
   const rest = lines.slice(start + 1);
   const end = rest.findIndex((line) => line.startsWith("## "));
   return (end === -1 ? rest : rest.slice(0, end)).join("\n");
+}
+
+/**
+ * Extract one `### <title>` subsection of the skill, heading excluded.
+ *
+ * The blast-radius audit is a `###` subsection of the Spec-axis block, and it is read on its own:
+ * the claim under test is about THAT section, and a token appearing elsewhere in the skill (the
+ * Q8 section used to carry the same claim) would make the guard pass on a skill that had lost it.
+ */
+function subsection(title: string): string {
+  const lines = skill.split("\n");
+  const start = lines.findIndex((line) => line.trim() === "### " + title);
+  if (start === -1) {
+    throw new Error(`the skill has no subsection titled "### ${title}"`);
+  }
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((line) => line.startsWith("## ") || line.startsWith("### "));
+  return (end === -1 ? rest : rest.slice(0, end)).join("\n");
+}
+
+/**
+ * A rule file's `## 严重性升级(Q9-D)` section -- heading excluded, or null when it has none.
+ *
+ * One rule file spells the heading `## 严重性升级(Q9-D hook)`, so the match is by prefix. Only
+ * the escalation section is read: the rule files' check items belong to another change
+ * (issue #254, ticket ①) and this guard must not depend on them.
+ */
+function escalationSection(ruleFile: string): string | null {
+  const lines = readText(join(REPO_ROOT, ruleFile), ruleFile).split("\n");
+  const start = lines.findIndex((line) => line.trim().startsWith("## 严重性升级"));
+  if (start === -1) return null;
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((line) => line.startsWith("## "));
+  return (end === -1 ? rest : rest.slice(0, end)).join("\n");
+}
+
+/**
+ * Every git-tracked markdown file, as paths relative to the repository root.
+ *
+ * The one-home check has to see the whole repository: a copy of the three-layer table in a file
+ * nobody happens to read is still a second fact to keep in step.
+ */
+function trackedMarkdown(): string[] {
+  const out = execFileSync("git", ["ls-files", "*.md"], { cwd: REPO_ROOT, encoding: "utf8" });
+  return out
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+}
+
+/**
+ * One markdown table row, normalized: the padding `oxfmt` puts on table cells removed.
+ *
+ * The one-home marker is matched on the normalized form so that reformatting the table (which
+ * the repo's formatter does, and does again on every version bump) does not silently disarm the
+ * guard -- while a copy with a different column set or a different column order still misses.
+ */
+function normalizeTableRow(line: string): string {
+  return line
+    .split("|")
+    .map((cell) => cell.trim())
+    .join("|");
 }
 
 describe("the code-review skill's standards sources", () => {
@@ -100,20 +172,6 @@ describe("the code-review skill's standards sources", () => {
   test("the upstream baseline doc is reachable from the skill", () => {
     expect(existsSync(BASELINE_PATH)).toBe(true);
     expect(skill).toContain("docs/agents/code-review-upstream.md");
-  });
-});
-
-describe("the code-review skill's hand-copied rule table", () => {
-  test("every rule file rule.json dispatches is named in the rule table", () => {
-    // The skill's Q9-D table is a hand copy of rule.json's anchors, and the skill itself
-    // warns that hand copies drift. Expected value source: .opencodereview/rule.json.
-    const { rules } = readRuleJson();
-    const table = section("阻塞级规则清单(Q8 纪律)");
-    const missing = rules
-      .map((rule) => rule.rule)
-      .filter((rulePath) => !table.includes(basename(rulePath)));
-
-    expect(missing).toEqual([]);
   });
 });
 
@@ -150,7 +208,14 @@ describe("the code-review skill's factual claims", () => {
       .filter((line) => line.includes("F4") && line.includes("阻塞"));
     expect(blockingF4.length, "F4 is not named as a blocking pattern").toBeGreaterThan(0);
 
-    expect(section("阻塞级规则清单(Q8 纪律)")).toContain("F4");
+    // The second half of this claim used to be asserted on the skill's hand-copied Q9-D table,
+    // which issue #254 ticket ② deleted -- the fact now lives in rule.json's top-level `q9d`
+    // map. The claim's new home is the rule file's own escalation section, which is the prose
+    // side the machine-side map is aligned against by tests/review-layer-q9d-alignment.test.ts.
+    // Expected value source: .opencodereview/rules/test-discipline.md.
+    const escalation = escalationSection(".opencodereview/rules/test-discipline.md") ?? "";
+    expect(escalation, "test-discipline.md has no 严重性升级 section").not.toBe("");
+    expect(escalation).toContain("F4");
   });
 
   test("every rule-anchor claim the skill makes matches rule.json", () => {
@@ -196,6 +261,59 @@ describe("the code-review skill's factual claims", () => {
 
     const wrong = claims.filter((claim) => anchoredTo.get(claim.file) !== claim.rule);
     expect(wrong).toEqual([]);
+  });
+});
+
+describe("the code-review skill's factual-layer reading discipline", () => {
+  test("'no call edge on the graph' is not read as 'no tests' in the blast-radius audit", () => {
+    // Issue #254 (ticket ③). The factual layer supplies evidence; the mechanical layer owns
+    // "are there tests". CodeGraph's "no tests found within N caller hops" is a GRAPH FACT,
+    // and reading it as the CONCLUSION "no tests" is the over-reach this discipline forbids.
+    // Expected value source: issue #254's brief (the three-layer contract).
+    const audit = subsection("Audit 1 · 调用点完备性(blast radius)");
+
+    // The discipline itself, in the skill's own words.
+    expect(audit).toContain("没有直接调用边");
+    expect(audit).toContain("不能读作「无测试」");
+
+    // The shape it defends against: a test that runs the code under test as a subprocess never
+    // imports the symbol, so the graph has no call edge BY CONSTRUCTION. The in-repo example
+    // has to exist for the example to be an example.
+    expect(audit).toContain("子进程");
+    expect(audit).toContain("tests/website-landing-tool-names.test.ts");
+    expect(existsSync(join(REPO_ROOT, "tests/website-landing-tool-names.test.ts"))).toBe(true);
+
+    // And the ownership: counting and running the tests is the mechanical layer's job.
+    expect(audit).toContain("机械层");
+  });
+});
+
+describe("the three-layer review apparatus", () => {
+  test("the three-layer table lives in exactly one file", () => {
+    // One fact, one home. A second copy of the table is a second thing to keep in step -- the
+    // failure this repo already paid for with the hand-copied Q9-D rule table.
+    // Expected value source: the filesystem (the git-tracked markdown).
+    const marker = normalizeTableRow("| 层 | 载体 | 接口 | 归属（这层拥有的关注点） | 不归它管 |");
+    const holders = trackedMarkdown().filter((relative) =>
+      readText(join(REPO_ROOT, relative), relative)
+        .split("\n")
+        .some((line) => line.trim().startsWith("|") && normalizeTableRow(line) === marker),
+    );
+
+    expect(holders).toEqual(["docs/agents/review-layers.md"]);
+  });
+
+  test("the skill and the rule-authoring manual point at that one home", () => {
+    // The pointer chain: both entry points name the file, neither copies the table.
+    expect(skill).toContain("docs/agents/review-layers.md");
+    expect(ruleAuthoringManual).toContain("docs/agents/review-layers.md");
+  });
+
+  test("the flow tells the author to pick a layer before adding a rule", () => {
+    // Issue #254 (ticket ④): adding a check item has a layer decision attached to it.
+    const flow = section("流程");
+    expect(flow).toContain("新增规则前先判层");
+    expect(flow).toContain("docs/agents/review-layers.md");
   });
 });
 

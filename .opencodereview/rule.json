@@ -171,5 +171,17 @@
       "rule": ".opencodereview/rules/general.md",
       "merge_system_rule": true
     }
-  ]
+  ],
+
+  "q9d": {
+    ".opencodereview/rules/doc-sync.md": { "escalate": true },
+    ".opencodereview/rules/general.md": { "escalate": false },
+    ".opencodereview/rules/ptc-bgdispatch-contract.md": { "escalate": true },
+    ".opencodereview/rules/ptc-config-wiring.md": { "escalate": true },
+    ".opencodereview/rules/ptc-protocol-pair-correctness.md": { "escalate": true },
+    ".opencodereview/rules/ptc-render-bounds.md": { "escalate": false },
+    ".opencodereview/rules/ptc-worker-lifecycle.md": { "escalate": true },
+    ".opencodereview/rules/test-discipline.md": { "escalate": true },
+    ".opencodereview/rules/test-discipline-oracle.md": { "escalate": true }
+  }
 }

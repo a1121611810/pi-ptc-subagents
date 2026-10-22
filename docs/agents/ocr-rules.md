@@ -29,6 +29,29 @@
   复刻 `.opencodereview/rules/` 布局,ocr 会刷一串 `WARNING: rule file not found: .opencodereview/rules/*.md`,
   并且所有条目静默失效、全部落到兜底。
 
+### 1.1 `q9d`:Q9-D 升级事实(顶层 map,一份规则文件一处)
+
+`rules[]` 是**按 path** 的(一条锚点一个 pattern),而 Q9-D 升级是**按规则文件**的。所以它不进 `rules[]` 的条目 ——
+挂在条目上等于同一件事抄十几遍、条条可以不一致且没有任何东西拦着。它挂在顶层:
+
+```json
+{
+  "rules": [ ... ],
+  "q9d": {
+    ".opencodereview/rules/ptc-render-bounds.md": { "escalate": false },
+    ".opencodereview/rules/test-discipline.md": { "escalate": true }
+  }
+}
+```
+
+- 键 = 规则文件路径,与 `rules[].rule` 用同一个字符串;值 = `{"escalate": true|false}`。
+- **OCR 不读这个字段。** 实测:在真实 rule.json 的副本上加顶层 `q9d` 键,`ocr rules check` 的
+  `Source` / `Pattern` 判定与基线**逐字相同**,也没有 "rule file not found" 警告 —— OCR 忽略未知键。
+- 读它的是 **skill 的编排端**与 **`tests/review-layer-q9d-alignment.test.ts`**(对齐 fixture:机器侧与散文侧
+  改一边不动另一边 ⇒ 转红)。
+- 散文那份在规则文件的 `## 严重性升级(Q9-D)` 一节。**无此节 ⇒ 不升级**(judgement call 兜底层的约定,
+  `general.md` 今天就是这一档);两边由对齐 fixture 绑在一起。
+
 ## 2. first-match-wins:数组顺序就是优先级
 
 数组里**第一条 path 匹配上的规则生效**,后面的同类 pattern 被静默遮蔽——没有告警。两个可复现实验
@@ -189,6 +212,23 @@ fnmatch 模拟 glob——ocr 的 `**/` 语义与 Python `fnmatch` 不同:`tests/
 - 严重性升级一节必须给出**理由**,不能只写「升级」。
 - 规则正文里的路径、pattern、行号同样是会被 review 的对象,写错等于给下一个评审埋雷
   (`ptc-worker-lifecycle.md` 曾把不存在的 `src/runtime/worker-state.ts` 写进「适用文件」行)。
+
+## 7.5 写新规则前先判层(路由判据)
+
+新增一条必查项 / 一份规则文件之前,先判它归哪一层,**判完只留一条**。
+
+> 三问是**判定程序**,不是三个可以同时命中的筛子 —— 写成「顺序清单」会让一条落进几层,那正是交错本身。
+> 第 1 问成立就归机械层,第 2 问成立就归事实层,都不成立才归判断层。一条必查项只留在它所属的那一层。
+
+1. **能被写成确定性脚本吗?** 能 ⇒ **机械层**。写成 CI 守卫;规则文件里只留 `[机械: X]` 指针,判断层**不**再把它写进逐条检查。
+2. 不能 ⇒ **它要回答的是「谁调用了它 / 影响半径」吗?** 是 ⇒ **事实层**。规则文件里写清「结论看 CodeGraph,不在 diff 里找」。
+3. 都不是 ⇒ **判断层**。OCR 逐条检查。
+
+**三层归属表、不交错规则与三个不变量的唯一实体在 [`docs/agents/review-layers.md`](./review-layers.md)** ——
+本节不复制那张表。
+
+**反例(本仓已有、今天放错层)**:3a 必查项 1 ——「grep 字面量 `'connect'` / `'init'` / `'call-result'` / …」。
+形状上属机械层(能写成脚本),今天每轮靠人或 sub-agent 手工 grep。判据样本就是它。
 
 ## 8. 命令速查
 

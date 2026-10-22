@@ -80,6 +80,7 @@ compatibility: >
    ② 由 host agent / sub-agent 按 `doc-sync.md` 的 8 条必查项逐条走 —— ADR 状态机与索引、ADR 声明→`src/` 读点双向对照、CHANGELOG、GLOSSARY.md 词条、`docs/reviews/` 账本四元对齐、行号/链接/常量漂移、整跑发布门禁。
    ③ `scripts/**` 与 `.github/workflows/**` **是可审的**:它们是 `.mjs` / `.yml`,两种扩展名都能进 `ocr review` / `ocr delegate preview`(实测 `.github/workflows/*.yml` 出现在 `reviewable_files` 里)。CI workflow 不需要手工套 checklist。
 9. **汇总**:两轴分列,不合并不重排,结尾一行各轴 finding 数 + 最严重项 + 升级条目数 + SYSTEM-ONLY 门禁结果。
+10. **新增规则前先判层**(维护动作):新增必查项 / 新规则文件之前,先判它归哪一层(机械层 / 事实层 / 判断层),**判完只留一条** —— 一条必查项只进它所属的那一层;别的层可以引用它的证据,但不重复下结论、不重复报、不重复升级。判据(三问)与三层归属表见 `docs/agents/review-layers.md`(唯一实体,本文件只留指针)。
 
 ## Spec 轴强制增量(阻塞项)
 
@@ -96,6 +97,16 @@ compatibility: >
 **触发信号**(命中任一即触发):默认值改动、export 删除/收窄、签名变化、参数 optional→required、错误模型变化、排序假设变化、配置语义变化。
 
 **要求**:用 `codegraph explore` 列出该接口全部调用点,逐一标注 已迁移 / 不受影响(说明理由) / 遗漏。**遗漏 = 阻塞 finding**。禁止 'diff 中没出现其他调用点' 作为完备性证据。
+
+**判读纪律(事实层的边界)**:**「图上无调用边」只能读作「没有直接调用边」,不能读作「无测试」。** CodeGraph 报的
+"no tests found within N caller hops" 是**图上事实**,不是「没有测试」这个结论 —— 报告里遇到必须显式写明这一点,
+不许把「图上没找到」写成「没有测试」。
+
+它防的是这个形状:**测试以子进程方式跑被测脚本**(不 import 被测符号)⇒ 图上按构造必然没有调用边。
+仓内现成例子:`tests/website-landing-tool-names.test.ts`(复制脚本 + `spawnSync` 跑,不 import 被测符号)。
+
+「有没有测试」归**机械层**(去数、去跑),不归事实层,也不由判断层替它下结论:事实层只负责交出
+「没有直接调用边」这条证据。三层的归属边界见 `docs/agents/review-layers.md`。
 
 **退化通道**(CodeGraph 不可用):`grep -rn '<symbol>' --include='*.ts' src/ tests/`(必须输出未截断计数 + 双形态检索:函数名 + 全大写常量名)。
 
@@ -141,19 +152,17 @@ background-runtime / notification-pipeline / child-process-lifecycle / bindings 
 判定口径:某文件解析出的 per-file group 的 rule 文本里,标了「阻塞级」或「PR 阻塞」的条目即为该文件的阻塞清单,
 `ocr delegate rule --format json` 直接给出。命中 → PR 阻塞 + 自动升级到 delegate 复核(Q9-D hook)。
 
-当前契约规则(**改 rule.json 后此处必须同步**;`tests/ocr-anchor-coverage.test.ts` 只验 rule.json 自身完整性,**不验这张手抄表** —— 这张表的同步由 `tests/code-review-skill-sync.test.ts` 兜底):
+**Q9-D 升级判定读 `.opencodereview/rule.json` 顶层的 `q9d` map** —— 键 = 规则文件路径(一份规则文件一处),
+值 = `{"escalate": true|false}`。**这个字段不是给 OCR 读的**:OCR 忽略 rule.json 的未知键(实测加顶层 `q9d`
+键后 `ocr rules check` 的 `Source` / `Pattern` 判定与基线逐字相同,也没有 "rule file not found" 警告);
+读它的是本 skill 的编排端,以及把它与规则文件 `## 严重性升级(Q9-D)` 一节对齐的
+`tests/review-layer-q9d-alignment.test.ts`(改一边不动另一边 ⇒ 那条 fixture 转红)。
 
-| OCR 规则文件                       | 审计对象                      | Q9-D 升级                                               |
-| ---------------------------------- | ----------------------------- | ------------------------------------------------------- |
-| `ptc-protocol-pair-correctness.md` | 3a 协议成对正确性             | 是(silent drift)                                        |
-| `ptc-worker-lifecycle.md`          | 3b worker 状态机              | 是                                                      |
-| `ptc-bgdispatch-contract.md`       | 3d 后台派发契约               | 是                                                      |
-| `ptc-config-wiring.md`             | 声明驱动关系 / 读点证据       | 是(silent misconfiguration)                             |
-| `ptc-render-bounds.md`             | 3c 渲染上限 / 截断契约        | **否** — visual contract,规则文件明确写「不升级」       |
-| `test-discipline.md`               | F1/F2/F3(+F4)                 | 是                                                      |
-| `test-discipline-oracle.md`        | T1-T4(dispatch 系列)          | 是                                                      |
-| `doc-sync.md`                      | ADR / 文档 / 账本漂移         | 是(**host agent 手动套用**,`.md` 不进任何 OCR 自动路径) |
-| `general.md`                       | catch-all 兜底(Fowler + 维度) | 否(judgement call)                                      |
+旧表只有三列,只有第三列是机器形状的;**前两列没有丢信息** ——「OCR 规则文件」是 `q9d` 的键本身,
+「审计对象」可从规则文件的 H1 推导:每份规则文件的 H1 已带自己的 audit id
+(例如 `# PTC Protocol Pair-Correctness (audit 3a, 阻塞级)`)。
+⚠️ **H1 里的「阻塞级」不是阻塞清单的判据**:3c 的 H1 没有它、general.md 的 H1 有它,而两者的 Q9-D 都是「否」。
+阻塞清单仍按上面那条口径从规则正文里标「阻塞级」/「PR 阻塞」的条目取。
 
 **升级机制**:spec 轴报出 "阻塞级 finding" → skill 编排端立即重新调 `ocr delegate rule` 拿该文件 checklist →
 用本仓库 ptc_run_code sub-agent 而非 OCR DeepSeek-flash 二次审。协议 drift、worker 状态、test discipline、
@@ -214,7 +223,7 @@ Fowler smell baseline **12 条已实体化在 `.opencodereview/rules/general.md`
 - **文档与 ADR 漂移**:`.opencodereview/rules/doc-sync.md` + `docs/adr/README.md` 索引 + `docs/reviews/` 账本。
 - **OCR 工具链**:`~/.opencodereview/config.json`(已配 deepseek-flash)+ `.opencodereview/rule.json`(项目规则)**作者手册 = `docs/agents/ocr-rules.md`**(schema / first-match-wins / merge 语义 / 文件类型覆盖 / 新锚点模板)。
 - **上游基线**:本 skill 的上游 fork 点、逐条裁决表、刻意偏离上游之处、重同步命令 = `docs/agents/code-review-upstream.md`(唯一事实源)。
-- **fixture**:`tests/test-meta-discipline.test.ts` 自动扫 F1/F2/F3/F4;`tests/ocr-anchor-coverage.test.ts` 自动扫孤儿规则、悬空锚点、catch-all 错位与 `Source: Project` 回归;`tests/code-review-skill-sync.test.ts` 自动扫本文件的可判定声明(规则表与 rule.json 对齐、无写死计数、`CONTRIBUTING.md` 在列)。
+- **fixture**:`tests/test-meta-discipline.test.ts` 自动扫 F1/F2/F3/F4;`tests/ocr-anchor-coverage.test.ts` 自动扫孤儿规则、悬空锚点、catch-all 错位与 `Source: Project` 回归;`tests/review-layer-q9d-alignment.test.ts` 自动扫 Q9-D 事实(rule.json 的 `q9d` map)与规则文件 `## 严重性升级(Q9-D)` 一节的对齐;`tests/code-review-skill-sync.test.ts` 自动扫本文件的可判定声明(无写死计数、`CONTRIBUTING.md` 在列、事实层的判读纪律、三层归属表只在一处)。
 
 ## 退化通道
 
