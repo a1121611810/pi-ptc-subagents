@@ -1,0 +1,70 @@
+# Code review — 评审装置的三层分层（#254）(2026-10-22)
+
+Date: 2026-10-22. **被审对象是 `feat/review-layers` 分支**，需求来源是 issue #254
+（评审装置的三层分层：规则文件声明机械守卫、Q8 表搬回唯一事实源、事实层判读纪律、路由判据）。
+
+Scope:固定点 `0621aac`（`feat/routing-engineering`）→ 第 1 轮审查 tip `a93f12c`；
+一轮修复（`a7304ad` / `dc6cf1b` / `5c2d16c`）+ 父级补的一处（`c0c6767`）。本轮由**两个只读 agent 并行**产出
+（Standards 轴 / Spec 轴），父级复核每一条断言后落地；修复由一个 agent 按文件归属一次做完。
+
+## 为什么不需要 ADR(doc-sync 必查 3 的三条触发线)
+
+三条**全部不触发**：① 无新增对外契约（`src/` 零改动，实测
+`git diff --name-only 0621aac..HEAD -- src/ packages/ .github/` 返回 0 个文件）；② 无语义翻转；
+③ 无状态机增删边。新出现的词（机械层 / 判断层 / 事实层）是**评审工具的词汇，不是领域词汇** ——
+`GLOSSARY.md` 是单上下文领域词表（见 `docs/agents/domain.md`），它记 PTC 这个领域里的概念，
+不记「一套评审装置有几层」。所以 `GLOSSARY.md` 不动，`docs/adr/` 不新增。
+
+## 为什么不需要 CHANGELOG(doc-sync 必查 4)
+
+下游 `pi install npm:pi-ptc-subagents` 装到的**察觉不到**：本票改的是评审装置自身
+（`.agents/skills/`、`docs/agents/`、`.opencodereview/`、`tests/`），而 `package.json` 的 `files`
+只发布 `dist/`、`docs/routes/`、`docs/usage/`、`README.md`、`LICENSE`、`THIRD_PARTY_NOTICES.md`、
+`CHANGELOG.md` —— 改动的路径**一个都不在发布物里**。所以 `[Unreleased]` 段不动。
+
+## Health gate
+
+`codegraph status`：206 files / 4,877 nodes / 18,057 edges（未触发本票任何 blast-radius 判定信号）。
+`ocr --version`：v1.12.11。锚点门禁 `SYSTEM-ONLY: []`，exit 0。
+发布门禁：typecheck / lint / fmt:check（392 files）/ build / `vp test --run --coverage`
+（101 passed | 1 skipped 文件，1733 passed | 6 skipped 用例）/ `verify:dist`（29 项）全绿。
+
+## 账本（finding → 证据 → 处置 → 关掉它的提交）
+
+| finding                                                                                                                                                | 证据                                                                                                                                                                                                                                                                                          | 处置                                                                                                                                                                                                                                                                                    | 关掉它的提交                         |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| **F-1【阻塞】「判断层不报这一条」今天没有读者** —— 契约里的「不重复报是机械的，不是纪律」要求一个可运行的 checklist 构建步骤，仓库里没有；标记是惰性的 | Standards 轴：全仓 grep 标记词（排除 `tests/`、`dist/`、`node_modules/`）只命中两个测试文件；`ocr delegate rule --format json src/tools/render.ts` 把 3c 的 5 条带标记条目**一条不少**交给评审。Spec 轴独立得到同一结论                                                                       | 建 `scripts/build-review-checklist.mjs`（按标记分流，交接清单点名被移交的条目与守卫），加 `tests/review-layer-checklist.test.ts`，并接进 `SKILL.md` 第 4/6/8 步。**父级复核发现根因是自己的指令自相矛盾**：契约写了这条验收标准，父级却在两个 agent 的 brief 里都写了「不要实现那一步」 | `a7304ad`                            |
+| **F-2【阻塞】三条 doc-sync 标记是「半真的话」** —— `tests/doc-integrity.test.ts` 不覆盖它们的完成判据，而标记语义让判断层闭嘴                          | 断言二只查 `SOURCE_TEXT.includes(name)`（**名字出现**，不是读点、不是值相等），扫面只有 `docs/adr/` `docs/specs/` `docs/usage/` + README + GLOSSARY；断言三只查账本 **SHA** 可解析；断言四明写「**规范文档**里 file:line」，`docs/reviews/**` 被划为快照**不查行号**                          | 三条改标 `[待补守卫: …]`，理由逐条写清 doc-integrity 覆盖哪部分、缺哪部分；`[待补守卫]` 的语义从「守卫缺席」扩到「守卫缺席**或不完整**」；缺的守卫显式挂账到 #255                                                                                                                       | `dc6cf1b`                            |
+| **F-3【阻塞】唯一的实体文档断言了一个不存在的程序** —— `docs/agents/review-layers.md:68-69` 用现在时把「checklist 构建这一步」写成仓库现状             | 同 F-1 的检索结果；且同文件 `:16` 的表把机械层接口写成「声明 + fixture」，与 `:68` 自相矛盾                                                                                                                                                                                                   | 随 F-1 变成真的，并把这句改写成机制实际的样子（清单构建这一步在哪、交接清单谁报）                                                                                                                                                                                                       | `a7304ad`                            |
+| **F-4【阻塞】一条标记点了错的守卫** —— 3c 必查 5 标 `[机械: tests/text.test.ts]`，而那个文件测的是渲染器不是调用点                                     | Spec 轴变异实测（在一次性 checkout 上，不动被验的树）：`src/tools/common.ts:417` 从 `renderModelValue(outcome.value)` 改成 `JSON.stringify(outcome.value)` ⇒ `tests/text.test.ts` **14 passed 全绿**；`run-code-tool` / `workflow-tool` / `binding-policy` **7 个转红**。父级独立复现同一结果 | 标记改为点名后三个守卫；`tests/text.test.ts` 被**刻意删掉**（它钉的是渲染器自己的输出形状，不是调用点），删的理由写进提交，免得下一个评审又把它加回来                                                                                                                                   | `dc6cf1b`                            |
+| **F-5【非阻塞】路由判据被抄两份、无守卫**                                                                                                              | `review-layers.md:40` 与 `ocr-rules.md:220` 逐字同一句注，`:43` 与 `:223` 逐字同一句第 1 问，`:49-50` 与 `:230` 同一句反例；而 `review-layers.md:3` 自称路由判据的唯一实体。既有守卫只认那张表                                                                                                | 三问的**唯一实体定在 `docs/agents/ocr-rules.md` §7.5**（规则作者手册：教人写规则的地方）；`review-layers.md` 保留表 + 不交错规则 + 三个不变量 + 业界依据，改指针；加一条「三问只在一处」的守卫                                                                                          | `dc6cf1b`                            |
+| **F-6【非阻塞】AGENTS.md 的新指针没有守卫**                                                                                                            | 删掉入口文件那句指针，门禁仍全绿                                                                                                                                                                                                                                                              | 补断言：AGENTS.md 必须指名 `docs/agents/review-layers.md`                                                                                                                                                                                                                               | `dc6cf1b`                            |
+| **F-7【非阻塞】「守卫是否仍覆盖这一项」的盲区只写在 commit message**                                                                                   | brief 明确要求「在试点结论里写明未验」；`grep -rn "对账" --include='*.md' --include='*.ts'`（排除 `node_modules/`、`docs/reviews/`）→ 0 命中，人工对账表不存在                                                                                                                                | 写进 `docs/agents/review-layers.md`（点名 F-4 就是反例）与 `docs/testing-constraints.md` 的 **「What the gate does not check…」** 一节（仓库指定的「写下来」的位置）                                                                                                                    | `dc6cf1b`                            |
+| **F-8【非阻塞】`verdictOf` 顺序敏感，失败消息与真实原因不符**                                                                                          | 先判 `不升级` 再判 `delegate…复核`：一节 escalate 的规则里加一句合法澄清「以下情况不升级」就会翻面，而消息说「既没说升级也没说不升级」                                                                                                                                                        | 两种信号同时出现 ⇒ `ambiguous`（人要确认），消息点名它看到了什么；新增用例；9 份规则文件仍解析为 7 escalate / 1 no-escalate / 1 走无节约定，并被新用例钉住                                                                                                                              | `dc6cf1b`                            |
+| **F-9【非阻塞】one-home 守卫只认逐字表头、且依赖 git**                                                                                                 | 守卫用 `git ls-files "*.md"`：列名/列序不同的副本抓不到；非 git 树里直接抛 `fatal: not a git repository`（隔离副本首跑实测）；未跟踪的副本看不见                                                                                                                                              | 改成遍历文件系统（跳过 `node_modules/`、`dist/`、`.git/`、`.scratch/`、`coverage/`），以**首列是「层」**匹配，副本换了列名/列序也抓得到；反事实保留                                                                                                                                     | `dc6cf1b`                            |
+| **F-10【非阻塞】「今天的三处违反」标题两处不准**                                                                                                       | 它是**立项时的快照**，且 3c 那条随本票消解（3c 五条必查项今天全是机械层）                                                                                                                                                                                                                     | 标题改成「立项时的三处违反（快照）」，逐条标状态：F1–F4 **仍在**、3c **已解决**、事实层越界 **已解决（以纪律形式）**                                                                                                                                                                    | `dc6cf1b`                            |
+| **F-11【非阻塞】F1–F4 仍重复登记**                                                                                                                     | `test-discipline.md` 的 `## 阻塞 finding` 一节仍把 F1/F2/F3 列为阻塞 finding，`## 严重性升级` 一节仍写「任何 F1/F2/F3/F4 命中 → delegate 复核」；而归属声明加在 `## 必查` 表格里 —— 那两节不是带标记的必查项，清单构建拿不掉它们                                                              | 规则正文按 #254 的 Out of scope **不重写**；显式挂账到 **#255**（含「这条要么由新票解、要么作为已知且被接受的重复写下来」的两条分支）                                                                                                                                                   | `dc6cf1b`（写进 `review-layers.md`） |
+| **F-12【非阻塞】ADR / GLOSSARY 的口径没人记**                                                                                                          | 60 篇 ADR 没有一篇覆盖评审装置本身                                                                                                                                                                                                                                                            | 口径写进 `docs/agents/review-layers.md`（不触发三条触发线；新词是评审工具词汇不是领域词汇），免得下一个人重新讨论一遍                                                                                                                                                                   | `dc6cf1b`                            |
+| **F-13【非阻塞】契约 ④ 自身两处措辞冲突**                                                                                                              | brief 的 ④ bullet 1 说三问**和三个不变量**都写进 `ocr-rules.md`，bullet 3 与 Key interfaces 又说三个不变量的唯一实体在 `review-layers.md`                                                                                                                                                     | 实现选的一侧保留（不变量在 `review-layers.md`、三问在 `ocr-rules.md` §7.5），文档与守卫对齐它；brief 的自相矛盾记在本账本                                                                                                                                                               | `dc6cf1b`                            |
+| **F-14【非阻塞】commit message 里的用例数过期**                                                                                                        | `6d020cf` 写「ownership fixture 12 tests」，实际 14（brief 说 13）                                                                                                                                                                                                                            | 历史不改；新提交不写错数；本账本记实际数：ownership 15 / q9d-alignment 8 / checklist 12 / skill-sync 24                                                                                                                                                                                 | `dc6cf1b`                            |
+| **F-15【观察】AGENTS.md 那句在 F-5 之后不再准确**                                                                                                      | 三问搬到 `ocr-rules.md` 之后，`AGENTS.md:50` 仍把路由判据算进 `review-layers.md` 的唯一实体                                                                                                                                                                                                   | 修复 agent 无权改 `AGENTS.md`（不在那轮的改动面内），只能写下来 —— **父级补改**：`AGENTS.md` 现在写「三层归属表、不交错规则与三个不变量 = `review-layers.md`;判层三问 = `ocr-rules.md` §7.5」                                                                                           | `c0c6767`                            |
+
+## 父级复核期的修正（不是评审 finding，是父级自己改的）
+
+| 修正                                           | 依据                                                                                                                          | 提交      |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | --------- |
+| 字段扩成多守卫 `[机械: A, B]`                  | 3d 的 3 条必查项的子命题分居不同守卫；只列第一个是**半真的话**                                                                | `a93f12c` |
+| 3c「截断必须显式可见」的归属从判断层改成机械层 | 实测 `tests/unit/adr0015-truncation.test.ts:75` 断言 `expect(task.truncated).toBe(true)` + `:51-56` 定位 `[Showing …]` 字面量 | `a93f12c` |
+| doc-sync 的必查项数从 8 改成 9                 | 8 条编号 + 1 条无编号（「移动的代码块必须重读其注释」）                                                                       | `a93f12c` |
+
+## 剩下的缺口（显式挂账，不吞掉）
+
+三处，写在 `docs/agents/review-layers.md` 的「剩下的缺口」一节，票是 **#255**（`enhancement` + `needs-triage`，
+两处口径要维护者先定）：doc-sync 必查 2/6/7 的完成判据没有守卫；没有检查验证「标记点名的守卫仍覆盖这一项」；
+F1–F4 仍重复登记。
+
+## 已知 flake（与本票无关）
+
+`tests/tool-visibility.test.ts` 的 4 个用例偶发失败（`Error: the probe never observed a provider request`）——
+它 spawn 真的 `pi` 并需要 provider。修复 agent 在**基线提交 `a93f12c` 的干净副本上复现了同样的 4 个失败**，
+所以不是本票引入；本票最终全量跑是绿的。
