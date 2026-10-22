@@ -12,7 +12,13 @@
  *
  *   [机械: tests/<guard>.test.ts]   — owned by the mechanical layer; `<guard>` is the
  *                                    test file that guards it. The judgement layer does
- *                                    not report it.
+ *                                    not report it. A check item may be guarded by more
+ *                                    than one file (its sub-claims live in different
+ *                                    guards), in which case every one of them is listed,
+ *                                    comma-separated: [机械: a.test.ts, b.test.ts] — a
+ *                                    marker that names only the first guard would be a
+ *                                    half-true claim, and a half-true claim is what
+ *                                    this whole apparatus exists to prevent.
  *   [待补守卫: <reason>]            — would be mechanical, but no guard exists yet. A gap
  *                                    in the mechanical layer, not the judgement layer's job.
  *   [判断层: <reason>]              — owned by the judgement layer; the reason says why it
@@ -270,11 +276,19 @@ function validateMarkers(text: string, exists: (path: string) => boolean): strin
   }
   const marker = markers[0] as Marker;
   if (marker.kind === "机械") {
-    if (marker.body === "") {
+    // One check item may be guarded by several files (its sub-claims live in different
+    // guards). Every named guard is checked, so a marker cannot quietly cover half the
+    // item and leave the other half unwatched.
+    const guards = marker.body
+      .split(",")
+      .map((guard) => guard.trim())
+      .filter((guard) => guard !== "");
+    if (guards.length === 0) {
       return ["机械 marker names no guard file"];
     }
-    if (!exists(marker.body)) {
-      return ["机械 marker names a guard file that does not exist: " + marker.body];
+    const missing = guards.filter((guard) => !exists(guard));
+    if (missing.length > 0) {
+      return ["机械 marker names a guard file that does not exist: " + missing.join(", ")];
     }
     return [];
   }
@@ -384,8 +398,15 @@ describe("review-layer ownership markers", () => {
     for (const { spec, item, marker } of allMarkers()) {
       if (marker.kind !== "机械") continue;
       seen += 1;
-      if (!repoFileExists(marker.body)) {
-        problems.push(spec.path + ":" + item.line + " guard file missing: " + marker.body);
+      // A check item may be guarded by several files; every one of them is named, and every
+      // one of them must exist. Checking only the first would let a half-true marker stand.
+      const guards = marker.body
+        .split(",")
+        .map((guard) => guard.trim())
+        .filter((guard) => guard !== "");
+      const missing = guards.filter((guard) => !repoFileExists(guard));
+      if (missing.length > 0) {
+        problems.push(spec.path + ":" + item.line + " guard file missing: " + missing.join(", "));
       }
     }
 
@@ -490,6 +511,31 @@ describe("the ownership-marker validator's counterfactuals", () => {
     );
 
     expect(problems).toContain("2 ownership markers on one check item");
+  });
+
+  test("a 机械 marker whose SECOND guard does not exist is reported", () => {
+    // The multi-guard form is not a convenience: a check item whose sub-claims live in two
+    // different guards must name both, and BOTH must exist. A marker that names only the first
+    // guard would be a half-true claim -- the judgement layer would go quiet on the half that
+    // no guard covers.
+    const problems = validateMarkers(
+      "1. 出口统一。 [机械: tests/real.test.ts, tests/does-not-exist.test.ts]",
+      (path) => path === "tests/real.test.ts",
+    );
+
+    expect(problems).toContain(
+      "机械 marker names a guard file that does not exist: tests/does-not-exist.test.ts",
+    );
+  });
+
+  test("a 机械 marker naming several existing guards is accepted", () => {
+    // The happy path for the multi-guard form: every named guard exists, so there is no problem.
+    const problems = validateMarkers(
+      "1. 出口统一。 [机械: tests/a.test.ts, tests/b.test.ts]",
+      (path) => path === "tests/a.test.ts" || path === "tests/b.test.ts",
+    );
+
+    expect(problems).toEqual([]);
   });
 
   test("a well-formed marker with an existing guard produces no problem", () => {
