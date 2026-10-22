@@ -53,6 +53,14 @@ compatibility: >
    ocr delegate preview --format json [--from <ref> --to <ref>] [--commit <hash>] [--background-file <spec.md>]
    ocr delegate rule --format json <preview 输出里的 reviewable_files 路径>
    ```
+   **交给评审的清单必须过一遍 checklist 构建这一步**,不能把 `ocr delegate rule` 的原始输出直接当清单:
+   ```bash
+   ocr delegate rule --format json <paths> | node scripts/build-review-checklist.mjs > checklist.json
+   ```
+   它按每条必查项的**归属标记**分流:带 `[机械: X]` / `[待补守卫: …]` 的整条拿掉(机械层已经强制、或本该强制它们),
+   带 `[判断层: …]` 的留下。**被拿掉的那些连同它们的守卫写进脚本 stderr 的「交接清单」** ——
+   **host agent 必须把交接清单写进报告**:点名守卫的 = 机械层已强制,判断层不重复报;**没有守卫的 = 缺口**,要报出来。
+   (标记的形状与语义见 `docs/agents/review-layers.md`;命令的完整说明在脚本自己的文件头。)
    输出 JSON:每个文件被分配到一个 group,group 含 (source, pattern, rule text)。project rule 优先,系统规则兜底。`--background-file` 把 spec 正文作为需求上下文注入,这是 Spec 轴「独立来源」的唯一合法管道。
    **注意 `.md` 的解析层与选择层是分裂的**:`.md` 在**解析层**正常(`ocr rules check` / `ocr delegate rule` 对 .md 返回 project group),但在**选择层**被丢弃——`ocr delegate preview`、`ocr review`、**`ocr scan`** 三条路径都把每个 `.md` 标成 `will_review: false` + `exclude_reason: unsupported_ext`(实测:`ocr scan --preview` 列出的 `.md` **无一** `will_review: true`;数量随仓库增长,以实跑为准,判定看 `will_review` 不看个数)。`tests/**` 是另一条独立排除(`exclude_reason: default_path`),只有显式传路径才解析。
    **`.yml` 不在排除面里 —— 它是可审的**(实测:`ocr delegate preview` 把 `.github/workflows/*.yml` 列进 `reviewable_files`;`ocr scan --preview` 里绝大多数 `.yml` 是 `will_review: true`)。**结论:文档 / ADR / README 无法委托给 OCR,只能由 host agent 手动套用对应 checklist(见第 8 步);CI workflow 反而可以直接委托。**
@@ -67,20 +75,22 @@ compatibility: >
    - **两个调用一起发出、都走前台、并消费它们返回的报告再汇总**。**禁止后台派发后另等消息**:本仓 `ptc_subagent` / `pi.dispatch` 的 `background: true` 只返回句柄(`Started background task <ULID>`,见 `src/tools/subagent.ts`),报告要另用 `ptc_task_output` 轮询 —— 后台化又不轮询 = 两轴报告永不到手(上游 #1073 的形态)。前台调用返回的就是报告本身。
    - **两轴都只读** —— 它们只审阅,不写文件:
      - **Standards 轴**:对照**已搜出的**规范文档清单(至少 `AGENTS.md`、`CONTRIBUTING.md`、`docs/testing-constraints.md`、`docs/adr/`、`README.md`、`GLOSSARY.md`)+ catch-all 兜底规则 `.opencodereview/rules/general.md`(Fowler 12 条 baseline + 触发式维度表已实体化在那里)。
-     - **Spec 轴**:OCR 拿到的 per-file rule groups 当 checklist;每个文件按 checklist 走。audit 1(blast radius)用 CodeGraph 证据;audit 2(Oracle check)用反事实判据 + 6 条硬约束;声明驱动关系按 `ptc-config-wiring.md` 的读点纪律走;越界实现按「越界实现(scope creep)」节走。
+     - **Spec 轴**:**第 4 步构建出来的** per-file checklist 当 checklist(不是 `ocr delegate rule` 的原始输出 —— 原始输出里带
+       `[机械: X]` / `[待补守卫: …]` 标记的条目已经被拿掉);每个文件按 checklist 走。audit 1(blast radius)用 CodeGraph 证据;audit 2(Oracle check)用反事实判据 + 6 条硬约束;声明驱动关系按 `ptc-config-wiring.md` 的读点纪律走;越界实现按「越界实现(scope creep)」节走。
        Spec sub-agent brief **必须**逐字包含下方「Spec 轴强制增量」全部指令原文。
    - **两个 brief 都要带这句禁令**(上游已知未修 bug,本仓同样裸奔):`Do not invoke /code-review or spawn additional agents: perform this review directly.` —— 否则 sub-agent 会重新找到本 skill 再派一轮(上游记录有人跑到 50+ 个 agent)。
 7. **升级判定**(Q9-D hook):若 spec 轴的某个 finding 命中**阻塞级规则**(见下方),自动升级 — 该文件用 delegate mode 重新审一遍(我们的 sub-agent 而非 OCR DeepSeek-flash),**并同时开 OCR 的召回旋钮**(见下方升级机制的命令)。
 8. **文档 / ADR / 门禁契约审计**(host agent 亲自跑,OCR 委托不了):
    `.md` 在 OCR 选择层不可见(见第 4 步),所以**文档**这一类**不能**用 `ocr review` / `ocr scan`。做法:
-   ① 显式枚举本次 diff 触及的文档路径,自己传进解析层拿 checklist:
+   ① 显式枚举本次 diff 触及的文档路径,自己传进解析层拿 checklist —— **同样过一遍第 4 步的 checklist 构建**,归属标记照样分流:
    ```bash
-   ocr delegate rule --format json <diff 触及的 .md 路径...>   # 解析层对 .md 正常,返回 project group
+   ocr delegate rule --format json <diff 触及的 .md 路径...> | node scripts/build-review-checklist.mjs > checklist.json
+   # 解析层对 .md 正常,返回 project group
    ```
-   ② 由 host agent / sub-agent 按 `doc-sync.md` 的 8 条必查项逐条走 —— ADR 状态机与索引、ADR 声明→`src/` 读点双向对照、CHANGELOG、GLOSSARY.md 词条、`docs/reviews/` 账本四元对齐、行号/链接/常量漂移、整跑发布门禁。
+   ② 由 host agent / sub-agent 按上面那份**分流后**的 `doc-sync.md` 清单逐条走 —— ADR 状态机与索引、ADR 声明→`src/` 读点双向对照、CHANGELOG、GLOSSARY.md 词条、`docs/reviews/` 账本四元对齐、行号/链接/常量漂移、整跑发布门禁。**被分流掉的那些项(机械层已强制的、以及还没有守卫的缺口)走第 4 步的交接清单上报,不在这份清单里逐条走。**
    ③ `scripts/**` 与 `.github/workflows/**` **是可审的**:它们是 `.mjs` / `.yml`,两种扩展名都能进 `ocr review` / `ocr delegate preview`(实测 `.github/workflows/*.yml` 出现在 `reviewable_files` 里)。CI workflow 不需要手工套 checklist。
 9. **汇总**:两轴分列,不合并不重排,结尾一行各轴 finding 数 + 最严重项 + 升级条目数 + SYSTEM-ONLY 门禁结果。
-10. **新增规则前先判层**(维护动作):新增必查项 / 新规则文件之前,先判它归哪一层(机械层 / 事实层 / 判断层),**判完只留一条** —— 一条必查项只进它所属的那一层;别的层可以引用它的证据,但不重复下结论、不重复报、不重复升级。判据(三问)与三层归属表见 `docs/agents/review-layers.md`(唯一实体,本文件只留指针)。
+10. **新增规则前先判层**(维护动作):新增必查项 / 新规则文件之前,先判它归哪一层(机械层 / 事实层 / 判断层),**判完只留一条** —— 一条必查项只进它所属的那一层;别的层可以引用它的证据,但不重复下结论、不重复报、不重复升级。判据(三问)在 `docs/agents/ocr-rules.md` §7.5,三层归属表在 `docs/agents/review-layers.md`(各自唯一实体,本文件只留指针)。判完之后每条必查项都要带归属标记,清单构建那一步按标记分流(见第 4 步)。
 
 ## Spec 轴强制增量(阻塞项)
 
@@ -223,7 +233,7 @@ Fowler smell baseline **12 条已实体化在 `.opencodereview/rules/general.md`
 - **文档与 ADR 漂移**:`.opencodereview/rules/doc-sync.md` + `docs/adr/README.md` 索引 + `docs/reviews/` 账本。
 - **OCR 工具链**:`~/.opencodereview/config.json`(已配 deepseek-flash)+ `.opencodereview/rule.json`(项目规则)**作者手册 = `docs/agents/ocr-rules.md`**(schema / first-match-wins / merge 语义 / 文件类型覆盖 / 新锚点模板)。
 - **上游基线**:本 skill 的上游 fork 点、逐条裁决表、刻意偏离上游之处、重同步命令 = `docs/agents/code-review-upstream.md`(唯一事实源)。
-- **fixture**:`tests/test-meta-discipline.test.ts` 自动扫 F1/F2/F3/F4;`tests/ocr-anchor-coverage.test.ts` 自动扫孤儿规则、悬空锚点、catch-all 错位与 `Source: Project` 回归;`tests/review-layer-q9d-alignment.test.ts` 自动扫 Q9-D 事实(rule.json 的 `q9d` map)与规则文件 `## 严重性升级(Q9-D)` 一节的对齐;`tests/code-review-skill-sync.test.ts` 自动扫本文件的可判定声明(无写死计数、`CONTRIBUTING.md` 在列、事实层的判读纪律、三层归属表只在一处)。
+- **fixture**:`tests/test-meta-discipline.test.ts` 自动扫 F1/F2/F3/F4;`tests/ocr-anchor-coverage.test.ts` 自动扫孤儿规则、悬空锚点、catch-all 错位与 `Source: Project` 回归;`tests/review-layer-q9d-alignment.test.ts` 自动扫 Q9-D 事实(rule.json 的 `q9d` map)与规则文件 `## 严重性升级(Q9-D)` 一节的对齐;`tests/review-layer-ownership.test.ts` 自动扫每条必查项的归属标记;`tests/review-layer-checklist.test.ts` 自动扫 checklist 构建这一步(机械项不进清单、交接清单点名守卫);`tests/code-review-skill-sync.test.ts` 自动扫本文件的可判定声明(无写死计数、`CONTRIBUTING.md` 在列、事实层的判读纪律、三层归属表只在一处、判层三问只在一处)。
 
 ## 退化通道
 

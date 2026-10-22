@@ -308,6 +308,32 @@ read the code a sentence points at, and ask what it does when that sentence's co
 met. That is per-claim, not a filter, which is the honest answer rather than a three-item list that
 reads like one.
 
+### One more thing the gate cannot see: whether a named guard still covers its item
+
+The ownership markers in `.opencodereview/rules/*.md` name the guard that forces each check
+item (`[机械: tests/x.test.ts]`). Two things about them are mechanically checked
+(`tests/review-layer-ownership.test.ts`): the marker is legal, and the guard file it names
+**exists**. What is not checked is the third thing -- **that the named guard still covers that
+item's completion criterion.** The guard files do not read the markers (they read source, tests
+and documents), so they cannot answer that question, and nothing else in the tree does either.
+
+**The measured case.** `ptc-render-bounds.md`'s check item 5 was marked
+`[机械: tests/text.test.ts]`, and `tests/text.test.ts:6` imports only `renderModelValue` -- it
+tests the renderer, not the call site. Mutating `src/tools/common.ts:417` from
+`renderModelValue(outcome.value)` to `JSON.stringify(outcome.value)` left **14 passed, 0 failed**
+in `tests/text.test.ts`, while `tests/run-code-tool.test.ts`, `tests/workflow-tool.test.ts` and
+`tests/binding-policy.test.ts` turned **7 tests red**. The marker named a file that existed and
+guarded nothing: a half-true claim, and it had the judgement layer going quiet about a check
+item nobody was enforcing.
+
+The marker was corrected in the same round, but **the class is not closed by that correction**:
+a guard can drift away from its item at any time, and the next marker edit can name a file that
+merely exists. "The file exists" is not "the file covers the item." The mechanical fix for the
+class would be a mutation harness that, per marker, breaks the thing the item is about and
+asserts the named guard turns red -- the same shape as the counterfactual discipline in §5,
+applied to the ownership markers. It is not built. Until it is, this gap is carried on paper
+(`docs/agents/review-layers.md`, "剩下的缺口") and by a follow-up issue, not by a gate.
+
 ### What would retire this decision
 
 A claim-class checker with a **measured** false-positive count over the whole corpus, in the spirit
