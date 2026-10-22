@@ -68,3 +68,18 @@ F1–F4 仍重复登记。
 `tests/tool-visibility.test.ts` 的 4 个用例偶发失败（`Error: the probe never observed a provider request`）——
 它 spawn 真的 `pi` 并需要 provider。修复 agent 在**基线提交 `a93f12c` 的干净副本上复现了同样的 4 个失败**，
 所以不是本票引入；本票最终全量跑是绿的。
+
+## 补记（2026-10-22 12:25 · 「工具优先」前提下的复核）
+
+本轮按「oxlint/oxfmt 能管的事情优先让工具管」这个前提复核了评审装置的机械层，查出两处**本仓已记录但一直没修**的缺口（#256 承接）：
+
+1. **覆盖率信号被采集后丢弃**。`vitest.config.ts` 的 `thresholds` 全是 0（lines/branches/functions/statements）⇒ 覆盖率掉到 0% 也不红。而
+   `docs/testing-constraints.md:198-210` 早就写明了这件事：「唯一能区分的信号已经被采集，并且被明确丢弃…『这个 catch 有没有被任何测试执行到』正是 branch 覆盖率回答的问题 —— 答案每次都算出来了，然后配置把它扔掉」。
+   实测当前值：statements 91.69% / branches 84.75% / functions 93.98% / lines 91.63%。
+2. **vitest 的原生机械反事实一次没用**。`expect.assertions(n)` 与 `expect.hasAssertions()` 在本仓 0 个文件；实测
+   `expect.assertions(1)` + 分支未走到 ⇒ `Error: expected number of assertions to be 1, but got 0` ⇒ 红。
+   ⇒ 我们的 F2 正则扫描（`reIf` 只认 `status|result|response|outcome` 四词）是在替 vitest 做它本来就能做、而且做得更准的事。
+
+另有一条**订正**：上一轮（本账本 F-11 / #255 缺口 3）说 oxlint 报的 29 处「是我们 F2 定义里的盲区」——**不准确**。逐处分类后，
+29 处里 23 处是 if/else 双臂（两臂各自断言，互补完备）、其余是前提守卫 / 版本地板分支，**没有一处是 F2 的形状**。
+F2 只指「条件依赖被测结果、另一条路径无断言」这一型；要补的是**文档（F2 的边界）**，不是扫描器。
