@@ -1,0 +1,22 @@
+{
+  "name": "@pi-ptc/routes",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Model-facing prose single source: route registry (ROUTES + TOOLS), two-layer output",
+  "license": "Apache-2.0",
+  "files": [
+    "dist",
+    "docs/routes"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "rolldown -c",
+    "check": "tsrs -p tsconfig.json"
+  }
+}

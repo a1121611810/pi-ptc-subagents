@@ -1,0 +1,30 @@
+{
+  "name": "@pi-ptc/entry",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Model-facing entry: pi extension assembly, surface detection, route registry prose",
+  "license": "Apache-2.0",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "rolldown -c",
+    "check": "tsrs -p tsconfig.json"
+  },
+  "dependencies": {
+    "@pi-ptc/dispatch": "workspace:*",
+    "@pi-ptc/ptc": "workspace:*",
+    "@pi-ptc/routes": "workspace:*",
+    "@pi-ptc/search": "workspace:*",
+    "@pi-ptc/task": "workspace:*",
+    "@pi-ptc/tui": "workspace:*",
+    "typebox": "1.3.27"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.86.0"
+  }
+}

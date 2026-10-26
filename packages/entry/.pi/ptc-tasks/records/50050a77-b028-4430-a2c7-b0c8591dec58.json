@@ -1,0 +1,12 @@
+{
+  "id": "50050a77-b028-4430-a2c7-b0c8591dec58",
+  "status": "succeeded",
+  "task": "Reply with exactly: ok",
+  "label": "regress",
+  "whySuppressed": false,
+  "ownerPid": 5896,
+  "ownerBootMs": 1793003762021,
+  "finishedAt": 1793003769089,
+  "reportChannel": "none",
+  "outputPath": "memory://50050a77-b028-4430-a2c7-b0c8591dec58"
+}

@@ -1,0 +1,34 @@
+{
+  "name": "@pi-ptc/ptc",
+  "version": "0.0.0",
+  "private": true,
+  "description": "PTC orchestrator: ptc_run_code / ptc_workflow program runtime (worker pool, strict mode, protocol)",
+  "license": "Apache-2.0",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "rolldown -c",
+    "check": "tsrs -p tsconfig.json"
+  },
+  "dependencies": {
+    "@earendil-works/pi-tui": "1.4.0",
+    "@pi-ptc/dispatch": "workspace:*",
+    "@pi-ptc/routes": "workspace:*",
+    "@pi-ptc/tui": "workspace:*",
+    "typebox": "1.3.27"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-tui": "1.4.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.86.0"
+  }
+}
