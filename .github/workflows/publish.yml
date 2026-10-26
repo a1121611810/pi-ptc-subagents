@@ -1,0 +1,51 @@
+# Publishes the package. Per ADR-0018 (old series): the tag is the release's identity —
+# it names the commit the tarball is built from, and the job refuses to publish when the
+# tag and `package.json` disagree.
+#
+# This workflow is registered on npmjs.com as the package's trusted publisher
+# (https://docs.npmjs.com/trusted-publishers), so it authenticates with GitHub's OIDC
+# token instead of a long-lived npm token. There is no NPM_TOKEN secret.
+name: Publish
+
+on:
+  push:
+    tags: [v*]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+      # Node is pinned rather than `lts/*`: trusted publishing needs npm CLI >= 11.5.1,
+      # which ships with this runtime.
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          # No `registry-url`: it would write a placeholder `_authToken` into .npmrc,
+          # turning a failed OIDC exchange into a misleading 404 on PUT.
+          package-manager-cache: false
+      - run: pnpm install --frozen-lockfile
+      - name: Verify the tag matches package.json
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "${TAG#v}" != "$version" ]; then
+            echo "tag $TAG does not match package.json version $version" >&2
+            exit 1
+          fi
+      - run: pnpm run check
+      - run: pnpm run lint
+      - run: pnpm run fmt:check
+      - run: pnpm run build
+      # No `--provenance` flag: under trusted publishing npm generates the attestation
+      # automatically once the source repository is public. Verbose is the level at
+      # which npm reports the OIDC exchange, so the release log records it.
+      - run: npm publish --loglevel verbose
