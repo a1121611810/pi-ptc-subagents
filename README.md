@@ -1,62 +1,106 @@
 # pi-ptc-subagents
 
-Programmable tool calling (PTC) and subagent fan-out for [pi](https://pi.dev).
+Programmable tool calling and subagent dispatch for [pi](https://pi.dev).
 
-当前 `main` 是**干净室重写版**（7 包 pnpm workspace，按 ADR/spec 重写，不抄旧实现源码）。
-旧实现归档在 `backup/main-legacy-20261026` 分支。
+pi calls tools one at a time. This package lets the model write a program that calls them
+in one go — and lets that program spawn pi subagents. Two capabilities. One package.
 
-## 能力
+```
+full_ptc      model ──▶ ptc_run_code ──▶ program ──┬──▶ tools.read · grep · edit · …   (session tools)
+                                                   └──▶ pi_task_ptc ──▶ pi child ──▶ report
 
-- **PTC**：`ptc_run_code` / `ptc_workflow` 让模型写 TypeScript 程序，程序里用 `tools.<name>(args)`
-  批量调会话工具；程序在 worker 线程严格模式跑，回到模型的只有返回值、日志与产出的归约结果。
-- **子代理派发**：`pi_task_ptc`（程序内 binding）与 `pi_task_codemode`（codemode 脚本内）建任务，
-  由派发引擎起独立 `pi` 子进程执行；排队-槽模型（满员排队不拒绝）、报告两通道
-  （`ptc_child_report` 工具优先 / 末尾 JSON 兜底）、可查可停。
-- **任务面**：`ptc_task_list` / `ptc_task_output` / `ptc_task_stop`，有任务记录才出现在模型面前。
-- **联网搜索**：`web_ds_search`（DeepSeek，search/open/find 三动作）只在子代理进程注册，默认关。
+codemode_ptc  model ──▶ codemode script ───────────┬──▶ tools.read · grep · edit · …   (session tools)
+                                                   └──▶ pi_task_codemode ──▶ pi child ──▶ report
 
-## 本地开发
-
-```bash
-pnpm install
-pnpm build            # rolldown，产物在各包 dist/
-pi -ne -e packages/entry/dist/index.js   # -ne：禁用其它扩展发现，防止同名扩展互踩
+                                        one call in, one result back — never the calls in between.
 ```
 
-门禁（改动后四件套全绿才算完）：
+Both surfaces are detected from the session. There is no setting.
 
-```bash
-pnpm run check        # tsrs 类型检查
-pnpm run build
-pnpm run lint         # oxlint
-pnpm run fmt:check    # oxfmt
+## What you get
+
+- **One program, many tool calls.** `ptc_run_code` and `ptc_workflow` run TypeScript in a
+  worker. The program uses the session's tools as `tools.read(...)`, `tools.grep(...)`.
+  Only the result, the logs, and truncated output come back. On a codemode session, pi's
+  own codemode runs the script; this package supplies the task door underneath it.
+- **Real subagents.** `pi_task_ptc` inside a program, `pi_task_codemode` inside a codemode
+  script. Every task gets its own pi process and its own report. Busy means wait, not reject.
+- **Visibility.** `ptc_task_list`, `ptc_task_output`, `ptc_task_stop` appear when there is
+  a task to look at.
+- **Search, where it belongs.** `web_ds_search` registers only inside dispatched children.
+  Off by default.
+
+A call looks like this — the same shape on both surfaces:
+
+```ts
+// full_ptc, inside ptc_run_code
+const r = await tools.pi_task_ptc({ task: "audit the auth code", wait: true });
+
+// codemode_ptc, inside a codemode script
+const r = await tools.pi_task_codemode({ task: "audit the auth code", wait: true });
+
+return r.report?.summary ?? r.text;
 ```
 
-## 仓库结构
+## Install
 
-| 包                  | 职责                                                                      |
-| ------------------- | ------------------------------------------------------------------------- |
-| `packages/entry`    | pi 扩展装配：session_start 注册、surface 检测、PTC 模式、通知投递         |
-| `packages/ptc`      | 程序运行时：worker 池、dispatcher、严格模式编译、PTC 工具工厂             |
-| `packages/dispatch` | 任务引擎：闸门、槽、spawn/pump、registry（落盘+重启恢复）、报告、通知中心 |
-| `packages/task`     | 任务面的读/停语义（叶子调用方）                                           |
-| `packages/tui`      | 渲染原语叶子：文本卫生、截断契约、渲染预算                                |
-| `packages/routes`   | 模型面散文唯一出处：路由册 + 渲染器                                       |
-| `packages/search`   | 搜索 provider（DeepSeek）：三动作工具、配额、记忆、预算                   |
+```bash
+pi install npm:pi-ptc-subagents
+```
 
-## 兼容性
+From a local checkout:
 
-pi `>= 0.86.0`。真机冒烟覆盖 0.86.0 / 0.87 / 0.99 / 1.0 / 1.1 / 1.2 / 1.3 / 1.4
-（含程序内派发真子进程），见 [docs/pi-version-matrix.md](./docs/pi-version-matrix.md)。
+```bash
+pnpm install && pnpm run build && pi install /abs/path/to/this/repo
+```
 
-## 文档
+To run one build without touching your settings:
 
-- [AGENTS.md](./AGENTS.md) — 工程约定与硬规矩
-- [docs/adr/](./docs/adr/) — 决策记录（0001–0015）
-- [docs/prototypes/](./docs/prototypes/) — spec 与两份状态全景页
-- [docs/research/](./docs/research/) — 历史证据笔记
-- [docs/pi-version-matrix.md](./docs/pi-version-matrix.md) — pi 版本兼容矩阵
+```bash
+pi -ne -e packages/entry/dist/index.js
+```
+
+## Surfaces
+
+- **`full_ptc`** — the PTC pair is model-facing. Programs reach tasks with `pi_task_ptc`.
+- **`codemode_ptc`** — pi's codemode orchestrates. Scripts reach tasks with
+  `pi_task_codemode`; the PTC pair is not registered at all.
+
+Which one you get depends on whether `codemode` is loaded and callable. Nothing to configure.
+
+## PTC mode
+
+On a `full_ptc` session, PTC mode moves the built-in tools behind the program, so writing
+one becomes the shortest path. `/ptc mode off` restores them. `/ptc off` stops new
+dispatches and withdraws the orchestration tools; running tasks keep running.
+
+## Configuration
+
+`~/.pi/agent/ptc.json` — all optional:
+
+- `defaultMode` — enter PTC mode on `full_ptc` sessions. Default `true`.
+- `whyEnabled` — carry the caller's reason into the child. Default `true`.
+- `webDsSearch` / `searchMaxCalls` — web search in children; off by default, 30 calls per
+  child when on (`0` means unlimited).
+
+## Trust posture
+
+Programs run as you. There is no OS sandbox, and a program's tool calls bypass pi's
+`tool_call` hooks. `bash` is not bound by default.
+
+## Compatibility
+
+pi `>= 0.86.0`. Real-machine smoke tests cover 0.86.0 through 1.4, including a program that
+dispatches a real child process. Details:
+[docs/pi-version-matrix.md](./docs/pi-version-matrix.md).
+
+## Documentation
+
+- [AGENTS.md](./AGENTS.md) — how this repository is built and guarded
+- [docs/adr/](./docs/adr/) — decisions, 0001–0015
+- [docs/prototypes/](./docs/prototypes/) — spec and status pages
+- [docs/research/](./docs/research/) — evidence notes
 
 ## License
 
-Apache-2.0。见 [LICENSE](./LICENSE)。
+Apache-2.0. See [LICENSE](./LICENSE).
