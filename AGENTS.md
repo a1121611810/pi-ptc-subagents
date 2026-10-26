@@ -51,6 +51,6 @@ pi 的扩展：PTC（模型写 TypeScript 程序批量调工具）+ 子代理派
 
 ## 已知未做（按价值）
 
-测试框架（探针转正 + 机械强制点门禁）· 发布形态（摘 private / dts / 详情指针）· floor 双端实测（executeTool / json 模式形状 / exposure 三处考古）· CHANGELOG（发布时新立）。详见 dispatch 状态页横幅。
+测试框架（探针转正 + 机械强制点门禁）· floor 三处考古（executeTool / json 模式形状 / exposure）· `docs/routes` 详情指针的发布包解算（6.0.0 不带 dts，指针仍解析不到用户机器）。详见 dispatch 状态页横幅。
 
 已知小拧（记录在案）：`/ptc off` 后 `/ptc mode on` 会在已撤工具上收窄；pid 复用误判窗口（旧 ADR-0023 原样接受）；`-p` 模式通知进不进模型上下文未实测。
