@@ -87,7 +87,7 @@
       <div class="row">
         <div class="node done"><div class="t"><span class="mark">✓</span>模型</div><div class="d">调 ptc_run_code / ptc_workflow，写程序</div></div>
         <div class="arr">→</div>
-        <div class="node done"><div class="t"><span class="mark">✓</span>entry 装配</div><div class="d">session_start：surface 检测、binding 表、&lt;ptc&gt; 节注入（含按面总则句）、任务面可见性活判断；<b>PTC 模式（旧 ADR-0010）</b>：full_ptc 下程序优先的总则句（<b>不再收窄活跃表</b>——pi 1.4.0 的可调用集 = active 的 direct 工具，收窄即让程序调不到 read/bash）+ /ptc mode on|off；真机验证模型自发写程序</div></div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>entry 装配</div><div class="d">session_start：surface 检测、binding 表、&lt;ptc&gt; 节注入（含按面总则句 + 详情目录）、任务面可见性活判断；<b>PTC 模式（旧 ADR-0010）</b>：full_ptc 下程序优先的总则句（<b>不再收窄活跃表</b>——pi 1.4.0 的可调用集 = active 的 direct 工具，收窄即让程序调不到 read/bash；<b>回执文案同步改成「引导层」</b>，不再说「收窄中」）+ /ptc mode on|off；真机验证模型自发写程序</div></div>
         <div class="arr">→</div>
         <div class="node done"><div class="t"><span class="mark">✓</span>工具工厂</div><div class="d">tools.ts · typebox schema · isError 按状态</div></div>
       </div>
@@ -149,12 +149,12 @@
       <tr><td><code>sub-calls.ts</code></td><td>子调用活树：running/ok/error/rejected + 耗时 + 参数预览，随 outcome 交出</td><td>旧 ADR-0021 · 探针 3/3 状态</td></tr>
       <tr><td>图片上提</td><td>binding 上下文 <code>emitImage</code>；entry 桥 pi 结果 image 块；只挂 fulfilled</td><td>旧 ADR-0014 · 探针</td></tr>
       <tr><td><code>tools.ts</code></td><td>ptc_run_code / ptc_workflow 工厂：schema、execute、isError、workflow args JSON 校验</td><td>真 pi 双冒烟通过</td></tr>
-      <tr><td><code>bindings.ts</code></td><td>名单 known 7 / bash 唯一 opt-in / <code>名单 ∩ 活跃工具</code> 收窄</td><td>旧 ADR-0040/0005 T7</td></tr>
+      <tr><td><code>bindings.ts</code></td><td>名单 known 7 / bash 唯一 opt-in / <code>名单 ∩ 会话作用域</code> 收窄（≥0.99 的作用域 = 活跃工具；0.86/0.87 = 已注册工具，好让调用给出明确版本错误）</td><td>旧 ADR-0040/0005 T7</td></tr>
       <tr><td><code>task-binding.ts</code></td><td>两扇门共享十参数 typebox schema（task/label 外标注随派发引擎接管）</td><td>HTML 决策 27</td></tr>
-      <tr><td><code>@pi-ptc/tui</code> / <code>@pi-ptc/routes</code></td><td>tui：text/truncate/bounds 叶子（第 5 包）；routes：散文唯一出处 ROUTES 7 条 + TOOLS 6 描述 + &lt;ptc&gt; 节注入（第 6 包），ptc 描述字面量已搬出</td><td>旧 ADR-0012/0013/0015 · ADR-0013/0061</td></tr>
+      <tr><td><code>@pi-ptc/tui</code> / <code>@pi-ptc/routes</code></td><td>tui：text/truncate/bounds 叶子（第 5 包）；routes：散文唯一出处 ROUTES 7 条 + TOOLS 6 描述 + &lt;ptc&gt; 节注入（第 6 包），ptc 描述字面量已搬出；<b>索引指针 = 详情目录（绝对路径，出现一次）+ 每行只留文件名</b>——每行贴全路径会顶出 560 预算（实测 695 token），改后 <b>481 token ✓ 不再挂 WARNING</b></td><td>旧 ADR-0012/0013/0015 · ADR-0013/0061</td></tr>
       <tr><td>真 pi 端到端</td><td>run_code：tools.read 并行归约；workflow：phase + pipeline；程序内 tools.pi_task_ptc 建任务（handle 带 label）；任务面随记录出现/消失</td><td>pi 1.4.0 · -ne 隔离冒烟 ×5</td></tr>
       <tr><td>C1–C6 接线</td><td>门进程序 binding 表 · surface 检测 · handle 带 label · 闸门挂点（admissionGates）· 可见性 setActiveTools · 散文层 routes 包</td><td>dispatch-doors-flow 差异清零</td></tr>
-      <tr><td><b>PTC 模式（旧 ADR-0010/0011）</b></td><td>full_ptc 下程序优先的总则句（<b>2026-10-26 起不再收窄活跃表</b>：pi 1.4.0 的可调用集 = active 的 direct 工具，收窄会让程序调不到 read/bash）+ /ptc mode on|off + /ptc off 截断（ADR-0012）；真机：模型自发写程序</td><td>pi 1.4.0 · 探针 5/5 + 真机</td></tr>
+      <tr><td><b>PTC 模式（旧 ADR-0010/0011）</b></td><td>full_ptc 下程序优先的总则句（<b>2026-10-26 起不再收窄活跃表</b>：pi 1.4.0 的可调用集 = active 的 direct 工具，收窄会让程序调不到 read/bash）+ /ptc mode on|off（<b>回执 =「引导层」</b>，6.0.2 之前一直误报「收窄中」）+ /ptc off 截断（ADR-0012）；真机：模型自发写程序</td><td>pi 1.4.0 · 探针 5/5 + 真机</td></tr>
       <tr><td><b>pi 四模式实测</b></td><td>print / json（事件流+PTC 调用）/ rpc（prompt→tool_execution→settled）/ TUI（kimi-cu 驱动：renderResult 折叠行）</td><td>2026-10-26 全通过</td></tr>
     </tbody>
   </table>
@@ -176,6 +176,11 @@
   <div class="note">
     <b>验证基线（2026-10-26）：</b>7 包 tsrs 类型检查 Done、rolldown 构建 Done、oxlint 0 问题、oxfmt 通过；已提交（feat/rewrite 工作链，未 push）；评审修复探针 13/13；
     dispatcher 探针 6/6、池/子调用树/图片探针 4/4、真 pi 1.4.0 冒烟 run_code 与 workflow 各一次通过、floor 0.86.0 冒烟（run_code + 派发）通过。
+    <br><b>评审修复轮（2026-10-26 晚，9 条评审发现全修 + 全矩阵复跑）：</b>修复轮探针 14/14（索引预算 <b>481/560 ✓ 不再 WARNING</b>、图片结果不回 base64、绑定作用域三态：有通道用声明集 / 无通道的老版本才退回已注册工具）；
+    <b>全版本矩阵复跑 16/16</b>（0.86.0·0.86.1·0.87.0·0.87.1 → 明确报「需 pi ≥ 0.99」；0.99.0–1.4.0 共 12 版 → <code>OK:295</code>，与上轮逐字一致）；
+    1.4.0 补充探针 2/2（模型按「详情目录 + 文件名」读出详情首行 <code># 派一个子代理</code>；程序内 <code>tools.pi_task_ptc</code> 派发返回 handle）。
+    <br><b>评审后全链路复测（2026-10-26 晚，提交前）：</b>矩阵再复跑 <b>16/16 逐字一致</b> + 离线修复轮探针 14/14；workflow / json / rpc / TUI 四模式全过（TUI 真 Terminal：模型自发调 run_code，fulfilled 折叠行渲染 + <code>OK:42</code>）；真子进程派发 floor 0.86.0 + 0.87.0 / 0.99.0 / 1.3.0 抽测全部 <code>fulfilled</code>。
+    <b>附记（待查，与本轮改动无关）：</b>pi TUI <code>/exit</code> 打印 Goodbye! 后进程未自退（已 SIGTERM 清理）——待查证是无扩展的 pi 也这样，还是扩展持有句柄拖住事件循环。
   </div>
   <div class="note warn">
     <b>最大单块风险：</b>dispatch 引擎在 sub，不在 ptc——ptc 的「建任务」binding 目前只写 registry 记录。

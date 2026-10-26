@@ -8,7 +8,7 @@ export const DEFAULT_BINDING_NAMES: readonly BindingName[] = KNOWN_BINDING_NAMES
   (name) => !(OPT_IN_BINDING_NAMES as readonly string[]).includes(name),
 );
 
-// 旧 ADR-0005 T7 + 旧 ADR-0010：binding 表 = 声明名单 ∩ 会话活跃工具（--tools 收窄会话不该拿到被滤掉的绑定）
+// 旧 ADR-0005 T7 + 旧 ADR-0010：binding 表 = 已知名单 ∩ 会话作用域（作用域由宿主给：≥0.99 是活跃工具，0.86/0.87 是已注册工具）
 export function resolveBindingNames(
   activeToolNames: readonly string[],
   optIns: readonly string[] = [],

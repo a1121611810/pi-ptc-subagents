@@ -8,3 +8,5 @@ coverage/
 
 # 发布产物（npm pack）
 *.tgz
+# 详情文档的发布副本（源在 packages/routes/docs/routes，pack 时拷到包根）
+/docs/routes/

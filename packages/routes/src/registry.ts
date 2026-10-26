@@ -1,8 +1,8 @@
 import type { SurfaceMode } from "./surface.ts";
-import { join } from "node:path";
 
 // ADR-0013/0061：模型面散文唯一出处。散文只在本文件出现——工具文件里不许有描述字面量（机械点 6）
-// 渲染确定性（决策 25，prompt cache）：输入只有静态册子 + surface，两次渲染逐字节相同
+// 渲染确定性（决策 25，prompt cache）：输入 = 册子 + surface + 详情目录 + 总则句开关
+// 总则句随 PTC 模式开关变（会话中途改系统提示词会废掉提示词缓存）——代价记在 ADR-0015
 
 export type ToolName =
   | "ptc_run_code"
@@ -207,13 +207,15 @@ export function renderRouteIndex(surface: SurfaceMode, detailBase?: string, nudg
   const lines = ROUTES.map(
     (route) =>
       `- ${route.name} — ${route.when}。这面怎么走：${route.how[surface]}。细节：${
-        // detailBase = 扩展安装位置下的详情目录；给了它，模型读到的就是真实可读的绝对路径
-        detailBase ? join(detailBase, route.detail.split("/").pop()!) : route.detail
+        // 详情目录在索引里只给一次，每行只留文件名——每行再贴一遍绝对路径会把索引顶出 token 预算
+        detailBase ? route.detail.split("/").pop()! : route.detail
       }`,
   );
   let index = [
     `<ptc>`,
     ...(nudge ? [ROUTE_INDEX_LEAD[surface]] : []),
+    // detailBase = 扩展安装位置下的详情目录；模型把目录与文件名拼起来读（绝对路径只出现一次）
+    ...(detailBase ? [`详情目录：${detailBase}`] : []),
     "路由表（一条一行，详情按需 read）：",
     ...lines,
     `</ptc>`,

@@ -95,7 +95,7 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
       modeActive = surface === "full_ptc" && modeEnabled;
     };
     applyMode();
-    // ADR-0015：<ptc> 常驻索引进系统提示词；渲染输入只有静态册子 + surface，每 turn 字节相同（决策 25）
+    // ADR-0015：<ptc> 常驻索引进系统提示词；渲染输入 = 册子 + surface + 详情目录 + 总则句开关——中途 /ptc mode 会废一次提示词缓存（决策 5 例外，见 ADR-0015 修订）
     pi.on("before_agent_start", (event) => {
       applyMode();
       applyTaskFaceVisibility(pi, session); // resume 重置后任务面可见性再对齐（幂等）
@@ -177,7 +177,7 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
           applyMode();
         }
         cmdCtx.ui.notify(
-          `/ptc：dispatchEnabled=${dispatchEnabled}，mode=${modeActive ? "on（收窄中）" : "off"}，whyEnabled=${whyEnabledOverride ?? whyEnabledPersisted}（在飞任务不受影响）`,
+          `/ptc：dispatchEnabled=${dispatchEnabled}，mode=${modeActive ? "on（引导层）" : "off"}，whyEnabled=${whyEnabledOverride ?? whyEnabledPersisted}（在飞任务不受影响）`,
           "info",
         );
       },
@@ -358,17 +358,21 @@ function normalizeToolValue(value: unknown): unknown {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) {
     return value
-      .map((block) =>
-        typeof block === "string"
-          ? block
-          : ((block as { text?: unknown })?.text ?? JSON.stringify(block)),
-      )
+      .map((block) => {
+        if (typeof block === "string") return block;
+        const obj = block as { type?: unknown; text?: unknown };
+        // 图片块走 emitImage 上提，不把 base64 灌进文本
+        if (obj.type === "image") return "[image]";
+        return obj.text ?? JSON.stringify(block);
+      })
       .join("\n");
   }
   if (value && typeof value === "object") {
-    const obj = value as { content?: unknown; text?: unknown };
+    const obj = value as { content?: unknown; text?: unknown; type?: unknown; note?: unknown };
     if (typeof obj.content === "string") return obj.content;
     if (typeof obj.text === "string") return obj.text;
+    // pi 的 read 对图片回 {type:"image", data:<base64>, note}——图片已经上提给模型，这里只回文字
+    if (obj.type === "image") return typeof obj.note === "string" ? obj.note : "[image]";
   }
   return value;
 }
@@ -384,15 +388,16 @@ function createBindingTable(
 ): BindingTable {
   // emitImage 桥：pi 工具结果里的图片块经此上提到运行结果（旧 ADR-0014）
   const active = pi.getActiveTools();
-  // 作用域 = 会话能用的内置工具：
-  // 0.99+ 的 getActiveTools() 就是「向模型声明的集合」，直接用（--tools 收窄也 respected）；
-  // 0.86/0.87 的 getActiveTools() 只含扩展自己的工具（实测 ["zz_probe"]），内置工具只在
-  // getAllTools() 里——那两版没有嵌套调用通道，程序里的 tools.* 无论如何都会拿到明确错误，
+  // 作用域 = 程序真能调到的内置工具：
+  // 有通道的版本（≥0.99）：getActiveTools() 就是「向模型声明的集合」，直接用（--tools 收窄也 respected）
+  // 没有通道的老版本（0.86/0.87）：getActiveTools() 只含扩展自己的工具（实测 ["zz_probe"]），
+  // 内置工具只在 getAllTools() 里——那两版没有嵌套调用通道，程序里的 tools.* 无论如何都会拿到明确错误，
   // 但至少不再是无声的 undefined。
   const known = new Set<string>(KNOWN_BINDING_NAMES);
-  const scope = active.some((name) => known.has(name))
-    ? active
-    : pi.getAllTools().map((tool) => tool.name);
+  const scope =
+    !getToolContext() && !active.some((name) => known.has(name))
+      ? pi.getAllTools().map((tool) => tool.name)
+      : active;
   const names = resolveBindingNames(scope);
   const table: BindingTable = Object.fromEntries(
     names.map((name) => [
@@ -426,7 +431,7 @@ function createBindingTable(
   return table;
 }
 
-// PTC 门面（旧 ADR-0010/0017）：binding 表 = 名单 ∩ 会话活跃工具（--tools 收窄会话不会拿到被滤掉的绑定）
+// PTC 门面（旧 ADR-0010/0017）：binding 表 = 名单 ∩ 会话作用域（≥0.99 的作用域 = 活跃工具，--tools 收窄会话不会拿到被滤掉的绑定）
 // ADR-0005 + 决策 28：一个面一个编排器——full_ptc 注册 PTC 对（模型面）；
 // codemode_ptc 不注册（编排唯一出口 = pi 的 codemode + 脚本内 pi_task_codemode，修订 旧 ADR-0025 §3 的 codemode-reach 残留）
 function registerPtcTools(

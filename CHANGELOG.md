@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.3] - 2026-10-26
+
+### Fixed
+
+- **The route index fits its token budget again.** Every route line carried the
+  detail file's absolute path; in an installed package that pushed the index to 695
+  tokens against the 560 ceiling, so every turn's system prompt ended with a
+  `> WARNING: index over token budget` line — and the warning told the model to
+  move the details into the directory they were already in. The directory is now
+  stated once and each line keeps only the file name: 481 tokens.
+- **`/ptc mode` no longer claims it is narrowing.** PTC mode stopped narrowing the
+  tool loadout in 6.0.1, but the command's reply still read `mode=on（收窄中）`.
+  It now reads `on（引导层）`.
+- **A tool result that is an image no longer carries its base64 into the program.**
+  pi's `read` returns `{type:"image", data:<base64>}` for image files, so the whole
+  image ended up in the program's return value as text — while the image itself was
+  already handed to the model as an image block. The bridge now returns the
+  readable note instead.
+- **The binding scope no longer lists tools the session cannot call.** The fallback
+  to "every registered tool" now applies only to the pi versions without a
+  nested-call channel (0.86/0.87). On 0.99+ the session's own active set is used,
+  so a session that narrowed its tools no longer sees bindings that would be
+  rejected on the first call.
+
+### Changed
+
+- The seven route detail files live in one place now
+  (`packages/routes/docs/routes/`); the identical copy at the repository root is
+  gone, and the copy `prepack` drops there is now git-ignored.
+- ADR-0015 records the reversal of its "no absolute path in the index" decision,
+  the token ruler it actually uses, and the cost of the PTC-mode switch.
+
 ## [6.0.2] - 2026-10-26
 
 ### Fixed
