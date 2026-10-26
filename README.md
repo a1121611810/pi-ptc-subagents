@@ -70,9 +70,12 @@ Which one you get depends on whether `codemode` is loaded and callable. Nothing 
 
 ## PTC mode
 
-On a `full_ptc` session, PTC mode moves the built-in tools behind the program, so writing
-one becomes the shortest path. `/ptc mode off` restores them. `/ptc off` stops new
-dispatches and withdraws the orchestration tools; running tasks keep running.
+On a `full_ptc` session, PTC mode adds a routing lead to the system prompt: batch your
+tool calls into one program. `/ptc mode off` drops the lead.
+
+It does not hide the built-in tools from the model. pi keeps a tool callable from a
+program only while it is active, so narrowing the loadout would take `tools.read` away
+from the program too — the two cannot both hold on pi 1.4.0.
 
 ## Configuration
 

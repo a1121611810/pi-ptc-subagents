@@ -1,4 +1,5 @@
 import type { SurfaceMode } from "./surface.ts";
+import { join } from "node:path";
 
 // ADR-0013/0061：模型面散文唯一出处。散文只在本文件出现——工具文件里不许有描述字面量（机械点 6）
 // 渲染确定性（决策 25，prompt cache）：输入只有静态册子 + surface，两次渲染逐字节相同
@@ -202,14 +203,17 @@ const ROUTE_INDEX_LEAD: Record<SurfaceMode, string> = {
     "编排写 codemode 脚本；批量派活经脚本内的 pi_task_codemode；要查/停任务用任务面三工具。",
 };
 
-export function renderRouteIndex(surface: SurfaceMode): string {
+export function renderRouteIndex(surface: SurfaceMode, detailBase?: string, nudge = true): string {
   const lines = ROUTES.map(
     (route) =>
-      `- ${route.name} — ${route.when}。这面怎么走：${route.how[surface]}。细节：${route.detail}`,
+      `- ${route.name} — ${route.when}。这面怎么走：${route.how[surface]}。细节：${
+        // detailBase = 扩展安装位置下的详情目录；给了它，模型读到的就是真实可读的绝对路径
+        detailBase ? join(detailBase, route.detail.split("/").pop()!) : route.detail
+      }`,
   );
   let index = [
     `<ptc>`,
-    ROUTE_INDEX_LEAD[surface],
+    ...(nudge ? [ROUTE_INDEX_LEAD[surface]] : []),
     "路由表（一条一行，详情按需 read）：",
     ...lines,
     `</ptc>`,

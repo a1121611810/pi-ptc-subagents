@@ -6,7 +6,7 @@ pi 的扩展：PTC（模型写 TypeScript 程序批量调工具）+ 子代理派
 
 | 包         | 职责                                                                                                               | 依赖                        |
 | ---------- | ------------------------------------------------------------------------------------------------------------------ | --------------------------- |
-| `entry`    | pi extension 装配：session_start 注册、surface 检测、PTC 模式（收窄/skills 补偿）、/ptc off 截断、通知投递         | → 全部                      |
+| `entry`    | pi extension 装配：session_start 注册、surface 检测、PTC 模式（程序优先引导层）、/ptc off 截断、通知投递           | → 全部                      |
 | `ptc`      | 程序运行时：worker 池、dispatcher、严格模式编译、工具工厂、renderResult                                            | → sub→dispatch、tui、routes |
 | `dispatch` | 任务引擎：六道闸、DispatchSlotCounter（libuv 队列）、spawn/pump、registry（落盘+重启恢复）、child report、通知中心 | 无（叶子）                  |
 | `task`     | 任务面：list/output/stop 的读/停语义（分层读取：超阈值引导读报告）                                                 | → dispatch                  |
@@ -51,6 +51,6 @@ pi 的扩展：PTC（模型写 TypeScript 程序批量调工具）+ 子代理派
 
 ## 已知未做（按价值）
 
-测试框架（探针转正 + 机械强制点门禁）· floor 三处考古（executeTool / json 模式形状 / exposure）· `docs/routes` 详情指针的发布包解算（6.0.0 不带 dts，指针仍解析不到用户机器）。详见 dispatch 状态页横幅。
+测试框架（探针转正 + 机械强制点门禁）· floor 三处考古（executeTool / json 模式形状 / exposure）· 发布包不带 dts（6.0.1 起详情指针随包发布并解析到安装目录）。详见 dispatch 状态页横幅。
 
-已知小拧（记录在案）：`/ptc off` 后 `/ptc mode on` 会在已撤工具上收窄；pid 复用误判窗口（旧 ADR-0023 原样接受）；`-p` 模式通知进不进模型上下文未实测。
+已知小拧（记录在案）：pid 复用误判窗口（旧 ADR-0023 原样接受）；`-p` 模式通知进不进模型上下文未实测。

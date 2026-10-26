@@ -1,4 +1,4 @@
-import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, ExtensionToolContext } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
 import { TOOLS, type SurfaceMode } from "@pi-ptc/routes";
 import { runPtcProgram, type BindingTable } from "./dispatcher.ts";
@@ -10,6 +10,8 @@ export interface PtcToolOptions {
   cwd?: string;
   surface?: SurfaceMode;
   getPool?: () => import("./pool.ts").WorkerPool | undefined;
+  /** pi 把工具执行上下文交给 execute 的第 5 个参数——程序内 tools.* 的通道在那里（ctx.executeTool） */
+  onToolContext?: (ctx: ExtensionToolContext) => void;
 }
 
 const RUN_CODE_PARAMETERS = Type.Object({
@@ -28,7 +30,14 @@ export function createPtcRunCodeTool(options: PtcToolOptions) {
     description: TOOLS.ptc_run_code.description(options.surface ?? "full_ptc"),
     parameters: RUN_CODE_PARAMETERS,
     renderResult: renderPtcResult("run_code"),
-    execute: async (_id: string, args: RunCodeParams): Promise<AgentToolResult<PtcToolDetails>> => {
+    execute: async (
+      _id: string,
+      args: RunCodeParams,
+      _signal: AbortSignal | undefined,
+      _onUpdate: unknown,
+      ctx: ExtensionToolContext,
+    ): Promise<AgentToolResult<PtcToolDetails>> => {
+      options.onToolContext?.(ctx);
       const outcome = await runPtcProgram({
         code: args.code,
         surface: "run_code",
@@ -78,7 +87,11 @@ export function createPtcWorkflowTool(options: PtcToolOptions) {
     execute: async (
       _id: string,
       params: WorkflowParams,
+      _signal: AbortSignal | undefined,
+      _onUpdate: unknown,
+      ctx: ExtensionToolContext,
     ): Promise<AgentToolResult<PtcToolDetails>> => {
+      options.onToolContext?.(ctx);
       try {
         validateWorkflowArgs(params.args);
       } catch (error) {

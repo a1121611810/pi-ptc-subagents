@@ -1,10 +1,10 @@
-import { formatSkillsForPrompt, getAgentDir, loadSkills } from "@earendil-works/pi-coding-agent";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type {
   AgentToolResult,
   ExtensionAPI,
-  ExtensionContext,
+  ExtensionToolContext,
 } from "@earendil-works/pi-coding-agent";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Type } from "typebox";
 import {
@@ -30,7 +30,6 @@ import {
   createPtcRunCodeTool,
   createPtcWorkflowTool,
   createTaskBinding,
-  KNOWN_BINDING_NAMES,
   resolveBindingNames,
   TASK_BINDING_NAME,
   TASK_DOOR_PARAMETERS,
@@ -64,6 +63,13 @@ const textResult = (value: unknown): AgentToolResult => ({
   details: undefined,
 });
 
+// 详情文件目录：发布包里是 <pkg>/docs/routes，开发态是 packages/routes/docs/routes
+const packageRoot = fileURLToPath(new URL("..", import.meta.url));
+const publishedDetailDir = join(packageRoot, "docs", "routes");
+const detailDir = existsSync(publishedDetailDir)
+  ? publishedDetailDir
+  : join(packageRoot, "..", "routes", "docs", "routes");
+
 // pi 版本能力矩阵与 <0.99.0 floor 的运行时差异：docs/pi-version-matrix.md
 export default function piPtcEntry(pi: ExtensionAPI): void {
   // 旧 ADR-0035：注册发生在 session_start——此刻 getActiveTools() 可用且 trust 已应用；factory 阶段它们是 throw 的桩
@@ -77,48 +83,24 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
     const surface: SurfaceMode = pi.getActiveTools().includes("codemode")
       ? "codemode_ptc"
       : FALLBACK_SURFACE_MODE;
-    // 旧 ADR-0010 PTC 模式：full_ptc + 开关 + 工具可用（--tools 限制会话不在活跃表 → 不进）→ 收窄 loadout
-    // 收窄目标 = 内置绑定工具：模型只能程序内 tools.* 调它们，写程序成为最顺的路
+    // 旧 ADR-0010 PTC 模式：pi 1.4.0 上「收窄活跃表」与「程序内 tools.*」不可兼得——
+    // 可调用集 = active 的 direct 工具（pi 的 _getCallableTools），收窄即退出可调用集，
+    // 程序就再也调不到 read/bash（真机实测 "Tool read not found"）；内置工具的 exposure
+    // 不是扩展能设的（没有「active 但不向模型声明」的通道给内置工具）。
+    // 所以模式退化为**引导层**：程序优先的总则句进路由索引，工具仍可直调。
     let modeEnabled = readDefaultModeConfig(getAgentDir());
     let modeActive = false;
-    let baseLoadout: string[] | null = null;
     const applyMode = () => {
-      const active = pi.getActiveTools();
-      const shouldEnter = surface === "full_ptc" && modeEnabled && active.includes("ptc_run_code");
-      if (shouldEnter && !modeActive) {
-        baseLoadout ??= [...active];
-        pi.setActiveTools(
-          active.filter((name) => !(KNOWN_BINDING_NAMES as readonly string[]).includes(name)),
-        );
-        modeActive = true;
-      } else if (!shouldEnter && modeActive && baseLoadout) {
-        pi.setActiveTools(baseLoadout);
-        baseLoadout = null;
-        modeActive = false;
-      }
+      modeActive = surface === "full_ptc" && modeEnabled;
     };
     applyMode();
     // ADR-0015：<ptc> 常驻索引进系统提示词；渲染输入只有静态册子 + surface，每 turn 字节相同（决策 25）
-    // 旧 ADR-0011 skills 补偿：收窄会触发 pi 丢 skills 节（只在 read/bash 可见时生成）——模式在且二者不可直调时自己写回（indirect 加载句）
     pi.on("before_agent_start", (event) => {
-      applyMode(); // pi 可能在 session_start 后重置活跃表——每 turn 开头重新收敛
-      applyTaskFaceVisibility(pi, session); // 关模式重放 baseLoadout、resume 重置后，任务面可见性再对齐（幂等）
+      applyMode();
+      applyTaskFaceVisibility(pi, session); // resume 重置后任务面可见性再对齐（幂等）
       // floor 版本事件形状未实测：缺 sections 就跳过注入，别让每个 turn 抛 TypeError
       const sections = event.systemPromptOptions?.sections;
-      if (sections) sections["ptc"] = renderRouteIndex(surface);
-      if (!modeActive) return;
-      const active = pi.getActiveTools();
-      if (active.includes("read") || active.includes("bash")) return;
-      const loaded = loadSkills({
-        cwd: process.cwd(),
-        agentDir: getAgentDir(),
-        skillPaths: [],
-        includeDefaults: true,
-      });
-      if (loaded.skills.length === 0) return;
-      if (sections) {
-        sections["available_skills"] = formatSkillsForPrompt(loaded.skills, "indirect");
-      }
+      if (sections) sections["ptc"] = renderRouteIndex(surface, detailDir, modeActive);
     });
     const pool = new WorkerPool(spawnPtcWorker);
     const notifications = new NotificationCenter();
@@ -173,7 +155,7 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
     });
     pi.registerCommand("ptc", {
       description:
-        "/ptc off|on：派发开关 · /ptc why on|off：理由开关 · /ptc mode on|off：PTC 模式（收窄/恢复 loadout）",
+        "/ptc off|on：派发开关 · /ptc why on|off：理由开关 · /ptc mode on|off：PTC 模式（程序优先的引导层）",
       handler: async (args, cmdCtx) => {
         const [sub, rest] = args.trim().split(/\s+/);
         if (sub === "off") {
@@ -231,10 +213,20 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
     };
     registerTaskFace(registerTracked, session, surface);
     applyTaskFaceVisibility(pi, session);
-    const bindings = createBindingTable(pi, ctx, session);
+    // 工具执行上下文：程序内 tools.* 的通道（pi 1.4.0 把 executeTool 放在 ExtensionToolContext 上）
+    let toolContext: ExtensionToolContext | undefined;
+    const bindings = createBindingTable(pi, session, () => toolContext);
     registerPtcTools(
       registerTracked,
-      { getBindings: () => bindings, cwd: process.cwd(), surface, getPool: () => pool },
+      {
+        getBindings: () => bindings,
+        cwd: process.cwd(),
+        surface,
+        getPool: () => pool,
+        onToolContext: (ctx) => {
+          toolContext = ctx;
+        },
+      },
       surface,
     );
     if (surface === "codemode_ptc") registerTaskDoor(registerTracked, session, surface);
@@ -358,23 +350,16 @@ function registerChildToolsOnly(pi: ExtensionAPI): void {
   });
 }
 
-// 旧 ADR-0005：binding 经 pi 的工具管线执行（ctx.executeTool）；floor 版本无此通道时绑定给出明确错误
+// 旧 ADR-0005：binding 经 pi 的工具管线执行（ctx.executeTool）
+// 通道在**工具执行上下文**上：pi 1.4.0 的 ToolDefinition.execute 第 5 个参数是
+// ExtensionToolContext，它的 executeTool(name, args, options?) 才是程序内调用工具的入口
+// （session_start 的 ExtensionContext 上没有它——早期实现取错上下文，程序内 tools.* 全程是死的）
 function createBindingTable(
   pi: ExtensionAPI,
-  ctx: ExtensionContext,
   session: PtcSession,
+  getToolContext: () => ExtensionToolContext | undefined,
 ): BindingTable {
   // emitImage 桥：pi 工具结果里的图片块经此上提到运行结果（旧 ADR-0014）
-  // executeTool 在 ExtensionContextActions 上是 optional，session_start 的 ctx 类型为 ExtensionContext——运行时探测
-  const executeTool = (
-    ctx as {
-      executeTool?: (
-        callerId: string,
-        name: string,
-        args: unknown,
-      ) => Promise<{ result: AgentToolResult; isError: boolean }>;
-    }
-  ).executeTool;
   const names = resolveBindingNames(pi.getActiveTools());
   const table: BindingTable = Object.fromEntries(
     names.map((name) => [
@@ -383,10 +368,11 @@ function createBindingTable(
         args: unknown,
         callCtx: { emitImage: (image: unknown) => void; signal?: AbortSignal },
       ) => {
-        if (!executeTool) {
+        const ctx = getToolContext();
+        if (!ctx?.executeTool) {
           throw new Error(`此 pi 版本不支持程序内工具调用（executeTool 不可用，binding: ${name}）`);
         }
-        const outcome = await executeTool(`ptc/${name}`, name, args);
+        const outcome = await ctx.executeTool(name, args, { signal: callCtx.signal });
         for (const block of outcome.result.content) {
           if (block.type === "image") callCtx.emitImage(block);
         }
