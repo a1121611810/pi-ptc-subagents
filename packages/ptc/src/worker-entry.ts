@@ -4,7 +4,7 @@ import type { HostToWorkerFrame, WorkerToHostFrame } from "./protocol.ts";
 
 if (!parentPort) throw new Error("worker-entry 只能在 worker 线程里加载");
 
-// ADR-0005 F3：env 冻结在 workerData 里，worker 内不再感知宿主环境变化
+// 旧 ADR-0005 F3：env 冻结在 workerData 里，worker 内不再感知宿主环境变化
 void Object.freeze(workerData);
 
 workerMain({

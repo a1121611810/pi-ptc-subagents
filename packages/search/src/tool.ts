@@ -15,7 +15,7 @@ export const WEB_DS_SEARCH_PARAMETERS = Type.Object({
 
 export type WebDsSearchParams = Static<typeof WEB_DS_SEARCH_PARAMETERS>;
 
-// ADR-0049：web_ds_search——只在子代理进程注册（entry 的子代理进程模式），父会话不存在
+// ADR-0003：web_ds_search——只在子代理进程注册（entry 的子代理进程模式），父会话不存在
 export function createWebDsSearchTool(context: SearchRunContext) {
   return {
     name: "web_ds_search",

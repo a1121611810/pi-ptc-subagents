@@ -2,10 +2,10 @@ import { Type, type Static } from "typebox";
 import type { CreateTaskResult } from "@pi-ptc/dispatch";
 export type { CreateTaskResult, DispatchResult, TaskHandle, TaskRejection } from "@pi-ptc/dispatch";
 
-// ADR-0052：两扇门共享 pi_task_ 前缀；这是 PTC 门——程序内 binding，不是注册的 pi 工具
+// ADR-0006：两扇门共享 pi_task_ 前缀；这是 PTC 门——程序内 binding，不是注册的 pi 工具
 export const TASK_BINDING_NAME = "pi_task_ptc";
 
-// HTML 决策 27 / ADR-0054：两扇门共用同一份参数表（原 DISPATCH_PARAMETERS 的职责）
+// HTML 决策 27 / ADR-0008：两扇门共用同一份参数表（原 DISPATCH_PARAMETERS 的职责）
 // shortcut: 目前生效的只有 task/label，其余参数随 sub 的派发引擎落地后接管；schema 先立住共享形状
 export const TASK_DOOR_PARAMETERS = Type.Object({
   task: Type.String({ minLength: 1, description: "孩子要干的活" }),

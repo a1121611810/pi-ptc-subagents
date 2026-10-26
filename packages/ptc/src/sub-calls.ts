@@ -1,4 +1,4 @@
-// ADR-0021：程序内 binding 调用的活树——run 期间记录 start/end，settle 时随结果交出去（显示层消费）
+// 旧 ADR-0021：程序内 binding 调用的活树——run 期间记录 start/end，settle 时随结果交出去（显示层消费）
 export interface SubCallRecord {
   callId: number;
   name: string;

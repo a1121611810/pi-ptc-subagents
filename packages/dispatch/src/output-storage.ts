@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync } from "no
 import { open } from "node:fs/promises";
 import { join } from "node:path";
 
-// ADR-0053：前台也落盘——记录是派发的唯一痕迹，产出是记录的一部分
+// ADR-0007：前台也落盘——记录是派发的唯一痕迹，产出是记录的一部分
 // 评审：taskId 会拼进路径；公开 API 的调用方不可控，先拒分隔符与 ..
 function isSafeTaskId(taskId: string): boolean {
   return !taskId.includes("/") && !taskId.includes("\\") && !taskId.includes("..");
@@ -13,7 +13,7 @@ export interface OutputStorage {
   /** 产出字节数（不读全文——超长产出先探长度再决定读不读） */
   size(taskId: string): Promise<number | undefined>;
   /**
-   * 只读尾部至多 maxBytes 字节（ADR-0015 的截断本来就偏尾——读全文再切尾是双重浪费）。
+   * 只读尾部至多 maxBytes 字节（旧 ADR-0015 的截断本来就偏尾——读全文再切尾是双重浪费）。
    * 从行边界起读，峰值内存 = maxBytes 而非全文。
    */
   readTail(taskId: string, maxBytes: number): Promise<string | undefined>;

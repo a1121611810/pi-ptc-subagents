@@ -1,4 +1,4 @@
-// ADR-0012：模型面文本卫生——pi 内建工具同款三步（pi 不导出 helper，本地复现），加可读排版
+// 旧 ADR-0012：模型面文本卫生——pi 内建工具同款三步（pi 不导出 helper，本地复现），加可读排版
 import { RENDER_BOUNDS } from "./bounds.ts";
 
 // oxlint-disable no-control-regex -- 清洗控制符正是本函数的职责
@@ -13,7 +13,7 @@ export function sanitizeText(text: string): string {
   return stripAnsi(text.replace(/\r/g, ""));
 }
 
-const MAX_LINE_CHARS = 200; // ADR-0015 §3：行内上限保留本地字符级实现
+const MAX_LINE_CHARS = 200; // 旧 ADR-0015 §3：行内上限保留本地字符级实现
 
 export function truncateLine(line: string): string {
   if (line.length <= MAX_LINE_CHARS) return line;
@@ -22,7 +22,7 @@ export function truncateLine(line: string): string {
   return `${line.slice(0, cut)}…`;
 }
 
-// 完成值的可读排版（ADR-0012）：字符串逐字、紧凑值单行、容器按界缩进——拒绝 JSON.stringify 整值转义
+// 完成值的可读排版（旧 ADR-0012）：字符串逐字、紧凑值单行、容器按界缩进——拒绝 JSON.stringify 整值转义
 export function renderModelValue(value: unknown, depth = 0, seen = new WeakSet<object>()): string {
   const pad = "  ".repeat(depth);
   if (depth >= RENDER_BOUNDS.VALUE_TREE_MAX_DEPTH) return "…";

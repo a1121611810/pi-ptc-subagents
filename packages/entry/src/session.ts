@@ -41,7 +41,7 @@ export interface PtcSessionOptions {
   /** sub 的闸门（同步）；六道默认闸在 entry 组装，可追加 */
   gates?: Gate[];
   onTransition?: (record: unknown) => void;
-  /** ADR-0043：whyEnabled 支持值或谓词——传谓词才能热生效（/ptc why 会话覆盖） */
+  /** 旧 ADR-0043：whyEnabled 支持值或谓词——传谓词才能热生效（/ptc why 会话覆盖） */
   whyEnabled?: boolean | (() => boolean);
   /** 注入引擎依赖（探针传假 spawn；生产缺省真 pi） */
   engine?: Omit<EngineOptions, "registry" | "gates" | "whyEnabled">;

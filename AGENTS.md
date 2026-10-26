@@ -11,7 +11,7 @@ pi 的扩展：PTC（模型写 TypeScript 程序批量调工具）+ 子代理派
 | `dispatch` | 任务引擎：六道闸、DispatchSlotCounter（libuv 队列）、spawn/pump、registry（落盘+重启恢复）、child report、通知中心 | 无（叶子）                  |
 | `task`     | 任务面：list/output/stop 的读/停语义（分层读取：超阈值引导读报告）                                                 | → dispatch                  |
 | `tui`      | 渲染原语叶子：文本卫生、截断契约、渲染预算                                                                         | 无                          |
-| `routes`   | 模型面散文唯一出处（ADR-0059）：7 条路的册子 + 渲染器（索引/通知/引导语）                                          | 无（叶子）                  |
+| `routes`   | 模型面散文唯一出处（ADR-0013）：7 条路的册子 + 渲染器（索引/通知/引导语）                                          | 无（叶子）                  |
 | `search`   | 搜索 provider 抽象（DeepSeek 首家）：三动作工具、配额、记忆、预算                                                  | → tui                       |
 
 依赖铁律：**tui / routes 是叶子**（不感知领域概念）；`dispatch` 持全部任务状态，其余只是调用方。
@@ -30,15 +30,16 @@ pi 的扩展：PTC（模型写 TypeScript 程序批量调工具）+ 子代理派
 - 子进程/execArgv 的坑：worker 继承宿主 execArgv，`-e` 场景要剥 eval 系参数（已实现，别回退）；shell 传秘密给探针用 `VAR=$(...) cmd`（前缀式），`&&` 链不 export
 - pi 版本事实见 `docs/pi-version-matrix.md`（floor 0.86 / 当前 1.4.0；exposure getter、json 模式形状是已实测差异）
 
-## 干净室规则（ADR-0002）
+## 干净室规则（旧 ADR-0002）
 
-旧分支（`main`、feat/258 等）的 `src/**` 实现源码**不许抄**；ADR、`docs/prototypes/*.html`、研究文档是合法输入。spec 是 `docs/prototypes/dispatch-doors-flow.html`（28 条决策，**决策 28：一个面一个编排器**——codemode_ptc 面上不注册 PTC 对，修订了 ADR-0025 §3）。
+旧分支（`main`、feat/258 等）的 `src/**` 实现源码**不许抄**；ADR、`docs/prototypes/*.html`、研究文档是合法输入。spec 是 `docs/prototypes/dispatch-doors-flow.html`（28 条决策，**决策 28：一个面一个编排器**——codemode_ptc 面上不注册 PTC 对，修订了 旧 ADR-0025 §3）。
 
 ## 文档地图
 
 - `docs/prototypes/dispatch-doors-flow.html` — spec/决策（改动语义前先对质它）
 - `docs/prototypes/ptc-runtime-status.html` / `dispatch-engine-status.html` — 两包现状全景（已做/未做/验证基线）
-- `docs/adr/` — 现存 15 份（0047–0061）；更早编号的旧 ADR 已删、待重建（决策暂记在 spec 页与代码注释）
+- `docs/adr/` — 决策记录 15 份（0001–0015，2026-10-26 重排）；旧实现的 0001–0046 / 0062–0065 归档在 `backup/main-legacy-20261026` 分支，文中引用写作「旧 ADR-xxxx」
+- `docs/research/` — 历史证据笔记（含旧实现时期的研究；其中的 ADR 引用按旧编号）
 - `docs/pi-version-matrix.md` — pi 版本兼容矩阵
 
 ## 规矩
@@ -50,6 +51,6 @@ pi 的扩展：PTC（模型写 TypeScript 程序批量调工具）+ 子代理派
 
 ## 已知未做（按价值）
 
-测试框架（探针转正 + 机械强制点门禁）· 发布形态（摘 private / dts / 详情指针）· floor 双端实测（executeTool / json 模式形状 / exposure 三处考古）· 重写版 ADR/CHANGELOG。详见 dispatch 状态页横幅。
+测试框架（探针转正 + 机械强制点门禁）· 发布形态（摘 private / dts / 详情指针）· floor 双端实测（executeTool / json 模式形状 / exposure 三处考古）· CHANGELOG（发布时新立）。详见 dispatch 状态页横幅。
 
-已知小拧（记录在案）：`/ptc off` 后 `/ptc mode on` 会在已撤工具上收窄；pid 复用误判窗口（ADR-0023 原样接受）；`-p` 模式通知进不进模型上下文未实测。
+已知小拧（记录在案）：`/ptc off` 后 `/ptc mode on` 会在已撤工具上收窄；pid 复用误判窗口（旧 ADR-0023 原样接受）；`-p` 模式通知进不进模型上下文未实测。

@@ -1,8 +1,8 @@
 import type { TaskRegistry } from "./registry.ts";
 
-// ADR-0022：后台任务完成 → 通知回到会话。事件源 = registry 的终态变迁；
+// 旧 ADR-0022：后台任务完成 → 通知回到会话。事件源 = registry 的终态变迁；
 // 注：批渲染（模型面文案）按散文单源纪律归 routes（renderTaskNotifications），本包只持队列与形状；
-// 前台（wait）调用的任务由调用方直接拿结果，不再通知（ADR-0053）；批渲染成 <bg-task-notifications>
+// 前台（wait）调用的任务由调用方直接拿结果，不再通知（ADR-0007）；批渲染成 <bg-task-notifications>
 export interface TaskNotification {
   taskId: string;
   label?: string;
@@ -40,7 +40,7 @@ export class NotificationCenter {
     });
   }
 
-  /** 决策 8/ADR-0053：wait 路径的调用方自己拿结果——记 awaited，终态时跳过通知 */
+  /** 决策 8/ADR-0007：wait 路径的调用方自己拿结果——记 awaited，终态时跳过通知 */
   markAwaited(taskId: string): void {
     this.#awaited.add(taskId);
   }

@@ -23,8 +23,8 @@ export interface PtcToolArgs {
   meta?: { name: string; description: string };
 }
 
-// ADR-0013：折叠 = 标题 + 状态一行；展开 = 代码/日志/结果，上限吃 RENDER_BOUNDS 冻结表
-// shortcut: shimmer 动画（ADR-0020）与五态颜色未做——等真实使用中对「运行中辨识度」有诉求再加
+// 旧 ADR-0013：折叠 = 标题 + 状态一行；展开 = 代码/日志/结果，上限吃 RENDER_BOUNDS 冻结表
+// shortcut: shimmer 动画（旧 ADR-0020）与五态颜色未做——等真实使用中对「运行中辨识度」有诉求再加
 export function renderPtcResult(surface: "run_code" | "workflow") {
   return (
     result: AgentToolResult<PtcToolDetails>,

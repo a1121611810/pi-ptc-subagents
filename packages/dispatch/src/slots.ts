@@ -1,4 +1,4 @@
-// ADR-0056：libuv 线程池形状——固定槽、满了 FIFO 排队、从不拒绝；按 task id 键记账与释放
+// ADR-0010：libuv 线程池形状——固定槽、满了 FIFO 排队、从不拒绝；按 task id 键记账与释放
 export const DEFAULT_DISPATCH_CONCURRENCY = 8;
 
 export type AcquireOutcome = "granted" | "queued" | "withdrawn";
@@ -43,7 +43,7 @@ export class DispatchSlotCounter {
     return waiter.taskId;
   }
 
-  /** ADR-0063：拆卸还槽不提拔——被抽任务占着槽却永不启动的洞，用它还 */
+  /** 旧 ADR-0063：拆卸还槽不提拔——被抽任务占着槽却永不启动的洞，用它还 */
   releaseWithoutPromotion(taskId: string): void {
     this.#holders.delete(taskId);
   }
@@ -52,7 +52,7 @@ export class DispatchSlotCounter {
     return [...this.#holders];
   }
 
-  /** ADR-0057：抽掉一个还在排队的；已起的返回 false（uv_cancel 的 EBUSY） */
+  /** ADR-0011：抽掉一个还在排队的；已起的返回 false（uv_cancel 的 EBUSY） */
   cancelQueued(taskId: string): boolean {
     const index = this.#waiters.findIndex((w) => w.taskId === taskId);
     if (index < 0) return false;
@@ -61,7 +61,7 @@ export class DispatchSlotCounter {
     return true;
   }
 
-  /** ADR-0063：抽干全部等待者（shutdown 清扫） */
+  /** 旧 ADR-0063：抽干全部等待者（shutdown 清扫） */
   drainWaiters(): string[] {
     const drained = this.#waiters.splice(0);
     for (const waiter of drained) waiter.resolve("withdrawn");

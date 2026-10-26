@@ -90,7 +90,7 @@
         <div class="arr">→</div>
         <div class="node done"><div class="t"><span class="mark">✓</span>铸 taskId</div><div class="d">UUID；ULID minter 后补</div></div>
         <div class="arr">→</div>
-        <div class="node done"><div class="t"><span class="mark">✓</span>建任务记录</div><div class="d">registry.spawn：queued 记录 = 派发的唯一痕迹（ADR-0053/0056）</div></div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>建任务记录</div><div class="d">registry.spawn：queued 记录 = 派发的唯一痕迹（ADR-0007/0056）</div></div>
       </div>
     </div>
     <div class="lane">
@@ -98,7 +98,7 @@
       <div class="row">
         <div class="node done"><div class="t"><span class="mark">✓</span>七道闸</div><div class="d">readOnly · task 文本（非空/不以 - 开头）· dispatchEnabled（/ptc off）· 会话结束 · 深度 · agent 名（白名单防穿越）· agent 解析——入队前 fail fast</div></div>
         <div class="arr">→</div>
-        <div class="node done"><div class="t"><span class="mark">✓</span>并发槽</div><div class="d">DispatchSlotCounter：FIFO 等待 · keyed holders · 释放即提拔最老 · drainWaiters（ADR-0056/0063）</div></div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>并发槽</div><div class="d">DispatchSlotCounter：FIFO 等待 · keyed holders · 释放即提拔最老 · drainWaiters（ADR-0010/0063）</div></div>
         <div class="arr">→</div>
         <div class="node done"><div class="t"><span class="mark">✓</span>出队转 running</div><div class="d">槽 granted → transition running → spawn，引擎串起整条（TaskEngine）</div></div>
       </div>
@@ -110,13 +110,13 @@
         <div class="arr">→</div>
         <div class="node partial"><div class="t"><span class="mark">◐</span>spawn</div><div class="d">独立 pi 进程已真跑通（6.2s 端到端）；JSONL 事件流已解析（真实形状）；TMPDIR 提示词未做</div></div>
         <div class="arr">→</div>
-        <div class="node done"><div class="t"><span class="mark">✓</span>agent 收窄</div><div class="d">发现 ✓（user/project 目录 + frontmatter：tools 收窄、childReport 退出）；<b>argv 合并 ✓</b>（strict 压过名单 → 读集；非 strict 用名单；ADR-0039/0041）</div></div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>agent 收窄</div><div class="d">发现 ✓（user/project 目录 + frontmatter：tools 收窄、childReport 退出）；<b>argv 合并 ✓</b>（strict 压过名单 → 读集；非 strict 用名单；旧 ADR-0039/0041）</div></div>
       </div>
     </div>
     <div class="lane">
       <div class="lane-t warn">④ 在飞（能做的只有查和停）</div>
       <div class="row">
-        <div class="node done"><div class="t"><span class="mark">✓</span>查 / 停</div><div class="d">ptc_task_list/output/stop；排队中的抽得掉、在跑的转 stopping（ADR-0057）</div></div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>查 / 停</div><div class="d">ptc_task_list/output/stop；排队中的抽得掉、在跑的转 stopping（ADR-0011）</div></div>
         <div class="arr">→</div>
         <div class="node partial"><div class="t"><span class="mark">◐</span>pump</div><div class="d">驱动到终态 ✓（exit → resolve-exit）；usage 累计 ✓（observedUsage 补缺）；结构化事件未做</div></div>
         <div class="arr">→</div>
@@ -130,15 +130,15 @@
         <div class="arr">→</div>
         <div class="node done"><div class="t"><span class="mark">✓</span>产出落盘</div><div class="d">OutputStorage 双适配器；entry 已接 FileOutputStorage（output.log 跨重启可读，超阈值给尾部）</div></div>
         <div class="arr">→</div>
-        <div class="node done"><div class="t"><span class="mark">✓</span>终态写回</div><div class="d">resolve-exit 判定在写锁内（stopping 恒 canceled）；终态清单单源（ADR-0064/0065）</div></div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>终态写回</div><div class="d">resolve-exit 判定在写锁内（stopping 恒 canceled）；终态清单单源（旧 ADR-0064/0065）</div></div>
         <div class="arr">→</div>
-        <div class="node done"><div class="t"><span class="mark">✓</span>完成通知</div><div class="d">NotificationCenter（终态入队、wait 不通知、100KiB 批切）→ turn_end 批投递（ADR-0022）</div></div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>完成通知</div><div class="d">NotificationCenter（终态入队、wait 不通知、100KiB 批切）→ turn_end 批投递（旧 ADR-0022）</div></div>
       </div>
     </div>
     <div class="lane">
       <div class="lane-t warn">⑥ 会话生命周期（部分落地）</div>
       <div class="row">
-        <div class="node done"><div class="t"><span class="mark">✓</span>重启恢复</div><div class="d">记录落盘（写穿）+ 启动装载 + owner 归属回收；owner 还活着的同类记录不装载（ADR-0023）</div></div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>重启恢复</div><div class="d">记录落盘（写穿）+ 启动装载 + owner 归属回收；owner 还活着的同类记录不装载（旧 ADR-0023）</div></div>
         <div class="arr">→</div>
         <div class="node done"><div class="t"><span class="mark">✓</span>shutdown 清扫</div><div class="d">engine.shutdown：抽干等待者 + SIGTERM 在跑 ✓；拆卸还槽不提拔 ✓（releaseWithoutPromotion）</div></div>
       </div>
@@ -194,7 +194,7 @@
     真 pi 冒烟 1.4.0 与 floor 0.86.0 各一次全过（run_code + 程序内派发真子进程）。
   </div>
   <div class="note warn">
-    <b>与 dispatch-doors-flow.html 的差异（2026-10-26 核对）：</b>C1 门进程序表 ✓、C2 surface 检测 ✓（session_start 问 pi）、C3 handle 带 label ✓、C4 闸门挂点 ✓（admissionGates 序列，本体待 dispatch）、C5 可见性 ✓（setActiveTools 增删；exposure getter 经实测 1.4.0 不支持）、<b>C6 散文层 ✓（@pi-ptc/routes 第 6 包：7 条路 + 6 工具描述 + &lt;ptc&gt; 节注入，预算 380/560，真 pi 按路由表作答）</b>——待办：闸门本体、spawn/pump。<br><b>通知管线细节（2026-10-26 ✓）：</b>NotificationCenter（终态事件入队、wait 路径记 awaited 不通知 ADR-0053、按字节 100KiB 批切分）→ entry turn_end drain → routes.renderTaskNotifications（模型面文案单源）→ sendMessage nextTurn 投递；端到端真子进程验证，顺手修掉 <b>sessionEndingGate 方向写反</b>的真 bug。<br><b>PTC 模式进入 ✓ · /ptc off 截断 ✓（ADR-0058）· 方案 A readTail ✓ · agentScope 层级覆盖 ✓（project 优先于 user）· teardown 还槽不提拔 ✓（ADR-0063）· resume×收窄真机验证 ✓（pi -c resume 后收窄完好，#11062 不冲突）</b>（均 2026-10-26）。<b>pi 四模式实测 ✓ 2026-10-26</b>：print（历史冒烟）/ json（事件流完整+PTC 调用）/ rpc（真交互 prompt→tool_execution→settled）/ TUI（kimi-cu 驱动真界面：收窄生效 + renderResult 折叠行渲染 + 程序跑通 123）。<b>下一步建议：</b>测试框架、发布形态、floor 双端实测、重写版 ADR/CHANGELOG。
+    <b>与 dispatch-doors-flow.html 的差异（2026-10-26 核对）：</b>C1 门进程序表 ✓、C2 surface 检测 ✓（session_start 问 pi）、C3 handle 带 label ✓、C4 闸门挂点 ✓（admissionGates 序列，本体待 dispatch）、C5 可见性 ✓（setActiveTools 增删；exposure getter 经实测 1.4.0 不支持）、<b>C6 散文层 ✓（@pi-ptc/routes 第 6 包：7 条路 + 6 工具描述 + &lt;ptc&gt; 节注入，预算 380/560，真 pi 按路由表作答）</b>——待办：闸门本体、spawn/pump。<br><b>通知管线细节（2026-10-26 ✓）：</b>NotificationCenter（终态事件入队、wait 路径记 awaited 不通知 ADR-0007、按字节 100KiB 批切分）→ entry turn_end drain → routes.renderTaskNotifications（模型面文案单源）→ sendMessage nextTurn 投递；端到端真子进程验证，顺手修掉 <b>sessionEndingGate 方向写反</b>的真 bug。<br><b>PTC 模式进入 ✓ · /ptc off 截断 ✓（ADR-0012）· 方案 A readTail ✓ · agentScope 层级覆盖 ✓（project 优先于 user）· teardown 还槽不提拔 ✓（旧 ADR-0063）· resume×收窄真机验证 ✓（pi -c resume 后收窄完好，#11062 不冲突）</b>（均 2026-10-26）。<b>pi 四模式实测 ✓ 2026-10-26</b>：print（历史冒烟）/ json（事件流完整+PTC 调用）/ rpc（真交互 prompt→tool_execution→settled）/ TUI（kimi-cu 驱动真界面：收窄生效 + renderResult 折叠行渲染 + 程序跑通 123）。<b>下一步建议：</b>测试框架、发布形态、floor 双端实测、重写版 ADR/CHANGELOG。
   </div>
 
   <footer>

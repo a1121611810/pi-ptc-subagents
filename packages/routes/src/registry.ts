@@ -1,6 +1,6 @@
 import type { SurfaceMode } from "./surface.ts";
 
-// ADR-0059/0061：模型面散文唯一出处。散文只在本文件出现——工具文件里不许有描述字面量（机械点 6）
+// ADR-0013/0061：模型面散文唯一出处。散文只在本文件出现——工具文件里不许有描述字面量（机械点 6）
 // 渲染确定性（决策 25，prompt cache）：输入只有静态册子 + surface，两次渲染逐字节相同
 
 export type ToolName =
@@ -91,7 +91,7 @@ export const ROUTES = [
       codemode_ptc:
         "不适用——写程序是 full_ptc 面的编排能力；本面用 codemode 编排、pi_task_codemode 派任务",
     },
-    fact: "程序内 tools.*；bash 当前不在程序绑定表里（ADR-0040 的 opt-in 尚未接线）；只在本面（full_ptc）注册 PTC 工具",
+    fact: "程序内 tools.*；bash 当前不在程序绑定表里（旧 ADR-0040 的 opt-in 尚未接线）；只在本面（full_ptc）注册 PTC 工具",
     detail: "docs/routes/run-one-program.md",
   },
   {
@@ -113,7 +113,7 @@ export const ROUTES = [
       full_ptc: "程序内 tools.read/grep/find/ls/edit/write；逐个直调走 pi 自己的工具",
       codemode_ptc: "脚本内 tools.<内置名> 直接调",
     },
-    fact: "bash 当前不在程序绑定表里（ADR-0040 的 opt-in 尚未接线）",
+    fact: "bash 当前不在程序绑定表里（旧 ADR-0040 的 opt-in 尚未接线）",
     detail: "docs/routes/use-the-built-in-tools.md",
   },
   {
@@ -147,12 +147,12 @@ export const ROUTES = [
       full_ptc: "ptc_task_list / ptc_task_output / ptc_task_stop（模型直调）",
       codemode_ptc: "同左（模型直调；脚本经结构化返回）",
     },
-    fact: "有任务记录这三个工具才出现在模型面前（ADR-0053）",
+    fact: "有任务记录这三个工具才出现在模型面前（ADR-0007）",
     detail: "docs/routes/manage-a-task.md",
   },
 ] satisfies RouteEntry[];
 
-// 超长产出的分层引导（ptc_task_output）：报告是归约层（ADR-0032 本意），响应里的 output 是尾部原始层
+// 超长产出的分层引导（ptc_task_output）：报告是归约层（旧 ADR-0032 本意），响应里的 output 是尾部原始层
 export const LONG_OUTPUT_GUIDANCE_WITH_REPORT =
   "产出超过截断阈值（{bytes} 字节）。先看孩子的报告（归约层）：{report}——响应里的 output 是截断后的尾部；报告没收录的完整原文用 read 读记录上的 outputPath。";
 export const LONG_OUTPUT_GUIDANCE_NO_REPORT =
@@ -176,7 +176,7 @@ export function renderLongOutputGuidance(options: {
   return LONG_OUTPUT_GUIDANCE_NO_REPORT.replace("{bytes}", String(options.bytes));
 }
 
-// ADR-0022：后台任务通知的批渲染——模型面文案归本册子（结构化参数：routes 保持叶子，不依赖 dispatch）
+// 旧 ADR-0022：后台任务通知的批渲染——模型面文案归本册子（结构化参数：routes 保持叶子，不依赖 dispatch）
 export function renderTaskNotifications(
   batch: ReadonlyArray<{ taskId: string; label?: string; status: string; stopReason?: string }>,
 ): string {
@@ -187,7 +187,7 @@ export function renderTaskNotifications(
   return ["<bg-task-notifications>", ...lines, "</bg-task-notifications>"].join("\n");
 }
 
-// ADR-0061：索引 token 预算；超了明说（> WARNING:），不静默截断
+// ADR-0015：索引 token 预算；超了明说（> WARNING:），不静默截断
 export const ROUTE_INDEX_TOKEN_CEILING = 560;
 
 // 启发式估 token（中英混排按 2 字符/token）；旧实现同款思路
@@ -195,7 +195,7 @@ function estimateTokens(text: string): number {
   return Math.ceil(text.length / 2);
 }
 
-// 总则句（ADR-0010 的「引导」一半：先给地图再收枪）——按面切换，随索引一起渲染
+// 总则句（旧 ADR-0010 的「引导」一半：先给地图再收枪）——按面切换，随索引一起渲染
 const ROUTE_INDEX_LEAD: Record<SurfaceMode, string> = {
   full_ptc: "批量调工具默认先写程序（ptc_run_code）；单次调用或要逐步判断、审批敏感的才直连。",
   codemode_ptc:

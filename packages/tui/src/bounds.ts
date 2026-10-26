@@ -1,4 +1,4 @@
-// ADR-0013 §6：渲染上限的冻结契约值——改任何一个都要新 ADR；渲染器一律引用这里
+// 旧 ADR-0013 §6：渲染上限的冻结契约值——改任何一个都要新 ADR；渲染器一律引用这里
 export const RENDER_BOUNDS = {
   MAX_RESULT_HINT_CHARS: 60, // 折叠行右侧的值提示
   MAX_ERROR_CHARS: 120, // 错误摘要

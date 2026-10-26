@@ -6,9 +6,9 @@ export interface ParsedChildStream {
   text: string;
   /** 工具通道读到的报告（ptc_child_report 的 toolResult） */
   toolReport: ChildReport | null;
-  /** 宿主侧 message_end 上报的 usage（ADR-0044 的 observed 一半） */
+  /** 宿主侧 message_end 上报的 usage（旧 ADR-0044 的 observed 一半） */
   observedUsage: { input?: number; output?: number; cost?: number; turns?: number } | null;
-  /** ADR-0045：流里实测到的孩子模型/provider */
+  /** 旧 ADR-0045：流里实测到的孩子模型/provider */
   observedModel: string | null;
   observedProvider: string | null;
 }

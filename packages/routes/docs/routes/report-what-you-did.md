@@ -1,4 +1,4 @@
-# 交报告（child report，ADR-0032）
+# 交报告（child report，旧 ADR-0032）
 
 子代理收工前交一份结构化报告，四样：`summary`（一句话结论）、`findings`（每条 what +
 独立 evidence）、`files_touched`、`usage`（input/output/cost/turns）。散文保留不替换。

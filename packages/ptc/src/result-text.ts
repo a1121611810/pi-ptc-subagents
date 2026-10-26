@@ -1,7 +1,7 @@
 import type { RunOutcome } from "./protocol.ts";
 import { applyAdr0015Truncation, renderModelValue, sanitizeText } from "@pi-ptc/tui";
 
-// 运行结果 → 模型可见文本块（ADR-0012 排版 + ADR-0015 截断）；details 带截断元信息
+// 运行结果 → 模型可见文本块（旧 ADR-0012 排版 + 旧 ADR-0015 截断）；details 带截断元信息
 export function renderToolResult(outcome: RunOutcome): {
   text: string;
   truncated: boolean;

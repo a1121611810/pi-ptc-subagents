@@ -3,5 +3,5 @@
   "categories": {
     "correctness": "error"
   },
-  "ignorePatterns": ["**/dist/**", "docs/prototypes/**", ".scratch/**"]
+  "ignorePatterns": ["**/dist/**", "docs/prototypes/**", "docs/research/**", ".scratch/**"]
 }

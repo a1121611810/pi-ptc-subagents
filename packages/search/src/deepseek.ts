@@ -11,7 +11,7 @@ export function retryHint(status: number): string {
   return "";
 }
 
-// ADR-0048：永不 throw、key 只进 Authorization 头、产出文本过 redact（deepseek.ts 旧实现的三条纪律）
+// ADR-0002：永不 throw、key 只进 Authorization 头、产出文本过 redact（deepseek.ts 旧实现的三条纪律）
 export function redact(text: string, apiKey: string): string {
   return apiKey ? text.split(apiKey).join("[REDACTED]") : text;
 }

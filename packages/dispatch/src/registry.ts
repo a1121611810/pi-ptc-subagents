@@ -1,6 +1,6 @@
 import { isTerminal, type TaskRecord, type TaskStatus } from "./task-record.ts";
 
-// ADR-0056/0057：queued 入队即存在；终态没有出边
+// ADR-0010/0057：queued 入队即存在；终态没有出边
 const ALLOWED_TRANSITIONS: Readonly<Record<TaskStatus, readonly TaskStatus[]>> = {
   queued: ["running", "canceled", "lost"],
   running: ["stopping", "succeeded", "failed", "lost"],
@@ -28,12 +28,12 @@ export type TaskCommand =
 
 export interface CommandResult {
   record: TaskRecord;
-  /** null = 无写入（spawn 插入）；非 null 但 changed=false = 判定拒绝写入（ADR-0064 的竞态常态） */
+  /** null = 无写入（spawn 插入）；非 null 但 changed=false = 判定拒绝写入（旧 ADR-0064 的竞态常态） */
   fromStatus: TaskStatus | null;
   changed: boolean;
 }
 
-// ADR-0022 §8 + ADR-0064：registry 是记录的唯一合法写入者，判定在写锁内做，命令不点名目标终态
+// 旧 ADR-0022 §8 + 旧 ADR-0064：registry 是记录的唯一合法写入者，判定在写锁内做，命令不点名目标终态
 export class TaskRegistry {
   readonly #records = new Map<string, TaskRecord>();
   #writeTail: Promise<unknown> = Promise.resolve();
@@ -82,7 +82,7 @@ export class TaskRegistry {
       case "stop":
         return this.#move(command.id, "stopping", { stopReason: command.reason });
       case "cancel-queued": {
-        // ADR-0064：写入器读当前状态——还是 queued 才 canceled，不是则原样返回、不写、不报错
+        // 旧 ADR-0064：写入器读当前状态——还是 queued 才 canceled，不是则原样返回、不写、不报错
         const current = this.#require(command.id);
         if (current.status !== "queued")
           return { record: current, fromStatus: current.status, changed: false };
@@ -99,7 +99,7 @@ export class TaskRegistry {
       case "reconcile-lost":
         return this.#move(command.id, "lost", { stopReason: command.reason });
       case "attach-report": {
-        // ADR-0032 故事 15/16：报告随记录存活；终态上的迟到报告静默丢弃（竞态常态）
+        // 旧 ADR-0032 故事 15/16：报告随记录存活；终态上的迟到报告静默丢弃（竞态常态）
         const current = this.#require(command.id);
         if (isTerminal(current.status))
           return { record: current, fromStatus: current.status, changed: false };
@@ -142,7 +142,7 @@ export class TaskRegistry {
       ...current,
       ...patch,
       status: to,
-      // ADR-0056 决定 4：出队转 running 的那一刻盖 startedAt，durationMs 量孩子跑起来之后的时间
+      // ADR-0010 决定 4：出队转 running 的那一刻盖 startedAt，durationMs 量孩子跑起来之后的时间
       startedAt: to === "running" ? Date.now() : current.startedAt,
       finishedAt: isTerminal(to) ? Date.now() : current.finishedAt,
     };

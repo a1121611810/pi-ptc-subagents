@@ -87,7 +87,7 @@
       <div class="row">
         <div class="node done"><div class="t"><span class="mark">✓</span>模型</div><div class="d">调 ptc_run_code / ptc_workflow，写程序</div></div>
         <div class="arr">→</div>
-        <div class="node done"><div class="t"><span class="mark">✓</span>entry 装配</div><div class="d">session_start：surface 检测、binding 表、&lt;ptc&gt; 节注入（含按面总则句）、任务面可见性活判断；<b>PTC 模式（ADR-0010）</b>：full_ptc 默认收窄（内置绑定出活跃表，每 turn 前重新收敛）+ skills 节补偿（ADR-0011，indirect 加载句）+ /ptc mode on|off；真机验证模型自发写程序</div></div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>entry 装配</div><div class="d">session_start：surface 检测、binding 表、&lt;ptc&gt; 节注入（含按面总则句）、任务面可见性活判断；<b>PTC 模式（旧 ADR-0010）</b>：full_ptc 默认收窄（内置绑定出活跃表，每 turn 前重新收敛）+ skills 节补偿（旧 ADR-0011，indirect 加载句）+ /ptc mode on|off；真机验证模型自发写程序</div></div>
         <div class="arr">→</div>
         <div class="node done"><div class="t"><span class="mark">✓</span>工具工厂</div><div class="d">tools.ts · typebox schema · isError 按状态</div></div>
       </div>
@@ -101,7 +101,7 @@
         <div class="arr">→</div>
         <div class="node done"><div class="t"><span class="mark">✓</span>worker</div><div class="d">reset 握手：拒残留 pending · globalThis 基线清场 · console 还原</div></div>
         <div class="arr">→</div>
-        <div class="node done"><div class="t"><span class="mark">✓</span>compileProgram</div><div class="d">剥 TS 类型 + 强制严格模式（ADR-0060）</div></div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>compileProgram</div><div class="d">剥 TS 类型 + 强制严格模式（ADR-0014）</div></div>
       </div>
       <div class="row" style="margin-top:6px">
         <div class="node done"><div class="t"><span class="mark">✓</span>协议</div><div class="d">host↔worker 帧两端一份类型</div></div>
@@ -110,27 +110,27 @@
         <div class="arr">→</div>
         <div class="node done"><div class="t"><span class="mark">✓</span>console / workflow 上提</div><div class="d">log 帧；workflow.log/phase/parallel/pipeline（workflow 面注入）</div></div>
         <div class="arr">→</div>
-        <div class="node done"><div class="t"><span class="mark">✓</span>子调用树</div><div class="d">ADR-0021：四态 + 耗时 + 参数预览，随结果交出</div></div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>子调用树</div><div class="d">旧 ADR-0021：四态 + 耗时 + 参数预览，随结果交出</div></div>
       </div>
     </div>
     <div class="lane">
       <div class="lane-t pi">工具执行（pi 管线）</div>
       <div class="row">
-        <div class="node done"><div class="t"><span class="mark">✓</span>binding 表</div><div class="d">ADR-0040：bash 唯一 opt-in（默认不在表里）；executeTool 运行时探测</div></div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>binding 表</div><div class="d">旧 ADR-0040：bash 唯一 opt-in（默认不在表里）；executeTool 运行时探测</div></div>
         <div class="arr">→</div>
         <div class="node partial"><div class="t"><span class="mark">◐</span>pi 工具执行</div><div class="d">走 ctx.executeTool（pi 1.x）；0.86 floor 机制未考古；门参数已透传（model/thinkingLevel/agent/agentScope），会话模型继承（sessionModel）未接</div></div>
         <div class="arr">→</div>
-        <div class="node done"><div class="t"><span class="mark">✓</span>图片上提</div><div class="d">ADR-0014：emitImage 通道，只挂 fulfilled</div></div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>图片上提</div><div class="d">旧 ADR-0014：emitImage 通道，只挂 fulfilled</div></div>
       </div>
     </div>
     <div class="lane">
       <div class="lane-t tui">结果渲染（packages/tui）</div>
       <div class="row">
-        <div class="node done"><div class="t"><span class="mark">✓</span>文本卫生</div><div class="d">ADR-0012：ANSI/控制符清洗 + 可读排版</div></div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>文本卫生</div><div class="d">旧 ADR-0012：ANSI/控制符清洗 + 可读排版</div></div>
         <div class="arr">→</div>
-        <div class="node done"><div class="t"><span class="mark">✓</span>截断契约</div><div class="d">ADR-0015：50KB/2000 行 + 全文临时文件 + 尾注</div></div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>截断契约</div><div class="d">旧 ADR-0015：50KB/2000 行 + 全文临时文件 + 尾注</div></div>
         <div class="arr">→</div>
-        <div class="node done"><div class="t"><span class="mark">✓</span>渲染预算表</div><div class="d">ADR-0013 §6：七个冻结常量唯一持有</div></div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>渲染预算表</div><div class="d">旧 ADR-0013 §6：七个冻结常量唯一持有</div></div>
         <div class="arr">→</div>
         <div class="node partial"><div class="t"><span class="mark">◐</span>TUI 行渲染</div><div class="d">ptc 两工具 renderResult 已挂（折叠/展开/运行中）；shimmer 与各包 renderer 未写</div></div>
       </div>
@@ -141,20 +141,20 @@
   <table>
     <thead><tr><th style="width:24%">模块</th><th style="width:56%">内容</th><th style="width:20%">依据</th></tr></thead>
     <tbody>
-      <tr><td><code>compile.ts</code></td><td>严格模式编译器：剥类型 + <code>"use strict"</code> 内传、顶层 await/return、编译期 SyntaxError</td><td>ADR-0060 · 探针 5/5</td></tr>
-      <tr><td><code>limits.ts</code></td><td>全部数字唯一出处：2 分钟超时（上限 10 分）、64 MiB 预算、128 在途 / 10 并行、池参数</td><td>ADR-0003/0004/0017</td></tr>
-      <tr><td><code>protocol.ts</code></td><td>host↔worker 帧协议：init / run（含 args）/ cancel / reset / result / log / call / settled / ready</td><td>ADR-0017</td></tr>
+      <tr><td><code>compile.ts</code></td><td>严格模式编译器：剥类型 + <code>"use strict"</code> 内传、顶层 await/return、编译期 SyntaxError</td><td>ADR-0014 · 探针 5/5</td></tr>
+      <tr><td><code>limits.ts</code></td><td>全部数字唯一出处：2 分钟超时（上限 10 分）、64 MiB 预算、128 在途 / 10 并行、池参数</td><td>旧 ADR-0003/0004/0017</td></tr>
+      <tr><td><code>protocol.ts</code></td><td>host↔worker 帧协议：init / run（含 args）/ cancel / reset / result / log / call / settled / ready</td><td>旧 ADR-0017</td></tr>
       <tr><td><code>dispatcher.ts</code></td><td>超时 terminate、并发双闸门（FIFO 等待）、输出预算校验、abort 在飞调用、worker 早退兜底</td><td>探针 6/6</td></tr>
       <tr><td><code>pool.ts</code> + worker reset</td><td>warm 复用：reset 握手后才归还；globalThis 基线清场；console 还原</td><td>探针：跨 run 泄漏不可见</td></tr>
-      <tr><td><code>sub-calls.ts</code></td><td>子调用活树：running/ok/error/rejected + 耗时 + 参数预览，随 outcome 交出</td><td>ADR-0021 · 探针 3/3 状态</td></tr>
-      <tr><td>图片上提</td><td>binding 上下文 <code>emitImage</code>；entry 桥 pi 结果 image 块；只挂 fulfilled</td><td>ADR-0014 · 探针</td></tr>
+      <tr><td><code>sub-calls.ts</code></td><td>子调用活树：running/ok/error/rejected + 耗时 + 参数预览，随 outcome 交出</td><td>旧 ADR-0021 · 探针 3/3 状态</td></tr>
+      <tr><td>图片上提</td><td>binding 上下文 <code>emitImage</code>；entry 桥 pi 结果 image 块；只挂 fulfilled</td><td>旧 ADR-0014 · 探针</td></tr>
       <tr><td><code>tools.ts</code></td><td>ptc_run_code / ptc_workflow 工厂：schema、execute、isError、workflow args JSON 校验</td><td>真 pi 双冒烟通过</td></tr>
-      <tr><td><code>bindings.ts</code></td><td>名单 known 7 / bash 唯一 opt-in / <code>名单 ∩ 活跃工具</code> 收窄</td><td>ADR-0040/0005 T7</td></tr>
+      <tr><td><code>bindings.ts</code></td><td>名单 known 7 / bash 唯一 opt-in / <code>名单 ∩ 活跃工具</code> 收窄</td><td>旧 ADR-0040/0005 T7</td></tr>
       <tr><td><code>task-binding.ts</code></td><td>两扇门共享十参数 typebox schema（task/label 外标注随派发引擎接管）</td><td>HTML 决策 27</td></tr>
-      <tr><td><code>@pi-ptc/tui</code> / <code>@pi-ptc/routes</code></td><td>tui：text/truncate/bounds 叶子（第 5 包）；routes：散文唯一出处 ROUTES 7 条 + TOOLS 6 描述 + &lt;ptc&gt; 节注入（第 6 包），ptc 描述字面量已搬出</td><td>ADR-0012/0013/0015 · ADR-0059/0061</td></tr>
+      <tr><td><code>@pi-ptc/tui</code> / <code>@pi-ptc/routes</code></td><td>tui：text/truncate/bounds 叶子（第 5 包）；routes：散文唯一出处 ROUTES 7 条 + TOOLS 6 描述 + &lt;ptc&gt; 节注入（第 6 包），ptc 描述字面量已搬出</td><td>旧 ADR-0012/0013/0015 · ADR-0013/0061</td></tr>
       <tr><td>真 pi 端到端</td><td>run_code：tools.read 并行归约；workflow：phase + pipeline；程序内 tools.pi_task_ptc 建任务（handle 带 label）；任务面随记录出现/消失</td><td>pi 1.4.0 · -ne 隔离冒烟 ×5</td></tr>
       <tr><td>C1–C6 接线</td><td>门进程序 binding 表 · surface 检测 · handle 带 label · 闸门挂点（admissionGates）· 可见性 setActiveTools · 散文层 routes 包</td><td>dispatch-doors-flow 差异清零</td></tr>
-      <tr><td><b>PTC 模式（ADR-0010/0011）</b></td><td>full_ptc 默认收窄（内置绑定出活跃表，每 turn 前重新收敛）+ skills 节补偿（indirect 加载句）+ /ptc mode on|off + /ptc off 截断（ADR-0058）；真机：模型自发写程序</td><td>pi 1.4.0 · 探针 5/5 + 真机</td></tr>
+      <tr><td><b>PTC 模式（旧 ADR-0010/0011）</b></td><td>full_ptc 默认收窄（内置绑定出活跃表，每 turn 前重新收敛）+ skills 节补偿（indirect 加载句）+ /ptc mode on|off + /ptc off 截断（ADR-0012）；真机：模型自发写程序</td><td>pi 1.4.0 · 探针 5/5 + 真机</td></tr>
       <tr><td><b>pi 四模式实测</b></td><td>print / json（事件流+PTC 调用）/ rpc（prompt→tool_execution→settled）/ TUI（kimi-cu 驱动：收窄 + renderResult 折叠行）</td><td>2026-10-26 全通过</td></tr>
     </tbody>
   </table>
@@ -168,7 +168,7 @@
       <tr><td>门参数语义接管</td><td>大部分已接（why/agent/readOnly/wait→引擎与 argv）；<b>model/thinkingLevel 已透传到 argv</b>（调用参数→agent 定义，档位挂 :thinking 后缀）；会话模型继承（sessionModel）未接；strict 白名单随 searchEnabled 含 web_ds_search</td><td><span class="st partial">◐</span></td><td>会话模型继承随 pi ctx 接入</td></tr>
       <tr><td>floor 0.86 binding 通道</td><td>binding 走 <code>ctx.executeTool</code>（pi 1.x）；floor 上程序内调不了内置工具；旧实现在 floor 能跑的机制<b>未考古</b></td><td><span class="st partial">◐</span></td><td>查 pi 0.86 API（矩阵文档待测节）</td></tr>
       <tr><td>池的 runGeneration 防护</td><td>reset 握手已覆盖正确性；「迟到帧/supersede」边角没做</td><td><span class="st partial">◐</span></td><td>边角，需求出现再补</td></tr>
-      <tr><td>drain 的 grace 等待</td><td>drain 已改为「杀当代空闲 worker、下轮 acquire 起新一代」（rearm）；在跑 run 靠自身 timeout 兜底——真 pi 冒烟中由模型捉出并修复了「drain 后池永久封死」</td><td><span class="st partial">◐</span></td><td>ADR-0017 W-1 · 已修 rearm</td></tr>
+      <tr><td>drain 的 grace 等待</td><td>drain 已改为「杀当代空闲 worker、下轮 acquire 起新一代」（rearm）；在跑 run 靠自身 timeout 兜底——真 pi 冒烟中由模型捉出并修复了「drain 后池永久封死」</td><td><span class="st partial">◐</span></td><td>旧 ADR-0017 W-1 · 已修 rearm</td></tr>
       <tr><td>渲染预算第 8 项</td><td>bounds.ts 登记了 ADR 点名的 7 个上限；旧实现「八上限」的第 8 个 ADR 摘要未写名</td><td><span class="st partial">◐</span></td><td>有 renderer 时补登（须走新 ADR）</td></tr>
     </tbody>
   </table>

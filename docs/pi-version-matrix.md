@@ -33,7 +33,7 @@ floor = **0.86.0**（`peerDependencies: ">=0.86.0"`），ceiling = 跟踪最新�
 ## 硬约束（重写仍然成立的事实）
 
 - pi **无 unregisterTool**：撤工具 = 同名重注册 `exposure: "hidden"`（`registerTool` 是 Map.set）；声明集每个模型请求重算，下一 turn 才生效 → `/ptc off` 的同 turn 窗口靠 `dispatch()` 里的闸接（纵深防御）
-- factory 阶段的 `getAllTools()`/`getActiveTools()` 是 `notInitialized` 桩 → **注册必须发生在 `session_start`**（ADR-0035）
+- factory 阶段的 `getAllTools()`/`getActiveTools()` 是 `notInitialized` 桩 → **注册必须发生在 `session_start`**（旧 ADR-0035）
 - `ctx.ui.notify` 在 `-p`/`json` 模式下是 no-op
 - pi 的**两个 settings 文件由两个不同函数解析**（项目侧位置优先、用户侧固定顺序），任何镜像都有 two-functions 陷阱——不要再写镜像，session_start 直接问 pi
 

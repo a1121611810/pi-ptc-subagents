@@ -20,7 +20,7 @@ const RUN_CODE_PARAMETERS = Type.Object({
 
 export type RunCodeParams = Static<typeof RUN_CODE_PARAMETERS>;
 
-// ptc_run_code（ADR-0010 门面）：execute 全部委托 runPtcProgram，模型面文本走 ADR-0012/0015
+// ptc_run_code（旧 ADR-0010 门面）：execute 全部委托 runPtcProgram，模型面文本走 旧 ADR-0012/0015
 export function createPtcRunCodeTool(options: PtcToolOptions) {
   return {
     name: "ptc_run_code",
@@ -38,7 +38,7 @@ export function createPtcRunCodeTool(options: PtcToolOptions) {
         pool: options.getPool?.(),
       });
       const { text, truncated, fullOutputPath } = renderToolResult(outcome);
-      // ADR-0014：程序内产出的图片块跟在文本结果之后挂给模型（失败/取消的运行不挂）
+      // 旧 ADR-0014：程序内产出的图片块跟在文本结果之后挂给模型（失败/取消的运行不挂）
       const imageBlocks = (outcome.status === "fulfilled"
         ? (outcome.images ?? [])
         : []) as unknown as AgentToolResult["content"];
@@ -98,7 +98,7 @@ export function createPtcWorkflowTool(options: PtcToolOptions) {
         pool: options.getPool?.(),
       });
       const { text, truncated, fullOutputPath } = renderToolResult(outcome);
-      // ADR-0014：程序内产出的图片块跟在文本结果之后挂给模型（失败/取消的运行不挂）
+      // 旧 ADR-0014：程序内产出的图片块跟在文本结果之后挂给模型（失败/取消的运行不挂）
       const imageBlocks = (outcome.status === "fulfilled"
         ? (outcome.images ?? [])
         : []) as unknown as AgentToolResult["content"];

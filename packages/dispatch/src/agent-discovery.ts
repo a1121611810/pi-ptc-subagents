@@ -1,15 +1,15 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
-// ADR-0039/0032：agent 定义发现——<dir>/<name>.md + 极简 frontmatter（--- 包围的 key: value 行）
+// 旧 ADR-0039/0032：agent 定义发现——<dir>/<name>.md + 极简 frontmatter（--- 包围的 key: value 行）
 export interface AgentDefinition {
   name: string;
   path: string;
-  /** ADR-0032：frontmatter childReport: false/no 退出报告契约；typo 视为开（意外的契约是可见多字段，反过来不可恢复） */
+  /** 旧 ADR-0032：frontmatter childReport: false/no 退出报告契约；typo 视为开（意外的契约是可见多字段，反过来不可恢复） */
   childReport: boolean;
   /** frontmatter tools: a,b,c（argv 收窄已接） */
   tools?: string[];
-  /** ADR-0044：定义可钉模型/思考档位——解析序「调用参数 → 定义 → 会话」 */
+  /** 旧 ADR-0044：定义可钉模型/思考档位——解析序「调用参数 → 定义 → 会话」 */
   model?: string;
   thinkingLevel?: string;
 }

@@ -1,4 +1,4 @@
-// ADR-0032：child report 词汇与 prompt 通道——刻意零 import（工具通道落地前，这里是契约的唯一持有者）
+// 旧 ADR-0032：child report 词汇与 prompt 通道——刻意零 import（工具通道落地前，这里是契约的唯一持有者）
 export const CHILD_REPORT_TOOL_NAME = "ptc_child_report";
 
 export type ChildFinding = {
@@ -20,7 +20,7 @@ export type ChildReport = {
   usage?: ChildUsage;
 };
 
-// reportChannel 恒在（ADR-0032 用户故事 4/6）：tool 通道缺席时 prompt 通道兜底，永不静默降级成散文
+// reportChannel 恒在（旧 ADR-0032 用户故事 4/6）：tool 通道缺席时 prompt 通道兜底，永不静默降级成散文
 export type ReportChannel = "tool" | "prompt-json" | "none" | "opted-out";
 
 export const REPORT_CONTRACT_BLOCK = [

@@ -1,4 +1,4 @@
-// workflow 面（ADR-0017）：程序内辅助函数。log/phase 是运行作用域的，由 worker 注入；parallel/pipeline 是纯组合子
+// workflow 面（旧 ADR-0017）：程序内辅助函数。log/phase 是运行作用域的，由 worker 注入；parallel/pipeline 是纯组合子
 export interface WorkflowHelpers {
   log: (...args: unknown[]) => void;
   phase: (name: string) => void;

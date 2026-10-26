@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// ADR-0015：pi 的截断契约值（pi 扩展指南「Tools MUST truncate their output」；floor 版本 pi 无此导出，本地持有）
+// 旧 ADR-0015：pi 的截断契约值（pi 扩展指南「Tools MUST truncate their output」；floor 版本 pi 无此导出，本地持有）
 export const TRUNCATION_MAX_BYTES = 50 * 1024;
 export const TRUNCATION_MAX_LINES = 2000;
 

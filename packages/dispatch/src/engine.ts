@@ -42,7 +42,7 @@ export type DispatchResult = {
   durationMs: number;
   /** 孩子自报或宿主观测的用量（观测值兜底） */
   usage?: ChildReport["usage"];
-  /** ADR-0045：流里实测到的孩子模型/provider */
+  /** 旧 ADR-0045：流里实测到的孩子模型/provider */
   observedModel?: string;
   observedProvider?: string;
   /** status != fulfilled 时给出原因 */
@@ -51,7 +51,7 @@ export type DispatchResult = {
   readOnlyTier: "strict" | "lenient";
   outputPath: string;
   whySuppressed?: boolean;
-  /** ADR-0032：报告与通道；没交报告时缺省、channel = none（散文照交，不静默） */
+  /** 旧 ADR-0032：报告与通道；没交报告时缺省、channel = none（散文照交，不静默） */
   report?: ChildReport;
   reportChannel: ReportChannel;
 };
@@ -92,18 +92,18 @@ export interface EngineOptions {
   gates?: Gate[];
   buildArgv?: (input: BuildArgvInput, context: EngineContext) => string[];
   stopGraceMs?: number;
-  /** ADR-0039：agent 发现（缺省：不存在任何定义——只认省略） */
+  /** 旧 ADR-0039：agent 发现（缺省：不存在任何定义——只认省略） */
   resolveAgent?: (name: string, scope?: "user" | "project" | "both") => AgentDefinition | null;
   /** 让子代理进程加载本扩展（-e 路径），工具通道的前提 */
   childExtensionPath?: string;
-  /** ADR-0049：搜索开关——strict 白名单据此保留 web_ds_search */
+  /** ADR-0003：搜索开关——strict 白名单据此保留 web_ds_search */
   searchEnabled?: boolean;
   /** BG-01：TaskRecord 落盘目录（<cwd>/.pi/ptc-tasks）；设了才有重启恢复 */
   storageDir?: string;
-  /** ADR-0022/0053：通知中心——wait 路径记 awaited，终态不重复通知 */
+  /** 旧 ADR-0022/0053：通知中心——wait 路径记 awaited，终态不重复通知 */
   notifications?: { markAwaited(taskId: string): void };
-  /** ADR-0043：whyEnabled 默认开；关掉时丢弃 why 并记 whySuppressed——剥夺类开关 fail-open（坏值视为开）。
-   * 谓词非值：/ptc why 的会话级覆盖要热生效，值会在装配时被冻住（同 ADR-0065 sessionEnding 的教训） */
+  /** 旧 ADR-0043：whyEnabled 默认开；关掉时丢弃 why 并记 whySuppressed——剥夺类开关 fail-open（坏值视为开）。
+   * 谓词非值：/ptc why 的会话级覆盖要热生效，值会在装配时被冻住（同 旧 ADR-0065 sessionEnding 的教训） */
   whyEnabled?: boolean | (() => boolean);
 }
 
@@ -122,7 +122,7 @@ function aborts(signal: AbortSignal): Promise<void> {
   });
 }
 
-// ADR-0023：kill(pid, 0) 探活——ESRCH 死、EPERM 活（别人进程但存在）
+// 旧 ADR-0023：kill(pid, 0) 探活——ESRCH 死、EPERM 活（别人进程但存在）
 function isPidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -186,11 +186,11 @@ export class TaskEngine {
       const rejected = gate(rawInput);
       if (rejected) return Promise.resolve(rejected); // 闸在铸 id 前：不留记录不占槽
     }
-    // ADR-0043：开关关掉时在这里丢 why——record/handle/result 都带 whySuppressed，argv 里不再出现
+    // 旧 ADR-0043：开关关掉时在这里丢 why——record/handle/result 都带 whySuppressed，argv 里不再出现
     const whyEnabled = this.#whyEnabled();
     const whySuppressed = !whyEnabled && rawInput.why !== undefined;
     const input: DispatchInput = { ...rawInput, why: whyEnabled ? rawInput.why : undefined };
-    // ADR-0032/0039：给了名字必须解析得出（闸门 5 已守）；frontmatter childReport:false → 契约缺席
+    // 旧 ADR-0032/0039：给了名字必须解析得出（闸门 5 已守）；frontmatter childReport:false → 契约缺席
     const agent =
       input.agent === undefined ? null : this.#resolveAgent(input.agent, input.agentScope);
     const extras = {
@@ -209,14 +209,14 @@ export class TaskEngine {
           task: input.task,
           label: input.label,
           whySuppressed,
-          // ADR-0023 归属：记录盖 owner 戳，重启恢复按它判定「还在不在飞」
+          // 旧 ADR-0023 归属：记录盖 owner 戳，重启恢复按它判定「还在不在飞」
           ownerPid: this.#owner.pid,
           ownerBootMs: this.#owner.bootMs,
         },
       })
       .then(async () => {
         if (input.wait) {
-          // ADR-0053：前台调用方等结果——终态不投递通知
+          // ADR-0007：前台调用方等结果——终态不投递通知
           this.#notifications?.markAwaited(taskId);
           const acquired = this.#slots.acquire(taskId);
           // 决策 17：调用方 abort → 抽掉排队中的等待（已 granted 的不动，uv_cancel 的 EBUSY 语义）
@@ -242,7 +242,7 @@ export class TaskEngine {
           }
           return this.#runToTerminal(taskId, input, whySuppressed, extras);
         }
-        // ADR-0055：不等槽——立刻返回 handle，granted 时才真起
+        // ADR-0009：不等槽——立刻返回 handle，granted 时才真起
         void this.#beginAfterAdmission(taskId, input, whySuppressed, extras);
         return { taskId, label: input.label, status: "queued" as const, whySuppressed };
       });
@@ -294,7 +294,7 @@ export class TaskEngine {
   ): Promise<DispatchResult> {
     const entered = await this.#registry.submit({ kind: "transition", id: taskId, to: "running" });
     if (!entered.changed) {
-      // 等槽期间记录已被取消（stop/abort/shutdown）——不 spawn（ADR-0057 决定 3 的「撞上边」）
+      // 等槽期间记录已被取消（stop/abort/shutdown）——不 spawn（ADR-0011 决定 3 的「撞上边」）
       this.#releaseSlot(taskId);
       return this.#notStartedResult(taskId, input, whySuppressed, "任务在启动前已取消", "canceled");
     }
@@ -334,7 +334,7 @@ export class TaskEngine {
     });
     this.#children.delete(taskId);
     const outputPath = await this.#output.write(taskId, text);
-    // ADR-0032：工具通道（--mode json 的 toolResult）优先；退 prompt 通道；opted-out 明说
+    // 旧 ADR-0032：工具通道（--mode json 的 toolResult）优先；退 prompt 通道；opted-out 明说
     const parsed = parseChildStream(text);
     const finalText = parsed.text || text;
     let report: ChildReport | undefined;
@@ -387,7 +387,7 @@ export class TaskEngine {
     };
   }
 
-  // ADR-0057：先写终态记录、后抽队列（反序会留「槽空出时抽任务仍启动」的窗口）
+  // ADR-0011：先写终态记录、后抽队列（反序会留「槽空出时抽任务仍启动」的窗口）
   async stop(taskId: string, reason: string): Promise<void> {
     const canceled = await this.#registry.submit({ kind: "cancel-queued", id: taskId, reason });
     if (canceled.changed) {
@@ -404,7 +404,7 @@ export class TaskEngine {
     }, this.#stopGraceMs).unref();
   }
 
-  // 终态还槽的唯一出口：拆卸中（ADR-0063）不提拔——提拔起来的孩子会话已关没人收，是孤儿
+  // 终态还槽的唯一出口：拆卸中（旧 ADR-0063）不提拔——提拔起来的孩子会话已关没人收，是孤儿
   #releaseSlot(taskId: string): void {
     if (this.#teardown) this.#slots.releaseWithoutPromotion(taskId);
     else this.#slots.release(taskId);
@@ -449,12 +449,12 @@ export class TaskEngine {
     return this.#output.size(taskId);
   }
 
-  /** 方案 A：只读尾部至多 maxBytes 字节（ADR-0015 偏尾语义；模型坚持要全文时的内存保险） */
+  /** 方案 A：只读尾部至多 maxBytes 字节（旧 ADR-0015 偏尾语义；模型坚持要全文时的内存保险） */
   readOutputTail(taskId: string, maxBytes: number): Promise<string | undefined> {
     return this.#output.readTail(taskId, maxBytes);
   }
 
-  // BG-01/ADR-0023：落盘（写穿）+ 重启恢复（装载 → owner 已死者 reconcile-lost）
+  // BG-01/旧 ADR-0023：落盘（写穿）+ 重启恢复（装载 → owner 已死者 reconcile-lost）
   async #restore(storageDir: string): Promise<void> {
     const dir = join(storageDir, "records");
     if (existsSync(dir)) {
@@ -473,7 +473,7 @@ export class TaskEngine {
     this.#registry.subscribe((record) => this.#persist(storageDir, record));
     for (const record of this.#registry.list()) {
       if (isTerminalRecord(record.status)) continue;
-      // 同机会话重叠（ADR-0023）：owner 还活着但不是我这条会话 → 别人的在飞任务不装载（看不见也停不了，避免「假停」）
+      // 同机会话重叠（旧 ADR-0023）：owner 还活着但不是我这条会话 → 别人的在飞任务不装载（看不见也停不了，避免「假停」）
       if (record.ownerPid !== undefined && isPidAlive(record.ownerPid)) continue;
       // owner 已死（或无主）：上次会话没来得及收，标 lost
       await this.#registry
@@ -495,10 +495,10 @@ export class TaskEngine {
     }
   }
 
-  // ADR-0065/0063：会话结束——拒新（gate 读 isEnding）、抽干等待者、SIGTERM 在跑的孩子
+  // 旧 ADR-0065/0063：会话结束——拒新（gate 读 isEnding）、抽干等待者、SIGTERM 在跑的孩子
   async shutdown(): Promise<void> {
     this.#ending = true;
-    this.#teardown = true; // ADR-0063：拆卸后所有还槽不提拔；dispatch 拒绝新的
+    this.#teardown = true; // 旧 ADR-0063：拆卸后所有还槽不提拔；dispatch 拒绝新的
     const drained = this.#slots.drainWaiters();
     for (const taskId of drained) {
       await this.#registry.submit({

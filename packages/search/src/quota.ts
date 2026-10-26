@@ -1,4 +1,4 @@
-// ADR-0047：每进程配额——只计成功调用（与 DeepSeek 计费一致），失败不占额；0 = 不限
+// ADR-0001：每进程配额——只计成功调用（与 DeepSeek 计费一致），失败不占额；0 = 不限
 export interface SearchQuota {
   tryAcquire(): boolean;
   /** 完成一次调用：success=false（搜索无结果等官方不计费的形态）不耗额 */

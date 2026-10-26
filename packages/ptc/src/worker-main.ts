@@ -9,7 +9,7 @@ export interface WorkerMainDeps {
 }
 
 // worker 侧运行时：跑程序、tools.* 转发宿主、console 上提。
-// 复用模型：宿主发 reset → 拒掉全部 pending、清场 globalThis（ADR-0017 warm 复用的功能等价物，不照搬十条）
+// 复用模型：宿主发 reset → 拒掉全部 pending、清场 globalThis（旧 ADR-0017 warm 复用的功能等价物，不照搬十条）
 export function workerMain(deps: WorkerMainDeps): void {
   let tools: Readonly<Record<string, (args: unknown) => Promise<unknown>>> = {};
   let pending = new Map<

@@ -1,7 +1,7 @@
 import type { Worker } from "node:worker_threads";
 import { DEFAULT_LIMITS } from "./limits.ts";
 
-// warm 复用的最小功能集：固定容量、acquire 超时、drain 退役（ADR-0017 的池语义，不照搬 §10 十条）
+// warm 复用的最小功能集：固定容量、acquire 超时、drain 退役（旧 ADR-0017 的池语义，不照搬 §10 十条）
 export class WorkerPool {
   readonly #spawn: () => Worker;
   readonly #capacity: number;

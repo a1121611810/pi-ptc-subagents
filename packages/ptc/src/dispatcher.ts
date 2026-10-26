@@ -7,7 +7,7 @@ import { buildWorkerUrl } from "./worker-source.ts";
 
 export interface BindingContext {
   cwd: string;
-  /** ADR-0014：binding 结果里的图片块经此上提到运行结果，随工具结果挂给模型 */
+  /** 旧 ADR-0014：binding 结果里的图片块经此上提到运行结果，随工具结果挂给模型 */
   emitImage: (image: unknown) => void;
   /** 决策 17：run 级取消信号（timeout/cancel 时触发）——binding 里等排队的任务应据此撤回 */
   signal?: AbortSignal;
@@ -20,13 +20,13 @@ export interface RunProgramRequest {
   surface?: string;
   cwd?: string;
   timeoutMs?: number;
-  /** workflow 的 args：作为程序里的同名全局绑定注入（ADR-0017 只透传 JSON 值） */
+  /** workflow 的 args：作为程序里的同名全局绑定注入（旧 ADR-0017 只透传 JSON 值） */
   args?: unknown;
   bindings: BindingTable;
   pool?: WorkerPool;
 }
 
-// ADR-0005 F1/F2：环境白名单 + 内存上限——程序以用户身份跑，这些只是降事故面，不是安全边界（ADR-0007）
+// 旧 ADR-0005 F1/F2：环境白名单 + 内存上限——程序以用户身份跑，这些只是降事故面，不是安全边界（旧 ADR-0007）
 const WORKER_ENV_ALLOW_LIST = ["PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "TEMP", "TMP"];
 
 // worker 默认继承 execArgv——宿主若以 -e/--input-type 等启动，原样继承会让 worker 起不来；只剥这几个

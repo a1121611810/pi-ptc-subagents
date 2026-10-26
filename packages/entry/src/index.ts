@@ -66,18 +66,18 @@ const textResult = (value: unknown): AgentToolResult => ({
 
 // pi 版本能力矩阵与 <0.99.0 floor 的运行时差异：docs/pi-version-matrix.md
 export default function piPtcEntry(pi: ExtensionAPI): void {
-  // ADR-0035：注册发生在 session_start——此刻 getActiveTools() 可用且 trust 已应用；factory 阶段它们是 throw 的桩
+  // 旧 ADR-0035：注册发生在 session_start——此刻 getActiveTools() 可用且 trust 已应用；factory 阶段它们是 throw 的桩
   pi.on("session_start", (_event, ctx) => {
-    // 子代理进程（depth>0）：只注册 child_report 工具（ADR-0032 工具通道），不做任何宿主侧装配
+    // 子代理进程（depth>0）：只注册 child_report 工具（旧 ADR-0032 工具通道），不做任何宿主侧装配
     if (Number(process.env.PI_PTC_DEPTH ?? 0) > 0) {
       registerChildToolsOnly(pi);
       return;
     }
-    // ADR-0035/0051：surface 直接问 pi——codemode 进了模型活跃表 = codemode_ptc；否则 full_ptc
+    // 旧 ADR-0035/0051：surface 直接问 pi——codemode 进了模型活跃表 = codemode_ptc；否则 full_ptc
     const surface: SurfaceMode = pi.getActiveTools().includes("codemode")
       ? "codemode_ptc"
       : FALLBACK_SURFACE_MODE;
-    // ADR-0010 PTC 模式：full_ptc + 开关 + 工具可用（--tools 限制会话不在活跃表 → 不进）→ 收窄 loadout
+    // 旧 ADR-0010 PTC 模式：full_ptc + 开关 + 工具可用（--tools 限制会话不在活跃表 → 不进）→ 收窄 loadout
     // 收窄目标 = 内置绑定工具：模型只能程序内 tools.* 调它们，写程序成为最顺的路
     let modeEnabled = readDefaultModeConfig(getAgentDir());
     let modeActive = false;
@@ -98,8 +98,8 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
       }
     };
     applyMode();
-    // ADR-0061：<ptc> 常驻索引进系统提示词；渲染输入只有静态册子 + surface，每 turn 字节相同（决策 25）
-    // ADR-0011 skills 补偿：收窄会触发 pi 丢 skills 节（只在 read/bash 可见时生成）——模式在且二者不可直调时自己写回（indirect 加载句）
+    // ADR-0015：<ptc> 常驻索引进系统提示词；渲染输入只有静态册子 + surface，每 turn 字节相同（决策 25）
+    // 旧 ADR-0011 skills 补偿：收窄会触发 pi 丢 skills 节（只在 read/bash 可见时生成）——模式在且二者不可直调时自己写回（indirect 加载句）
     pi.on("before_agent_start", (event) => {
       applyMode(); // pi 可能在 session_start 后重置活跃表——每 turn 开头重新收敛
       applyTaskFaceVisibility(pi, session); // 关模式重放 baseLoadout、resume 重置后，任务面可见性再对齐（幂等）
@@ -122,7 +122,7 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
     });
     const pool = new WorkerPool(spawnPtcWorker);
     const notifications = new NotificationCenter();
-    // ADR-0022：终态事件进待投递队列（engine 的 wait 路径记 awaited 不通知）；turn 边界批投递
+    // 旧 ADR-0022：终态事件进待投递队列（engine 的 wait 路径记 awaited 不通知）；turn 边界批投递
     // 单批发送失败不拖累其余批（分批已按 100KB 切；丢一批只是提醒缺失，记录仍在任务面）
     pi.on("turn_end", () => {
       for (const batch of notifications.drain()) {
@@ -137,7 +137,7 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
         }
       }
     });
-    // ADR-0050/0065：dispatchEnabled 独立于 mode；会话结束位置位（gate 读谓词）
+    // ADR-0004/0065：dispatchEnabled 独立于 mode；会话结束位置位（gate 读谓词）
     let dispatchEnabled = true;
     let sessionEnding = false;
     let whyEnabledOverride: boolean | null = null;
@@ -155,7 +155,7 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
         notifications,
         resolveAgent: (name, scope) => findAgent(name, agentDirs, scope),
         childExtensionPath: fileURLToPath(import.meta.url),
-        // ADR-0049：搜索开关传给引擎（strict 白名单保留 web_ds_search）
+        // ADR-0003：搜索开关传给引擎（strict 白名单保留 web_ds_search）
         searchEnabled: readWebSearchConfig(getAgentDir()).enabled,
         // BG-01：记录与产出一同落盘（项目级 .pi 目录；pi 的 sessionDir 不在扩展 API 上，此处取项目本地态）
         storageDir: join(process.cwd(), ".pi", "ptc-tasks"),
@@ -177,11 +177,11 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
       handler: async (args, cmdCtx) => {
         const [sub, rest] = args.trim().split(/\s+/);
         if (sub === "off") {
-          dispatchEnabled = false; // 纵深防御（ADR-0058）：闸留着，截断是真手段
+          dispatchEnabled = false; // 纵深防御（ADR-0012）：闸留着，截断是真手段
           withdrawTools(); // 撤编排层/门——声明集下一 turn 重算后生效
           if (modeActive) {
             modeEnabled = false;
-            applyMode(); // off ⇒ 收窄同时退出（ADR-0050）
+            applyMode(); // off ⇒ 收窄同时退出（ADR-0004）
           }
         } else if (sub === "on") {
           dispatchEnabled = true;
@@ -205,7 +205,7 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
       void session.shutdown();
     });
     notifications.attach(session.registry);
-    // ADR-0058 截断的原件留存：/ptc off = 同名重注册 exposure:hidden（pi 无 unregister，Map.set 覆盖）；on 重放原件
+    // ADR-0012 截断的原件留存：/ptc off = 同名重注册 exposure:hidden（pi 无 unregister，Map.set 覆盖）；on 重放原件
     const toolOriginals = new Map<string, Parameters<ExtensionAPI["registerTool"]>[0]>();
     const withdrawnNames: string[] = [];
     const registerTracked: ExtensionAPI["registerTool"] = ((
@@ -216,7 +216,7 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
     }) as ExtensionAPI["registerTool"];
     const withdrawTools = () => {
       for (const [name, def] of toolOriginals) {
-        if (name.startsWith("ptc_task_")) continue; // 任务面不属于 PTC 层（ADR-0050）：off 不动它
+        if (name.startsWith("ptc_task_")) continue; // 任务面不属于 PTC 层（ADR-0004）：off 不动它
         pi.registerTool({ ...def, exposure: "hidden" } as Parameters<
           ExtensionAPI["registerTool"]
         >[0]);
@@ -246,7 +246,7 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
 // 决策 5：有记录 → 加进活跃表；归零 → 撤掉。读当前活跃表合并，不动用户 loadout 的其它部分
 const TASK_FACE_NAMES = ["ptc_task_list", "ptc_task_output", "ptc_task_stop"];
 
-// ADR-0010：defaultMode 缺省 true（装包默认进 PTC 模式）；显式 false 才不进
+// 旧 ADR-0010：defaultMode 缺省 true（装包默认进 PTC 模式）；显式 false 才不进
 function readDefaultModeConfig(agentDir: string): boolean {
   try {
     const parsed = JSON.parse(readFileSync(join(agentDir, "ptc.json"), "utf8")) as {
@@ -258,7 +258,7 @@ function readDefaultModeConfig(agentDir: string): boolean {
   }
 }
 
-// ADR-0043：whyEnabled 读 ~/.pi/agent/ptc.json——剥夺类开关 fail-open：文件缺失/坏 JSON/坏值一律视为开
+// 旧 ADR-0043：whyEnabled 读 ~/.pi/agent/ptc.json——剥夺类开关 fail-open：文件缺失/坏 JSON/坏值一律视为开
 function readWhyEnabledConfig(agentDir: string): boolean {
   try {
     const raw = readFileSync(join(agentDir, "ptc.json"), "utf8");
@@ -278,7 +278,7 @@ function applyTaskFaceVisibility(pi: ExtensionAPI, session: PtcSession): void {
     pi.setActiveTools(active.filter((name) => !TASK_FACE_NAMES.includes(name)));
 }
 
-// ADR-0048：webDsSearch 开关 fail-closed（默认关）；凭据按 pi 同款语义三级解析（auth.json → models.json → env）
+// ADR-0002：webDsSearch 开关 fail-closed（默认关）；凭据按 pi 同款语义三级解析（auth.json → models.json → env）
 function readWebSearchConfig(agentDir: string): { enabled: boolean; maxCalls: number } {
   try {
     const parsed = JSON.parse(readFileSync(join(agentDir, "ptc.json"), "utf8")) as {
@@ -315,11 +315,11 @@ function readDeepSeekCredential(agentDir: string): string | null {
   return process.env.DEEPSEEK_API_KEY ?? null;
 }
 
-// ADR-0032 工具通道 + ADR-0049 搜索：子代理进程里唯一的注册物集合——echo 式报告工具 + 门控的 web_ds_search
+// 旧 ADR-0032 工具通道 + ADR-0003 搜索：子代理进程里唯一的注册物集合——echo 式报告工具 + 门控的 web_ds_search
 function registerChildToolsOnly(pi: ExtensionAPI): void {
   const agentDir = getAgentDir();
   const searchConfig = readWebSearchConfig(agentDir);
-  // 注意：开关开但缺 key 时仍注册——调用返回可读错误（ADR-0048 方案 B），描述与启动告警省略
+  // 注意：开关开但缺 key 时仍注册——调用返回可读错误（ADR-0002 方案 B），描述与启动告警省略
   if (searchConfig.enabled) {
     const apiKey = readDeepSeekCredential(agentDir);
     pi.registerTool(
@@ -358,13 +358,13 @@ function registerChildToolsOnly(pi: ExtensionAPI): void {
   });
 }
 
-// ADR-0005：binding 经 pi 的工具管线执行（ctx.executeTool）；floor 版本无此通道时绑定给出明确错误
+// 旧 ADR-0005：binding 经 pi 的工具管线执行（ctx.executeTool）；floor 版本无此通道时绑定给出明确错误
 function createBindingTable(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   session: PtcSession,
 ): BindingTable {
-  // emitImage 桥：pi 工具结果里的图片块经此上提到运行结果（ADR-0014）
+  // emitImage 桥：pi 工具结果里的图片块经此上提到运行结果（旧 ADR-0014）
   // executeTool 在 ExtensionContextActions 上是 optional，session_start 的 ctx 类型为 ExtensionContext——运行时探测
   const executeTool = (
     ctx as {
@@ -400,16 +400,16 @@ function createBindingTable(
       },
     ]),
   );
-  // C1 / 派发链左栏：程序内建任务的门（ADR-0052）——binding 表注入点接上，tools.pi_task_ptc 在程序内可达
+  // C1 / 派发链左栏：程序内建任务的门（ADR-0006）——binding 表注入点接上，tools.pi_task_ptc 在程序内可达
   const taskBinding = createTaskBinding(session);
   table[TASK_BINDING_NAME] = (args) =>
     taskBinding.execute(args as { task: string; label?: string });
   return table;
 }
 
-// PTC 门面（ADR-0010/0017）：binding 表 = 名单 ∩ 会话活跃工具（--tools 收窄会话不会拿到被滤掉的绑定）
-// ADR-0051 + 决策 28：一个面一个编排器——full_ptc 注册 PTC 对（模型面）；
-// codemode_ptc 不注册（编排唯一出口 = pi 的 codemode + 脚本内 pi_task_codemode，修订 ADR-0025 §3 的 codemode-reach 残留）
+// PTC 门面（旧 ADR-0010/0017）：binding 表 = 名单 ∩ 会话活跃工具（--tools 收窄会话不会拿到被滤掉的绑定）
+// ADR-0005 + 决策 28：一个面一个编排器——full_ptc 注册 PTC 对（模型面）；
+// codemode_ptc 不注册（编排唯一出口 = pi 的 codemode + 脚本内 pi_task_codemode，修订 旧 ADR-0025 §3 的 codemode-reach 残留）
 function registerPtcTools(
   registerTool: ExtensionAPI["registerTool"],
   options: Parameters<typeof createPtcRunCodeTool>[0],
@@ -420,7 +420,7 @@ function registerPtcTools(
   registerTool(createPtcWorkflowTool(options));
 }
 
-// 任务链（lifecycle face，ADR-0022 + 决策 5）：读/停同一个 registry；可见性 = 有任务记录才在模型面前
+// 任务链（lifecycle face，旧 ADR-0022 + 决策 5）：读/停同一个 registry；可见性 = 有任务记录才在模型面前
 // pi 1.4.0 实测不支持 exposure getter → defaultActive:false + setActiveTools 增删（applyTaskFaceVisibility）
 function registerTaskFace(
   registerTool: ExtensionAPI["registerTool"],
@@ -476,7 +476,7 @@ function registerTaskFace(
   });
 }
 
-// 派发链的门（ADR-0052/0054）：codemode 门 ≥0.99.0 对模型不可见；floor 上 exposure 被忽略（见矩阵文档）
+// 派发链的门（ADR-0006/0054）：codemode 门 ≥0.99.0 对模型不可见；floor 上 exposure 被忽略（见矩阵文档）
 function registerTaskDoor(
   registerTool: ExtensionAPI["registerTool"],
   session: PtcSession,

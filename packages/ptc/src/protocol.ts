@@ -1,4 +1,4 @@
-// ADR-0017：host↔worker 线协议。两端共用这一份类型，防止漂移
+// 旧 ADR-0017：host↔worker 线协议。两端共用这一份类型，防止漂移
 export type HostToWorkerFrame =
   | { kind: "init"; surface: string; bindingNames: string[] }
   | { kind: "run"; id: string; code: string; args: unknown }
@@ -7,7 +7,7 @@ export type HostToWorkerFrame =
   | { kind: "result"; callId: number; ok: true; value: unknown }
   | { kind: "result"; callId: number; ok: false; error: string };
 
-// images 为结构化图片块（pi ImageContent 形状）；subCalls 为子调用记录（ADR-0021）
+// images 为结构化图片块（pi ImageContent 形状）；subCalls 为子调用记录（旧 ADR-0021）
 export type RunOutcome =
   | {
       status: "fulfilled";

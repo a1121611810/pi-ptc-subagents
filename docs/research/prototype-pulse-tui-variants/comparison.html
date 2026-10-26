@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>TUI pulse variants</title>
+    <style>
+      body {
+        background: #1e1e1e;
+        color: #d4d4d4;
+        font-family: "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+        font-size: 14px;
+        padding: 24px;
+        margin: 0;
+        line-height: 1.5;
+      }
+      h1 {
+        font-size: 18px;
+        margin: 0 0 4px 0;
+      }
+      .subtitle {
+        color: #858585;
+        margin-bottom: 24px;
+      }
+      .settled,
+      .card {
+        background: #252526;
+        border: 1px solid #3e3e3e;
+        border-radius: 6px;
+        padding: 16px;
+        margin-bottom: 16px;
+      }
+      .settled h2,
+      .card h2 {
+        margin: 0 0 8px 0;
+        font-size: 15px;
+        color: #d4d4d4;
+        font-weight: bold;
+      }
+      .settled .note,
+      .card .note {
+        color: #9e9e9e;
+        font-style: italic;
+        margin-bottom: 12px;
+      }
+      .settled .cadence,
+      .card .cadence {
+        color: #d4d4d4;
+        margin-bottom: 12px;
+        font-size: 12px;
+      }
+      .frames {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+      }
+      .frame {
+        background: #1e1e1e;
+        padding: 12px 10px;
+        border-radius: 4px;
+        overflow: hidden;
+      }
+      .frame-num {
+        color: #6e6e6e;
+        font-size: 11px;
+        margin-bottom: 6px;
+      }
+      .frame-line {
+        white-space: nowrap;
+        font-size: 13px;
+      }
+      /* Theme slot mapping (matches pi-tui's Theme color names) */
+      .t-tree {
+        color: #6e6e6e;
+      }
+      .t-title {
+        font-weight: bold;
+        color: #d4d4d4;
+      }
+      .t-plain {
+        color: #d4d4d4;
+      }
+      .t-dim {
+        color: #4b5263;
+      } /* theme.fg("dim") */
+      .t-accent {
+        color: #56b6c2;
+      } /* theme.fg("accent") */
+      .t-muted {
+        color: #5c6370;
+      } /* theme.fg("muted") */
+      .t-meta {
+        color: #4b5263;
+      }
+      .t-underline {
+        text-decoration: underline;
+        color: #56b6c2;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>TUI pulse variants</h1>
+    <p class="subtitle">
+      10 partial-state visuals × 4 frames each. Theme slots map to
+      <code>theme.fg(slot, ...)</code> in pi-tui.
+    </p>
+
+    <section class="settled">
+      <h2>settled (control — what the row looks like when the run completes)</h2>
+      <div class="frame-line">
+        <span class="t-tree">└─ </span><span class="t-title">PTC</span>
+        <span class="t-accent">Verify file integrity</span>
+        <span class="t-meta">• 1 image · 536ms</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>A · DSH TextShimmer (moving highlight band)</h2>
+      <p class="note">
+        DSH's actual implementation: glyphs stay put, a brighter gradient highlight sweeps
+        left-to-right across the description. We approximate by highlighting one character at a time
+        while the rest are dim.
+      </p>
+      <p class="cadence">cadence: 150ms</p>
+      <div class="frames">
+        <div class="frame">
+          <div class="frame-num">frame 0</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-title">PTC</span>
+            <span class="t-accent">V</span><span class="t-dim">erify file integrity</span>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="frame-num">frame 1</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-title">PTC</span>
+            <span class="t-dim">Veri</span><span class="t-accent">f</span
+            ><span class="t-dim">y file integrity</span>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="frame-num">frame 2</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-title">PTC</span>
+            <span class="t-dim">Verify</span><span class="t-accent"> </span
+            ><span class="t-dim">file integrity</span>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="frame-num">frame 3</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-title">PTC</span>
+            <span class="t-dim">Verify fi</span><span class="t-accent">l</span
+            ><span class="t-dim">e integrity</span>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section class="card">
+      <h2>B · Whole-line dim/bright cycle</h2>
+      <p class="note">
+        Simpler than A: the entire line dims/brightens together, no per-character work. Single
+        theme.fg wrap. Subtle motion; less visually distinctive than A.
+      </p>
+      <p class="cadence">cadence: 150ms</p>
+      <div class="frames">
+        <div class="frame">
+          <div class="frame-num">frame 0</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span
+            ><span class="t-dim">PTC Verify file integrity • 1 image · 536ms</span>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="frame-num">frame 1</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-title">PTC</span>
+            <span class="t-accent">Verify file integrity</span>
+            <span class="t-meta">• 1 image · 536ms</span>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="frame-num">frame 2</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span
+            ><span class="t-dim">PTC Verify file integrity • 1 image · 536ms</span>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="frame-num">frame 3</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-title">PTC</span>
+            <span class="t-accent">Verify file integrity</span>
+            <span class="t-meta">• 1 image · 536ms</span>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section class="card">
+      <h2>C · Knight-Rider scanner (Aider's signature)</h2>
+      <p class="note">
+        Two block-drawing chars (░█ / █░) overwriting themselves with backspace. No escape sequences
+        for the motion itself. Distinctive aesthetic; description stays untouched. ~1 fps.
+      </p>
+      <p class="cadence">cadence: 1000ms</p>
+      <div class="frames">
+        <div class="frame">
+          <div class="frame-num">frame 0</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-muted">░█</span>
+            <span class="t-title">PTC</span> <span class="t-accent">Verify file integrity</span>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="frame-num">frame 1</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-muted">█░</span>
+            <span class="t-title">PTC</span> <span class="t-accent">Verify file integrity</span>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="frame-num">frame 2</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-muted">░█</span>
+            <span class="t-title">PTC</span> <span class="t-accent">Verify file integrity</span>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="frame-num">frame 3</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-muted">█░</span>
+            <span class="t-title">PTC</span> <span class="t-accent">Verify file integrity</span>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section class="card">
+      <h2>D · Braille spinner (pi-tui Loader default)</h2>
+      <p class="note">
+        Spinner glyph rotates; text static. Matches pi's Loader frames exactly (⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇
+        ⠏). Most explicit 'running' signal — universal 'loading' affordance, used by Codex, Claude
+        Code, Gemini CLI.
+      </p>
+      <p class="cadence">cadence: 80ms</p>
+      <div class="frames">
+        <div class="frame">
+          <div class="frame-num">frame 0</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-muted">⠋</span>
+            <span class="t-title">PTC</span> <span class="t-accent">Verify file integrity</span>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="frame-num">frame 1</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-muted">⠙</span>
+            <span class="t-title">PTC</span> <span class="t-accent">Verify file integrity</span>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="frame-num">frame 2</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-muted">⠹</span>
+            <span class="t-title">PTC</span> <span class="t-accent">Verify file integrity</span>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="frame-num">frame 3</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-muted">⠸</span>
+            <span class="t-title">PTC</span> <span class="t-accent">Verify file integrity</span>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section class="card">
+      <h2>E · Dots spinner (charm.sh bubbles MiniDot)</h2>
+      <p class="note">
+        Filled dot morphing around a circle (⠁ ⠂ ⠄ ⢀). Lighter visual weight than braille ring;
+        bubbles' default. 100ms cadence.
+      </p>
+      <p class="cadence">cadence: 100ms</p>
+      <div class="frames">
+        <div class="frame">
+          <div class="frame-num">frame 0</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-muted">⠁</span>
+            <span class="t-title">PTC</span> <span class="t-accent">Verify file integrity</span>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="frame-num">frame 1</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-muted">⠂</span>
+            <span class="t-title">PTC</span> <span class="t-accent">Verify file integrity</span>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="frame-num">frame 2</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-muted">⠄</span>
+            <span class="t-title">PTC</span> <span class="t-accent">Verify file integrity</span>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="frame-num">frame 3</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-muted">⢀</span>
+            <span class="t-title">PTC</span> <span class="t-accent">Verify file integrity</span>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section class="card">
+      <h2>F · ASCII spinner (classic terminal)</h2>
+      <p class="note">
+        Pipe / slash / dash / backslash. Universally recognizable from 1970s terminals; works in any
+        TTY regardless of UTF-8 support. lazygit + indicatif default for unknown spinners.
+      </p>
+      <p class="cadence">cadence: 100ms</p>
+      <div class="frames">
+        <div class="frame">
+          <div class="frame-num">frame 0</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-muted">|</span>
+            <span class="t-title">PTC</span> <span class="t-accent">Verify file integrity</span>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="frame-num">frame 1</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-muted">/</span>
+            <span class="t-title">PTC</span> <span class="t-accent">Verify file integrity</span>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="frame-num">frame 2</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-muted">-</span>
+            <span class="t-title">PTC</span> <span class="t-accent">Verify file integrity</span>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="frame-num">frame 3</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-muted">\</span>
+            <span class="t-title">PTC</span> <span class="t-accent">Verify file integrity</span>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section class="card">
+      <h2>G · Trailing dots (incremental ellipsis stepper)</h2>
+      <p class="note">
+        Description cycles . / .. / ... / .. bubbles' Ellipsis, npm-install style. Text actually
+        changes — easy to scan a column of rows and pick out the running one.
+      </p>
+      <p class="cadence">cadence: 500ms</p>
+      <div class="frames">
+        <div class="frame">
+          <div class="frame-num">frame 0</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-title">PTC</span>
+            <span class="t-accent">Verify file integrity</span><span class="t-muted">.</span>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="frame-num">frame 1</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-title">PTC</span>
+            <span class="t-accent">Verify file integrity</span><span class="t-muted">..</span>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="frame-num">frame 2</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-title">PTC</span>
+            <span class="t-accent">Verify file integrity</span><span class="t-muted">...</span>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="frame-num">frame 3</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-title">PTC</span>
+            <span class="t-accent">Verify file integrity</span><span class="t-muted">..</span>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section class="card">
+      <h2>H · Underline pulse</h2>
+      <p class="note">
+        Underline toggles on/off on the description only. Cursor-blink heritage; rare in modern TUIs
+        but visually distinct when the row has no other motion.
+      </p>
+      <p class="cadence">cadence: 150ms</p>
+      <div class="frames">
+        <div class="frame">
+          <div class="frame-num">frame 0</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-title">PTC</span>
+            <span class="t-underline">Verify file integrity</span>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="frame-num">frame 1</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-title">PTC</span>
+            <span class="t-accent">Verify file integrity</span>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="frame-num">frame 2</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-title">PTC</span>
+            <span class="t-underline">Verify file integrity</span>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="frame-num">frame 3</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-title">PTC</span>
+            <span class="t-accent">Verify file integrity</span>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section class="card">
+      <h2>I · Colour shift only (description: accent ↔ muted)</h2>
+      <p class="note">
+        Same text; description colour alternates between accent and muted. No character changes; the
+        description is still readable but pulls attention. Codemux + tmux-agent-indicator do this.
+      </p>
+      <p class="cadence">cadence: 150ms</p>
+      <div class="frames">
+        <div class="frame">
+          <div class="frame-num">frame 0</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-title">PTC</span>
+            <span class="t-accent">Verify file integrity</span>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="frame-num">frame 1</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-title">PTC</span>
+            <span class="t-muted">Verify file integrity</span>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="frame-num">frame 2</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-title">PTC</span>
+            <span class="t-accent">Verify file integrity</span>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="frame-num">frame 3</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-title">PTC</span>
+            <span class="t-muted">Verify file integrity</span>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section class="card">
+      <h2>J · Hybrid (trailing dots + dim header, two cadences)</h2>
+      <p class="note">
+        Trailing dots make the row obviously 'in progress' in a column scan; the title dims at a
+        different cadence (150ms vs 500ms) so the two motions don't merge.
+      </p>
+      <p class="cadence">cadence: 150ms</p>
+      <div class="frames">
+        <div class="frame">
+          <div class="frame-num">frame 0</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-title">PTC</span>
+            <span class="t-dim">Verify file integrity</span><span class="t-muted">.</span>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="frame-num">frame 1</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-title">PTC</span>
+            <span class="t-accent">Verify file integrity</span><span class="t-muted">..</span>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="frame-num">frame 2</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-title">PTC</span>
+            <span class="t-dim">Verify file integrity</span><span class="t-muted">...</span>
+          </div>
+        </div>
+        <div class="frame">
+          <div class="frame-num">frame 3</div>
+          <div class="frame-line">
+            <span class="t-tree">└─ </span><span class="t-title">PTC</span>
+            <span class="t-accent">Verify file integrity</span><span class="t-muted">..</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="subtitle" style="margin-top: 32px">
+      Settled above, then 10 variants in order: A through J. Each shows 4 consecutive frames at its
+      cadence.
+    </footer>
+  </body>
+</html>
