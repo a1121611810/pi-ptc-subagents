@@ -1,31 +1,64 @@
 {
   "name": "pi-ptc-subagents",
-  "version": "0.0.0",
-  "private": true,
+  "version": "6.0.0",
   "description": "Programmable tool calling (PTC) and subagent fan-out for pi",
+  "keywords": [
+    "pi",
+    "pi-package",
+    "programmable-tool-calling",
+    "ptc",
+    "subagents"
+  ],
+  "homepage": "https://github.com/a1121611810/pi-ptc-subagents",
+  "bugs": {
+    "url": "https://github.com/a1121611810/pi-ptc-subagents/issues"
+  },
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/a1121611810/pi-ptc-subagents.git"
   },
+  "files": [
+    "dist/**/*.js",
+    "README.md",
+    "LICENSE"
+  ],
   "type": "module",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
   "scripts": {
     "build": "pnpm -r run build",
+    "prepack": "pnpm run build && rm -rf dist && cp -R packages/entry/dist dist",
     "check": "pnpm -r run check",
     "lint": "oxlint",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^1.4.0",
+    "@earendil-works/pi-coding-agent": ">=0.86.0",
     "@types/node": "^26.6.5",
     "oxfmt": "^0.74.0",
     "oxlint": "^1.89.0",
     "rolldown": "^1.2.15",
     "tsrs": "0.18.0-ts7.1.0-dev.20260929"
   },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.86.0"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
+  },
   "engines": {
     "node": ">=22.19.0"
   },
-  "packageManager": "pnpm@12.15.0"
+  "packageManager": "pnpm@12.15.0",
+  "pi": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  }
 }

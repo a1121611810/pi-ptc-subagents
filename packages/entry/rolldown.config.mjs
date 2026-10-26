@@ -8,7 +8,8 @@ export default defineConfig({
     worker: "../ptc/src/worker-entry.ts",
   },
   platform: "node",
-  external: [/^@earendil-works\//, /^@pi-ptc\//],
+  // 发布形态：根包只发一份自包含产物——workspace 包（@pi-ptc/*）打进 bundle，只外置 pi 本身
+  external: [/^@earendil-works\//],
   output: {
     dir: "dist",
     entryFileNames: "[name].js",
