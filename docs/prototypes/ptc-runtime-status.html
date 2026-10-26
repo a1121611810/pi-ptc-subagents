@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ptc 运行时 · 现状全景</title>
+<style>
+  :root{
+    --bg:#f7f5f0; --card:#ffffff; --line:#e9e3d6;
+    --ink:#14171e; --ink2:#3a4256; --muted:#7c7a72;
+    --done:#2f6f5e; --done-soft:rgba(47,111,94,.08);
+    --todo:#b06367; --todo-soft:rgba(176,99,103,.09);
+    --amber:#9a7420; --amber-soft:rgba(154,116,32,.09);
+    --radius:14px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,"PingFang SC","Outfit",sans-serif;font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1060px;margin:0 auto;padding:48px 24px 72px}
+  h1{font-size:30px;margin:0 0 10px;letter-spacing:-.01em}
+  .lede{color:var(--ink2);max-width:84ch;margin:0 0 6px}
+  .lede code{background:var(--done-soft);color:var(--done);padding:1px 6px;border-radius:6px;font-size:13px}
+  .legend{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0 8px}
+  .pill{font-size:12px;border-radius:999px;padding:3px 12px;border:1px solid var(--line);background:#fff}
+  .pill b{font-family:ui-monospace,monospace}
+  .pill.done{border-color:rgba(47,111,94,.4);color:var(--done);background:var(--done-soft)}
+  .pill.todo{border-color:rgba(176,99,103,.4);color:var(--todo);background:var(--todo-soft)}
+  .pill.partial{border-color:rgba(154,116,32,.4);color:var(--amber);background:var(--amber-soft)}
+  h2{font-size:20px;margin:40px 0 6px}
+  .sub{color:var(--muted);font-size:13.5px;margin:0 0 16px;max-width:86ch}
+  .flow{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:22px;box-shadow:0 2px 8px rgba(0,0,0,.04)}
+  .lane{margin-bottom:20px}
+  .lane:last-child{margin-bottom:0}
+  .lane-t{font-size:12px;font-weight:600;letter-spacing:.04em;color:var(--muted);margin-bottom:8px}
+  .lane-t.ptc{color:var(--done)}
+  .lane-t.sub{color:var(--todo)}
+  .lane-t.tui{color:var(--amber)}
+  .lane-t.pi{color:var(--ink2)}
+  .row{display:flex;align-items:stretch;gap:6px;flex-wrap:wrap}
+  .node{border:1.5px solid var(--line);border-radius:10px;padding:8px 11px;background:#fff;min-width:110px;flex:1;max-width:220px}
+  .node .t{font-weight:600;font-size:12.5px;display:flex;align-items:center;gap:6px}
+  .node .d{font-size:11px;color:var(--muted);margin-top:2px;line-height:1.45}
+  .node.done{border-color:rgba(47,111,94,.5);background:var(--done-soft)}
+  .node.done .t{color:var(--done)}
+  .node.todo{border-style:dashed;border-color:rgba(176,99,103,.5);background:var(--todo-soft)}
+  .node.todo .t{color:var(--todo)}
+  .node.partial{border-color:rgba(154,116,32,.5);background:var(--amber-soft)}
+  .node.partial .t{color:var(--amber)}
+  .mark{font-family:ui-monospace,monospace;font-size:11px;border-radius:6px;padding:0 5px;background:#fff;border:1px solid var(--line)}
+  .arr{align-self:center;color:var(--muted);font-size:15px;flex:none}
+  table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;font-size:13.5px}
+  th{text-align:left;font-size:12px;letter-spacing:.03em;color:var(--muted);padding:10px 14px;border-bottom:1px solid var(--line);background:#fbfaf7}
+  td{padding:9px 14px;border-bottom:1px solid #f1ece2;vertical-align:top;color:var(--ink2)}
+  tr:last-child td{border-bottom:0}
+  td code{font-size:12.5px;color:var(--ink)}
+  .st{font-size:11.5px;font-weight:600;border-radius:6px;padding:1px 8px;white-space:nowrap}
+  .st.done{color:var(--done);background:var(--done-soft)}
+  .st.todo{color:var(--todo);background:var(--todo-soft)}
+  .st.partial{color:var(--amber);background:var(--amber-soft)}
+  .note{margin-top:14px;padding:11px 14px;border-radius:11px;font-size:13px;background:var(--done-soft);border-left:2px solid var(--done);color:var(--ink2)}
+  .note.warn{background:var(--todo-soft);border-left-color:var(--todo)}
+  footer{margin-top:44px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);font-size:12.5px}
+  footer code{font-size:12px}
+  @media (max-width:720px){ .node{max-width:none} .arr{transform:rotate(90deg)} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>ptc 运行时 · 现状全景</h1>
+  <p class="lede">
+    <code>packages/ptc</code> 是编排器：模型写 TypeScript 程序批量调工具。本页一张图说清运行链路、
+    <b>已落地</b>与<b>未落地</b>的边界。基准分支 <code>feat/rewrite</code>（干净室重写，只按 ADR 写，不抄旧实现）。姐妹页：<a href="./dispatch-engine-status.html" style="color:var(--done)">dispatch 任务引擎 · 现状全景</a>。
+  </p>
+
+  <div class="legend">
+    <span class="pill done"><b>✓</b> 已落地（探针/真 pi 验证）</span>
+    <span class="pill partial"><b>◐</b> 部分落地（功能在、有标注的缺口）</span>
+    <span class="pill todo"><b>✗</b> 未落地</span>
+  </div>
+
+  <h2>一、运行链路（真 pi 1.4.0 已端到端跑通）</h2>
+  <p class="sub">绿=已实现且在真 pi 验证过；黄=功能在但有明示 shortcut；红=还没有。</p>
+
+  <div class="flow">
+    <div class="lane">
+      <div class="lane-t pi">模型面（pi）</div>
+      <div class="row">
+        <div class="node done"><div class="t"><span class="mark">✓</span>模型</div><div class="d">调 ptc_run_code / ptc_workflow，写程序</div></div>
+        <div class="arr">→</div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>entry 装配</div><div class="d">session_start：surface 检测、binding 表、&lt;ptc&gt; 节注入（含按面总则句）、任务面可见性活判断；<b>PTC 模式（ADR-0010）</b>：full_ptc 默认收窄（内置绑定出活跃表，每 turn 前重新收敛）+ skills 节补偿（ADR-0011，indirect 加载句）+ /ptc mode on|off；真机验证模型自发写程序</div></div>
+        <div class="arr">→</div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>工具工厂</div><div class="d">tools.ts · typebox schema · isError 按状态</div></div>
+      </div>
+    </div>
+    <div class="lane">
+      <div class="lane-t ptc">运行时（packages/ptc）</div>
+      <div class="row">
+        <div class="node done"><div class="t"><span class="mark">✓</span>dispatcher</div><div class="d">超时 terminate · 并发双闸门 · 输出预算 · abort</div></div>
+        <div class="arr">→</div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>WorkerPool</div><div class="d">容量 4 · acquire 超时 · drain 退役</div></div>
+        <div class="arr">→</div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>worker</div><div class="d">reset 握手：拒残留 pending · globalThis 基线清场 · console 还原</div></div>
+        <div class="arr">→</div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>compileProgram</div><div class="d">剥 TS 类型 + 强制严格模式（ADR-0060）</div></div>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <div class="node done"><div class="t"><span class="mark">✓</span>协议</div><div class="d">host↔worker 帧两端一份类型</div></div>
+        <div class="arr">→</div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>tools.* 转发</div><div class="d">pending map · callId · 未知绑定程序侧即 TypeError</div></div>
+        <div class="arr">→</div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>console / workflow 上提</div><div class="d">log 帧；workflow.log/phase/parallel/pipeline（workflow 面注入）</div></div>
+        <div class="arr">→</div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>子调用树</div><div class="d">ADR-0021：五态 + 耗时 + 参数预览，随结果交出</div></div>
+      </div>
+    </div>
+    <div class="lane">
+      <div class="lane-t pi">工具执行（pi 管线）</div>
+      <div class="row">
+        <div class="node done"><div class="t"><span class="mark">✓</span>binding 表</div><div class="d">ADR-0040：bash 唯一 opt-in；executeTool 运行时探测</div></div>
+        <div class="arr">→</div>
+        <div class="node partial"><div class="t"><span class="mark">◐</span>pi 工具执行</div><div class="d">走 ctx.executeTool（pi 1.x）；0.86 floor 机制未考古；门参数 model/thinkingLevel 未进 DispatchInput</div></div>
+        <div class="arr">→</div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>图片上提</div><div class="d">ADR-0014：emitImage 通道，只挂 fulfilled</div></div>
+      </div>
+    </div>
+    <div class="lane">
+      <div class="lane-t tui">结果渲染（packages/tui）</div>
+      <div class="row">
+        <div class="node done"><div class="t"><span class="mark">✓</span>文本卫生</div><div class="d">ADR-0012：ANSI/控制符清洗 + 可读排版</div></div>
+        <div class="arr">→</div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>截断契约</div><div class="d">ADR-0015：50KB/2000 行 + 全文临时文件 + 尾注</div></div>
+        <div class="arr">→</div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>渲染预算表</div><div class="d">ADR-0013 §6：七个冻结常量唯一持有</div></div>
+        <div class="arr">→</div>
+        <div class="node partial"><div class="t"><span class="mark">◐</span>TUI 行渲染</div><div class="d">ptc 两工具 renderResult 已挂（折叠/展开/运行中）；shimmer 与各包 renderer 未写</div></div>
+      </div>
+    </div>
+  </div>
+
+  <h2>二、已做（✓ 探针或真 pi 验证）</h2>
+  <table>
+    <thead><tr><th style="width:24%">模块</th><th style="width:56%">内容</th><th style="width:20%">依据</th></tr></thead>
+    <tbody>
+      <tr><td><code>compile.ts</code></td><td>严格模式编译器：剥类型 + <code>"use strict"</code> 内传、顶层 await/return、编译期 SyntaxError</td><td>ADR-0060 · 探针 5/5</td></tr>
+      <tr><td><code>limits.ts</code></td><td>全部数字唯一出处：2 分钟超时（上限 10 分）、64 MiB 预算、128 在途 / 10 并行、池参数</td><td>ADR-0003/0004/0017</td></tr>
+      <tr><td><code>protocol.ts</code></td><td>host↔worker 帧协议：init/run/cancel/reset/result/log/call/settled</td><td>ADR-0017</td></tr>
+      <tr><td><code>dispatcher.ts</code></td><td>超时 terminate、并发双闸门（FIFO 等待）、输出预算校验、abort 在飞调用、worker 早退兜底</td><td>探针 6/6</td></tr>
+      <tr><td><code>pool.ts</code> + worker reset</td><td>warm 复用：reset 握手后才归还；globalThis 基线清场；console 还原</td><td>探针：跨 run 泄漏不可见</td></tr>
+      <tr><td><code>sub-calls.ts</code></td><td>子调用活树：running/ok/error/rejected + 耗时 + 参数预览，随 outcome 交出</td><td>ADR-0021 · 探针 3/3 状态</td></tr>
+      <tr><td>图片上提</td><td>binding 上下文 <code>emitImage</code>；entry 桥 pi 结果 image 块；只挂 fulfilled</td><td>ADR-0014 · 探针</td></tr>
+      <tr><td><code>tools.ts</code></td><td>ptc_run_code / ptc_workflow 工厂：schema、execute、isError、workflow args JSON 校验</td><td>真 pi 双冒烟通过</td></tr>
+      <tr><td><code>bindings.ts</code></td><td>名单 known 7 / bash 唯一 opt-in / <code>名单 ∩ 活跃工具</code> 收窄</td><td>ADR-0040/0005 T7</td></tr>
+      <tr><td><code>task-binding.ts</code></td><td>两扇门共享十参数 typebox schema（task/label 外标注随派发引擎接管）</td><td>HTML 决策 27</td></tr>
+      <tr><td><code>@pi-ptc/tui</code> / <code>@pi-ptc/routes</code></td><td>tui：text/truncate/bounds 叶子（第 5 包）；routes：散文唯一出处 ROUTES 5 条 + TOOLS 8 描述 + &lt;ptc&gt; 节注入（第 6 包），ptc 描述字面量已搬出</td><td>ADR-0012/0013/0015 · ADR-0059/0061</td></tr>
+      <tr><td>真 pi 端到端</td><td>run_code：tools.read 并行归约；workflow：phase + pipeline；程序内 tools.pi_task_ptc 建任务（handle 带 label）；任务面随记录出现/消失</td><td>pi 1.4.0 · -ne 隔离冒烟 ×5</td></tr>
+      <tr><td>C1–C6 接线</td><td>门进程序 binding 表 · surface 检测 · handle 带 label · 闸门挂点（admissionGates）· 可见性 setActiveTools · 散文层 routes 包</td><td>dispatch-doors-flow 差异清零</td></tr>
+    </tbody>
+  </table>
+
+  <h2>三、未做（✗ 或 ◐ 的缺口）</h2>
+  <table>
+    <thead><tr><th style="width:24%">事项</th><th style="width:44%">现状</th><th style="width:12%">状态</th><th style="width:20%">归属/下一步</th></tr></thead>
+    <tbody>
+      <tr><td><b>dispatch 引擎</b></td><td><b>执行链 + 报告两通道 + agent 发现/argv 合并全落地</b>（见 dispatch 页，真机验证）；缺通知管线、存储恢复、搜索模块</td><td><span class="st partial">◐</span></td><td><b>dispatch</b> 迭代中</td></tr>
+      <tr><td>TUI 行渲染</td><td><b>ptc 两个工具已挂 renderResult</b>（折叠=标题+状态，展开按 RENDER_BOUNDS 裁，运行中 isPartial 态）；shimmer 动画、task/sub 的 renderer 还没写</td><td><span class="st partial">◐</span></td><td><b>ptc</b>（已起步）/ tui / 各包</td></tr>
+      <tr><td>门参数语义接管</td><td>大部分已接（why/agent/readOnly/wait→引擎与 argv）；<b>model/thinkingLevel 链已补</b>（调用参数→agent 定义→会话，档位挂 :thinking 后缀）；strict 白名单随 searchEnabled 含 web_ds_search</td><td><span class="st partial">◐</span></td><td>随 sub 派发引擎</td></tr>
+      <tr><td>floor 0.86 binding 通道</td><td>binding 走 <code>ctx.executeTool</code>（pi 1.x）；floor 上程序内调不了内置工具；旧实现在 floor 能跑的机制<b>未考古</b></td><td><span class="st partial">◐</span></td><td>查 pi 0.86 API（矩阵文档待测节）</td></tr>
+      <tr><td>池的 runGeneration 防护</td><td>reset 握手已覆盖正确性；「迟到帧/supersede」边角没做</td><td><span class="st partial">◐</span></td><td>边角，需求出现再补</td></tr>
+      <tr><td>drain 的 grace 等待</td><td>drain 已改为「杀当代空闲 worker、下轮 acquire 起新一代」（rearm）；在跑 run 靠自身 timeout 兜底——真 pi 冒烟中由模型捉出并修复了「drain 后池永久封死」</td><td><span class="st partial">◐</span></td><td>ADR-0017 W-1 · 已修 rearm</td></tr>
+      <tr><td>渲染预算第 8 项</td><td>bounds.ts 登记了 ADR 点名的 7 个上限；旧实现「八上限」的第 8 个 ADR 摘要未写名</td><td><span class="st partial">◐</span></td><td>有 renderer 时补登（须走新 ADR）</td></tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    <b>验证基线（2026-10-26）：</b>5 包 tsrs 类型检查 Done、rolldown 构建 Done、oxlint 0 问题、oxfmt 通过；
+    dispatcher 探针 6/6、池/子调用树/图片探针 4/4、真 pi 1.4.0 冒烟 run_code 与 workflow 各一次通过。
+  </div>
+  <div class="note warn">
+    <b>最大单块风险：</b>dispatch 引擎在 sub，不在 ptc——ptc 的「建任务」binding 目前只写 registry 记录。
+    门的十参数语义、wait 等待、真子进程都压在那一块上。
+  </div>
+
+  <footer>
+    事实来源：<code>packages/ptc/src/*.ts</code>、<code>packages/tui/src/*.ts</code>、<code>packages/entry/src/index.ts</code>；
+    依据 <code>docs/adr/0003–0017</code>、<code>docs/adr/0040/0060</code>、<code>docs/pi-version-matrix.md</code>。
+    状态截至 2026-10-26，分支 <code>feat/rewrite</code>。
+  </footer>
+
+</div>
+</body>
+</html>

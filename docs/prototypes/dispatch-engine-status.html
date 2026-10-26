@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>子代理派发 · 现状全景</title>
+<style>
+  :root{
+    --bg:#f7f5f0; --card:#ffffff; --line:#e9e3d6;
+    --ink:#14171e; --ink2:#3a4256; --muted:#7c7a72;
+    --done:#2f6f5e; --done-soft:rgba(47,111,94,.08);
+    --todo:#b06367; --todo-soft:rgba(176,99,103,.09);
+    --amber:#9a7420; --amber-soft:rgba(154,116,32,.09);
+    --radius:14px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,"PingFang SC","Outfit",sans-serif;font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1060px;margin:0 auto;padding:48px 24px 72px}
+  h1{font-size:30px;margin:0 0 10px;letter-spacing:-.01em}
+  .lede{color:var(--ink2);max-width:84ch;margin:0 0 6px}
+  .lede code{background:var(--done-soft);color:var(--done);padding:1px 6px;border-radius:6px;font-size:13px}
+  .legend{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0 8px}
+  .pill{font-size:12px;border-radius:999px;padding:3px 12px;border:1px solid var(--line);background:#fff}
+  .pill b{font-family:ui-monospace,monospace}
+  .pill.done{border-color:rgba(47,111,94,.4);color:var(--done);background:var(--done-soft)}
+  .pill.todo{border-color:rgba(176,99,103,.4);color:var(--todo);background:var(--todo-soft)}
+  .pill.partial{border-color:rgba(154,116,32,.4);color:var(--amber);background:var(--amber-soft)}
+  h2{font-size:20px;margin:40px 0 6px}
+  .sub{color:var(--muted);font-size:13.5px;margin:0 0 16px;max-width:86ch}
+  .flow{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:22px;box-shadow:0 2px 8px rgba(0,0,0,.04)}
+  .lane{margin-bottom:20px}
+  .lane:last-child{margin-bottom:0}
+  .lane-t{font-size:12px;font-weight:600;letter-spacing:.04em;color:var(--muted);margin-bottom:8px}
+  .lane-t.ok{color:var(--done)}
+  .lane-t.sub{color:var(--todo)}
+  .lane-t.warn{color:var(--amber)}
+  .row{display:flex;align-items:stretch;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+  .row:last-child{margin-bottom:0}
+  .node{border:1.5px solid var(--line);border-radius:10px;padding:8px 11px;background:#fff;min-width:110px;flex:1;max-width:235px}
+  .node .t{font-weight:600;font-size:12.5px;display:flex;align-items:center;gap:6px}
+  .node .d{font-size:11px;color:var(--muted);margin-top:2px;line-height:1.45}
+  .node.done{border-color:rgba(47,111,94,.5);background:var(--done-soft)}
+  .node.done .t{color:var(--done)}
+  .node.todo{border-style:dashed;border-color:rgba(176,99,103,.5);background:var(--todo-soft)}
+  .node.todo .t{color:var(--todo)}
+  .node.partial{border-color:rgba(154,116,32,.5);background:var(--amber-soft)}
+  .node.partial .t{color:var(--amber)}
+  .mark{font-family:ui-monospace,monospace;font-size:11px;border-radius:6px;padding:0 5px;background:#fff;border:1px solid var(--line)}
+  .arr{align-self:center;color:var(--muted);font-size:15px;flex:none}
+  table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;font-size:13.5px}
+  th{text-align:left;font-size:12px;letter-spacing:.03em;color:var(--muted);padding:10px 14px;border-bottom:1px solid var(--line);background:#fbfaf7}
+  td{padding:9px 14px;border-bottom:1px solid #f1ece2;vertical-align:top;color:var(--ink2)}
+  tr:last-child td{border-bottom:0}
+  td code{font-size:12.5px;color:var(--ink)}
+  .st{font-size:11.5px;font-weight:600;border-radius:6px;padding:1px 8px;white-space:nowrap}
+  .st.done{color:var(--done);background:var(--done-soft)}
+  .st.todo{color:var(--todo);background:var(--todo-soft)}
+  .st.partial{color:var(--amber);background:var(--amber-soft)}
+  .note{margin-top:14px;padding:11px 14px;border-radius:11px;font-size:13px;background:var(--done-soft);border-left:2px solid var(--done);color:var(--ink2)}
+  .note.warn{background:var(--todo-soft);border-left-color:var(--todo)}
+  footer{margin-top:44px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);font-size:12.5px}
+  footer code{font-size:12px}
+  @media (max-width:720px){ .node{max-width:none} .arr{transform:rotate(90deg)} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>子代理派发 · 现状全景</h1>
+  <p class="lede">
+    「派一个子代理」= 起一个新的 pi 进程干活，父模型通过任务记录与它交互。引擎在
+    <code>packages/dispatch</code>。本页按<b>一次派发的完整流程</b>列出每个环节<b>已落地 / 未落地</b>。
+    姐妹页：<a href="./ptc-runtime-status.html" style="color:var(--done)">ptc 运行时</a>。
+  </p>
+
+  <div class="legend">
+    <span class="pill done"><b>✓</b> 已落地（探针验证）</span>
+    <span class="pill partial"><b>◐</b> 部分落地</span>
+    <span class="pill todo"><b>✗</b> 未落地</span>
+  </div>
+
+  <h2>一、一次派发的完整流程</h2>
+  <p class="sub">模型调「建任务」（ptc 程序里的 <code>pi_task_ptc</code> 或 codemode 脚本里的 <code>pi_task_codemode</code>）之后发生的事。绿=能跑；黄=半个；红=还没有——<b>孩子到今天还起不来</b>。</p>
+
+  <div class="flow">
+    <div class="lane">
+      <div class="lane-t ok">① 建任务（已通）</div>
+      <div class="row">
+        <div class="node done"><div class="t"><span class="mark">✓</span>门接收参数</div><div class="d">十参数共享 schema；<b>pi_task_ptc 已接进程序 binding 表</b>；handle 带 label；闸门挂点 admissionGates（被拒不留记录）</div></div>
+        <div class="arr">→</div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>铸 taskId</div><div class="d">UUID；ULID minter 后补</div></div>
+        <div class="arr">→</div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>建任务记录</div><div class="d">registry.spawn：queued 记录 = 派发的唯一痕迹（ADR-0053/0056）</div></div>
+      </div>
+    </div>
+    <div class="lane">
+      <div class="lane-t sub">② 闸门与排队（大半没做）</div>
+      <div class="row">
+        <div class="node done"><div class="t"><span class="mark">✓</span>六道闸</div><div class="d">readOnly · dispatchEnabled（/ptc off）· 会话结束 · 深度 · agent 名 · agent 解析——六个工厂，入队前 fail fast（agent 磁盘发现留 stub）</div></div>
+        <div class="arr">→</div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>并发槽</div><div class="d">DispatchSlotCounter：FIFO 等待 · keyed holders · 释放即提拔最老 · drainWaiters（ADR-0056/0063）</div></div>
+        <div class="arr">→</div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>出队转 running</div><div class="d">槽 granted → transition running → spawn，引擎串起整条（TaskEngine）</div></div>
+      </div>
+    </div>
+    <div class="lane">
+      <div class="lane-t sub">③ 起孩子（没有）</div>
+      <div class="row">
+        <div class="node done"><div class="t"><span class="mark">✓</span>组装子进程</div><div class="d">buildPiArgv：-p --no-session · 追加 context/why 块 · strict 只读 --tools 白名单 · --model（继承待接 sessionModel）</div></div>
+        <div class="arr">→</div>
+        <div class="node partial"><div class="t"><span class="mark">◐</span>spawn</div><div class="d">独立 pi 进程已真跑通（6.2s 端到端）；JSONL 事件流 / TMPDIR 提示词未做</div></div>
+        <div class="arr">→</div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>agent 收窄</div><div class="d">发现 ✓（user/project 目录 + frontmatter：tools 收窄、childReport 退出）；<b>argv 合并 ✓</b>（strict 压过名单 → 读集；非 strict 用名单；ADR-0039/0041）</div></div>
+      </div>
+    </div>
+    <div class="lane">
+      <div class="lane-t warn">④ 在飞（能做的只有查和停）</div>
+      <div class="row">
+        <div class="node done"><div class="t"><span class="mark">✓</span>查 / 停</div><div class="d">ptc_task_list/output/stop；排队中的抽得掉、在跑的转 stopping（ADR-0057）</div></div>
+        <div class="arr">→</div>
+        <div class="node partial"><div class="t"><span class="mark">◐</span>pump</div><div class="d">驱动到终态 ✓（exit → resolve-exit）；usage 累计 · 结构化事件未做</div></div>
+        <div class="arr">→</div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>停的信号阶梯</div><div class="d">SIGTERM → 5s 宽限 → SIGKILL；shutdown 统一 SIGTERM（BG-14 语义在 shutdown）</div></div>
+      </div>
+    </div>
+    <div class="lane">
+      <div class="lane-t sub">⑤ 交付与收尾（没有）</div>
+      <div class="row">
+        <div class="node done"><div class="t"><span class="mark">✓</span>child report</div><div class="d"><b>两通道全实现</b>：tool 优先（--mode json 的 toolResult，真机形状验证）→ prompt 兜底 → opted-out 明说</div></div>
+        <div class="arr">→</div>
+        <div class="node partial"><div class="t"><span class="mark">◐</span>产出落盘</div><div class="d">OutputStorage 双适配器（内存/文件 output.log）✓；前台也落随 wait 路径生效</div></div>
+        <div class="arr">→</div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>终态写回</div><div class="d">resolve-exit 判定在写锁内（stopping 恒 canceled）；终态清单单源（ADR-0064/0065）</div></div>
+        <div class="arr">→</div>
+        <div class="node todo"><div class="t"><span class="mark">✗</span>完成通知</div><div class="d">订阅-游标批投递，模型不轮询也知道孩子完了（ADR-0022）</div></div>
+      </div>
+    </div>
+    <div class="lane">
+      <div class="lane-t warn">⑥ 会话生命周期（没有）</div>
+      <div class="row">
+        <div class="node todo"><div class="t"><span class="mark">✗</span>重启恢复</div><div class="d">记录落盘 + owner 归属回收（字段已在，存储/回收逻辑缺；ADR-0023）</div></div>
+        <div class="arr">→</div>
+        <div class="node partial"><div class="t"><span class="mark">◐</span>shutdown 清扫</div><div class="d">engine.shutdown：抽干等待者 + SIGTERM 在跑 ✓；releaseWithoutPromotion 还槽与 teardown 权威计数待接</div></div>
+      </div>
+    </div>
+  </div>
+
+  <h2>二、按流程环节的明细（做了什么 / 没做什么）</h2>
+  <table>
+    <thead><tr><th style="width:16%">环节</th><th style="width:44%">已做 ✓</th><th style="width:40%">未做 ✗</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>建任务</b></td>
+        <td>两扇门；铸 taskId；registry.spawn 建 queued 记录；记录=派发的唯一痕迹；handle 带 label；拒绝走 status 不抛；闸门挂点（admissionGates 序列，本体待 dispatch）</td>
+        <td>agent/readOnly/model 等参数未接 argv；<b>why 全量 ✓</b>（透传 · whyEnabled 谓词热生效 · fail-open · whySuppressed · 块内尖括号实体转义）</td>
+      </tr>
+      <tr>
+        <td><b>闸门/排队</b></td>
+        <td>7 态状态机与合法迁移表；写锁串行化；非法迁移拒绝</td>
+        <td>—（已落地，见 TaskEngine 行）</td>
+      </tr>
+      <tr>
+        <td><b>起孩子</b></td>
+        <td>—（无）</td>
+        <td>JSONL 事件、agent 磁盘发现、模型继承接 ctx、bash 类授权面</td>
+      </tr>
+      <tr>
+        <td><b>在飞</b></td>
+        <td>list/output/stop 三工具；取消两级（排队抽掉/在跑 stopping）；终态竞态静默处理</td>
+        <td>usage 累计；会话结束隐式停（shutdown 已有 SIGTERM）；产出增量读</td>
+      </tr>
+      <tr>
+        <td><b>交付</b></td>
+        <td>终态写回判定（resolve-exit 写锁内、判定即写入）；reconcile-lost 三种原因文案</td>
+        <td><b>child report 两通道 ✓</b>（tool 优先/prompt 兜底/opted-out，真机验证）；<b>usage ✓</b>（jsonl 流实测 + observedUsage 补缺）；<b>通知管线 ✓</b>（NotificationCenter + turn_end 批投递，端到端真子进程验证）；<b>落盘存储与重启恢复 ✓</b></td>
+      </tr>
+      <tr>
+        <td><b>生命周期</b></td>
+        <td>owner 归属字段（ownerPid/ownerBootMs）已进记录结构</td>
+        <td>落盘存储与重启恢复；shutdown 清扫三原语；sessionEnding 谓词三道读</td>
+      </tr>
+      <tr>
+        <td><b>子代理侧工具</b></td>
+        <td>—（无）</td>
+        <td>ptc_child_report 工具与报告词汇；web_ds_search 及 search/ 模块（只在子代理进程注册）</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    <b>已验证基线（2026-10-26）：</b>registry 探针全过；引擎假 child 探针 5/5 + 真子进程 6.2s 端到端；child report
+    两通道真机验证（prompt-json + 工具通道真机形状）；agent 发现与 argv 合并探针 6/6；why 谓词热切换 + 转义探针；四工具 6 包全绿。
+  </div>
+  <div class="note warn">
+    <b>与 dispatch-doors-flow.html 的差异（2026-10-26 核对）：</b>C1 门进程序表 ✓、C2 surface 检测 ✓（session_start 问 pi）、C3 handle 带 label ✓、C4 闸门挂点 ✓（admissionGates 序列，本体待 dispatch）、C5 可见性 ✓（setActiveTools 增删；exposure getter 经实测 1.4.0 不支持）、<b>C6 散文层 ✓（@pi-ptc/routes 第 6 包：5 条路 + 8 工具描述 + &lt;ptc&gt; 节注入，预算 400/560（6 条路），真 pi 按路由表作答）</b>——待办：闸门本体、spawn/pump。<br><b>通知管线细节（2026-10-26 ✓）：</b>NotificationCenter（终态事件入队、wait 路径记 awaited 不通知 ADR-0053、按字节 100KiB 批切分）→ entry turn_end drain → routes.renderTaskNotifications（模型面文案单源）→ sendMessage nextTurn 投递；端到端真子进程验证，顺手修掉 <b>sessionEndingGate 方向写反</b>的真 bug。<br><b>PTC 模式进入 ✓ · /ptc off 截断 ✓（ADR-0058）· 方案 A readTail ✓ · agentScope 层级覆盖 ✓（project 优先于 user）· teardown 还槽不提拔 ✓（ADR-0063）· resume×收窄真机验证 ✓（pi -c resume 后收窄完好，#11062 不冲突）</b>（均 2026-10-26）。<b>pi 四模式实测 ✓ 2026-10-26</b>：print（历史冒烟）/ json（事件流完整+PTC 调用）/ rpc（真交互 prompt→tool_execution→settled）/ TUI（kimi-cu 驱动真界面：收窄生效 + renderResult 折叠行渲染 + 程序跑通 123）。<b>下一步建议：</b>测试框架、发布形态、floor 双端实测、重写版 ADR/CHANGELOG。
+  </div>
+
+  <footer>
+    事实来源：<code>packages/dispatch/src/*.ts</code>、<code>packages/task/src/*.ts</code>、<code>packages/entry/src/index.ts</code>；
+    依据 <code>docs/adr/0016/0022/0023/0032/0039/0041/0044/0053/0056/0057/0063/0064/0065</code>。
+    状态截至 2026-10-26，分支 <code>feat/rewrite</code>。
+  </footer>
+
+</div>
+</body>
+</html>
