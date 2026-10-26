@@ -154,6 +154,8 @@
       <tr><td><code>@pi-ptc/tui</code> / <code>@pi-ptc/routes</code></td><td>tui：text/truncate/bounds 叶子（第 5 包）；routes：散文唯一出处 ROUTES 5 条 + TOOLS 8 描述 + &lt;ptc&gt; 节注入（第 6 包），ptc 描述字面量已搬出</td><td>ADR-0012/0013/0015 · ADR-0059/0061</td></tr>
       <tr><td>真 pi 端到端</td><td>run_code：tools.read 并行归约；workflow：phase + pipeline；程序内 tools.pi_task_ptc 建任务（handle 带 label）；任务面随记录出现/消失</td><td>pi 1.4.0 · -ne 隔离冒烟 ×5</td></tr>
       <tr><td>C1–C6 接线</td><td>门进程序 binding 表 · surface 检测 · handle 带 label · 闸门挂点（admissionGates）· 可见性 setActiveTools · 散文层 routes 包</td><td>dispatch-doors-flow 差异清零</td></tr>
+      <tr><td><b>PTC 模式（ADR-0010/0011）</b></td><td>full_ptc 默认收窄（内置绑定出活跃表，每 turn 前重新收敛）+ skills 节补偿（indirect 加载句）+ /ptc mode on|off + /ptc off 截断（ADR-0058）；真机：模型自发写程序</td><td>pi 1.4.0 · 探针 5/5 + 真机</td></tr>
+      <tr><td><b>pi 四模式实测</b></td><td>print / json（事件流+PTC 调用）/ rpc（prompt→tool_execution→settled）/ TUI（kimi-cu 驱动：收窄 + renderResult 折叠行）</td><td>2026-10-26 全通过</td></tr>
     </tbody>
   </table>
 
@@ -172,7 +174,7 @@
   </table>
 
   <div class="note">
-    <b>验证基线（2026-10-26）：</b>5 包 tsrs 类型检查 Done、rolldown 构建 Done、oxlint 0 问题、oxfmt 通过；
+    <b>验证基线（2026-10-26）：</b>7 包 tsrs 类型检查 Done、rolldown 构建 Done、oxlint 0 问题、oxfmt 通过；已提交（feat/rewrite 三个 commit）；
     dispatcher 探针 6/6、池/子调用树/图片探针 4/4、真 pi 1.4.0 冒烟 run_code 与 workflow 各一次通过。
   </div>
   <div class="note warn">
