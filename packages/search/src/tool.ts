@@ -8,7 +8,9 @@ export const WEB_DS_SEARCH_PARAMETERS = Type.Object({
   query: Type.Optional(Type.String({ description: "search：搜索词" })),
   url: Type.Optional(Type.String({ description: "open/find：目标页面 url" })),
   pattern: Type.Optional(Type.String({ description: "find：页内行匹配（正则）" })),
-  count: Type.Optional(Type.Number({ description: "search：条数 1–50，默认 10" })),
+  count: Type.Optional(
+    Type.Integer({ minimum: 1, maximum: 50, description: "search：条数 1–50，默认 10" }),
+  ),
 });
 
 export type WebDsSearchParams = Static<typeof WEB_DS_SEARCH_PARAMETERS>;

@@ -31,12 +31,18 @@ export function workerMain(deps: WorkerMainDeps): void {
         Object.fromEntries(
           frame.bindingNames.map((name) => [
             name,
-            (args: unknown) =>
-              new Promise((resolve, reject) => {
+            (args: unknown) => {
+              if (currentRunId === null)
+                return Promise.reject(new Error("run 已结束：reset 后不再接受工具调用"));
+              const call = new Promise((resolve, reject) => {
                 const callId = nextCallId++;
                 pending.set(callId, { resolve, reject });
                 deps.post({ kind: "call", runId: currentRunId ?? "", callId, name, args });
-              }),
+              });
+              // 程序没 await 的调用：reset 拒绝时不许变成 unhandledRejection 杀掉 worker
+              void call.catch(() => {});
+              return call;
+            },
           ]),
         ),
       );
@@ -54,12 +60,14 @@ export function workerMain(deps: WorkerMainDeps): void {
       return;
     }
     if (frame.kind === "reset") {
+      currentRunId = null; // 旧程序的迟到调用一律拒绝（代次边界）
       for (const { reject } of pending.values()) reject(new Error("run reset：worker 被复用"));
       pending = new Map();
       for (const name of Object.getOwnPropertyNames(globalThis)) {
         if (!globalBaseline.has(name)) delete (globalThis as Record<string, unknown>)[name];
       }
       Object.assign(console, consoleBaseline);
+      // shortcut: 只清 globalThis 自有属性；内置原型（Object.prototype 等）的修改会渗到下一个 run，有污染案例再清场
       deps.post({ kind: "ready" });
       return;
     }
@@ -72,16 +80,17 @@ export function workerMain(deps: WorkerMainDeps): void {
       return;
     }
     if (frame.kind === "cancel") return; // host 决定终止或复用；cancel 本身不合作
-    run(frame.code, frame.id);
+    run(frame.code, frame.id, frame.args);
   });
 
   function defineGlobal(name: string, value: unknown): void {
     Object.defineProperty(globalThis, name, { value, writable: false, configurable: true });
   }
 
-  async function run(code: string, runId: string): Promise<void> {
+  async function run(code: string, runId: string, args: unknown): Promise<void> {
     currentRunId = runId;
     logs = [];
+    defineGlobal("args", args ?? {}); // workflow 的 args：程序里的同名全局绑定
     installConsole((level, text) => {
       logs.push(text);
       deps.post({ kind: "log", runId, level, text });

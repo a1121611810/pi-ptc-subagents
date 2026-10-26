@@ -7,7 +7,6 @@ export interface SearchMemory {
   /** open 成功后存正文；后续 find/open 命中记忆免费 serve */
   storeText(url: string, text: string): void;
   lookup(url: string): string | undefined;
-  findInText(url: string, pattern: string): string[] | undefined;
 }
 
 // url 宽松匹配：scheme+host 同、path 去尾斜杠、不计 fragment、query 同或一方为空
@@ -66,17 +65,6 @@ export function createSearchMemory(): SearchMemory {
         }
       }
       return undefined;
-    },
-    findInText(url, pattern) {
-      const text = this.lookup(url);
-      if (text === undefined) return undefined;
-      let regex: RegExp;
-      try {
-        regex = new RegExp(pattern, "i");
-      } catch {
-        return [];
-      }
-      return text.split("\n").filter((line) => regex.test(line));
     },
   };
 }

@@ -39,9 +39,12 @@ floor = **0.86.0**（`peerDependencies: ">=0.86.0"`），ceiling = 跟踪最新�
 
 ## 实测增补（2026-10-26，本重写分支）
 
+- **真 pi 冒烟：1.4.0 与 floor 0.86.0 各一次全过**（2026-10-26）：`-ne -e packages/entry/dist/index.js` 隔离；`ptc_run_code` 求值 `6*7` → 42；程序内 `tools.pi_task_ptc({wait:true})` 建真子进程并回收报告（floor 用 `PATH=/tmp/pi086/node_modules/.bin:$PATH` shim，让子进程也跑 0.86）。floor 上 `loadSkills/formatSkillsForPrompt/getAgentDir` 导出齐备（静态 import 可加载）。
+- **0.87 / 0.99 / 1.0 / 1.1 / 1.2 / 1.3 冒烟（2026-10-26）**：每版跑真 pi 一次——`ptc_run_code` 求值 42 全过；派发用例抽测 **0.87**（分水岭前，报告走 prompt-json 兜底）/ **0.99**（分水岭，tool 通道首选）/ **1.3**（最新前一版），均 `fulfilled` + 产出 `ok`。同一 minor 内的补丁版（0.87.1、0.99.1/2、1.0.1–4）未单独安装——改动面按 minor 分水岭取样。
+- floor 上报告通道走 prompt-json 兜底（`structuredContent` <0.99 不存在），结果正常；tool 通道的 floor 形状未单独取证。
 - **exposure 传函数（getter）在 1.4.0 不被支持**：隔离探针（`-ne` 只加载探针扩展）翻转标志位后，工具仍不出现在声明集。动态可见性须走 `defaultActive: false` + `setActiveTools` 增删（可调用性实测有效；是否同步进模型声明清单未确证）。
 - 冒烟隔离：`pi -ne -e <path>`——本机全局装有旧版 `npm:pi-ptc-subagents`，不加 `-ne` 会同名互踩（registerTool 是 Map.set，后注册者覆盖）。
 
 ## 待测
 
-1.4.0 列是从 changelog 推断的，**没有经过旧仓那种逐版本安装探针**；下次 pi 发版或动了 pi 中介的代码（门、可见性、codemode 探测）时补测。
+中间版本的**执行链冒烟**已覆盖（0.87 / 0.99 / 1.0 / 1.1 / 1.2 / 1.3，见上）；仍未做的：同一 minor 的补丁版逐版安装（按 minor 分水岭取样）、`1.x` 能力表里未直接观测的 codemode 差分（依赖旧仓 16 项探针结论）、floor 的 codemode/exposure 行为（0.99 以下本就没有）。下次 pi 发版或动了门/可见性/codemode 探测相关代码时补测。

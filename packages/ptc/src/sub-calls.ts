@@ -15,11 +15,17 @@ export class SubCallTracker {
   readonly #order: number[] = [];
 
   start(callId: number, name: string, args: unknown): void {
-    const preview = JSON.stringify(args);
+    let preview = "";
+    try {
+      preview = JSON.stringify(args) ?? "";
+    } catch {
+      // BigInt/循环引用是 structured clone 的合法值但 JSON.stringify 会抛——预览不许影响主链路
+      preview = String(args);
+    }
     this.#records.set(callId, {
       callId,
       name,
-      argsPreview: preview ? preview.slice(0, PREVIEW_MAX_CHARS) : "",
+      argsPreview: preview.slice(0, PREVIEW_MAX_CHARS),
       status: "running",
       startedAt: performance.now(),
     });

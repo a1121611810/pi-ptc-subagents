@@ -1,4 +1,4 @@
-export { isOwnRecord, isTerminal, TERMINAL_STATUSES } from "./task-record.ts";
+export { isTerminal, TERMINAL_STATUSES } from "./task-record.ts";
 export type { TaskOwner, TaskRecord, TaskStatus } from "./task-record.ts";
 export { TaskRegistry } from "./registry.ts";
 export type { CommandResult, TaskCommand } from "./registry.ts";
@@ -13,6 +13,7 @@ export {
   readOnlyGate,
   rejection,
   sessionEndingGate,
+  taskTextGate,
 } from "./gates.ts";
 export type { AgentResolver, DispatchInput, Gate, TaskRejection } from "./gates.ts";
 export { FileOutputStorage, InMemoryOutputStorage } from "./output-storage.ts";

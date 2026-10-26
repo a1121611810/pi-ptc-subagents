@@ -31,6 +31,7 @@ export interface TaskDoorOptions {
   thinkingLevel?: string;
   agent?: string;
   agentScope?: "user" | "project" | "both";
+  readOnly?: "strict" | "lenient";
 }
 
 export interface TaskDoor {
@@ -50,14 +51,16 @@ export function createTaskBinding(door: TaskDoor): TaskBinding {
     name: TASK_BINDING_NAME,
     parameters: TASK_DOOR_PARAMETERS,
     execute(args) {
-      return door.createTask(args.task, {
-        label: args.label,
-        wait: args.wait,
-        why: args.why,
-        model: args.model,
-        thinkingLevel: args.thinkingLevel,
-        agent: args.agent,
-        agentScope: args.agentScope,
+      const input = (args ?? {}) as TaskBindingArgs; // 程序里传 null/undefined 不该炸，交给 task 闸按拒绝处理
+      return door.createTask(input.task, {
+        label: input.label,
+        wait: input.wait,
+        why: input.why,
+        model: input.model,
+        thinkingLevel: input.thinkingLevel,
+        agent: input.agent,
+        agentScope: input.agentScope,
+        readOnly: input.readOnly,
       });
     },
   };

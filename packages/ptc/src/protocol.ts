@@ -1,7 +1,7 @@
 // ADR-0017：host↔worker 线协议。两端共用这一份类型，防止漂移
 export type HostToWorkerFrame =
   | { kind: "init"; surface: string; bindingNames: string[] }
-  | { kind: "run"; id: string; code: string; cwd: string; timeoutMs: number }
+  | { kind: "run"; id: string; code: string; args: unknown }
   | { kind: "cancel"; id: string; reason: string }
   | { kind: "reset" }
   | { kind: "result"; callId: number; ok: true; value: unknown }

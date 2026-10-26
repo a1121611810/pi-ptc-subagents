@@ -1,6 +1,7 @@
 import {
   TaskEngine,
   TaskRegistry,
+  type DispatchInput,
   type DispatchOutcome,
   type EngineOptions,
   type Gate,
@@ -20,7 +21,7 @@ export interface PtcSession {
   engine: TaskEngine;
   createTask(
     task: string,
-    options?: { label?: string; wait?: boolean; why?: string },
+    options?: Omit<DispatchInput, "task" | "signal">,
   ): Promise<CreateTaskResult>;
   listTasks(recentCompletedLimit?: number): TaskRecord[];
   stopTask(taskId: string, reason: string): Promise<void>;
@@ -58,8 +59,7 @@ export function assemblePtcSession(options: PtcSessionOptions = {}): PtcSession 
   return {
     registry,
     engine,
-    createTask: (task, opts) =>
-      engine.dispatch({ task, label: opts?.label, wait: opts?.wait, why: opts?.why }),
+    createTask: (task, opts) => engine.dispatch({ ...opts, task }),
     listTasks: (recentCompletedLimit) => listTasks(registry, recentCompletedLimit),
     stopTask: (taskId, reason) => engine.stop(taskId, reason),
     faceVisible: () => faceVisible(registry),

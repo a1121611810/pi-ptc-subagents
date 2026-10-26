@@ -20,6 +20,8 @@ export interface RunProgramRequest {
   surface?: string;
   cwd?: string;
   timeoutMs?: number;
+  /** workflow 的 args：作为程序里的同名全局绑定注入（ADR-0017 只透传 JSON 值） */
+  args?: unknown;
   bindings: BindingTable;
   pool?: WorkerPool;
 }
@@ -64,6 +66,7 @@ export async function runPtcProgram(request: RunProgramRequest): Promise<RunOutc
     const controllers = new Set<AbortController>();
     let settled = false;
     let waitingReset = false;
+    let resetTimer: NodeJS.Timeout | undefined;
     const runAbort = new AbortController();
 
     const send = (frame: HostToWorkerFrame) => worker.postMessage(frame);
@@ -72,6 +75,7 @@ export async function runPtcProgram(request: RunProgramRequest): Promise<RunOutc
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      callQueue.length = 0; // 取消后排队中的调用不再拉起：副作用不许落后于「已取消」
       runAbort.abort();
       for (const abort of controllers) abort.abort();
       const withExtras: RunOutcome = { ...outcome, subCalls: subCalls.snapshot() };
@@ -80,6 +84,13 @@ export async function runPtcProgram(request: RunProgramRequest): Promise<RunOutc
       if (request.pool) {
         // 归还前先 reset：拒掉残留 pending、清场 globalThis；ready 回来才放回池里
         waitingReset = true;
+        resetTimer = setTimeout(() => {
+          // 同步死循环的程序不会处理 reset：宽限后杀掉收回名额（否则池永久少一格）
+          if (!waitingReset) return;
+          waitingReset = false;
+          request.pool!.discard(worker);
+        }, DEFAULT_LIMITS.graceMs);
+        resetTimer.unref();
         send({ kind: "reset" });
       } else {
         void worker.terminate();
@@ -92,13 +103,18 @@ export async function runPtcProgram(request: RunProgramRequest): Promise<RunOutc
     }, timeoutMs);
 
     worker.on("message", (frame: WorkerToHostFrame) => {
+      // 池化复用：旧 run 的监听器还挂在同一 worker 上——已 settle 的 run 只等自己的 reset ready
+      if (settled && frame.kind !== "ready") return;
       if (frame.kind === "ready") {
         if (waitingReset) {
           waitingReset = false;
+          if (resetTimer) clearTimeout(resetTimer);
           request.pool!.release(worker);
         }
         return;
       }
+      // 迟到帧（已取消 run 的残留调用/日志）不记在当前 run 头上
+      if (frame.runId !== runId) return;
       if (frame.kind === "log") {
         logs.push(frame.text);
         return;
@@ -116,6 +132,7 @@ export async function runPtcProgram(request: RunProgramRequest): Promise<RunOutc
         pendingCalls++;
         subCalls.start(frame.callId, frame.name, frame.args);
         const execute = async () => {
+          if (settled) return; // 取消后队列里的调用不再执行
           const controller = new AbortController();
           controllers.add(controller);
           try {
@@ -133,6 +150,7 @@ export async function runPtcProgram(request: RunProgramRequest): Promise<RunOutc
             const value = await binding(frame.args, {
               cwd,
               emitImage: (image) => images.push(image),
+              signal: controller.signal, // 决策 17：timeout/cancel 时 binding 据此撤回自己的等待
             });
             subCalls.end(frame.callId, "ok");
             send({
@@ -203,6 +221,6 @@ export async function runPtcProgram(request: RunProgramRequest): Promise<RunOutc
       surface: request.surface ?? "run_code",
       bindingNames: Object.keys(request.bindings),
     });
-    send({ kind: "run", id: runId, code: request.code, cwd, timeoutMs });
+    send({ kind: "run", id: runId, code: request.code, args: request.args ?? {} });
   });
 }

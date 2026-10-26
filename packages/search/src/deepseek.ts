@@ -27,6 +27,8 @@ async function postJson(
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      // 网络黑洞（丢 SYN 无 RST）时不至于让子代理卡死：30s 后落 status 0「网络不可达」
+      signal: AbortSignal.timeout(30_000),
     });
   } catch (error) {
     return {

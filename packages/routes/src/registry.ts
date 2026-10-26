@@ -41,15 +41,16 @@ export const TOOLS = {
   pi_task_codemode: {
     name: "pi_task_codemode",
     description: () =>
-      "建一条子代理任务，立刻返回 handle（taskId + label）。任务在任务记录里排队，由派发引擎起独立 pi 进程执行；完成后的报告与产出经 ptc_task_output 读取。",
+      "建一条子代理任务，默认立刻返回 handle（taskId + label）；wait:true 时阻塞到终态再返回结果。任务在任务记录里排队，由派发引擎起独立 pi 进程执行；完成后的报告与产出经 ptc_task_output 读取。",
   },
   ptc_task_list: {
     name: "ptc_task_list",
-    description: () => "列出在飞的任务与最近完成的任务（默认最近 10 条已完成）。",
+    description: () => "列出在飞的任务与最近完成的任务（最近 10 条已完成）。",
   },
   ptc_task_output: {
     name: "ptc_task_output",
-    description: () => "按 task_id 读一条任务记录：状态、产出位置、报告（随派发引擎落地）。",
+    description: () =>
+      "按 task_id 读一条任务记录：状态、报告、产出。产出超过截断阈值时给尾部与完整产出位置（outputPath）。",
   },
   ptc_task_stop: {
     name: "ptc_task_stop",
@@ -90,7 +91,7 @@ export const ROUTES = [
       codemode_ptc:
         "不适用——写程序是 full_ptc 面的编排能力；本面用 codemode 编排、pi_task_codemode 派任务",
     },
-    fact: "程序内 tools.*；bash 需 opt-in 授权；只在本面（full_ptc）注册 PTC 工具",
+    fact: "程序内 tools.*；bash 当前不在程序绑定表里（ADR-0040 的 opt-in 尚未接线）；只在本面（full_ptc）注册 PTC 工具",
     detail: "docs/routes/run-one-program.md",
   },
   {
@@ -112,7 +113,7 @@ export const ROUTES = [
       full_ptc: "程序内 tools.read/grep/find/ls/edit/write；逐个直调走 pi 自己的工具",
       codemode_ptc: "脚本内 tools.<内置名> 直接调",
     },
-    fact: "bash 不在默认程序绑定表里（ADR-0040 opt-in）",
+    fact: "bash 当前不在程序绑定表里（ADR-0040 的 opt-in 尚未接线）",
     detail: "docs/routes/use-the-built-in-tools.md",
   },
   {
@@ -124,7 +125,7 @@ export const ROUTES = [
         "孩子的契约：最终消息末尾 fenced JSON（summary/findings/files_touched/usage）；宿主自动解析",
       codemode_ptc: "同左——契约在孩子的追加提示词里，与 surface 无关",
     },
-    fact: "reportChannel 恒在（prompt-json/none）；散文照交但不标可信",
+    fact: "reportChannel 恒在四值：tool/prompt-json/none/opted-out；工具通道（ptc_child_report）已是首选",
     detail: "docs/routes/report-what-you-did.md",
   },
   {
@@ -151,11 +152,11 @@ export const ROUTES = [
   },
 ] satisfies RouteEntry[];
 
-// 超长产出的分层引导（ptc_task_output）：报告是归约层（ADR-0032 本意），产出尾部是原始层
+// 超长产出的分层引导（ptc_task_output）：报告是归约层（ADR-0032 本意），响应里的 output 是尾部原始层
 export const LONG_OUTPUT_GUIDANCE_WITH_REPORT =
-  "产出超过截断阈值（{bytes} 字节）。先看孩子的报告（归约层）：{report}——要看报告没收录的原始细节（完整输出、逐行内容）再调一次并说明要全文。";
+  "产出超过截断阈值（{bytes} 字节）。先看孩子的报告（归约层）：{report}——响应里的 output 是截断后的尾部；报告没收录的完整原文用 read 读记录上的 outputPath。";
 export const LONG_OUTPUT_GUIDANCE_NO_REPORT =
-  "产出超过截断阈值（{bytes} 字节），且孩子未交报告（reportChannel=none，散文可信度存疑）。以下为截断后的产出尾部；要完整输出请说明。";
+  "产出超过截断阈值（{bytes} 字节），且孩子未交报告（reportChannel=none，散文可信度存疑）。响应里的 output 是截断后的尾部；完整原文用 read 读记录上的 outputPath。";
 
 export function renderLongOutputGuidance(options: {
   bytes: number;
@@ -188,10 +189,9 @@ export function renderTaskNotifications(
 
 // ADR-0061：索引 token 预算；超了明说（> WARNING:），不静默截断
 export const ROUTE_INDEX_TOKEN_CEILING = 560;
-export const ROUTE_INDEX_TOKEN_FLOOR = 380;
 
 // 启发式估 token（中英混排按 2 字符/token）；旧实现同款思路
-export function estimateTokens(text: string): number {
+function estimateTokens(text: string): number {
   return Math.ceil(text.length / 2);
 }
 

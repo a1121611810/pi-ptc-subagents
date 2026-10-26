@@ -26,6 +26,11 @@ export function applyAdr0015Truncation(text: string): TruncationResult {
     keptLines = keptLines.slice(Math.max(1, Math.floor(keptLines.length / 2)));
     kept = keptLines.join("\n");
   }
+  // 单行超长（JSON.stringify 结果/base64）砍不动行：按字节留尾，别让 50KB 预算被常见形状绕过
+  const keptBuffer = Buffer.from(kept, "utf8");
+  if (keptBuffer.length > TRUNCATION_MAX_BYTES) {
+    kept = keptBuffer.subarray(keptBuffer.length - TRUNCATION_MAX_BYTES).toString("utf8");
+  }
   const fullOutputPath = join(tmpdir(), `pi-ptc-output-${randomUUID()}.txt`);
   mkdirSync(tmpdir(), { recursive: true });
   writeFileSync(fullOutputPath, text, "utf8");

@@ -93,6 +93,7 @@ export function createPtcWorkflowTool(options: PtcToolOptions) {
         surface: "workflow",
         cwd: options.cwd,
         timeoutMs: params.timeoutMs,
+        args: params.args ?? {},
         bindings: options.getBindings(),
         pool: options.getPool?.(),
       });

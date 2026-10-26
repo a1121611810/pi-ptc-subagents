@@ -44,7 +44,9 @@ export function parseChildStream(stdout: string): ParsedChildStream {
     if (message.role === "assistant") {
       if (typeof message.model === "string") observedModel = message.model;
       if (typeof message.provider === "string") observedProvider = message.provider;
-      text = (message.content ?? [])
+      // content 形状随 pi 版本变：非数组按「没有文本」跳过，不让单个畸形事件毒化整次解析
+      const parts = Array.isArray(message.content) ? message.content : [];
+      text = parts
         .filter((part) => part.type === "text" && typeof part.text === "string")
         .map((part) => part.text!)
         .join("\n");

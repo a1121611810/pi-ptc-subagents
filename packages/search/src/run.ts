@@ -113,6 +113,7 @@ export async function runWebSearch(
       context.quota.release(false);
       return { ok: false, error: `open 失败（HTTP ${outcome.status}）：${outcome.error}` };
     }
+    context.quota.release(outcome.value.length > 0);
     context.memory.storeText(action.url, outcome.value);
     return { ok: true, text: sanitizeText(outcome.value.slice(0, budget)) };
   }
@@ -130,16 +131,15 @@ export async function runWebSearch(
     .split("\n")
     .map((line, index) => ({ line, index }))
     .filter(({ line }) => regex.test(line));
-  return {
-    ok: true,
-    text:
-      lines.length > 0
-        ? lines
-            .slice(0, 50)
-            .map(({ line, index }) => `${index + 1}: ${line}`)
-            .join("\n")
-        : "（页内无匹配行）",
-  };
+  const body =
+    lines.length > 0
+      ? lines
+          .slice(0, 50)
+          .map(({ line, index }) => `${index + 1}: ${line}`)
+          .join("\n")
+      : "（页内无匹配行）";
+  // 与 open/search 同待遇：一行可能 500KB（压缩 bundle），不 sanitize+预算会一次打穿子代理上下文
+  return { ok: true, text: sanitizeText(body).slice(0, budget) };
 }
 
 /** 页文获取：记忆命中免费；否则占额抓取并回存记忆 */

@@ -3,3 +3,5 @@ dist/
 coverage/
 *.tsbuildinfo
 .DS_Store
+# 运行时状态（任务记录/产出）：探针与真机冒烟会写，不许入库
+.pi/

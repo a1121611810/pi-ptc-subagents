@@ -1,12 +1,12 @@
 # 派一个子代理
 
-入口两扇门面（ADR-0052），同名同形，只是所在平面不同：
+入口两扇门面（ADR-0052），同参同形（名字随所在平面），只是所在平面不同：
 
 - `pi_task_ptc`：PTC 程序内的 binding，程序里 `tools.pi_task_ptc({...})`
 - `pi_task_codemode`：注册的工具（exposure: codemode，模型不可见），codemode 脚本里 `tools.pi_task_codemode({...})`
 
-参数：`task`（必填，孩子要干的活）、`label`（给人看的标签）为当前生效项；
-`agent / why / cwd / agentScope / model / thinkingLevel / wait / readOnly` 的语义随派发引擎落地（schema 已共享一份）。
+参数：`task`（必填，孩子要干的活）、`label`、`wait`、`why`、`agent`、`agentScope`、`model`、`thinkingLevel`、`readOnly` 均已生效（`cwd` 待接）；
+agent 定义里的 `tools / model / thinkingLevel / childReport` 由 frontmatter 钉住。
 
 返回 handle：`{ taskId, label?, status: "queued" }`。默认不等；撞闸（随闸门落地）返回
 `{ status: "rejected", errorMessage }`，不抛异常。

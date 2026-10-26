@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Type } from "typebox";
 import {
+  FileOutputStorage,
   NotificationCenter,
   agentNameGate,
   agentResolveGate,
@@ -16,6 +17,7 @@ import {
   findAgent,
   readOnlyGate,
   sessionEndingGate,
+  taskTextGate,
 } from "@pi-ptc/dispatch";
 import { fileURLToPath } from "node:url";
 import {
@@ -37,6 +39,7 @@ import {
   type BindingTable,
 } from "@pi-ptc/ptc";
 import {
+  FALLBACK_SURFACE_MODE,
   TOOLS,
   renderLongOutputGuidance,
   renderRouteIndex,
@@ -73,7 +76,7 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
     // ADR-0035/0051：surface 直接问 pi——codemode 进了模型活跃表 = codemode_ptc；否则 full_ptc
     const surface: SurfaceMode = pi.getActiveTools().includes("codemode")
       ? "codemode_ptc"
-      : "full_ptc";
+      : FALLBACK_SURFACE_MODE;
     // ADR-0010 PTC 模式：full_ptc + 开关 + 工具可用（--tools 限制会话不在活跃表 → 不进）→ 收窄 loadout
     // 收窄目标 = 内置绑定工具：模型只能程序内 tools.* 调它们，写程序成为最顺的路
     let modeEnabled = readDefaultModeConfig(getAgentDir());
@@ -99,7 +102,10 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
     // ADR-0011 skills 补偿：收窄会触发 pi 丢 skills 节（只在 read/bash 可见时生成）——模式在且二者不可直调时自己写回（indirect 加载句）
     pi.on("before_agent_start", (event) => {
       applyMode(); // pi 可能在 session_start 后重置活跃表——每 turn 开头重新收敛
-      event.systemPromptOptions.sections["ptc"] = renderRouteIndex(surface);
+      applyTaskFaceVisibility(pi, session); // 关模式重放 baseLoadout、resume 重置后，任务面可见性再对齐（幂等）
+      // floor 版本事件形状未实测：缺 sections 就跳过注入，别让每个 turn 抛 TypeError
+      const sections = event.systemPromptOptions?.sections;
+      if (sections) sections["ptc"] = renderRouteIndex(surface);
       if (!modeActive) return;
       const active = pi.getActiveTools();
       if (active.includes("read") || active.includes("bash")) return;
@@ -110,21 +116,25 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
         includeDefaults: true,
       });
       if (loaded.skills.length === 0) return;
-      event.systemPromptOptions.sections["available_skills"] = formatSkillsForPrompt(
-        loaded.skills,
-        "indirect",
-      );
+      if (sections) {
+        sections["available_skills"] = formatSkillsForPrompt(loaded.skills, "indirect");
+      }
     });
     const pool = new WorkerPool(spawnPtcWorker);
     const notifications = new NotificationCenter();
     // ADR-0022：终态事件进待投递队列（engine 的 wait 路径记 awaited 不通知）；turn 边界批投递
+    // 单批发送失败不拖累其余批（分批已按 100KB 切；丢一批只是提醒缺失，记录仍在任务面）
     pi.on("turn_end", () => {
       for (const batch of notifications.drain()) {
-        const text = renderTaskNotifications(batch);
-        pi.sendMessage(
-          { customType: "bg-task-notifications", content: text, display: true },
-          { deliverAs: "nextTurn" },
-        );
+        try {
+          const text = renderTaskNotifications(batch);
+          pi.sendMessage(
+            { customType: "bg-task-notifications", content: text, display: true },
+            { deliverAs: "nextTurn" },
+          );
+        } catch {
+          // 通知是 best-effort：失败不阻塞 turn
+        }
       }
     });
     // ADR-0050/0065：dispatchEnabled 独立于 mode；会话结束位置位（gate 读谓词）
@@ -147,11 +157,13 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
         childExtensionPath: fileURLToPath(import.meta.url),
         // ADR-0049：搜索开关传给引擎（strict 白名单保留 web_ds_search）
         searchEnabled: readWebSearchConfig(getAgentDir()).enabled,
-        // BG-01：记录落盘（项目级 .pi 目录；pi 的 sessionDir 不在扩展 API 上，此处取项目本地态）
+        // BG-01：记录与产出一同落盘（项目级 .pi 目录；pi 的 sessionDir 不在扩展 API 上，此处取项目本地态）
         storageDir: join(process.cwd(), ".pi", "ptc-tasks"),
+        output: new FileOutputStorage(join(process.cwd(), ".pi", "ptc-tasks")),
       },
       gates: [
         readOnlyGate,
+        taskTextGate,
         dispatchEnabledGate(() => dispatchEnabled),
         sessionEndingGate(() => sessionEnding),
         depthGate(() => Number(process.env.PI_PTC_DEPTH ?? 0), 3),
@@ -189,6 +201,7 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
     });
     pi.on("session_shutdown", () => {
       sessionEnding = true;
+      pool.drain(); // 退役空闲 worker：特定关闭时序下别让 ref 着的线程拖住退出
       void session.shutdown();
     });
     notifications.attach(session.registry);
@@ -305,14 +318,15 @@ function readDeepSeekCredential(agentDir: string): string | null {
 // ADR-0032 工具通道 + ADR-0049 搜索：子代理进程里唯一的注册物集合——echo 式报告工具 + 门控的 web_ds_search
 function registerChildToolsOnly(pi: ExtensionAPI): void {
   const agentDir = getAgentDir();
+  const searchConfig = readWebSearchConfig(agentDir);
   // 注意：开关开但缺 key 时仍注册——调用返回可读错误（ADR-0048 方案 B），描述与启动告警省略
-  if (readWebSearchConfig(agentDir)) {
+  if (searchConfig.enabled) {
     const apiKey = readDeepSeekCredential(agentDir);
     pi.registerTool(
       createWebDsSearchTool({
         provider: createDeepSeekProvider(apiKey ?? "missing-key"),
         memory: createSearchMemory(),
-        quota: createSearchQuota(30),
+        quota: createSearchQuota(searchConfig.maxCalls),
       }),
     );
   }
@@ -432,14 +446,17 @@ function registerTaskFace(
       if (!record) return textResult({ error: `unknown task id ${args.task_id}` });
       const outputBytes = await session.outputSize(args.task_id);
       if (outputBytes === undefined) return textResult(record);
-      // 分层读取：产出超 ADR-0015 阈值时，先引导模型读报告（归约层）；无报告才给截断尾部
+      // 分层读取：报告是归约层，响应里的 output 是尾部原始层（完整原文在 outputPath）
       if (outputBytes > TRUNCATION_MAX_BYTES) {
+        const tail = (await session.readOutputTail(args.task_id, TRUNCATION_MAX_BYTES)) ?? "";
+        const { text } = applyAdr0015Truncation(tail);
         return textResult({
           ...record,
+          output: text,
           guidance: renderLongOutputGuidance({
             bytes: outputBytes,
             report: record.report,
-            reportChannel: record.reportChannel,
+            reportChannel: record.reportChannel ?? "none",
           }),
         });
       }
@@ -476,6 +493,11 @@ function registerTaskDoor(
         label: args.label,
         wait: args.wait,
         why: args.why,
+        agent: args.agent,
+        agentScope: args.agentScope,
+        model: args.model,
+        thinkingLevel: args.thinkingLevel,
+        readOnly: args.readOnly,
       });
       // 决策 7/12：拒绝走 status，不抛；两个入口同形
       return {

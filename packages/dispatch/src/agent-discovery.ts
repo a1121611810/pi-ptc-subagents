@@ -14,8 +14,14 @@ export interface AgentDefinition {
   thinkingLevel?: string;
 }
 
-export function parseAgentMarkdown(path: string, name: string): AgentDefinition {
-  const raw = readFileSync(path, "utf8");
+export function parseAgentMarkdown(path: string, name: string): AgentDefinition | null {
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch {
+    // 文件不可读 = 解析不出 = 上层按 unknown agent 走 status 拒绝，不让 IO 异常穿透闸门
+    return null;
+  }
   const definition: AgentDefinition = { name, path, childReport: true };
   const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!match) return definition;
@@ -51,6 +57,7 @@ export function findAgent(
   dirs: AgentDirs,
   scope: AgentScope = "both",
 ): AgentDefinition | null {
+  if (!/^[\w-]+$/.test(name)) return null; // 防御纵深：名字要拼路径，非法名直接当不存在
   for (const dir of scopedDirs(dirs, scope)) {
     const path = join(dir, `${name}.md`);
     if (existsSync(path)) return parseAgentMarkdown(path, name);

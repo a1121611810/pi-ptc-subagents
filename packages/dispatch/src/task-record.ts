@@ -25,10 +25,6 @@ export interface TaskOwner {
   bootMs: number;
 }
 
-export function isOwnRecord(record: TaskRecord, owner: TaskOwner): boolean {
-  return record.ownerPid === owner.pid && record.ownerBootMs === owner.bootMs;
-}
-
 // 记录本体：字段随 pump / 通知 / 报告落地再长（ADR-0022 的 25 字段是演进结果，不是起点）
 export interface TaskRecord {
   id: string;

@@ -26,7 +26,10 @@ export class NotificationCenter {
     registry.subscribe((next, prev) => {
       if (prev?.status === next.status) return;
       if (!isTerminalStatus(next.status)) return;
-      if (this.#awaited.has(next.id)) return;
+      if (this.#awaited.has(next.id)) {
+        this.#awaited.delete(next.id); // 终态后抑制不再需要，防集合只增不减
+        return;
+      }
       this.#pending.push({
         taskId: next.id,
         label: next.label,

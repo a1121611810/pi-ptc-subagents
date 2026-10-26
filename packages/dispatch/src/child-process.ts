@@ -2,21 +2,36 @@ import type { ChildHandle } from "./engine.ts";
 import { spawn } from "node:child_process";
 import { REPORT_CONTRACT_BLOCK } from "./report.ts";
 
+const STDERR_KEEP_CHARS = 64 * 1024; // 只留尾部：stopReason 素材够用，防喷涌撑爆宿主内存
+
 // 子进程以用户身份跑（ADR-0007：信任姿态与所有 pi 扩展一致，无 OS 沙箱）
 export function spawnChild(argv: string[], env: NodeJS.ProcessEnv = process.env): ChildHandle {
   const child = spawn(argv[0]!, argv.slice(1), { env, stdio: ["ignore", "pipe", "pipe"] });
   let stderr = "";
   child.stderr.on("data", (chunk) => {
-    stderr += String(chunk);
+    stderr = (stderr + String(chunk)).slice(-STDERR_KEEP_CHARS);
   });
+  let exitCode: number | null = null;
+  let onExit: ((code: number, stderr: string) => void) | undefined;
+  const settle = (code: number) => {
+    if (exitCode !== null) return;
+    exitCode = code;
+    onExit?.(code, stderr);
+  };
+  // spawn 失败（ENOENT/E2BIG）只发 error 不发 exit：不监听会以未捕获异常崩掉宿主
+  child.on("error", (error) => {
+    stderr = `${stderr}spawn error: ${error.message}\n`.slice(-STDERR_KEEP_CHARS);
+    settle(-1);
+  });
+  // close 等 stdio 流关闭后才触发；exit 可能早于管道尾部数据（报告/usage 会丢尾）
+  child.on("close", (code) => settle(code ?? -1));
   return {
     pid: child.pid ?? 0,
     onOutput: (callback) => child.stdout.on("data", (chunk) => callback(String(chunk))),
-    onExit: (callback) =>
-      child.on("exit", (code) => {
-        if (code === 0 && stderr) callback(0, stderr);
-        else callback(code ?? -1, stderr);
-      }),
+    onExit: (callback) => {
+      onExit = callback;
+      if (exitCode !== null) callback(exitCode, stderr); // 订阅晚于退出：补发
+    },
     kill: (signal) => {
       child.kill(signal);
     },

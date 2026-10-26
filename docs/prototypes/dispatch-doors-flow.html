@@ -238,7 +238,7 @@
     <b>dispatch</b>（任务引擎：闸门、<code>taskId</code>、registry、libuv 队列与槽、spawn、落盘、报告收集）·
     <b>task</b>（任务面：lifecycle face——<code>ptc_task_list</code> / <code>ptc_task_output</code> / <code>ptc_task_stop</code>，读/停 sub 的 registry）。
     依赖单向：<b>入口 → dispatch、ptc → dispatch、task → dispatch</b>——dispatch 持全部任务状态，其余三个只是它的调用方。
-    这一页把十节放在一起，决策已全部走完（27 条）。
+    这一页把十节放在一起，决策已全部走完（28 条）。
   </p>
 
   <nav class="toc">
@@ -1006,7 +1006,7 @@
         <tr><td><code>agent</code></td><td><span class="opt">否</span></td><td>已注册的 agent 名字，用来收窄孩子</td><td>省略 = <b>通用孩子</b>（fresh generalist pi，pi 自己的提示词 + 完整工具集）；给了但没定义 / 空串 → <b>闸门 4 拒</b></td></tr>
         <tr><td><code>why</code></td><td><span class="opt">否</span></td><td>这一刀为什么切出来（<b>自己的话</b>：不是整段对话，也不是用户原话）</td><td>任务已经说全了就省掉。开关关掉时丢弃，并记 <code>whySuppressed: true</code></td></tr>
         <tr><td><code>cwd</code></td><td><span class="opt">否</span></td><td>孩子的工作目录</td><td>默认调用方的 cwd</td></tr>
-        <tr><td><code>agentScope</code></td><td><span class="opt">否</span></td><td>去哪找 agent 目录：<code>user</code>（<code>~/.pi/agent/agents</code>）/ <code>project</code>（<code>&lt;cwd&gt;/.pi/agents</code>）/ <code>both</code></td><td>默认 <code>user</code>——<b>看不见</b> project agent</td></tr>
+        <tr><td><code>agentScope</code></td><td><span class="opt">否</span></td><td>去哪找 agent 目录：<code>user</code>（<code>~/.pi/agent/agents</code>）/ <code>project</code>（<code>&lt;cwd&gt;/.pi/agents</code>）/ <code>both</code></td><td>默认 <code>both</code>——两层都看得见，<b>project 优先覆盖同名 user</b>；可收窄到单层</td></tr>
         <tr><td><code>model</code></td><td><span class="opt">否</span></td><td>覆盖孩子跑的模型</td><td>省略 = 继承本会话当前模型（ADR-0044）；agent 定义里钉了优先用定义的</td></tr>
         <tr><td><code>thinkingLevel</code></td><td><span class="opt">否</span></td><td>孩子的思考档位</td><td>沿用 pi 的默认</td></tr>
         <tr><td><code>wait</code></td><td><span class="opt">否</span></td><td><code>true</code> = <b>等这个任务完成</b>，结果在返回值里（<code>DispatchResult</code>）</td><td>默认 <code>false</code>（libuv 回调式）：<b>不等</b>——立刻返回 handle（<code>DispatchHandle</code>），完成时<b>通知回到父会话</b></td></tr>
@@ -1419,7 +1419,7 @@ results = 1;            → 成功（写：静默建全局，零错误信号）<
         <tr><td><b>18</b></td><td>「等不等」用<b>一个入口 + <code>wait</code> 参数</b>（默认 <code>false</code> = 不等）</td><td>跨边界时 tokio/Python 那一路（句柄 + 调用方 <code>await</code>）做不出来——句柄里的 promise 带不回来（codemode 那侧返回值是结构化数据，promise 根本传不回来）。剩下的只有「参数」和「两个入口」，而两个入口 = 2 门 × 2 等法 = <b>4 个名字</b>，模型调用表翻倍。参数形态下参数语义取 Kotlin 的判据：「<b>这个调用点需要结果吗</b>」。<b>代价</b>：返回形状随参数变，模型可能以为要结果却拿到 handle——Kotlin 管这叫「await 遗忘综合征」，靠静态检查 + CI 规则兜；我们靠描述文案 + handle 里的明写 + <code>ptc_task_output</code> 兜</td></tr>
         <tr><td><b>19</b></td><td>「等」的返回形状 = <b>原始 <code>DispatchResult</code> / <code>DispatchHandle</code></b></td><td>与已定的一致：两个门给同一个对象，现有 PTC 程序读的字段一个不少。不引入统一信封（那会多一层嵌套）</td></tr>
         <tr><td><b>20</b></td><td>路由文案<b>收编到一个类型化 route registry</b>，它持<b>全部</b> model-facing 散文（F1=②）：两个区——<code>ROUTES</code>（一行 = 一条「路」，F2）· <code>TOOLS</code>（一行 = 一个工具的事实）</td><td>散文只在一个文件里 → <b>「同一句话写在两个地方」结构上不可能发生</b>。渲染出三个消费者：路由表 section（按 surface，复用 <code>&lt;ptc&gt;</code>，F3）· 工具 description（事实段 + 从 ROUTES 派生的「什么时候用我」）· Guidelines/snippet。留在外面：参数 schema（连它的 description）· 实现 · renderers · <b>动态</b>的绑定清单（会话内注入）· binding contract（另一个问题、已有自己的 ADR 与预算）</td></tr>
-        <tr><td><b>21</b></td><td>强制点：<b>六条机械</b>（工具→行 · 行→工具 · route 集完整 · 渲染 token 预算 · 每行事实段非空 · <b>工具的 description/guidelines/snippet 必须是 registry 的调用</b>）+ <b>一条约定</b>（「散文」与「形状」的边界：参数 schema 连 description 留在工具文件）</td><td>前五条照搬 ADR-0024 binding contract 的双向覆盖测试形状，已经在这个仓库里；第 6 条是 F1=② 的兑现点（漂移的口子被结构堵死）；第 7 条是唯一的软点，写明在案</td></tr>
+        <tr><td><b>21</b></td><td>强制点：<b>八条机械</b>（工具→行 · 行→工具 · route 集完整 · 渲染 token 预算 · 每行事实段非空 · <b>工具的 description/guidelines/snippet 必须是 registry 的调用</b> · 索引每路一行且 detail 指针存在 · 每 turn 字节相同）+ <b>一条约定</b>（「散文」与「形状」的边界：参数 schema 连 description 留在工具文件）</td><td>前六条照搬 ADR-0024 binding contract 的双向覆盖测试形状，已经在这个仓库里；第 6 条是 F1=② 的兑现点（漂移的口子被结构堵死）；末两条守索引形状与 prompt cache；唯一的软点写明在案</td></tr>
         <tr><td><b>22</b></td><td>今天四个通道全部退役：<code>&lt;ptc&gt;</code> section <b>升级</b>成路由表 · description 选路句搬进 registry · Guidelines 拆开 · <code>[PTC MODE ACTIVE]</code> 拆开（只有动态的绑定清单留下）· binding reach note 退役（新模型下那条约束不存在了）</td><td>「子代理不会直接触发、codemode 脚本够不到 <code>pi.dispatch</code>」这条 2026-10-20 的实测教训，在新模型下<b>不再成立</b>——门是 codemode 可达的工具，不是 binding</td></tr>
         <tr><td><b>23</b></td><td>路由表<b>两层</b>：常驻索引（每条路<b>一行</b> hook + detail 指针）+ <b>随包详情文件</b>（模型 read）</td><td>照搬 <code>@tylerho/pi-memory</code> 的 <code>MEMORY.md</code> 形状：「索引条目一行一条，详情永远不在索引里」。常驻 context 因此可控——模型看到的只是「有哪些路、什么时候走它、细节在哪」</td></tr>
         <tr><td><b>24</b></td><td><code>docs/usage/</code> 与 <code>docs/routes/</code> <b>进入口 npm 包</b>（<code>files</code> 加进去）</td><td>detail 指针必须能解到<b>用户机器上</b>的文件。今天 <code>docs/</code> 不在包里，那个指针是<b>悬空的</b>——装了包的用户读不到</td></tr>

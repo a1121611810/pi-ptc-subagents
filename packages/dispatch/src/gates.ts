@@ -58,13 +58,20 @@ export const depthGate =
       ? rejection(`dispatch depth limit reached（max ${maxDispatchDepth}）`)
       : null;
 
-// 闸门 4：给了名字但畸形（空/空白）——没给不是错，那是通用孩子（ADR-0039）
+// 闸门 4：给了名字就必须是合法名——空/空白/路径分隔符都不行（没给不是错，那是通用孩子，ADR-0039）
+// 白名单同时堵住 agent 名穿越（findAgent 会拼 `${name}.md`）
 export const agentNameGate: Gate = (input) =>
-  input.agent !== undefined && input.agent.trim() === ""
-    ? rejection(
-        "agent name is empty or whitespace（省略 agent = 通用孩子；给名字必须是已注册的非空名）",
-      )
+  input.agent !== undefined && !/^[\w-]+$/.test(input.agent)
+    ? rejection("agent name must match [A-Za-z0-9_-]+（省略 agent = 通用孩子）")
     : null;
+
+// 闸门 2b：task 必须是可进 argv 的非空文本——pi 会把以 - 开头的 task 当命令行选项（"--help" 会以 0 退出成假成功）
+export const taskTextGate: Gate = (input) =>
+  typeof input.task !== "string" || input.task.trim() === ""
+    ? rejection("task 必须是非空字符串")
+    : input.task.trimStart().startsWith("-")
+      ? rejection("task 不能以 - 开头：pi 会把它当命令行选项")
+      : null;
 
 export type AgentResolver = (name: string, scope?: "user" | "project" | "both") => boolean;
 

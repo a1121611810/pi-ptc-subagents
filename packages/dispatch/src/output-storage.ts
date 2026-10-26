@@ -3,6 +3,10 @@ import { open } from "node:fs/promises";
 import { join } from "node:path";
 
 // ADR-0053：前台也落盘——记录是派发的唯一痕迹，产出是记录的一部分
+// 评审：taskId 会拼进路径；公开 API 的调用方不可控，先拒分隔符与 ..
+function isSafeTaskId(taskId: string): boolean {
+  return !taskId.includes("/") && !taskId.includes("\\") && !taskId.includes("..");
+}
 export interface OutputStorage {
   write(taskId: string, text: string): Promise<string>;
   read(taskId: string): Promise<string | undefined>;
@@ -55,6 +59,7 @@ export class FileOutputStorage implements OutputStorage {
   }
 
   async write(taskId: string, text: string): Promise<string> {
+    if (!isSafeTaskId(taskId)) throw new Error(`invalid task id: ${taskId}`);
     const dir = join(this.#base, "tasks", taskId);
     mkdirSync(dir, { recursive: true });
     const path = join(dir, "output.log");
@@ -63,16 +68,19 @@ export class FileOutputStorage implements OutputStorage {
   }
 
   async read(taskId: string): Promise<string | undefined> {
+    if (!isSafeTaskId(taskId)) return undefined;
     const path = join(this.#base, "tasks", taskId, "output.log");
     return existsSync(path) ? readFileSync(path, "utf8") : undefined;
   }
 
   async size(taskId: string): Promise<number | undefined> {
+    if (!isSafeTaskId(taskId)) return undefined;
     const path = join(this.#base, "tasks", taskId, "output.log");
     return existsSync(path) ? statSync(path).size : undefined;
   }
 
   async readTail(taskId: string, maxBytes: number): Promise<string | undefined> {
+    if (!isSafeTaskId(taskId)) return undefined;
     const path = join(this.#base, "tasks", taskId, "output.log");
     if (!existsSync(path)) return undefined;
     const file = await open(path, "r");

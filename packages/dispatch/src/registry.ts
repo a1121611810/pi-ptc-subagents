@@ -142,6 +142,8 @@ export class TaskRegistry {
       ...current,
       ...patch,
       status: to,
+      // ADR-0056 决定 4：出队转 running 的那一刻盖 startedAt，durationMs 量孩子跑起来之后的时间
+      startedAt: to === "running" ? Date.now() : current.startedAt,
       finishedAt: isTerminal(to) ? Date.now() : current.finishedAt,
     };
     this.#records.set(id, next);

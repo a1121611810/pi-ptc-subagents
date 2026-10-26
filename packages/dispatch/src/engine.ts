@@ -268,7 +268,50 @@ export class TaskEngine {
     whySuppressed = false,
     extras: RunExtras = { childReport: true },
   ): Promise<DispatchResult> {
-    await this.#registry.submit({ kind: "transition", id: taskId, to: "running" });
+    try {
+      return await this.#executeRun(taskId, input, whySuppressed, extras);
+    } catch {
+      // 泵内异常（spawn 同步抛、磁盘写失败…）不许升级成宿主未处理拒绝：按失败收尸、还槽
+      await this.#registry
+        .submit({ kind: "resolve-exit", id: taskId, exitCode: -1 })
+        .catch(() => undefined);
+      this.#releaseSlot(taskId);
+      return this.#notStartedResult(
+        taskId,
+        input,
+        whySuppressed,
+        "任务内部错误（见日志）",
+        "rejected",
+      );
+    }
+  }
+
+  async #executeRun(
+    taskId: string,
+    input: DispatchInput,
+    whySuppressed = false,
+    extras: RunExtras = { childReport: true },
+  ): Promise<DispatchResult> {
+    const entered = await this.#registry.submit({ kind: "transition", id: taskId, to: "running" });
+    if (!entered.changed) {
+      // 等槽期间记录已被取消（stop/abort/shutdown）——不 spawn（ADR-0057 决定 3 的「撞上边」）
+      this.#releaseSlot(taskId);
+      return this.#notStartedResult(taskId, input, whySuppressed, "任务在启动前已取消", "canceled");
+    }
+    if (this.#teardown) {
+      // acquire 与 transition 之间会话开始拆卸：不 spawn 孤儿，按失败收尸
+      await this.#registry
+        .submit({ kind: "resolve-exit", id: taskId, exitCode: -1 })
+        .catch(() => undefined);
+      this.#releaseSlot(taskId);
+      return this.#notStartedResult(
+        taskId,
+        input,
+        whySuppressed,
+        "会话拆卸发生在启动前",
+        "rejected",
+      );
+    }
     const argv = this.#buildArgv(
       { ...input, taskId, searchEnabled: this.#searchEnabled, ...extras },
       this.#context,
@@ -312,10 +355,8 @@ export class TaskEngine {
     // 产出路径挂回记录：lifecycle face 的 output 工具经此读正文
     await this.#registry.submit({ kind: "attach-output", id: taskId, outputPath });
     const result = await this.#registry.submit({ kind: "resolve-exit", id: taskId, exitCode });
-    // 终态落库后才还槽。正常时释放即提拔最老等待者；拆卸中（ADR-0063）还槽不提拔——
-    // 提拔起来的孩子会话已关没人收，是孤儿
-    if (this.#teardown) this.#slots.releaseWithoutPromotion(taskId);
-    else this.#slots.release(taskId);
+    // 终态落库后才还槽（拆卸中不提拔，见 #releaseSlot）
+    this.#releaseSlot(taskId);
     const status =
       result.record.status === "succeeded"
         ? "fulfilled"
@@ -363,6 +404,37 @@ export class TaskEngine {
     }, this.#stopGraceMs).unref();
   }
 
+  // 终态还槽的唯一出口：拆卸中（ADR-0063）不提拔——提拔起来的孩子会话已关没人收，是孤儿
+  #releaseSlot(taskId: string): void {
+    if (this.#teardown) this.#slots.releaseWithoutPromotion(taskId);
+    else this.#slots.release(taskId);
+  }
+
+  // 没起孩子的终态结果（取消/拆卸/内部错误共用形状）
+  #notStartedResult(
+    taskId: string,
+    input: DispatchInput,
+    whySuppressed: boolean,
+    errorMessage: string,
+    status: "canceled" | "rejected",
+  ): DispatchResult {
+    return {
+      status,
+      taskId,
+      label: input.label,
+      text: "",
+      exitCode: -1,
+      started: false,
+      agentName: input.agent ?? "generalist",
+      durationMs: 0,
+      errorMessage,
+      readOnlyTier: input.readOnly ?? "lenient",
+      outputPath: "",
+      whySuppressed,
+      reportChannel: "none",
+    };
+  }
+
   isEnding(): boolean {
     return this.#ending;
   }
@@ -401,13 +473,12 @@ export class TaskEngine {
     this.#registry.subscribe((record) => this.#persist(storageDir, record));
     for (const record of this.#registry.list()) {
       if (isTerminalRecord(record.status)) continue;
-      // 非终态记录：owner 已死（或无主）→ 上次会话没来得及收，标 lost
-      if (record.ownerPid === undefined || !isPidAlive(record.ownerPid)) {
-        await this.#registry
-          .submit({ kind: "reconcile-lost", id: record.id, reason: "lost_on_session_restart" })
-          .catch(() => undefined);
-      }
-      // owner 还活着 = 同机会话重叠，按 ADR-0023 只收自己 owner 的，别人的不动
+      // 同机会话重叠（ADR-0023）：owner 还活着但不是我这条会话 → 别人的在飞任务不装载（看不见也停不了，避免「假停」）
+      if (record.ownerPid !== undefined && isPidAlive(record.ownerPid)) continue;
+      // owner 已死（或无主）：上次会话没来得及收，标 lost
+      await this.#registry
+        .submit({ kind: "reconcile-lost", id: record.id, reason: "lost_on_session_restart" })
+        .catch(() => undefined);
     }
   }
 
@@ -437,6 +508,8 @@ export class TaskEngine {
       });
     }
     for (const [taskId, child] of this.#children) {
+      // 已 stopping 的任务重发 stop 会撞非法迁移抛错，把整个清场循环打断（其余孩子收不到 SIGTERM）
+      if (this.#registry.get(taskId)?.status !== "running") continue;
       await this.#registry.submit({ kind: "stop", id: taskId, reason: "session ended" });
       child.kill("SIGTERM");
     }
