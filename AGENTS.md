@@ -4,15 +4,15 @@ pi 的扩展：PTC（模型写 TypeScript 程序批量调工具）+ 子代理派
 
 ## 包结构（packages/，pnpm workspace）
 
-| 包         | 职责                                                                                              | 依赖                        |
-| ---------- | ------------------------------------------------------------------------------------------------- | --------------------------- |
-| `entry`    | pi extension 装配：session_start 注册、surface 检测、闸门接线、通知投递                           | → 全部                      |
-| `ptc`      | 程序运行时：worker 池、dispatcher、严格模式编译、工具工厂                                         | → sub→dispatch、tui、routes |
-| `dispatch` | 任务引擎：六道闸、DispatchSlotCounter（libuv 队列）、spawn/pump、registry、child report、通知中心 | → tui                       |
-| `task`     | 任务面：list/output/stop 的读/停语义                                                              | → dispatch                  |
-| `tui`      | 渲染原语叶子：文本卫生、截断契约、渲染预算                                                        | 无                          |
-| `routes`   | 模型面散文唯一出处（ADR-0059）：7 条路的册子 + 渲染器                                             | 无（叶子）                  |
-| `search`   | 搜索 provider 抽象（DeepSeek 首家）：三动作工具、配额、记忆、预算                                 | → tui                       |
+| 包         | 职责                                                                                                               | 依赖                        |
+| ---------- | ------------------------------------------------------------------------------------------------------------------ | --------------------------- |
+| `entry`    | pi extension 装配：session_start 注册、surface 检测、PTC 模式（收窄/skills 补偿）、/ptc off 截断、通知投递         | → 全部                      |
+| `ptc`      | 程序运行时：worker 池、dispatcher、严格模式编译、工具工厂、renderResult                                            | → sub→dispatch、tui、routes |
+| `dispatch` | 任务引擎：六道闸、DispatchSlotCounter（libuv 队列）、spawn/pump、registry（落盘+重启恢复）、child report、通知中心 | → tui                       |
+| `task`     | 任务面：list/output/stop 的读/停语义（分层读取：超阈值引导读报告）                                                 | → dispatch                  |
+| `tui`      | 渲染原语叶子：文本卫生、截断契约、渲染预算                                                                         | 无                          |
+| `routes`   | 模型面散文唯一出处（ADR-0059）：7 条路的册子 + 渲染器（索引/通知/引导语）                                          | 无（叶子）                  |
+| `search`   | 搜索 provider 抽象（DeepSeek 首家）：三动作工具、配额、记忆、预算                                                  | → tui                       |
 
 依赖铁律：**tui / routes 是叶子**（不感知领域概念）；`dispatch` 持全部任务状态，其余只是调用方。
 
@@ -24,7 +24,8 @@ pi 的扩展：PTC（模型写 TypeScript 程序批量调工具）+ 子代理派
 
 - 探针直接跑 `node` 打 `packages/*/dist/index.js`（假 spawn/fake pi harness）；引擎类逻辑必须探针覆盖
 - **真 pi 冒烟必须隔离**：`pi -ne -e <entry/dist/index.js>`——本机全局装有旧版 `npm:pi-ptc-subagents`，不加 `-ne` 会同名互踩
-- 子进程/execArgv 的坑：worker 继承宿主 execArgv，`-e` 场景要剥 eval 系参数（已实现，别回退）
+- **四模式都已实测可用**（2026-10-26）：print（`-p`）/ json（`-p --mode json`，事件流可解析）/ rpc（`--mode rpc`，命令 `{"type":"prompt","message":...}` 走 stdin）/ TUI（全屏，用 kimi-cu 驱动真 Terminal——脚本方式起不来，需要图形界面）
+- 子进程/execArgv 的坑：worker 继承宿主 execArgv，`-e` 场景要剥 eval 系参数（已实现，别回退）；shell 传秘密给探针用 `VAR=$(...) cmd`（前缀式），`&&` 链不 export
 - pi 版本事实见 `docs/pi-version-matrix.md`（floor 0.86 / 当前 1.4.0；exposure getter、json 模式形状是已实测差异）
 
 ## 干净室规则（ADR-0002）
@@ -46,4 +47,6 @@ pi 的扩展：PTC（模型写 TypeScript 程序批量调工具）+ 子代理派
 
 ## 已知未做（按价值）
 
-测试框架（探针转正 + 机械强制点门禁）· 发布形态 · floor 双端实测（executeTool / json 模式形状 / exposure 三处考古）· 重写版 ADR/CHANGELOG。详见 dispatch 状态页横幅。（2026-10-26 已完成：PTC 模式、/ptc off 截断、readTail、agentScope 层级覆盖、teardown 还槽、通知管线、resume×收窄验证）
+测试框架（探针转正 + 机械强制点门禁）· 发布形态（摘 private / dts / 详情指针）· floor 双端实测（executeTool / json 模式形状 / exposure 三处考古）· 重写版 ADR/CHANGELOG。详见 dispatch 状态页横幅。
+
+已知小拧（记录在案）：`/ptc off` 后 `/ptc mode on` 会在已撤工具上收窄；pid 复用误判窗口（ADR-0023 原样接受）；`-p` 模式通知进不进模型上下文未实测。
