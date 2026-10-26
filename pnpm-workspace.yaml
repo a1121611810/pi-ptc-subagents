@@ -1,0 +1,22 @@
+# pnpm 12 project config.
+#
+# `packages:` — the root is always a workspace member; this field adds the
+# members beside it. Members live under `packages/<name>/` and declare
+# `"name": "<scope>/<name>"`.
+#
+# The lockfile is the discipline this field creates. Every install in this
+# repository uses `--frozen-lockfile` in CI, and a workspace member with
+# dependencies that is absent from `pnpm-lock.yaml` fails that install with
+# `ERR_PNPM_PACKAGE_MANAGER_NO_IMPORTER`. So: regenerate the lockfile and
+# commit it in the SAME commit that adds or changes a member's dependencies.
+#
+# `minimumReleaseAge` — pnpm 12 defaults to a delay that rejects packages
+# published within the last ~24 h. For this project that delay adds friction
+# (CI on `main` and a clean checkout on a developer box can be skewed by
+# hours) without buying anything — the registry's existing metadata is the
+# trust boundary we rely on. Pin to 0 so the lockfile resolves the same on
+# every machine.
+packages:
+  - "packages/*"
+
+minimumReleaseAge: 0

@@ -1,0 +1,31 @@
+{
+  "name": "pi-ptc-subagents",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Programmable tool calling (PTC) and subagent fan-out for pi",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/a1121611810/pi-ptc-subagents.git"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r run build",
+    "check": "pnpm -r run check",
+    "lint": "oxlint",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^1.4.0",
+    "@types/node": "^26.6.5",
+    "oxfmt": "^0.74.0",
+    "oxlint": "^1.89.0",
+    "rolldown": "^1.2.15",
+    "tsrs": "0.18.0-ts7.1.0-dev.20260929"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "packageManager": "pnpm@12.15.0"
+}
