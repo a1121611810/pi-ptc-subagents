@@ -7,12 +7,13 @@ floor = **0.86.0**（`peerDependencies: ">=0.86.0"`），ceiling = 跟踪最新�
 
 以下能力全部在 **0.99.0 出现**，0.99.0 以下一律没有（旧 ADR 写「1.0.0 起」是测量点，不是出现点）：
 
-| 能力                                                         | <0.99.0（含 floor）                          | ≥0.99.0  |
-| ------------------------------------------------------------ | -------------------------------------------- | -------- |
-| `ToolDefinition.outputSchema` / `exposure` / `defaultActive` | 类型缺失，**运行时被忽略**（注册即面向模型） | 完整支持 |
-| `AgentToolResult.isError` 通道                               | 无，失败靠 throw                             | 有       |
-| `structuredContent` 转发给 codemode 脚本                     | 无                                           | 有       |
-| codemode 本体 / MCP 自动激活 codemode                        | 无                                           | 有       |
+| 能力                                                         | <0.99.0（含 floor）                          | ≥0.99.0                      |
+| ------------------------------------------------------------ | -------------------------------------------- | ---------------------------- |
+| `ToolDefinition.outputSchema` / `exposure` / `defaultActive` | 类型缺失，**运行时被忽略**（注册即面向模型） | 完整支持                     |
+| `AgentToolResult.isError` 通道                               | 无，失败靠 throw                             | 有                           |
+| `structuredContent` 转发给 codemode 脚本                     | 无                                           | 有                           |
+| codemode 本体 / MCP 自动激活 codemode                        | 无                                           | 有                           |
+| **程序内调会话工具（`ctx.executeTool`）**                    | **无**（0.86/0.87 没有嵌套工具调用通道）     | 有（`ExtensionToolContext`） |
 
 **floor 0.86.0 的运行时含义**（不是缺陷，是「pi 不提供这个 API」）：
 
@@ -44,6 +45,33 @@ floor = **0.86.0**（`peerDependencies: ">=0.86.0"`），ceiling = 跟踪最新�
 - floor 上报告通道走 prompt-json 兜底（`structuredContent` <0.99 不存在），结果正常；tool 通道的 floor 形状未单独取证。
 - **exposure 传函数（getter）在 1.4.0 不被支持**：隔离探针（`-ne` 只加载探针扩展）翻转标志位后，工具仍不出现在声明集。动态可见性须走 `defaultActive: false` + `setActiveTools` 增删（可调用性实测有效；是否同步进模型声明清单未确证）。
 - 冒烟隔离：`pi -ne -e <path>`——本机全局装有旧版 `npm:pi-ptc-subagents`，不加 `-ne` 会同名互踩（registerTool 是 Map.set，后注册者覆盖）。
+
+## 程序内调工具的通道位置（2026-10-26 实测，逐版本矩阵）
+
+- **通道在工具执行上下文**：`ToolDefinition.execute(toolCallId, params, signal, onUpdate, ctx)`
+  的第 5 个参数是 `ExtensionToolContext`，它的 `executeTool(name, args, options?)` 才是程序内
+  调会话工具的入口。`session_start` 的 `ExtensionContext` 上没有它。
+- **0.86 / 0.87 没有这条通道**（全包里搜不到 `executeTool`）：程序仍可求值、可派发子任务，
+  但 `tools.*` 调用返回明确错误（"此 pi 版本没有程序内调用工具的通道（需 pi ≥ 0.99）"）。
+- 工具执行上下文的位置随版本变（1.4.0 是第 5 个参数，更早是第 3 个）——实现按「哪个参数带
+  `executeTool`」认，不写死位置。
+- **pi 1.4.0 的可调用集 = active 的 direct 工具 + codemode/deferred 工具**：从活跃表里收窄
+  内置工具，会让程序也调不到它们（`Tool read not found`）。内置工具的 exposure 不是扩展能设的，
+  所以「模型看不见内置工具」与「程序能调内置工具」不可兼得——PTC 模式因此改为引导层。
+
+### 逐版本实测（2026-10-26，兼容区间 16 个版本全跑）
+
+| pi 版本                                                                                          | 程序内 `tools.read`                                   |
+| ------------------------------------------------------------------------------------------------ | ----------------------------------------------------- |
+| 0.86.0 · 0.86.1 · 0.87.0 · 0.87.1                                                                | ✗ 平台没有嵌套调用通道 → 明确报错「需 pi ≥ 0.99」     |
+| 0.99.0 · 0.99.1 · 0.99.2 · 1.0.0 · 1.0.1 · 1.0.2 · 1.0.3 · 1.0.4 · 1.1.0 · 1.2.0 · 1.3.0 · 1.4.0 | ✓ 程序读 `/etc/hosts` 拿到 295 字符（结果统一成文本） |
+
+探针口径：真实 pi（隔离 `-ne`），程序里 `try { tools.read({path:"/etc/hosts"}) } catch { 回错误原文 }`，
+程序自己回字符串，模型只负责原样转述。
+
+老版本另有一处语义差异：**0.86/0.87 的 `getActiveTools()` 只含扩展自己的工具**（实测 `["zz_probe"]`），
+内置工具只在 `getAllTools()` 里——那两版没有「向模型声明的集合」这个语义，所以绑定作用域退回
+「已注册的内置工具」；0.99+ 的 `getActiveTools()` 就是声明集，直接用（`--tools` 收窄也随之生效）。
 
 ## 待测
 

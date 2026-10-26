@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.2] - 2026-10-26
+
+### Fixed
+
+- **Program-internal tool calls work across the whole supported range.** The tool
+  execution context sits in a different argument slot on older pi releases, so the
+  bridge now identifies it by "whoever carries `executeTool`" instead of a fixed position.
+- **Tools return text to programs on every version.** pi 0.99–1.0.3 hand back a
+  content-block array where 1.0.4+ hands back a string; the bridge normalises both into
+  text, so `tools.read` reads the same way everywhere.
+- **The binding scope is read from the session's own tool set.** On pi 0.86 and 0.87
+  `getActiveTools()` lists only an extension's own tools, so the built-in tools are taken
+  from `getAllTools()` there; on 0.99+ the active set is the declared set and is used as is.
+- **A clear message where the platform has no channel at all.** pi 0.86 and 0.87 expose no
+  nested tool execution API; a program's `tools.*` call now says so — "this pi version has
+  no in-program tool channel (needs pi ≥ 0.99)" — instead of failing vaguely.
+
 ## [6.0.1] - 2026-10-26
 
 ### Fixed

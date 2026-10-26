@@ -30,6 +30,7 @@ import {
   createPtcRunCodeTool,
   createPtcWorkflowTool,
   createTaskBinding,
+  KNOWN_BINDING_NAMES,
   resolveBindingNames,
   TASK_BINDING_NAME,
   TASK_DOOR_PARAMETERS,
@@ -215,11 +216,13 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
     applyTaskFaceVisibility(pi, session);
     // 工具执行上下文：程序内 tools.* 的通道（pi 1.4.0 把 executeTool 放在 ExtensionToolContext 上）
     let toolContext: ExtensionToolContext | undefined;
-    const bindings = createBindingTable(pi, session, () => toolContext);
+    // 绑定表按每次程序运行时重建：老版本（0.86/0.87）在 session_start 时活跃表还没成型，
+    // 早建会得到空表，程序里 tools.* 全是 undefined
+    const getBindings = () => createBindingTable(pi, session, () => toolContext);
     registerPtcTools(
       registerTracked,
       {
-        getBindings: () => bindings,
+        getBindings,
         cwd: process.cwd(),
         surface,
         getPool: () => pool,
@@ -350,6 +353,26 @@ function registerChildToolsOnly(pi: ExtensionAPI): void {
   });
 }
 
+// 工具结果在不同 pi 版本有三种形状：字符串、内容块数组、structuredContent 对象——统一成文本给程序
+function normalizeToolValue(value: unknown): unknown {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    return value
+      .map((block) =>
+        typeof block === "string"
+          ? block
+          : ((block as { text?: unknown })?.text ?? JSON.stringify(block)),
+      )
+      .join("\n");
+  }
+  if (value && typeof value === "object") {
+    const obj = value as { content?: unknown; text?: unknown };
+    if (typeof obj.content === "string") return obj.content;
+    if (typeof obj.text === "string") return obj.text;
+  }
+  return value;
+}
+
 // 旧 ADR-0005：binding 经 pi 的工具管线执行（ctx.executeTool）
 // 通道在**工具执行上下文**上：pi 1.4.0 的 ToolDefinition.execute 第 5 个参数是
 // ExtensionToolContext，它的 executeTool(name, args, options?) 才是程序内调用工具的入口
@@ -360,7 +383,17 @@ function createBindingTable(
   getToolContext: () => ExtensionToolContext | undefined,
 ): BindingTable {
   // emitImage 桥：pi 工具结果里的图片块经此上提到运行结果（旧 ADR-0014）
-  const names = resolveBindingNames(pi.getActiveTools());
+  const active = pi.getActiveTools();
+  // 作用域 = 会话能用的内置工具：
+  // 0.99+ 的 getActiveTools() 就是「向模型声明的集合」，直接用（--tools 收窄也 respected）；
+  // 0.86/0.87 的 getActiveTools() 只含扩展自己的工具（实测 ["zz_probe"]），内置工具只在
+  // getAllTools() 里——那两版没有嵌套调用通道，程序里的 tools.* 无论如何都会拿到明确错误，
+  // 但至少不再是无声的 undefined。
+  const known = new Set<string>(KNOWN_BINDING_NAMES);
+  const scope = active.some((name) => known.has(name))
+    ? active
+    : pi.getAllTools().map((tool) => tool.name);
+  const names = resolveBindingNames(scope);
   const table: BindingTable = Object.fromEntries(
     names.map((name) => [
       name,
@@ -370,7 +403,7 @@ function createBindingTable(
       ) => {
         const ctx = getToolContext();
         if (!ctx?.executeTool) {
-          throw new Error(`此 pi 版本不支持程序内工具调用（executeTool 不可用，binding: ${name}）`);
+          throw new Error(`此 pi 版本没有程序内调用工具的通道（需 pi ≥ 0.99，binding: ${name}）`);
         }
         const outcome = await ctx.executeTool(name, args, { signal: callCtx.signal });
         for (const block of outcome.result.content) {
@@ -382,7 +415,7 @@ function createBindingTable(
             .join("\n");
           throw new Error(text || `工具 ${name} 执行失败`);
         }
-        return outcome.result.structuredContent ?? outcome.result.content;
+        return normalizeToolValue(outcome.result.structuredContent ?? outcome.result.content);
       },
     ]),
   );

@@ -10,8 +10,8 @@ export interface PtcToolOptions {
   cwd?: string;
   surface?: SurfaceMode;
   getPool?: () => import("./pool.ts").WorkerPool | undefined;
-  /** pi 把工具执行上下文交给 execute 的第 5 个参数——程序内 tools.* 的通道在那里（ctx.executeTool） */
-  onToolContext?: (ctx: ExtensionToolContext) => void;
+  /** pi 把工具执行上下文交给 execute——程序内 tools.* 的通道在那里（ctx.executeTool）；老版本没有则传 undefined */
+  onToolContext?: (ctx: ExtensionToolContext | undefined) => void;
 }
 
 const RUN_CODE_PARAMETERS = Type.Object({
@@ -30,13 +30,13 @@ export function createPtcRunCodeTool(options: PtcToolOptions) {
     description: TOOLS.ptc_run_code.description(options.surface ?? "full_ptc"),
     parameters: RUN_CODE_PARAMETERS,
     renderResult: renderPtcResult("run_code"),
-    execute: async (
-      _id: string,
-      args: RunCodeParams,
-      _signal: AbortSignal | undefined,
-      _onUpdate: unknown,
-      ctx: ExtensionToolContext,
-    ): Promise<AgentToolResult<PtcToolDetails>> => {
+    execute: async (...rawArgs: unknown[]): Promise<AgentToolResult<PtcToolDetails>> => {
+      const args = rawArgs[1] as RunCodeParams;
+      // pi 的工具执行上下文位置随版本变（1.4.0 是第 5 个参数，更早是第 3 个）——按「谁带 executeTool」认
+      const ctx = rawArgs.find(
+        (value): value is ExtensionToolContext =>
+          typeof (value as { executeTool?: unknown } | undefined)?.executeTool === "function",
+      );
       options.onToolContext?.(ctx);
       const outcome = await runPtcProgram({
         code: args.code,
@@ -84,13 +84,13 @@ export function createPtcWorkflowTool(options: PtcToolOptions) {
     description: TOOLS.ptc_workflow.description(options.surface ?? "full_ptc"),
     parameters: WORKFLOW_PARAMETERS,
     renderResult: renderPtcResult("workflow"),
-    execute: async (
-      _id: string,
-      params: WorkflowParams,
-      _signal: AbortSignal | undefined,
-      _onUpdate: unknown,
-      ctx: ExtensionToolContext,
-    ): Promise<AgentToolResult<PtcToolDetails>> => {
+    execute: async (...rawArgs: unknown[]): Promise<AgentToolResult<PtcToolDetails>> => {
+      const params = rawArgs[1] as WorkflowParams;
+      // 同 run_code：工具执行上下文的位置随版本变，按「谁带 executeTool」认
+      const ctx = rawArgs.find(
+        (value): value is ExtensionToolContext =>
+          typeof (value as { executeTool?: unknown } | undefined)?.executeTool === "function",
+      );
       options.onToolContext?.(ctx);
       try {
         validateWorkflowArgs(params.args);
