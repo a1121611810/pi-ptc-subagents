@@ -430,11 +430,32 @@
   .lp-foot-nav {
     grid-template-columns: 1fr;
   }
+  /* Grid items default to min-content width: a long <pre> line would grow the
+     column past the viewport and clip the prose. min-width: 0 lets the card
+     shrink so the pre scrolls inside itself. */
+  .lp-card,
+  .lp-gap {
+    min-width: 0;
+  }
   .lp-hero {
     padding: 64px 20px 52px;
   }
   .lp-sec {
     padding: 48px 20px;
+  }
+}
+
+/* ── phones ────────────────────────────────────────────────────────────── */
+
+@media (max-width: 480px) {
+  /* 42px min overflows a 330px viewport: "pi-ptc-subagents" is 16 glyphs wide. */
+  .lp-mark {
+    font-size: clamp(28px, 9vw, 42px);
+  }
+  /* The install row (mono command + Copy) is wider than a phone — wrap, don't clip. */
+  .lp-install {
+    flex-wrap: wrap;
+    justify-content: center;
   }
 }
 
