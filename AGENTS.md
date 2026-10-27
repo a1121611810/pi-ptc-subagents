@@ -23,6 +23,7 @@ pi 的扩展：PTC（模型写 TypeScript 程序批量调工具）+ 子代理派
 ## 验证纪律
 
 - 探针直接跑 `node` 打 `packages/*/dist/index.js`（假 spawn/fake pi harness）；引擎类逻辑必须探针覆盖
+- **仓库测试：`pnpm test`**（node:test 直打 dist，26 用例；改代码后先 `build` 再 `test`）；临时探针转正进 `tests/`，别回 /tmp
 - **真 pi 冒烟必须隔离**：`pi -ne -e <entry/dist/index.js>`——本机全局装有旧版 `npm:pi-ptc-subagents`，不加 `-ne` 会同名互踩
 - **四模式都已实测可用**（2026-10-26）：print（`-p`）/ json（`-p --mode json`，事件流可解析）/ rpc（`--mode rpc`，命令 `{"type":"prompt","message":...}` 走 stdin）/ TUI（全屏，用 kimi-cu 驱动真 Terminal——脚本方式起不来，需要图形界面）
 - **floor 0.86.0 冒烟已过**（2026-10-26）：`ptc_run_code` 与程序内 `pi_task_ptc` 派发各一次；floor 测试用 `PATH=<0.86 bin>:$PATH` 让子进程也跑 0.86（详见 `docs/pi-version-matrix.md`）
@@ -61,7 +62,7 @@ pi 的扩展：PTC（模型写 TypeScript 程序批量调工具）+ 子代理派
 
 ## 已知未做（按价值）
 
-测试框架（探针转正 + 机械强制点门禁）· floor 三处考古（executeTool / json 模式形状 / exposure）· 发布包不带 dts（6.0.1 起详情指针随包发布并解析到安装目录）。详见 dispatch 状态页横幅。
+floor 三处考古（executeTool / json 模式形状 / exposure）· 发布包不带 dts（6.0.1 起详情指针随包发布并解析到安装目录）。详见 dispatch 状态页横幅。
 
 已知小拧（记录在案）：pid 复用误判窗口（旧 ADR-0023 原样接受）；`-p` 模式通知进不进模型上下文未实测。
 
