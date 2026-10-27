@@ -1,10 +1,14 @@
 #!/bin/bash
-# 发版前手工全量冒烟：16 个 pi 版本 × (ptc_run_code + 程序内真派发 wait)。
-# 用法：bash scripts/version-smoke.sh（不进 CI——装 16 个 pi 版本是网络重活，价值在发版前这一次）
+# 发版前手工全量冒烟：16 个 pi 版本 × 四腿契约（覆盖 0.99 分水岭两侧）。
+# 用法：bash scripts/version-smoke.sh；SMOKE_VERSIONS="1.3.0" 只跑指定版本（快查）。
+# 四腿：RUN=42（run_code 求值）· READ（程序内 tools.read——≥0.99 走 executeTool 通道返回数字，
+# floor 明确报 ERR:）· PAR=2（ptc_workflow 的 parallel allSettled）· HND 非空（wait:false
+# handle + 任务面 list/output 活）。判定：RUN=42 + READ/PAR/HND + 0 个 "isError":true。
 # 素材自愈：shim 缺了自动 npm install pi@<ver> 到 $SHIM_ROOT/ptc-smoke-pi-<ver>；
 # 已存在的 /tmp/pi-<ver>（与 /tmp/pi086）直接复用。
-# 判定（与 6.1.0 基线一致，全版本统一）：RUN=42 + TASK= 非空 + 0 个 "isError":true。
-# 程序内建任务走扩展自己的 binding（不经 executeTool），floor 也真派发——无版本豁免。
+# 程序内建任务走扩展自己的 binding（不经 executeTool），floor 也真派发。
+# 不做（版本敏感度低或不可脚本化）：codemode 面/rpc/TUI/stop 阶梯/通知/web_ds_search——
+# 引擎侧有 node tests 守，真机交互有手工冒烟记录在案。
 set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 EXT="$REPO/packages/entry/dist/index.js"
@@ -12,9 +16,9 @@ OUT="${TMPDIR:-/tmp}/ptc-version-smoke"
 SHIM_ROOT="${SHIM_ROOT:-/tmp}"
 mkdir -p "$OUT"; rm -f "$OUT"/*.log
 
-VERSIONS="0.86.0 0.86.1 0.87.0 0.87.1 0.99.0 0.99.1 0.99.2 1.0.0 1.0.1 1.0.2 1.0.3 1.0.4 1.1.0 1.2.0 1.3.0"
+VERSIONS="${SMOKE_VERSIONS:-0.86.0 0.86.1 0.87.0 0.87.1 0.99.0 0.99.1 0.99.2 1.0.0 1.0.1 1.0.2 1.0.3 1.0.4 1.1.0 1.2.0 1.3.0}"
 
-PROMPT='做两件事，最后严格只输出一行 RUN=<结果1> TASK=<结果2>：1) 调用 ptc_run_code 求值 6*7，把程序返回值作为结果1；2) 再调用 ptc_run_code，程序体为：const r = await tools.pi_task_ptc({ task: "只回答：1+1 等于几", wait: true }); return r.report?.summary ?? r.text; 把程序返回值作为结果2。'
+PROMPT='做四件事，最后严格只输出一行 RUN=<r> READ=<d> PAR=<p> HND=<h>：1) 调用 ptc_run_code 求值 6*7，作为 r；2) 调用 ptc_run_code，程序体为：let d; try { const t = await tools.read({ path: "package.json" }); d = typeof t === "string" ? t.length : -1; } catch (e) { d = "ERR:" + String((e && e.message) || e).slice(0, 24); } return d; 把程序返回值作为 d；3) 调用 ptc_workflow，meta 为 {name:"smoke",description:"smoke"}，script 为：const rs = await workflow.parallel([() => Promise.resolve(1), () => Promise.resolve(2)]); return rs.length; 把程序返回值作为 p；4) 先调用 tools.pi_task_ptc({ task: "只回答：1+1 等于几", wait: false }) 拿到 handle，随后调用 ptc_task_list 和 ptc_task_output（task_id 用 handle.taskId）确认任务面有记录，把 handle.taskId 作为 h。'
 
 shim_for() { # $1=version → 输出 bin 目录；缺 shim 先装
   local want="$1"
@@ -45,19 +49,28 @@ run() { # $1=version（"PATH" = 当前 PATH 上的现行版）
   local realver=""
   if [ -n "$bindir" ]; then
     realver="$(PATH="$bindir:$PATH" pi --version 2>/dev/null | head -1)"
-    PATH="$bindir:$PATH" timeout 180 pi -ne -e "$EXT" -p "$PROMPT" >"$log" 2>&1
+    PATH="$bindir:$PATH" timeout 300 pi -ne -e "$EXT" -p "$PROMPT" >"$log" 2>&1
   else
     realver="$(pi --version 2>/dev/null | head -1)"
-    timeout 180 pi -ne -e "$EXT" -p "$PROMPT" >"$log" 2>&1
+    timeout 300 pi -ne -e "$EXT" -p "$PROMPT" >"$log" 2>&1
   fi
   local run_ok="FAIL"
-  local task_ok="FAIL"
+  local read_ok="FAIL"
+  local par_ok="FAIL"
+  local hnd_ok="FAIL"
   local err_ok="OK"
   grep -q "RUN=42" "$log" && run_ok="OK"
-  grep -qE "TASK=[^[:space:]]+" "$log" && task_ok="OK"
+  # READ 腿分侧：floor（0.86/0.87，无 executeTool 通道）明确报 ERR: 即语义正确；≥0.99 要数字
+  if [[ "$want" == 0.86.* || "$want" == 0.87.* ]]; then
+    grep -qE "READ=ERR:[^[:space:]]*" "$log" && read_ok="OK"
+  else
+    grep -qE "READ=[0-9]+" "$log" && read_ok="OK"
+  fi
+  grep -qE "PAR=2([^0-9]|$)" "$log" && par_ok="OK"
+  grep -qE "HND=[0-9a-f-]+" "$log" && hnd_ok="OK"
   grep -q '"isError":true' "$log" && err_ok="FAIL"
-  echo "$want"（实际 "$realver"）run_code="$run_ok" dispatch="$task_ok" isError="$err_ok"
-  [ "$run_ok" = "OK" ] && [ "$task_ok" = "OK" ] && [ "$err_ok" = "OK" ]
+  echo "$want"（实际 "$realver"）run_code="$run_ok" read="$read_ok" workflow="$par_ok" task_face="$hnd_ok" isError="$err_ok"
+  [ "$run_ok" = "OK" ] && [ "$read_ok" = "OK" ] && [ "$par_ok" = "OK" ] && [ "$hnd_ok" = "OK" ] && [ "$err_ok" = "OK" ]
 }
 
 fails=0

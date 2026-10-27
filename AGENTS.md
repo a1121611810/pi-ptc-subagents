@@ -25,7 +25,7 @@ pi 的扩展：PTC（模型写 TypeScript 程序批量调工具）+ 子代理派
 - 探针直接跑 `node` 打 `packages/*/dist/index.js`（假 spawn/fake pi harness）；引擎类逻辑必须探针覆盖
 - **仓库测试：`pnpm test`**（node:test 直打 dist，26 用例；改代码后先 `build` 再 `test`）；临时探针转正进 `tests/`，别回 /tmp
 - **真 pi 冒烟必须隔离**：`pi -ne -e <entry/dist/index.js>`——本机全局装有旧版 `npm:pi-ptc-subagents`，不加 `-ne` 会同名互踩
-- **16 版本冒烟脚本化**：`scripts/version-smoke.sh`（发版前手工全量；缺 shim 自动 `npm install pi@<ver>` 到 `$SHIM_ROOT`，判定 = RUN=42 + TASK 非空 + 0 isError，floor 允许「需 ≥0.99」明确报错）
+- **16 版本冒烟脚本化**：`scripts/version-smoke.sh`（发版前手工全量，四腿契约：run_code 求值 / 程序内 tools.read（0.99 分水岭：≥0.99 返回数字、floor 明确报 ERR:）/ ptc_workflow parallel / wait:false + 任务面 list·output；`SMOKE_VERSIONS="1.3.0"` 可单版本快查；缺 shim 自动装到 `$SHIM_ROOT`）
 - **四模式都已实测可用**（2026-10-26）：print（`-p`）/ json（`-p --mode json`，事件流可解析）/ rpc（`--mode rpc`，命令 `{"type":"prompt","message":...}` 走 stdin）/ TUI（全屏，用 kimi-cu 驱动真 Terminal——脚本方式起不来，需要图形界面）
 - **floor 0.86.0 冒烟已过**（2026-10-26）：`ptc_run_code` 与程序内 `pi_task_ptc` 派发各一次；floor 测试用 `PATH=<0.86 bin>:$PATH` 让子进程也跑 0.86（详见 `docs/pi-version-matrix.md`）
 - **中间版本 0.87–1.3 冒烟已过**（2026-10-26）：0.87 / 0.99 / 1.0 / 1.1 / 1.2 / 1.3 各跑一次 `ptc_run_code`；派发用例抽测 0.87 / 0.99 / 1.3（报告通道分水岭在 0.99）
