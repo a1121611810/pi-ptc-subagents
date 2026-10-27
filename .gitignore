@@ -10,3 +10,13 @@ coverage/
 *.tgz
 # 详情文档的发布副本（源在 packages/routes/docs/routes，pack 时拷到包根）
 /docs/routes/
+
+# ai-memory 长期记忆的 cwd 镜像页（canonical 在 ai-memory 自己的存储里，不许入库）
+/concepts/
+/gotchas/
+/notes/
+/decisions/
+/sessions/
+/procedures/
+/_rules/
+/_prompts/
