@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>全功能流转解剖 · 基准流程图（v6.1.0）</title>
+<style>
+  :root {
+    --ok: #1a7f37;
+    --branch: #b35900;
+    --reject: #cf222e;
+    --archive: #6e56cf;
+    --ink: #1a1d23;
+    --line: #d7dae0;
+    --bg: #f7f8fa;
+    --term: #111418;
+    --term-ink: #d6deeb;
+    --term-dim: #7d8590;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 28px 60px;
+    font: 14px/1.6 -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+    color: var(--ink); background: var(--bg);
+  }
+  .banner {
+    background: #fff7e8; border: 1px solid #ffd591; color: #ad4e00;
+    border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 13px;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: #5c6470; margin: 0 0 18px; max-width: 1100px; }
+  .toc { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; margin-bottom: 20px; font-size: 13px; }
+  .toc b { margin-right: 8px; }
+  .toc a { margin-right: 12px; white-space: nowrap; }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12.5px; margin-bottom: 18px; }
+  .legend code { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px; }
+
+  section { margin-top: 34px; }
+  h2 { font-size: 16px; margin: 0 0 6px; border-left: 4px solid var(--ok); padding-left: 10px; }
+  h2 .no { color: var(--term-dim); font-weight: 400; margin-right: 8px; font-size: 13px; }
+  .src { color: #5c6470; font-size: 12.5px; margin: 0 0 10px; }
+  .src code { font-size: 11.5px; }
+  .term {
+    background: var(--term); color: var(--term-ink);
+    border-radius: 10px; padding: 14px 16px;
+    font: 12.5px/1.55 "SF Mono", Menlo, Consolas, monospace;
+    overflow-x: auto; white-space: pre; margin: 0;
+  }
+  .term .dim { color: var(--term-dim); }
+  .note { font-size: 12.5px; color: #5c6470; margin: 8px 0 0; max-width: 1100px; }
+  .note b { color: var(--ink); }
+  code { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px; background: #f2f4f7; padding: 1px 5px; border-radius: 4px; }
+  table { border-collapse: collapse; width: 100%; background: #fff; margin-top: 14px; font-size: 13px; }
+  th, td { border: 1px solid var(--line); padding: 7px 10px; text-align: left; vertical-align: top; }
+  th { background: #eef1f4; font-size: 12.5px; }
+</style>
+</head>
+<body>
+
+<h1>全功能流转解剖 · 基准流程图</h1>
+<p class="sub">基准：main @ 6.1.0（2026-10-27）。源码逐一核对（entry / ptc / dispatch / task / search / routes / tui 全部 30 个源文件），
+图中每个判断都来自现行代码的分支条件，锚点写在每节出处行。本页是后续流程转向的基准：改流程先改图。</p>
+<div class="banner">零 JS 静态页（仓规：Kimi 预览器剥脚本）。判读约定：<code>◇</code> = 代码级判断（菱形），
+<code>[拒]</code> = 返回 rejected 不留痕迹，<code>[终态]</code> = 四种终态之一（succeeded / failed / canceled / lost），
+<code>灰色字</code> = 出处锚点。所有「闸在铸 id 前」类判断：被拒 = 无记录、不占槽、无通知。</div>
+
+<div class="toc"><b>目录</b>
+<a href="#s1">①进程入口分岔</a><a href="#s2">②宿主装配</a><a href="#s3">③索引注入</a>
+<a href="#s4">④run_code/workflow</a><a href="#s5">⑤程序内 tools.*</a><a href="#s6">⑥worker 执行</a>
+<a href="#s7">⑦结果渲染截断</a><a href="#s8">⑧六道闸+派发</a><a href="#s9">⑨泵 executeRun</a>
+<a href="#s10">⑩状态机</a><a href="#s11">⑪归档层</a><a href="#s12">⑫任务面三工具</a>
+<a href="#s13">⑬通知链</a><a href="#s14">⑭子代理进程+搜索</a><a href="#s15">⑮重启恢复</a><a href="#s16">⑯开关配置总表</a>
+</div>
+
+<!-- ===================== ① ===================== -->
+<section id="s1">
+<h2><span class="no">①</span>进程入口分岔：宿主进程 vs 子代理进程</h2>
+<p class="src">出处：<code>packages/entry/src/index.ts:77-82</code>（session_start）· 血缘环境变量 <code>engine.ts:354-358</code></p>
+<pre class="term">pi 加载扩展（-e 或装包 pi.extensions）
+        │
+        ▼
+┌─────────────────── session_start ───────────────────┐
+│                                                     │
+◇ PI_PTC_DEPTH &gt; 0 ?                    <span class="dim">// 子代理进程识别（engine 铸血缘时置 +1）</span>
+│                                                     │
+├─是──▶ <b>子代理装配</b>：只注册 child 侧工具 ──────────▶ 见 ⑭ <span class="dim">（不做任何宿主装配）</span>
+│
+└─否──▶ <b>宿主装配</b>：见 ② <span class="dim">（下面全部章节都是这条路）</span></pre>
+<p class="note"><b>一处都不能遗漏的第一刀在这</b>：同一份扩展代码，两个进程角色。子代理进程里<b>没有</b>任务面、PTC 工具对、派发引擎、路由索引——只有 <code>web_ds_search</code>（门控）与 <code>ptc_child_report</code>（echo 工具）。</p>
+</section>
+
+<!-- ===================== ② ===================== -->
+<section id="s2">
+<h2><span class="no">②</span>宿主 session_start 装配（一次会话的全部 setup）</h2>
+<p class="src">出处：<code>entry/src/index.ts:77-261</code> · <code>session.ts:53-74</code>（assemblePtcSession）</p>
+<pre class="term">session_start（此刻 getActiveTools() 可用；factory 阶段它是 throw 的桩）
+        │
+        ▼
+┌─ surface 检测 ───────────────────────────────────────────┐
+◇ getActiveTools() 含 "codemode" ?                        <span class="dim">// :84 —— 直接问 pi，不猜环境</span>
+├─是─▶ surface = codemode_ptc
+└─否─▶ surface = FALLBACK_SURFACE_MODE = full_ptc
+        │
+        ▼
+┌─ 读配置（~/.pi/agent/ptc.json，各键独立容错）─────────────┐
+│ defaultMode   ≠ false → modeEnabled=true   <span class="dim">// 缺省开，显式 false 才关</span>
+│ whyEnabled    ≠ false → why 保留            <span class="dim">// 剥夺类 fail-open</span>
+│ webDsSearch   == true → 搜索开（fail-closed，默认关）
+│ searchMaxCalls 数字 → 每进程配额（默认 30；0 = 不限）
+│ taskTraceKeep / archiveEnabled / archiveTtlDays → clamp 校验后喂引擎 <span class="dim">// 决策 29</span>
+        │
+        ▼
+modeActive = (surface == full_ptc) && modeEnabled  <span class="dim">// PTC 模式退化为引导层（pi 1.4.0 收窄与 tools.* 不可兼得）</span>
+        │
+        ▼
+建 WorkerPool(spawnPtcWorker, 容量 4) + NotificationCenter
+        │
+        ▼
+┌─ 装配 PtcSession（assemblePtcSession）───────────────────┐
+│ TaskRegistry（写锁内判定）+ TaskEngine                    │
+│   引擎注入：resolveAgent=findAgent(user+project 两层)      │
+│   childExtensionPath=本文件（孩子 -e 加载）               │
+│   searchEnabled · storageDir=&lt;cwd&gt;/.pi/ptc-tasks          │
+│   output=FileOutputStorage · 痕迹三键                     │
+│   六道闸见 ⑧ · whyEnabled 传谓词（/ptc why 热生效）        │
+│ onTransition → applyTaskFaceVisibility（见 ⑫ F9 钩子）     │
+        │
+        ▼
+┌─ 注册（registerTracked：原件留存 Map 里，供 /ptc off 截断重放）─┐
+│ 任务面三工具（两面都注册，defaultActive:false）│ full_ptc 加注册 PTC 对  │
+│ ptc_task_list / ptc_task_output / ptc_task_stop │ ptc_run_code + ptc_workflow│
+│                                                 │ codemode_ptc 加注册 pi_task_codemode │
+└─────────────────────────────────────────────────┘
+        │
+        ▼
+注册 /ptc 命令（off|on|why|mode 四子命令，见 ⑯）+ 三个事件钩子（before_agent_start ③ · turn_end ⑬ · session_shutdown ↓）
+        │
+        ▼
+session_shutdown：sessionEnding=true → pool.drain()（退役空闲 worker）→ session.shutdown()（引擎拆卸，见 ⑧⑪）</pre>
+<p class="note">装配期一次性的判断全部在这里；此后每个 turn 重复跑的只有 <b>③索引注入</b> 和 <b>⑬通知投递</b>。</p>
+</section>
+
+<!-- ===================== ③ ===================== -->
+<section id="s3">
+<h2><span class="no">③</span>每 turn：&lt;ptc&gt; 路由索引进系统提示词</h2>
+<p class="src">出处：<code>entry/src/index.ts:99-105</code> · <code>routes/src/registry.ts:191-228</code></p>
+<pre class="term">before_agent_start（每 turn）
+        │
+        ▼
+applyMode() 重算（modeActive = full_ptc && modeEnabled）
+applyTaskFaceVisibility() 幂等重放（resume 重置后对齐，见 ⑫）
+        │
+        ▼
+◇ event.systemPromptOptions.sections 存在 ?     <span class="dim">// floor 版本事件形状未实测：缺了跳过，不抛</span>
+├─否─▶ 本 turn 不注入（索引缺失，功能不受影响）
+└─是─▶ sections["ptc"] = renderRouteIndex(surface, detailDir, modeActive)
+              │
+              ▼
+        渲染：总则句（按面）+ 详情目录 + 7 行路由（每行 = 名称—when—how[surface]—detail 文件名）
+              │
+              ▼
+        ◇ estimateTokens(index) &gt; 560 ?          <span class="dim">// ROUTE_INDEX_TOKEN_CEILING，启发式 2 字符/token</span>
+        ├─是─▶ 索引末尾追加 "&gt; WARNING: index over token budget (N &gt; 560)…"（明说，不静默截断）
+        └─否─▶ 原样进系统提示词</pre>
+<p class="note">字节确定性（决策 25）：渲染输入 = 册子 + surface + 详情目录 + 总则句开关——同输入必同字节，prompt cache 的依赖在这。</p>
+</section>
+
+<!-- ===================== ④ ===================== -->
+<section id="s4">
+<h2><span class="no">④</span>ptc_run_code / ptc_workflow：一次程序运行的宿主链路</h2>
+<p class="src">出处：<code>ptc/src/tools.ts:26-130</code> · <code>ptc/src/dispatcher.ts:53-229</code>（runPtcProgram）</p>
+<pre class="term">模型调 ptc_run_code({code, description, timeoutMs?})（full_ptc 面才有此工具）
+        │
+        ▼
+认工具执行上下文：rawArgs 里「谁带 executeTool」是谁（1.4.0 第 5 参 / 更早第 3 参）→ onToolContext 存下
+        │
+        ▼
+（workflow 先过一道：args 必须可 JSON 序列化——validateWorkflowArgs 不过 → 直接 isError 返回，不进 worker）
+        │
+        ▼
+getBindings() 重建绑定表（见 ⑤）→ runPtcProgram({code, surface, cwd, timeoutMs, bindings, pool})
+        │
+        ▼
+timeoutMs = effectiveTimeoutMs(请求值)：<span class="dim">// clamp：默认 120s · 下限 1s · 上限 600s</span>
+        │
+        ▼
+┌─ 取 worker ──────────────────────────────────────────────┐
+◇ pool 存在 ?                                               │
+├─是─▶ pool.acquire(30s 超时)：空闲直接取 / 未满新起 / 满则排队超时拒
+└─否─▶ 临时 spawn，用完 terminate（不进池）                  │
+        │                                                   │
+        ▼                                                   │
+发两帧：init{surface, bindingNames} → run{runId, code, args}│
+        │                                                   │
+        ▼                                                   │
+宿主侧三个计时器/监听就位（call 帧处理 ⑤ · timeout · error/exit）
+        │
+        ▼
+等待 settled / cancel / error / exit（各出口见 ⑥worker 侧与下）
+        │
+        ▼
+finish(outcome)：
+  ├─ 清 callQueue（取消后排队调用不再拉起——副作用不许落后于「已取消」）
+  ├─ abort 全部在途 binding 的 AbortController（决策 17：排队的任务据此撤回）
+  ├─  fulfilled 且有图片 → 结果挂 images
+  └─  有池：发 reset → 等 ready 握手 → <b>摘除本 run 三个监听</b>（F8）→ 归还
+      ready 超时（grace 3s，同步死循环程序不处理 reset）→ discard 杀 worker 收回名额
+      无池：terminate
+        │
+        ▼
+renderToolResult(outcome)（见 ⑦）→ content 文本 + 图片块 → renderPtcResult 折叠渲染
+        │
+        ▼
+isError = (status ≠ fulfilled)；details 带 {status, truncated, fullOutputPath?}</pre>
+</section>
+
+<!-- ===================== ⑤ ===================== -->
+<section id="s5">
+<h2><span class="no">⑤</span>程序内 tools.*：binding 表与一次调用的往返</h2>
+<p class="src">出处：<code>entry/src/index.ts:426-474</code>（createBindingTable）· <code>ptc/src/bindings.ts</code> · <code>ptc/src/dispatcher.ts:124-190</code></p>
+<pre class="term">绑定表（<b>每次程序运行重建</b>——session_start 时活跃表未成型，早建会得到空表）：
+  作用域：◇ 有 executeTool 通道(≥0.99)？active=getActiveTools()：getAllTools() 名字全表
+  名单：KNOWN(read,bash,grep,find,ls,edit,write) ∩ 作用域 − OPT_IN(bash)   <span class="dim">// bash 是唯一 opt-in，当前未接线</span>
+  注入：tools.pi_task_ptc = 程序内建任务的门（见 ⑧，两条派发链的交点）
+
+worker ──call{callId,name,args}──▶ 宿主 dispatcher：
+        │
+        ▼
+◇ pendingCalls ≥ 128 ? ──是──▶ 回 error「maxPendingCalls 128 reached」 <span class="dim">// 只拒不排队</span>
+        │否
+        ▼
+subCalls.start（活树记录：预览 60 字符）
+        │
+        ▼
+◇ runningCalls ≥ 10 ? ──是──▶ 进 FIFO callQueue 等位 / ──否──▶ 立刻执行
+        │
+        ▼
+执行：
+  ◇ 已 settled（取消后迟到的调用）? ──是──▶ 丢弃不执行
+  ◇ bindings[name] 存在 ? ──否──▶ subCalls.end(rejected) + 回 error「unknown binding」
+  │
+  ▼
+entry 的 binding 包装：
+  ◇ ctx.executeTool 存在 ? ──否──▶ throw「此 pi 版本没有程序内调用通道（需 ≥0.99）」
+  ▼
+  ctx.executeTool(name, args, {signal}) → pi 工具管线真跑
+    ├─ 结果图片块 → emitImage 上提（不灌 base64 进文本）
+    ├─ isError → 抽出文本 throw（程序里 await 到的是 rejection）
+    └─ 成功 → normalizeToolValue（字符串/块数组/structuredContent 三形状统一）
+  │
+  ▼
+回 result{ok, value}（undefined → null）/ result{ok:false, error}
+finally：controllers 清、计数减、FIFO 补位拉起下一个</pre>
+</section>
+
+<!-- ===================== ⑥ ===================== -->
+<section id="s6">
+<h2><span class="no">⑥</span>worker 侧：程序怎么被执行</h2>
+<p class="src">出处：<code>ptc/src/worker-main.ts</code> · <code>ptc/src/compile.ts</code> · <code>ptc/src/workflow-helpers.ts</code></p>
+<pre class="term">init 帧：globalBaseline 拍快照 → defineGlobal("tools", 冻结表)（workflow 面加 defineGlobal("workflow", 辅助)）→ 回 ready
+run 帧：currentRunId 更新 → logs 清空 → defineGlobal("args") → console 五个级别全装上提 → execute(code)
+        │
+        ▼
+compileProgram(code)：
+  剥 TS 类型（先包进 __ptcProgram 函数体再剥——module 目标会拒顶层 return/await）
+  new Function("use strict" + 函数体)()   <span class="dim">// ADR-0014：强制严格模式，程序自写指令成 no-op</span>
+        │
+        ▼
+跑程序（顶层 await 合法；workflow 面另给 log/phase/parallel/pipeline：
+  parallel = Promise.allSettled 决策 12——单边失败不丢兄弟结果）
+        │
+        ▼
+tools.&lt;name&gt;() 调用：◇ currentRunId == null（reset 后）? → reject「run 已结束」
+  否则发 call 帧等 result 帧（未 await 的调用 catch 过，不成 unhandledRejection）
+        │
+        ▼
+settled 出口四种：
+  ├─ value === undefined → { fulfilled, value: {$void:true} }
+  ├─ JSON.stringify(value) === undefined → { rejected, error:「程序返回值不可序列化」 }
+  ├─ 正常 → 序列化再反序列化（过 structured-clone 边界的安全形态）
+  └─ 任何 throw → { rejected, error: message }
+        │
+        ▼
+settled 帧到宿主 → ◇ logs+value 的 JSON 联合 &gt; 64MiB ? ──是──▶ 宿主改判 rejected「output exceeds 64MiB budget」
+        │
+reset 帧（宿主归还前）：currentRunId=null → 拒掉全部 pending → 清 globalThis 新属性 → console 还原 → 回 ready
+  <span class="dim">// shortcut：只清自有属性，内置原型污染不清（有案例再升级）</span></pre>
+</section>
+
+<!-- ===================== ⑦ ===================== -->
+<section id="s7">
+<h2><span class="no">⑦</span>结果渲染与截断：模型最终看到什么</h2>
+<p class="src">出处：<code>ptc/src/result-text.ts</code> · <code>tui/src/truncate.ts</code>（ADR-0015）· <code>tui/src/text.ts</code>（ADR-0016 值树）· <code>ptc/src/render.ts</code></p>
+<pre class="term">outcome → 正文：
+  fulfilled → [logs…, renderModelValue(value)]
+  rejected  → [logs…, "[rejected] &lt;error&gt;"]
+  canceled  → [logs…, "[canceled] &lt;reason&gt;"]
+        │
+        ▼
+sanitizeText（剥 ANSI + 去 \r）→ applyAdr0015Truncation：
+  ◇ ≤ 50KB 且 ≤ 2000 行 ? ──是──▶ 原样
+  └──否──▶ 留尾（行切 → 字节切 → 全文先落 tmp 文件）→ 头插「…（已截断：省略前 N 行/M 字节，全文在 &lt;tmp&gt;）」
+        │
+        ▼
+renderPtcResult（pi 折叠渲染）：标题 + 状态行（status · 已截断 · 全文路径）；展开视图日志最多 12 行
+
+renderModelValue 值树契约（F7/ADR-0016，每层递归都判）：
+  ◇ 深度 ≥ 4 → "…"        ◇ 循环引用 → "[Circular]"        ◇ {$void:true} → "（无完成值）"
+  ◇ 每层子项 &gt; 6 → 前 6 + "…（余 N 项）"          ◇ 单行 &gt; 120 字符 → 行内截断 + "…"</pre>
+</section>
+
+<!-- ===================== ⑧ ===================== -->
+<section id="s8">
+<h2><span class="no">⑧</span>派发主链：六道闸 → 铸记录 → 等不等槽</h2>
+<p class="src">出处：<code>dispatch/src/gates.ts</code>（六道闸）· <code>dispatch/src/engine.ts:212-296</code>（#dispatchReady）· 两扇门面 <code>entry/src/index.ts:471,559</code> 与 <code>ptc/src/task-binding.ts</code></p>
+<pre class="term">两扇门面（同参同拒绝语义，决策 7/12/19）：
+  full_ptc：程序内 tools.pi_task_ptc(binding)
+  codemode_ptc：脚本内 tools.pi_task_codemode(工具, exposure:codemode)
+        │
+        ▼
+engine.dispatch(rawInput) ──▶ #ready 先决（storageDir 存在时等 #restore 完成，见 ⑮）
+        │
+        ▼
+◇ teardown ? ──是──▶ [拒]「session is ending：拆卸中不再收新的派发」
+        │
+        ▼
+┌─ 六道闸（顺序执行，铸 taskId 与建记录<b>之前</b>——被拒不留痕）───────────┐
+│ 1 readOnlyGate        readOnly 给了值就必须是 strict/lenient（不 coerce）   │
+│ 2 taskTextGate        task 非空字符串 且 trimStart 不以 "-" 开头            │
+│                       （pi 会把 "-x" 当命令行选项，"--help" 假成功）         │
+│ 3 dispatchEnabledGate /ptc off 后停收新的（在飞不动）· 独立于 PTC 模式      │
+│ 4 sessionEndingGate   谓词读位（值会冻住，见 session_shutdown 置位）         │
+│ 5 depthGate           PI_PTC_DEPTH + 1 &gt; 3 → 拒（递归显式有界）            │
+│ 6 agentNameGate       给了 agent 就必须匹配 [\w-]+（堵路径穿越）             │
+│ 7 agentResolveGate    给了名字必须 findAgent 解析得出（入队前 fail fast）    │
+└──────────────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+why 开关谓词：whyEnabled=false 且有 why → 丢弃 why，全程记 whySuppressed（argv 不再出现）
+        │
+        ▼
+agent 解析（给了才做）：findAgent(user 层 + project 层，project 优先）→ frontmatter 四项：
+  childReport(false/no 退出契约；typo 视为开) · tools(名单收窄) · model · thinkingLevel
+        │
+        ▼
+createTaskId → registry spawn 记录（queued + owner 戳 + 写穿落盘）── 此刻起任务面可见
+        │
+        ▼
+◇ input.wait ?
+│
+├─是（wait 路径，ADR-0007 前台调用方）─────────────────────────────┐
+│ notifications.markAwaited(taskId)（终态不通知，见 ⑬）            │
+│ slots.acquire(taskId) race 调用方 aborts(signal)：               │
+│   ├─ abort 先到 → slots.cancelQueued + cancel-queued → [拒]「排队中被撤回」（决策 17）
+│   ├─ withdrawn   → cancel-queued → [拒]「排队中被抽掉」            │
+│   └─ granted     → #runToTerminal（见 ⑨）→ 返回 DispatchResult     │
+│
+└─否（不等路径，决策 16）──────────────────────────────────────────┐
+  立刻返回 {taskId, label, status:"queued"}（fire-and-forget）      │
+  #beginAfterAdmission：slots.acquire →                            │
+    ├─ withdrawn → cancel-queued → 记录转 canceled（静默收尾）       │
+    └─ granted   → #runToTerminal                                    │
+
+槽计数器（libuv 形状，slots.ts）：容量 8 · 满了进 FIFO 无界队列 · 从不拒绝
+  release 带提拔（终态还槽 → 最老等待者 granted，引擎负责拉起它）
+  releaseWithoutPromotion（拆卸中还槽不提拔——提拔出来的孤儿会话已关没人收）</pre>
+</section>
+
+<!-- ===================== ⑨ ===================== -->
+<section id="s9">
+<h2><span class="no">⑨</span>泵：#runToTerminal —— 从 granted 到终态的全链路</h2>
+<p class="src">出处：<code>dispatch/src/engine.ts:298-434</code>（#executeRun）· <code>child-process.ts</code> · <code>jsonl.ts</code> · <code>report.ts</code></p>
+<pre class="term">#runToTerminal 包住 try/catch：泵内任何异常 → resolve-exit(-1) + 还槽 + rejected「任务内部错误」
+        │
+        ▼
+registry transition → running：
+  ├─ changed=false（等槽期间已被停/取消）→ 还槽 + [canceled]「任务在启动前已取消」（不 spawn，ADR-0011 撞边）
+  └─ teardown 在 acquire 与 transition 之间置位 → 收尸 [rejected]「会话拆卸发生在启动前」（不 spawn 孤儿）
+        │
+        ▼
+buildArgv（child-process.ts）：
+  追加块 &lt;pi-ptc-context&gt;：身份 + 深度 + &lt;pi-ptc-why&gt;（XML 实体转义，防伪造标签）
+  ◇ childReport ≠ false → 附 &lt;child-report-contract&gt;（fenced JSON 契约）
+  model 解析序：调用参数 → agent 定义 → 会话当前模型；档位挂 :&lt;thinking&gt; 后缀
+  工具收窄：readOnly=strict → --tools 读集（搜索开时含 web_ds_search）
+            否则 agent frontmatter tools 名单收窄（只收窄不扩权）
+  argv = [pi, -p, --no-session, --mode json, --append-system-prompt 块, (model), (tools), task]
+  引擎再追加 -e childExtensionPath；env 铸血缘 PI_PTC_DEPTH+1、PI_PTC_TASK_ID
+        │
+        ▼
+spawnChild：stdio pipe · stderr 只留尾 64KB · spawn 失败（ENOENT/E2BIG）记 stderr 并 close(-1) 兜底
+  （不监听 error 会崩宿主；close 而非 exit——等流关闭，报告/usage 不丢尾）
+        │
+        ▼
+pump：
+  stdout 累积 ◇ 超 16MB → 砍头留尾 + outputTruncated=true（F2：读者知道全貌不在；首行可能半行，JSONL 按行容错）
+  等 close 拿 exitCode → children 表摘除
+        │
+        ▼
+产出落盘：output.write（taskId 安全校验拒分隔符/".."）→ output.log → attach-output{outputPath, truncated}
+        │
+        ▼
+parseChildStream（--mode json 事件流）：
+  message_end/assistant → 文本（最后一条胜出）+ observedUsage + observedModel/Provider（content 非数组跳过，单个畸形事件不毒化整流）
+  toolResult 且 toolName=ptc_child_report → toolReport（字段序：structuredContent &gt; details.report &gt; 带 summary 的 details）
+        │
+        ▼
+报告通道判定（reportChannel 恒在四值，永不静默）：
+  ◇ extras.childReport=false → opted-out（agent 退出契约）
+  ◇ toolReport 有 → tool（首选）
+  ◇ 否则 extractReportFromText：从后往前抠最后一个 fenced JSON 块 → ◇ summary 非空字符串 ? prompt-json : none
+  报告缺 usage → observedUsage 兜底 → attach-report
+        │
+        ▼
+resolve-exit{exitCode}（registry 写锁内判定）：
+  stopping → canceled（stopReason 保留）│ running + 0 → succeeded │ running + 非0 → failed │ 其它 → 不改不写
+        │
+        ▼
+终态落库 → #releaseSlot（提拔或不提拔）→ 决策 29 容量检查（见 ⑪）
+        │
+        ▼
+组装 DispatchResult：status 映射（succeeded→fulfilled / canceled→canceled / 其它→rejected）
+  + text/exitCode/started=true/agentName/durationMs(finishedAt-startedAt)/usage/errorMessage
+  + readOnlyTier/outputPath/whySuppressed/report/reportChannel/outputTruncated</pre>
+</section>
+
+<!-- ===================== ⑩ ===================== -->
+<section id="s10">
+<h2><span class="no">⑩</span>任务状态机：registry 的合法迁移全景</h2>
+<p class="src">出处：<code>dispatch/src/task-record.ts</code> · <code>dispatch/src/registry.ts:4-12,92-150</code></p>
+<pre class="term">queued ──▶ running / canceled / lost
+running ──▶ stopping / succeeded / failed / lost
+stopping ──▶ canceled / failed / lost
+succeeded / failed / canceled / lost ──▶ （终态无出边）
+        │
+判定纪律（全部在 submit 写锁串行链内做）：
+  · cancel-queued：当前还是 queued 才 canceled；不是 → 原样返回、不改、不写、不报错（竞态常态）
+  · attach-report / attach-output：终态上的迟到写入 → 静默丢弃（不覆盖终态记录）
+  · #move：出队转 running 那一刻盖 startedAt；进终态盖 finishedAt（durationMs 只量孩子跑起来之后）
+        │
+谁触发哪条边：
+  transition running   = 泵启动前（⑨）
+  cancel-queued        = stop(queued) / 等待者 abort / withdrawn / shutdown 抽干 / restore reconcile
+  resolve-exit         = 泵 close（stopping→canceled 是 stop 的收尸）
+  reconcile-lost       = 重启恢复发现 owner 已死（⑮）</pre>
+</section>
+
+<!-- ===================== ⑪ ===================== -->
+<section id="s11">
+<h2><span class="no">⑪</span>决策 29 归档层：热存 500 的进出与回落读者</h2>
+<p class="src">出处：<code>engine.ts:133-137,403,578-653</code> · <code>registry.ts:69-81</code>（evictTerminal）</p>
+<pre class="term">触发点两个：每个任务终态后（runtime 模式）· 每次启动恢复后（boot 模式）
+        │
+        ▼
+evictTerminal(keep=500)：内存同步挤掉终态最老（(finishedAt, taskId) 排序）→ 返回被挤 id 列表
+        │
+        ▼
+文件活分派：
+  boot 模式 ──▶ 同步直删（records/&lt;id&gt;.json + tasks/&lt;id&gt;/ 整目录）<span class="dim">// 历史渣无取证价值，避免启动压缩风暴</span>
+  runtime 且 archiveEnabled=false ──▶ 同步直删（同上报）
+  runtime 且 archiveEnabled=true  ──▶ 归档尾链：setImmediate 拍板（事件循环完整转一圈，饿死免疫）
+        │
+        ▼
+#archiveOne（异步，主线不等）：读 records → gzip{...record, archivedAt} → tmp+rename 落位 archive/&lt;id&gt;.json.gz
+  → output.log 存在再 gzip 成 &lt;id&gt;.output.gz → 删热文件
+  半途死掉最多双份残留（restore 容忍）；归档失败留热文件，下轮 boot 直删收尸
+        │
+        ▼
+boot 另加 #purgeExpiredArchive：archive/*.gz 按 mtime 过 TTL（默认 30 天）直删，单批上限 500 条不拖启动
+        │
+        ▼
+回落读者（热存 miss 时的三个读者，TTL 窗口内可解）：
+  readArchivedRecord(id)   → archive/&lt;id&gt;.json.gz gunzip（ptc_task_output 用，⑫）
+  #readArchivedOutput(id)  → archive/&lt;id&gt;.output.gz gunzip（readOutput/outputSize/readOutputTail 的 miss 回落）</pre>
+<p class="note">配置三键（ptc.json，clamp 不 reject）：<code>taskTraceKeep</code> 10–10000 默认 500 · <code>archiveEnabled</code> 仅显式 boolean 生效默认 ON · <code>archiveTtlDays</code> 1–365 默认 30。</p>
+</section>
+
+<!-- ===================== ⑫ ===================== -->
+<section id="s12">
+<h2><span class="no">⑫</span>任务面三工具：list / output / stop</h2>
+<p class="src">出处：<code>entry/src/index.ts:491-545</code> · <code>task/src/list-tasks.ts</code> · stop 走 <code>engine.ts:437-451</code> · 可见性 <code>entry/src/index.ts:136-151</code>（F9）</p>
+<pre class="term">三工具 defaultActive:false——可见性 = 「有任务记录」（faceVisible：records.length &gt; 0）
+applyTaskFaceVisibility：有记录且活跃表没有 → 加入（记入 faceAddedByUs）
+                  无记录且活跃表有「我们加过的」→ 撤掉；用户 loadout 自己固定的<b>不动</b>（F9）
+                  钩子挂在 registry onTransition + 每 turn before_agent_start 幂等重放（resume 场景）
+
+ptc_task_list：selectVisibleTasks = 在飞全部 + 终态按 finishedAt 倒序最近 10 条
+
+ptc_task_output(task_id)：
+  record = registry.get(id) ──miss──▶ readArchivedRecord(id)（⑪）──再 miss──▶ { error: unknown task id }
+  outputBytes = outputSize(id)（不读全文先探长；miss 回落归档解压量字节）
+    ├─ undefined → 只返回 record
+    ├─ &gt; 50KB（TRUNCATION_MAX_BYTES）→ readTail(50KB) + ADR-0015 截断 + guidance 引导：
+    │     有报告 → 「先看孩子的报告（归约层）：summary+findings≤5；全文 read outputPath」
+    │     无报告 → 「孩子未交报告（reportChannel=none，散文可信度存疑）；全文 read outputPath」
+    └─ ≤ 50KB → readTail 全文 + applyAdr0015Truncation（一般不会触截断）
+
+ptc_task_stop(task_id, reason?) → engine.stop（ADR-0011 先写终态记录、后抽队列）：
+  ① cancel-queued：还是 queued → canceled + slots.cancelQueued → 完事
+  ② 非 running → 无事发生（return）
+  ③ running → transition stopping + SIGTERM → 5s 后 children 表里还在 → SIGKILL（stopGraceMs 可配）</pre>
+</section>
+
+<!-- ===================== ⑬ ===================== -->
+<section id="s13">
+<h2><span class="no">⑬</span>通知链：终态怎么回到模型眼前</h2>
+<p class="src">出处：<code>dispatch/src/notifications.ts</code> · <code>entry/src/index.ts:110-122</code> · 渲染 <code>routes/src/registry.ts:181-189</code></p>
+<pre class="term">registry 每次变迁广播 → NotificationCenter.attach 的监听：
+  ◇ 状态没变 ? → 丢
+  ◇ 非终态 ? → 丢
+  ◇ awaited 集合里有 ? → 删掉、不入队（wait 路径调用方自己拿结果——ADR-0007）
+  否则 → 入 pending 队列
+        │
+        ▼
+turn_end：drain() 按 100KB 分批（批次失败不拖累其余批）
+        │
+        ▼
+renderTaskNotifications(batch) → &lt;bg-task-notifications&gt; 列表（散文归 routes）
+        │
+        ▼
+pi.sendMessage({customType:"bg-task-notifications"}, {deliverAs:"nextTurn"}) —— best-effort：失败吞掉，记录仍在任务面</pre>
+<p class="note"><b>已知小拧（记录在案）</b>：-p 打印模式下通知进不进模型上下文未实测（AGENTS.md 同款记录）。</p>
+</section>
+
+<!-- ===================== ⑭ ===================== -->
+<section id="s14">
+<h2><span class="no">⑭</span>子代理进程：装配 + web_ds_search 三动作 + 配额记忆</h2>
+<p class="src">出处：<code>entry/src/index.ts:356-396</code>（registerChildToolsOnly）· <code>search/src/{tool,run,quota,memory,deepseek}.ts</code></p>
+<pre class="term">子代理进程装配：
+  ◇ webDsSearch=true → 注册 web_ds_search（缺 key 也注册——调用时返回可读错误，ADR-0002 方案 B）
+  恒注册 ptc_child_report：echo 工具（structuredContent=报告本体 → --mode json 的 toolResult 通道）
+
+web_ds_search 入口校验：search 空 query / open·find 空 url → isError 直返，不进 run
+        │
+        ▼
+┌─ search(query, count?) ─────────────────────────────────────────┐
+│ count clamp 1–50（默认 10）                                    │
+│ quota.tryAcquire 失败 → 「配额已用尽」                          │
+│ provider.search 失败 → release(false) 不占额 → HTTP 错误       │
+│ 空结果 → release(false)（官方不计费）→ 「没有命中。」           │
+│ 有结果 → release(true) 耗额 → memory.remember(query, 结果)     │
+│   → renderSearchOverview：逐条累加，超 12K 字符预算整条丢弃    │
+│     （第一条永远给）+ 末尾告知丢了哪些 url（可经 open 补抓）     │
+├─ open(url) ────────────────────────────────────────────────────┤
+│ memory.lookup 命中 → 「（记忆命中，未发请求）」+ 切片（免费）   │
+│ quota 占额 → domainGate（同域名 50ms 串行，防 429）→ provider.open│
+│ 失败 → release(false) │ 成功 → release(非空) → memory.storeText │
+│ → 正文 slice(0, 预算)                                          │
+├─ find(url, pattern) ───────────────────────────────────────────┤
+│ 非法正则 → isError 直返                                        │
+│ ensurePageText：记忆命中免费 │ 否则占额+domainGate+open+回存记忆 │
+│ 页内行匹配（i  flag）→ 最多 50 行「N: 行内容」→ sanitize+预算   │
+└────────────────────────────────────────────────────────────────┘
+配额（每进程，ADR-0001）：0=不限；inFlight+used 计占用；只计成功调用（失败/空结果 release(false)）
+记忆（F5 已修）：5 条搜索条目 / 400K 字符总预算；直接 open 的页进「兜底桶」（不进条目 trim 先淘它）；
+lookup 两桶都查，URL 宽松匹配（scheme+host+去尾斜杠 path+query 相容）</pre>
+</section>
+
+<!-- ===================== ⑮ ===================== -->
+<section id="s15">
+<h2><span class="no">⑮</span>重启恢复：#restore 的启动序列（BG-01 / 旧 ADR-0023）</h2>
+<p class="src">出处：<code>engine.ts:535-563</code> · <code>agent-discovery.ts</code></p>
+<pre class="term">storageDir（&lt;cwd&gt;/.pi/ptc-tasks）存在才挂恢复；#ready 卡住一切 dispatch（引擎构造即开跑）
+        │
+        ▼
+① 装载：records/*.json 逐条 spawn 进 registry（同 id 冲突跳过 · 单条坏 JSON 不拖垮启动）
+        │
+        ▼
+② 订阅落盘：#persist 写穿（tmp+rename 原子换名；落盘失败不阻塞任务流）
+        │
+        ▼
+③ reconcile 非终态记录：
+   ◇ ownerPid 活着 且 不是我 → 跳过（同机另一条会话的在飞任务：看不见也停不了，避免假停）
+   ◇ owner 已死（或无主）→ reconcile-lost「lost_on_session_restart」
+        │
+        ▼
+④ boot 模式容量检查：evictAndPurge(keep, "boot") → 直删（⑪）
+⑤ purgeExpiredArchive：归档 TTL 单批 500 条清理（⑪）
+
+agent 发现（findAgent，闸 7 与解析共用）：agentScope 层级覆盖——both=[project, user] 近者优先；
+&lt;name&gt;.md 极简 frontmatter：childReport / tools / model / thinkingLevel（childReport typo 视为开）</pre>
+</section>
+
+<!-- ===================== ⑯ ===================== -->
+<section id="s16">
+<h2><span class="no">⑯</span>开关与配置总表：所有「判断」的外部输入</h2>
+<p class="src">出处：<code>entry/src/index.ts:180-207,268-331</code> · <code>gates.ts</code></p>
+<table>
+  <tr><th>开关</th><th>位置</th><th>缺省</th><th>失效姿态</th><th>影响面</th></tr>
+  <tr><td><code>/ptc off|on</code></td><td>会话级变量</td><td>on</td><td>—</td><td>闸 3 停收新派发；off 同时退出 PTC 模式；<b>截断</b>=同名重注册 exposure:hidden（任务面三工具不动，ADR-0004）；在飞任务不受影响</td></tr>
+  <tr><td><code>/ptc why on|off</code></td><td>会话级覆盖</td><td>读配置</td><td>—</td><td>谓词热生效：off 时 why 丢弃、记 whySuppressed（传值会冻住，所以传谓词）</td></tr>
+  <tr><td><code>/ptc mode on|off</code></td><td>会话级变量</td><td>读配置</td><td>—</td><td>只翻总则句开关（引导层）；full_ptc 面才生效</td></tr>
+  <tr><td><code>defaultMode</code></td><td>~/.pi/agent/ptc.json</td><td>true</td><td>fail-open（坏值=开）</td><td>modeEnabled 初值</td></tr>
+  <tr><td><code>whyEnabled</code></td><td>同上</td><td>true</td><td>fail-open</td><td>why 是否进 argv</td></tr>
+  <tr><td><code>webDsSearch</code></td><td>同上</td><td>false</td><td>fail-closed</td><td>子代理进程是否注册 web_ds_search；strict 读集是否含它</td></tr>
+  <tr><td><code>searchMaxCalls</code></td><td>同上</td><td>30（0=不限）</td><td>坏值落默认</td><td>每进程搜索配额</td></tr>
+  <tr><td><code>taskTraceKeep / archiveEnabled / archiveTtlDays</code></td><td>同上</td><td>500 / true / 30</td><td>clamp 夹取</td><td>决策 29 痕迹三键（⑪）</td></tr>
+  <tr><td>会话结束位</td><td>session_shutdown 置位</td><td>—</td><td>—</td><td>闸 4 拒新 · teardown：dispatch 拒新、还槽不提拔、泵不 spawn 孤儿、shutdown 抽干等待者+SIGTERM 在跑孩子+排空归档尾链</td></tr>
+</table>
+<p class="note">以上为 F4 立项前的<b>基准流程全貌</b>。后续任何流程转向（含 F4 测试框架对引擎的可测性改造）以本页为对照基准：改一处，图改一处。</p>
+</section>
+
+</body>
+</html>
