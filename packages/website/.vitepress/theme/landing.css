@@ -159,6 +159,33 @@
   margin: 16px 0 0;
 }
 
+/* Language toggle. Sits at the top of the hero; `.lp`-scoped so it never
+   touches VitePress chrome (the style-scope gate reads this file). */
+.lp-lang {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin: 0 0 30px;
+}
+
+.lp-lang button {
+  cursor: pointer;
+  background: transparent;
+  color: var(--lp-dim);
+  border: 1px solid var(--lp-line);
+  border-radius: 999px;
+  padding: 5px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+}
+
+.lp-lang button.on {
+  background: var(--lp-fg);
+  color: var(--lp-hero-bg);
+  border-color: var(--lp-fg);
+}
+
 /* ── sections ──────────────────────────────────────────────────────────── */
 
 .lp-sec {
