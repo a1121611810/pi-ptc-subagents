@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.1.0] - 2026-10-27
+
+### Added
+
+- **Task traces have a capacity boundary and a compressed archive** (spec decision 29).
+  Terminal records are capped at the newest 500 (`taskTraceKeep`, evicted oldest-first
+  by `(finishedAt, taskId)`; non-terminal records are never evicted). Runtime evictions
+  are archived — record and output gzip-compressed (3.4x measured on real child
+  streams) on an async event-loop chain the main path never waits on; boot-time
+  history is deleted directly. Archived traces stay retrievable by exact id through
+  `ptc_task_output` for 30 days from archival (`archiveTtlDays`; archive files are
+  purged at boot, 500 per pass). All three knobs live in `~/.pi/agent/ptc.json`;
+  `archiveEnabled: false` restores immediate delete.
+- **`outputTruncated` on task records and results.** Child stdout now has a 16MB
+  tail cap (the stderr cap's long-missing twin), so a runaway child can no longer
+  exhaust the host's memory; the record says when the trace is tail-only.
+
+### Fixed
+
+- **The task door no longer advertises a `cwd` parameter nothing consumed** (audit F1).
+  It was pre-planted in the shared parameter table, but neither entry point forwarded
+  it and no engine layer accepted it; the schema now tells the truth.
+- **Search memory keeps pages opened directly** (audit F5). `open` on a URL that
+  never appeared in search results previously had its text silently dropped, so a
+  later `find` on the same page re-fetched and double-spent quota; a fallback bucket
+  (same 400K budget) now holds it.
+- **Value-tree rendering enforces the frozen contract** (audit F7, ADR-0016): at most
+  6 children per level with an explicit `…（余 N 项）` marker, and line width back to
+  the contracted 120 — previously a 100k-element array rendered in full before the
+  downstream truncator threw the work away.
+- **Pooled workers drop their per-run listeners when returned** (audit F8); dozens of
+  programs in one turn no longer pile dead closures on the reused workers.
+- **The task face no longer removes user-pinned tools** (audit F9): visibility sweeps
+  with zero records now retract only tools the session added itself.
+- **Dead code removed** (audit F6): `listAgentNames`, `drainGraceMs`, a duplicated
+  `pi-tui` devDependency; three rich-row renderer bounds formally de-registered via
+  [ADR-0016](docs/adr/0016-render-bounds-cleanup.md) instead of being deleted as junk.
+
+### Changed
+
+- **Value-tree lines narrow from 200 to the contracted 120 characters** — a
+  model-visible shortening of oversized render lines.
+
 ## [6.0.3] - 2026-10-26
 
 ### Fixed
