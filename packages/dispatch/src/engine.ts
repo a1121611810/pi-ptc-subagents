@@ -7,9 +7,14 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
+  rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { gunzipSync, gzip } from "node:zlib";
+import { promisify } from "node:util";
 import { isTerminal as isTerminalRecord, type TaskRecord } from "./task-record.ts";
 import type { AgentDefinition } from "./agent-discovery.ts";
 import type { DispatchInput, Gate, TaskRejection } from "./gates.ts";
@@ -104,6 +109,12 @@ export interface EngineOptions {
   storageDir?: string;
   /** 旧 ADR-0022/0053：通知中心——wait 路径记 awaited，终态不重复通知 */
   notifications?: { markAwaited(taskId: string): void };
+  /** 决策 29：终态痕迹热存上限（条）；默认 500 */
+  terminalRecordKeep?: number;
+  /** 决策 29：归档开关——true（默认）= 运行时驱逐进压缩冷存；false = 驱逐即删 */
+  archiveEnabled?: boolean;
+  /** 决策 29：归档保留天数（自归档时刻，boot 按归档文件 mtime 清理）；默认 30 */
+  archiveTtlDays?: number;
   /** 旧 ADR-0043：whyEnabled 默认开；关掉时丢弃 why 并记 whySuppressed——剥夺类开关 fail-open（坏值视为开）。
    * 谓词非值：/ptc why 的会话级覆盖要热生效，值会在装配时被冻住（同 旧 ADR-0065 sessionEnding 的教训） */
   whyEnabled?: boolean | (() => boolean);
@@ -118,6 +129,14 @@ const DEFAULT_STOP_GRACE_MS = 5_000;
 
 // 审计 F2：stdout 尾部上限（stderr 同款思路，child-process.ts）。留尾的理由：报告/usage 在 JSONL 流尾部
 const STDOUT_KEEP_CHARS = 16 * 1024 * 1024;
+
+// 决策 29：终态痕迹容量边界——超过即按 (finishedAt, taskId) 最老先出挤掉（内存 + 磁盘同步）
+const DEFAULT_TERMINAL_RECORD_KEEP = 500;
+const DEFAULT_ARCHIVE_TTL_DAYS = 30;
+// boot 单次归档 TTL 清理上限：历史遗留的巨型 archive 不拖住本次启动，剩下的下轮收
+const ARCHIVE_PURGE_MAX_PER_BOOT = 500;
+
+const gzipP = promisify(gzip);
 
 // 决策 17：AbortSignal → Promise（已 abort 立即兑现）
 function aborts(signal: AbortSignal): Promise<void> {
@@ -157,6 +176,11 @@ export class TaskEngine {
   readonly #whyEnabled: () => boolean;
   readonly #notifications?: { markAwaited(taskId: string): void };
   readonly #context: EngineContext;
+  readonly #storageDir?: string;
+  readonly #terminalRecordKeep: number;
+  readonly #archiveEnabled: boolean;
+  readonly #archiveTtlDays: number;
+  #purgeTail: Promise<void> = Promise.resolve();
   readonly #children = new Map<string, ChildHandle>();
   #ending = false;
   #teardown = false;
@@ -172,6 +196,10 @@ export class TaskEngine {
     this.#childExtensionPath = options.childExtensionPath;
     this.#searchEnabled = options.searchEnabled ?? false;
     this.#owner = { pid: process.pid, bootMs: Date.now() };
+    this.#storageDir = options.storageDir;
+    this.#terminalRecordKeep = options.terminalRecordKeep ?? DEFAULT_TERMINAL_RECORD_KEEP;
+    this.#archiveEnabled = options.archiveEnabled ?? true;
+    this.#archiveTtlDays = options.archiveTtlDays ?? DEFAULT_ARCHIVE_TTL_DAYS;
     this.#ready = options.storageDir ? this.#restore(options.storageDir) : Promise.resolve();
     this.#stopGraceMs = options.stopGraceMs ?? DEFAULT_STOP_GRACE_MS;
     const whyOpt = options.whyEnabled;
@@ -372,6 +400,8 @@ export class TaskEngine {
     const result = await this.#registry.submit({ kind: "resolve-exit", id: taskId, exitCode });
     // 终态落库后才还槽（拆卸中不提拔，见 #releaseSlot）
     this.#releaseSlot(taskId);
+    // 决策 29：每任务一次容量检查——终态超上限挤最老；文件活走异步归档尾链，主线不等
+    this.#evictAndPurge(this.#terminalRecordKeep, "runtime");
     const status =
       result.record.status === "succeeded"
         ? "fulfilled"
@@ -456,19 +486,49 @@ export class TaskEngine {
     return this.#ending;
   }
 
-  /** 任务链读产出正文（lifecycle face 的 output 工具用） */
+  /** 任务链读产出正文（lifecycle face 的 output 工具用）；miss 回落归档（决策 29 冷存） */
   readOutput(taskId: string): Promise<string | undefined> {
-    return this.#output.read(taskId);
+    return this.#output.read(taskId).then((text) => text ?? this.#readArchivedOutput(taskId));
   }
 
-  /** 产出字节数（不读全文——超长产出引导模型先读报告，真要读再 readOutput） */
+  /** 产出字节数（不读全文——超长产出引导模型先读报告，真要读再 readOutput）；miss 回落归档 */
   outputSize(taskId: string): Promise<number | undefined> {
-    return this.#output.size(taskId);
+    return this.#output.size(taskId).then((n) => {
+      if (n !== undefined) return n;
+      const archived = this.#readArchivedOutput(taskId);
+      return archived === undefined ? undefined : Buffer.byteLength(archived, "utf8");
+    });
   }
 
-  /** 方案 A：只读尾部至多 maxBytes 字节（旧 ADR-0015 偏尾语义；模型坚持要全文时的内存保险） */
+  /** 方案 A：只读尾部至多 maxBytes 字节（旧 ADR-0015 偏尾语义；模型坚持要全文时的内存保险）；miss 回落归档（冷路径，简单字节切尾） */
   readOutputTail(taskId: string, maxBytes: number): Promise<string | undefined> {
-    return this.#output.readTail(taskId, maxBytes);
+    return this.#output.readTail(taskId, maxBytes).then((text) => {
+      if (text !== undefined) return text;
+      const archived = this.#readArchivedOutput(taskId);
+      return archived === undefined ? undefined : archived.slice(-maxBytes);
+    });
+  }
+
+  /** 决策 29：回落读者——精确 id 从压缩归档拉回（30 天窗口内可解）；miss = undefined */
+  readArchivedRecord(taskId: string): Promise<(TaskRecord & { archived: true }) | undefined> {
+    const file = this.#storageDir ? join(this.#storageDir, "archive", `${taskId}.json.gz`) : null;
+    if (!file || !existsSync(file)) return Promise.resolve(undefined);
+    try {
+      const parsed = JSON.parse(gunzipSync(readFileSync(file)).toString("utf8")) as TaskRecord;
+      return Promise.resolve({ ...parsed, archived: true });
+    } catch {
+      return Promise.resolve(undefined);
+    }
+  }
+
+  #readArchivedOutput(taskId: string): string | undefined {
+    const file = this.#storageDir ? join(this.#storageDir, "archive", `${taskId}.output.gz`) : null;
+    if (!file || !existsSync(file)) return undefined;
+    try {
+      return gunzipSync(readFileSync(file)).toString("utf8");
+    } catch {
+      return undefined;
+    }
   }
 
   // BG-01/旧 ADR-0023：落盘（写穿）+ 重启恢复（装载 → owner 已死者 reconcile-lost）
@@ -497,6 +557,9 @@ export class TaskEngine {
         .submit({ kind: "reconcile-lost", id: record.id, reason: "lost_on_session_restart" })
         .catch(() => undefined);
     }
+    // 决策 29：启动即剪历史债务（boot 模式 = 直接删除，历史渣无取证价值，避免启动期压缩风暴）+ 归档 TTL 清理
+    this.#evictAndPurge(this.#terminalRecordKeep, "boot");
+    this.#purgeExpiredArchive();
   }
 
   async #persist(storageDir: string, record: TaskRecord): Promise<void> {
@@ -509,6 +572,83 @@ export class TaskEngine {
       renameSync(tmp, path);
     } catch {
       // 落盘失败不阻塞任务流——记录仍在内存
+    }
+  }
+
+  // 决策 29：终态痕迹容量边界——内存同步挤掉；文件活分派：boot/关归档 → 同步直删；运行时 → 异步归档尾链
+  #evictAndPurge(keep: number, mode: "runtime" | "boot"): void {
+    const evicted = this.#registry.evictTerminal(keep);
+    if (!this.#storageDir || evicted.length === 0) return;
+    if (mode === "boot" || !this.#archiveEnabled) {
+      for (const id of evicted) this.#removeTraceFiles(id);
+      return;
+    }
+    for (const id of evicted) this.#enqueueArchive(id);
+  }
+
+  #removeTraceFiles(id: string): void {
+    try {
+      rmSync(join(this.#storageDir!, "records", `${id}.json`));
+      rmSync(join(this.#storageDir!, "tasks", id), { recursive: true, force: true });
+    } catch {
+      // 单条删失败不拖垮整批；残留文件下轮 restore 同机制收
+    }
+  }
+
+  // 决策 29：归档走 event loop——setImmediate 拍板保证每个任务间事件循环完整转一圈（饿死免疫），全异步文件操作，主线不等
+  #enqueueArchive(id: string): void {
+    this.#purgeTail = this.#purgeTail
+      .then(
+        () =>
+          new Promise<void>((resolve) => {
+            setImmediate(() => void this.#archiveOne(id).then(resolve, resolve));
+          }),
+      )
+      .catch(() => undefined);
+  }
+
+  // 决策 29：先归档落位（tmp+rename）、后删热文件——半途死掉最多双份残留，restore 容忍；归档失败留热文件，下轮 boot 直删路径收尸
+  async #archiveOne(id: string): Promise<void> {
+    const dir = this.#storageDir!;
+    const record = JSON.parse(
+      readFileSync(join(dir, "records", `${id}.json`), "utf8"),
+    ) as TaskRecord;
+    const recordGz = await gzipP(
+      Buffer.from(JSON.stringify({ ...record, archivedAt: Date.now() })),
+    );
+    const archiveDir = join(dir, "archive");
+    await mkdir(archiveDir, { recursive: true });
+    await writeFile(join(archiveDir, `${id}.json.gz.tmp`), recordGz);
+    await rename(join(archiveDir, `${id}.json.gz.tmp`), join(archiveDir, `${id}.json.gz`));
+    const outputPath = join(dir, "tasks", id, "output.log");
+    if (existsSync(outputPath)) {
+      const outputGz = await gzipP(await readFile(outputPath));
+      await writeFile(join(archiveDir, `${id}.output.gz.tmp`), outputGz);
+      await rename(join(archiveDir, `${id}.output.gz.tmp`), join(archiveDir, `${id}.output.gz`));
+    }
+    this.#removeTraceFiles(id);
+  }
+
+  // 决策 29：归档 TTL 清理——归档 gz 新写且从不改写，文件 mtime 即归档时刻；单批上限防爆启动
+  #purgeExpiredArchive(): void {
+    const dir = this.#storageDir;
+    if (!dir || !this.#archiveEnabled) return;
+    const archiveDir = join(dir, "archive");
+    if (!existsSync(archiveDir)) return;
+    const ttlMs = this.#archiveTtlDays * 86_400_000;
+    const now = Date.now();
+    let purged = 0;
+    for (const file of readdirSync(archiveDir)) {
+      if (purged >= ARCHIVE_PURGE_MAX_PER_BOOT) break;
+      if (!file.endsWith(".gz")) continue;
+      try {
+        if (now - statSync(join(archiveDir, file)).mtimeMs > ttlMs) {
+          rmSync(join(archiveDir, file));
+          purged++;
+        }
+      } catch {
+        // 单条失败跳过，下轮再收
+      }
     }
   }
 
@@ -530,5 +670,7 @@ export class TaskEngine {
       await this.#registry.submit({ kind: "stop", id: taskId, reason: "session ended" });
       child.kill("SIGTERM");
     }
+    // 决策 29：会话期间归档不等，退出前排空尾链——别截断半截归档
+    await this.#purgeTail.catch(() => undefined);
   }
 }

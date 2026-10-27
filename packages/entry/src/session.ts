@@ -33,6 +33,8 @@ export interface PtcSession {
   outputSize(taskId: string): Promise<number | undefined>;
   /** 只读产出尾部（方案 A：内存保险） */
   readOutputTail(taskId: string, maxBytes: number): Promise<string | undefined>;
+  /** 决策 29：回落读者——精确 id 从压缩归档拉回（30 天窗口内可解）；miss = undefined */
+  readArchivedRecord(taskId: string): Promise<(TaskRecord & { archived: true }) | undefined>;
 }
 
 import type { TaskRecord } from "@pi-ptc/dispatch";
@@ -67,5 +69,6 @@ export function assemblePtcSession(options: PtcSessionOptions = {}): PtcSession 
     readOutput: (taskId) => engine.readOutput(taskId),
     outputSize: (taskId) => engine.outputSize(taskId),
     readOutputTail: (taskId, maxBytes) => engine.readOutputTail(taskId, maxBytes),
+    readArchivedRecord: (taskId) => engine.readArchivedRecord(taskId),
   };
 }

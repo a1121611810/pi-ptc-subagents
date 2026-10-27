@@ -85,6 +85,10 @@ from the program too — the two cannot both hold on pi 1.4.0.
 - `whyEnabled` — carry the caller's reason into the child. Default `true`.
 - `webDsSearch` / `searchMaxCalls` — web search in children; off by default, 30 calls per
   child when on (`0` means unlimited).
+- `taskTraceKeep` / `archiveEnabled` / `archiveTtlDays` — task trace retention (decision 29):
+  terminal records kept in the hot store (default 500); evicted traces go to a compressed
+  archive unless `archiveEnabled: false` (immediate delete); archive lives `archiveTtlDays`
+  days (default 30) and stays retrievable by exact id via `ptc_task_output`.
 
 ## Trust posture
 

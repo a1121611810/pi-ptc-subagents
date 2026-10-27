@@ -180,7 +180,7 @@
     <b>全版本矩阵复跑 16/16</b>（0.86.0·0.86.1·0.87.0·0.87.1 → 明确报「需 pi ≥ 0.99」；0.99.0–1.4.0 共 12 版 → <code>OK:295</code>，与上轮逐字一致）；
     1.4.0 补充探针 2/2（模型按「详情目录 + 文件名」读出详情首行 <code># 派一个子代理</code>；程序内 <code>tools.pi_task_ptc</code> 派发返回 handle）。
     <br><b>评审后全链路复测（2026-10-26 晚，提交前）：</b>矩阵再复跑 <b>16/16 逐字一致</b> + 离线修复轮探针 14/14；workflow / json / rpc / TUI 四模式全过（TUI 真 Terminal：模型自发调 run_code，fulfilled 折叠行渲染 + <code>OK:42</code>）；真子进程派发 floor 0.86.0 + 0.87.0 / 0.99.0 / 1.3.0 抽测全部 <code>fulfilled</code>。
-    <br><b>审计修复轮（2026-10-27）：</b>任务门 cwd 参数删除（F1）；stdout 尾部上限 16MB + <code>outputTruncated</code> 标记（F2，dispatch 侧落地）；全兼容矩阵复跑 16/16（0.86.0–1.4.0 每版 run_code + 真派发全过）。
+    <br><b>审计修复轮（2026-10-27）：</b>任务门 cwd 参数删除（F1）；stdout 尾部上限 16MB + <code>outputTruncated</code> 标记（F2，dispatch 侧落地）；<b>决策 29 任务痕迹容量边界</b>（F3：终态留 500 最老先出、内存与磁盘同步、未终态永不驱逐；探针 3 用例含红线断言）；全兼容矩阵复跑 16/16（0.86.0–1.4.0 每版 run_code + 真派发全过）。
     <br><b>workflow.parallel 对齐决策 12（2026-10-26）：</b>并行改 <code>Promise.allSettled</code>——单边失败不丢兄弟结果，状态读返回记录（两扇门的范式本就这么写；要「一错全拒」的程序自己写 <code>Promise.all</code>）；真 worker 探针过（fulfilled + rejected 同批返回，子调用树 2/2 不丢），详情文件 <code>run-a-phased-workflow.md</code> 已同步。
     <b>附记（2026-10-26 已查证，与本扩展无关）：</b>pi 1.4.0 TUI <code>/exit</code> 打印 Exited/Goodbye 后进程不自退——无扩展对照实验同样复现（进程驻留 2 分钟+，SIGTERM 清理），是 pi 上游行为，非本扩展持有句柄。
   </div>

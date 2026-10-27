@@ -65,6 +65,21 @@ export class TaskRegistry {
     return [...this.#records.values()];
   }
 
+  /** 决策 29：终态痕迹容量边界——按 (finishedAt, taskId) 最老先出挤掉，返回被挤掉的 id；纯内存操作，删文件归引擎 */
+  evictTerminal(keep: number): string[] {
+    const terminal: TaskRecord[] = [];
+    for (const record of this.#records.values()) {
+      if (isTerminal(record.status)) terminal.push(record);
+    }
+    terminal.sort(
+      (a, b) =>
+        (a.finishedAt ?? 0) - (b.finishedAt ?? 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+    );
+    const evicted = terminal.slice(0, Math.max(0, terminal.length - keep));
+    for (const record of evicted) this.#records.delete(record.id);
+    return evicted.map((record) => record.id);
+  }
+
   submit(command: TaskCommand): Promise<CommandResult> {
     const result: Promise<CommandResult> = this.#writeTail.then(() => this.#apply(command));
     this.#writeTail = result.then(

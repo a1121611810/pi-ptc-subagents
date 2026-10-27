@@ -125,6 +125,7 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
     let sessionEnding = false;
     let whyEnabledOverride: boolean | null = null;
     const whyEnabledPersisted = readWhyEnabledConfig(getAgentDir());
+    const traceRetention = readTraceRetentionConfig(getAgentDir());
     const agentDirs = {
       userDir: join(getAgentDir(), "agents"),
       projectDir: join(process.cwd(), ".pi", "agents"),
@@ -143,6 +144,10 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
         // BG-01：记录与产出一同落盘（项目级 .pi 目录；pi 的 sessionDir 不在扩展 API 上，此处取项目本地态）
         storageDir: join(process.cwd(), ".pi", "ptc-tasks"),
         output: new FileOutputStorage(join(process.cwd(), ".pi", "ptc-tasks")),
+        // 决策 29：痕迹保留配置（~/.pi/agent/ptc.json，clamp 校验）
+        terminalRecordKeep: traceRetention.keep,
+        archiveEnabled: traceRetention.archiveEnabled,
+        archiveTtlDays: traceRetention.ttlDays,
       },
       gates: [
         readOnlyGate,
@@ -285,6 +290,34 @@ function readWebSearchConfig(agentDir: string): { enabled: boolean; maxCalls: nu
     return { enabled: parsed.webDsSearch === true, maxCalls };
   } catch {
     return { enabled: false, maxCalls: 30 };
+  }
+}
+
+// 决策 29：任务痕迹保留配置——clamp 不 reject（越界夹取、坏值落默认）；archiveEnabled 仅显式 boolean 生效（默认 ON = 取证优先）
+function readTraceRetentionConfig(agentDir: string): {
+  keep: number;
+  archiveEnabled: boolean;
+  ttlDays: number;
+} {
+  const defaults = { keep: 500, archiveEnabled: true, ttlDays: 30 };
+  try {
+    const parsed = JSON.parse(readFileSync(join(agentDir, "ptc.json"), "utf8")) as {
+      taskTraceKeep?: unknown;
+      archiveEnabled?: unknown;
+      archiveTtlDays?: unknown;
+    };
+    const clampNum = (v: unknown, lo: number, hi: number, d: number): number =>
+      typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, Math.round(v))) : d;
+    return {
+      keep: clampNum(parsed.taskTraceKeep, 10, 10000, defaults.keep),
+      archiveEnabled:
+        typeof parsed.archiveEnabled === "boolean"
+          ? parsed.archiveEnabled
+          : defaults.archiveEnabled,
+      ttlDays: clampNum(parsed.archiveTtlDays, 1, 365, defaults.ttlDays),
+    };
+  } catch {
+    return defaults;
   }
 }
 
@@ -466,7 +499,9 @@ function registerTaskFace(
     parameters: Type.Object({ task_id: Type.String() }),
     defaultActive: false,
     execute: async (_id, args) => {
-      const record = session.registry.get(args.task_id);
+      // 决策 29：registry miss 回落压缩归档——记住的 id 在 TTL 窗口内仍可解（标 archived: true）
+      const record =
+        session.registry.get(args.task_id) ?? (await session.readArchivedRecord(args.task_id));
       if (!record) return textResult({ error: `unknown task id ${args.task_id}` });
       const outputBytes = await session.outputSize(args.task_id);
       if (outputBytes === undefined) return textResult(record);

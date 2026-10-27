@@ -30,9 +30,18 @@ pi 的扩展：PTC（模型写 TypeScript 程序批量调工具）+ 子代理派
 - 子进程/execArgv 的坑：worker 继承宿主 execArgv，`-e` 场景要剥 eval 系参数（已实现，别回退）；shell 传秘密给探针用 `VAR=$(...) cmd`（前缀式），`&&` 链不 export
 - pi 版本事实见 `docs/pi-version-matrix.md`（floor 0.86 / 当前 1.4.0；exposure getter、json 模式形状是已实测差异）
 
+## codegraph 使用约定（2026-10-27 实测）
+
+- 结构问题（X 怎么工作 / X 怎么调到 Y / 摸一片区域）**先 `mcp__codegraph__codegraph_explore`**，返回的源码视为已读，不要 grep 复核
+- 改符号前的精确调用方/传递影响面（符号级 + 行号）：`mcp__codegraph__codegraph_callers` / `codegraph_impact`（explore 只给 caller 计数，铁律场景用这两个）；掉线时 CLI `codegraph callers/impact <symbol>` 等价
+- 派发探索类子代理时，briefing 里写明「先 codegraph explore，结果视为已读」——否则子代理照旧逐文件读，图变纯开销（官方实测警告）
+- 索引不覆盖 `docs/prototypes/*.html` 与 ADR——spec 对质照旧读 HTML；散文文案查找用 Grep
+- 新文件 watcher 约 4s 进图（v1.6.2 实测），查不到先等再怀疑
+- 已知：kimi-code 启动 MCP 默认 30s 超时，codegraph 冷启动下载 bundle 会超时掉线（已在 `~/.kimi-code/mcp.json` 加 `startupTimeoutMs: 120000`）；掉线时 CLI 是全功能退路
+
 ## 干净室规则（旧 ADR-0002）
 
-旧分支（`main`、feat/258 等）的 `src/**` 实现源码**不许抄**；ADR、`docs/prototypes/*.html`、研究文档是合法输入。spec 是 `docs/prototypes/dispatch-doors-flow.html`（28 条决策，**决策 28：一个面一个编排器**——codemode_ptc 面上不注册 PTC 对，修订了 旧 ADR-0025 §3）。
+旧分支（`main`、feat/258 等）的 `src/**` 实现源码**不许抄**；ADR、`docs/prototypes/*.html`、研究文档是合法输入。spec 是 `docs/prototypes/dispatch-doors-flow.html`（29 条决策，**决策 28：一个面一个编排器**——codemode_ptc 面上不注册 PTC 对，修订了 旧 ADR-0025 §3；**决策 29：任务痕迹容量边界**——终态记录留最近 500 条，最老先出，未终态永不驱逐）。
 
 ## 文档地图
 

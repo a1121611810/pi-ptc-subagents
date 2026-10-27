@@ -45,4 +45,6 @@ export interface TaskRecord {
   outputPath?: string;
   /** 审计 F2：孩子 stdout 超尾部上限被截断——读者据此知道全貌不在 */
   outputTruncated?: boolean;
+  /** 决策 29：归档时刻（只存在于归档副本里；热存记录无此字段） */
+  archivedAt?: number;
 }
