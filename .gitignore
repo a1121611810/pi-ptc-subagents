@@ -11,6 +11,10 @@ coverage/
 # 详情文档的发布副本（源在 packages/routes/docs/routes，pack 时拷到包根）
 /docs/routes/
 
+# 站点构建时投影/拷贝的产物（源在仓库文档与 docs/prototypes，canonical 只有一份）
+packages/website/docs/
+packages/website/public/status/
+
 # ai-memory 长期记忆的 cwd 镜像页（canonical 在 ai-memory 自己的存储里，不许入库）
 /concepts/
 /gotchas/

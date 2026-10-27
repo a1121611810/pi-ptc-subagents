@@ -1,0 +1,50 @@
+# The site's five checks, on every pull request. Until this file existed the only place they ran
+# was `.github/workflows/pages.yml`, which triggers on a push to `main` — so a pull request that
+# turned one of them red merged cleanly and the failure surfaced afterwards as a failed deploy.
+# This is the same fix ADR-0018 § Consequences records for the test suite: move the gate to where
+# the change is made, not to where it is published.
+#
+# The command below is deliberately the *same command* `pages.yml` runs, rather than a subset
+# chosen for speed. Two sets — one guarding a merge, one guarding a deploy — can drift apart, and a
+# drift is a worse failure than the gap it replaced: it is silent, and it reintroduces the original
+# bug for whichever check fell out. Running the identical script makes the sets equal by
+# construction instead of by a second gate that would need its own counterfactual test.
+#
+# `pnpm --filter website run build` and not `… run check`: three of the five checks read
+# `.vitepress/dist` directly and a fourth reads `projected.json`, the manifest the projection step
+# writes. So `build` is the shortest command that gets all five, and it is the chain already
+# load-bearing in `pages.yml`.
+name: Website checks
+
+on:
+  pull_request:
+
+# Read access to clone, and nothing else. `pages.yml` needs `pages: write` and `id-token: write`
+# because it mints the OIDC token Pages deployment trusts; none of that is needed to run a check,
+# and a pull request — including one from a fork — must not reach those credentials.
+permissions:
+  contents: read
+
+# A newer commit to the same pull request makes this run's answer obsolete. Cancelling is safe
+# here precisely because this workflow has no side effect: it publishes nothing, so there is no
+# half-applied state to leave behind. (`pages.yml` must not cancel, for the same reason inverted.)
+concurrency:
+  group: website-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The site build IS the gate — VitePress fails on a dead link, so a broken link in a
+      # projected document can never reach a published page. Do not add `ignoreDeadLinks`.
+      - run: pnpm --filter @pi-ptc/website run build
