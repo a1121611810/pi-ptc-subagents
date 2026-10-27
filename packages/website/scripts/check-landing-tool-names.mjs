@@ -1,0 +1,265 @@
+#!/usr/bin/env node
+/**
+ * Gate: every tool name the landing page shows must be a tool this package
+ * actually registers.
+ *
+ * The failure this prevents is specific and has already happened in this
+ * repository's history: the README said one number of tools, the code shipped
+ * another, and nothing objected until a release check caught it. A marketing
+ * page is a worse place for that drift than a README, because a visitor has no
+ * way to check.
+ *
+ * What it reads, and why:
+ *   - the BUILT landing page, not the Vue source. The claim the reader sees is
+ *     the rendered one; asserting on the template would miss anything a build
+ *     step injects.
+ *   - the `name:` property of each tool definition anywhere under `packages/`, plus
+ *     tool-name constants (`TASK_BINDING_NAME = "pi_task_ptc"`). That literal is
+ *     where registration actually happens — the same source the route-registry
+ *     gates read at `tests/route-registry-gates.test.mjs`, at the other end of
+ *     the pipeline. Comments are stripped first, so prose that merely names a
+ *     tool cannot make this pass.
+ *
+ * It checks three directions, not one.
+ *
+ * 1. **Nothing invented.** Every `ptc_*` / `pi_task_*` / `web_ds_*` the page
+ *    shows must be registered. A visitor has no way to check a landing page, so
+ *    advertising something that does not exist is the dangerous direction.
+ * 2. **Nothing required is missing.** Every entry in MUST_APPEAR must appear on
+ *    the built page, so a redesign that quietly drops a tool fails the build.
+ * 3. **Nothing is unaccounted for.** Every registered name must be in
+ *    MUST_APPEAR **or** DECLARED_ABSENT, so adding a tool fails until someone
+ *    says which side it is on.
+ *
+ * Direction 3 is what this gate was missing, and it is deliberately **not**
+ * "the page must list every tool". `ptc_child_report` and `web_ds_search` are
+ * what a dispatched child registers (the parent session never has them); no
+ * reader of this package calls them directly. A literal two-way set comparison
+ * would have demanded the page mention them, encoding a wrong requirement as a
+ * check. The partition enforces the thing that actually drifts instead: a new
+ * tool nobody decided to advertise.
+ *
+ * Exit code is 1 on any failure, and every failure names what to change. A
+ * silent pass here would be indistinguishable from a pass.
+ */
+
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const HERE = fileURLToPath(new URL('.', import.meta.url));
+const REPO_ROOT = join(HERE, '..', '..', '..');
+const SRC_DIR = join(REPO_ROOT, 'packages');
+const BUILT_INDEX = join(HERE, '..', '.vitepress', 'dist', 'index.html');
+
+/** Names the landing page may use as a family, e.g. `ptc_task_*`. */
+const WILDCARD = /\*$/;
+
+/**
+ * What the landing page is required to show.
+ *
+ * A trailing `*` is a family claim and covers every registered name under it, so
+ * `ptc_task_*` stands for `ptc_task_list`, `ptc_task_output` and `ptc_task_stop`
+ * without listing them twice. Removing one of the three from the page does **not**
+ * fail the build; removing the family claim does.
+ */
+const MUST_APPEAR = ["ptc_run_code", "ptc_workflow", "pi_task_ptc", "pi_task_codemode", "ptc_task_*"];
+
+/**
+ * Registered tools the landing page deliberately does not mention, each with its reason.
+ *
+ * The reason is not decoration. An exclusion without one is how a tool stays invisible by
+ * accident, which is the drift this partition exists to prevent — so a future maintainer can
+ * tell "we decided this" from "nobody has looked".
+ */
+const DECLARED_ABSENT = new Map([
+  [
+    "ptc_child_report",
+    "what a dispatched child calls to return its report; it registers only inside the child " +
+      "process, no reader of this package calls it, and the landing page advertises the " +
+      "parent-side surface",
+  ],
+  [
+    "web_ds_search",
+    "search (DeepSeek) registers only inside a dispatched child, by design (ADR-0001/0049 — " +
+      "the judgment about a source stays with the worker that read it); the parent session " +
+      "never has this tool",
+  ],
+]);
+
+/** Recursively list .ts files under a directory. */
+function tsFiles(dir) {
+  const out = [];
+  for (const entry of readdirSync(dir).sort()) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) out.push(...tsFiles(full));
+    else if (full.endsWith('.ts')) out.push(full);
+  }
+  return out;
+}
+
+/**
+ * Strip comments before matching. Without this, a doc comment that quotes a
+ * tool name would register as a registration and the gate would stop meaning
+ * anything — it would pass on prose alone.
+ */
+function stripComments(text) {
+  return text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ');
+}
+
+/** The set of tool names this package defines. */
+function registeredToolNames() {
+  const names = new Set();
+
+  // Style 1 — the name inline in the tool definition object:
+  //   name: "ptc_run_code"
+  const inline = /\bname:\s*"((?:ptc|pi_task|web_ds)_[a-z0-9_]+)"/g;
+
+  // Style 2 — the name behind a constant, which is how `pi_task_ptc` is
+  // declared: `name: TASK_BINDING_NAME` over
+  // `export const TASK_BINDING_NAME = "pi_task_ptc"` (packages/ptc/src/task-binding.ts).
+  // Scanning only style 1 was a real bug in the old single-package tree: it found
+  // six tools and silently omitted a seventh that the page was entitled to name.
+  // The constant's declaration is the registration site in this shape.
+  //
+  // This widens the accepted set, which is the safe direction: a tool name
+  // that is declared but not wired up would pass this gate, whereas a tool
+  // that IS wired up but missed here would fail it and cry wolf.
+  const viaConstant = /\b[A-Z][A-Z0-9_]*\s*=\s*"((?:ptc|pi_task|web_ds)_[a-z0-9_]+)"/g;
+
+  for (const file of tsFiles(SRC_DIR)) {
+    const source = stripComments(readFileSync(file, 'utf8'));
+    for (const pattern of [inline, viaConstant]) {
+      for (const match of source.matchAll(pattern)) names.add(match[1]);
+    }
+  }
+  return names;
+}
+
+/**
+ * Every tool token visible in the rendered page, wildcards included.
+ *
+ * The trailing boundary is a negative lookahead rather than `\b`: a `\b` after
+ * an optional `*` backtracks — for `ptc_task_*` the engine drops the `*`, finds
+ * a word boundary between `_` and `*`, and reports the family as the truncated
+ * name `ptc_task_`. The gate caught that on its first run.
+ */
+function claimedToolNames(html) {
+  const text = html.replace(/<[^>]*>/g, ' ');
+  const claims = new Set();
+  for (const match of text.matchAll(/\b((?:ptc|pi_task|web_ds)_[a-z0-9_]+\*?)(?![a-z0-9_])/g)) {
+    claims.add(match[1]);
+  }
+  return claims;
+}
+
+/**
+ * Deterministic ordering. A bare `.sort()` orders by UTF-16 code unit, and
+ * `localeCompare` orders by the reader's locale — neither is what a gate's
+ * output should depend on, since a diffable log that reorders under a different
+ * machine is a log people stop reading.
+ */
+const byName = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+
+function main() {
+  let built;
+  try {
+    built = readFileSync(BUILT_INDEX, 'utf8');
+  } catch {
+    console.error(`✗ no built landing page at ${relative(REPO_ROOT, BUILT_INDEX)}`);
+    console.error('  This gate reads the build output, so it runs after `vitepress build`.');
+    process.exit(1);
+  }
+
+  const registered = registeredToolNames();
+  const claims = [...claimedToolNames(built)].sort(byName);
+
+  if (claims.length === 0) {
+    console.error('✗ the landing page names no tools at all — the gate has nothing to check.');
+    console.error('  That means the extraction broke, not that the page is honest.');
+    process.exit(1);
+  }
+
+  const unbacked = claims.filter((claim) =>
+    WILDCARD.test(claim)
+      ? ![...registered].some((name) => name.startsWith(claim.slice(0, -1)))
+      : !registered.has(claim)
+  );
+
+  if (unbacked.length > 0) {
+    console.error('✗ the landing page advertises tools this package does not register:\n');
+    for (const claim of unbacked) console.error(`   ${claim}`);
+    console.error(`\n  registered: ${[...registered].sort(byName).join(', ')}`);
+    process.exit(1);
+  }
+
+  // Direction 2 — a required name the page stopped showing.
+  const missing = MUST_APPEAR.filter(
+    (required) =>
+      !claims.some((claim) =>
+        WILDCARD.test(required)
+          ? claim === required || claim.startsWith(required.slice(0, -1))
+          : claim === required,
+      ),
+  );
+
+  if (missing.length > 0) {
+    console.error('✗ the landing page no longer shows a tool it is required to show:\n');
+    for (const name of missing) console.error(`   ${name}`);
+    console.error(
+      '\n  Either the page should name it, or it is no longer required — in which case it\n' +
+        '  comes out of MUST_APPEAR here. Removing it from the page and from MUST_APPEAR in\n' +
+        '  the same change is a decision; removing it from the page alone is drift.',
+    );
+    process.exit(1);
+  }
+
+  // Direction 3 — a registered tool that neither set accounts for.
+  const unaccounted = [...registered]
+    .filter(
+      (name) =>
+        !DECLARED_ABSENT.has(name) &&
+        !MUST_APPEAR.some((required) =>
+          WILDCARD.test(required) ? name.startsWith(required.slice(0, -1)) : name === required,
+        ),
+    )
+    .sort(byName);
+
+  if (unaccounted.length > 0) {
+    console.error(
+      `✗ ${unaccounted.length} registered tool(s) are neither required on the landing page ` +
+        `nor declared absent:\n`,
+    );
+    for (const name of unaccounted) console.error(`   ${name}`);
+    console.error(
+      '\n  A new tool has to be decided: add it to MUST_APPEAR to advertise it, or to\n' +
+        '  DECLARED_ABSENT with a reason if the page should not mention it. Both are\n' +
+        '  decisions; landing in neither is the drift this check exists to catch.',
+    );
+    process.exit(1);
+  }
+
+  // An exclusion naming a tool that no longer exists is a stale record, not a spare.
+  const stale = [...DECLARED_ABSENT.keys()]
+    .filter((name) => !registered.has(name))
+    .sort(byName);
+
+  if (stale.length > 0) {
+    console.error('✗ DECLARED_ABSENT names tools this package does not register:\n');
+    for (const name of stale) console.error(`   ${name}`);
+    console.error(
+      '\n  The tool was removed or renamed. Delete the exclusion in the same commit that\n' +
+        '  removed the tool — a spare exclusion hides the next rename.',
+    );
+    process.exit(1);
+  }
+
+  console.log(
+    `✓ landing page tool names — ${claims.length} claim(s) against ${registered.size} ` +
+      `registered tool(s); ${MUST_APPEAR.length} required, ` +
+      `${DECLARED_ABSENT.size} declared absent, 0 unaccounted`,
+  );
+  for (const claim of claims) console.log(`    ${claim}`);
+}
+
+main();

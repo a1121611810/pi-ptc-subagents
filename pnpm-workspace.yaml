@@ -23,6 +23,9 @@ minimumReleaseAge: 0
 
 # pi 的传递依赖带 install/postinstall 脚本（@google/genai、protobufjs）。它们对本扩展
 # 无用；pnpm 12 用 `allowBuilds` 显式声明「审阅过、不跑」（`onlyBuiltDependencies` 已移除）。
+# esbuild 是 vitepress→vite 的传递依赖：postinstall 只为兼容旧平台下载二进制，现代平台走
+# optionalDependencies 预置二进制，脚本可省（旧仓同款处置）。
 allowBuilds:
   "@google/genai": false
   protobufjs: false
+  esbuild: false
