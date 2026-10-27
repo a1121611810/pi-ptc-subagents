@@ -31,10 +31,27 @@ interface MemoryEntry {
 
 export function createSearchMemory(): SearchMemory {
   const entries: MemoryEntry[] = [];
+  // 审计 F5：非搜索结果 URL 的兜底桶——直接 open 的页没有搜索条目可挂，正文存这里（lookup 两桶都查）
+  const looseTexts = new Map<string, string>();
+  let looseChars = 0;
   let totalChars = 0;
 
   const trim = () => {
-    while (entries.length > SEARCH_MEMORY_MAX_ENTRIES || totalChars > SEARCH_MEMORY_MAX_CHARS) {
+    while (totalChars > SEARCH_MEMORY_MAX_CHARS) {
+      // 超字符预算先淘汰兜底桶最老的（直接 open 的正文是大头；桶空才动搜索条目）
+      const oldest = looseTexts.keys().next();
+      if (!oldest.done) {
+        const len = looseTexts.get(oldest.value)?.length ?? 0;
+        looseChars -= len;
+        totalChars -= len;
+        looseTexts.delete(oldest.value);
+        continue;
+      }
+      const evicted = entries.shift();
+      if (!evicted) break;
+      totalChars -= evicted.chars;
+    }
+    while (entries.length > SEARCH_MEMORY_MAX_ENTRIES) {
       const evicted = entries.shift();
       if (!evicted) break;
       totalChars -= evicted.chars;
@@ -57,12 +74,21 @@ export function createSearchMemory(): SearchMemory {
         trim();
         return;
       }
+      // F5：搜索结果里没这个 URL——进兜底桶（覆盖同 key 先回吐旧账）
+      looseChars -= looseTexts.get(url)?.length ?? 0;
+      looseTexts.set(url, text);
+      looseChars += text.length;
+      totalChars += text.length;
+      trim();
     },
     lookup(url) {
       for (let i = entries.length - 1; i >= 0; i--) {
         for (const [stored, text] of entries[i]!.textByUrl) {
           if (urlsLooselyEqual(stored, url)) return text;
         }
+      }
+      for (const [stored, text] of [...looseTexts].reverse()) {
+        if (urlsLooselyEqual(stored, url)) return text;
       }
       return undefined;
     },
