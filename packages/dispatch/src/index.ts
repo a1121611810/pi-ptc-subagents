@@ -19,7 +19,7 @@ export type { AgentResolver, DispatchInput, Gate, TaskRejection } from "./gates.
 export { FileOutputStorage, InMemoryOutputStorage } from "./output-storage.ts";
 export type { OutputStorage } from "./output-storage.ts";
 export { buildPiArgv, spawnChild } from "./child-process.ts";
-export { findAgent, listAgentNames, parseAgentMarkdown } from "./agent-discovery.ts";
+export { findAgent, parseAgentMarkdown } from "./agent-discovery.ts";
 export type { AgentDefinition } from "./agent-discovery.ts";
 export { parseChildStream } from "./jsonl.ts";
 export { NOTIFICATION_BATCH_MAX_BYTES, NotificationCenter } from "./notifications.ts";

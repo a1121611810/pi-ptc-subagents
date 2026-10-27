@@ -8,7 +8,7 @@ export const DEFAULT_LIMITS = {
   maxParallelSubCalls: 10, // 同时执行的绑定调用上限（DSH 2026-07-26）
   poolSize: 4, // warm 池（落地后启用）
   poolAcquireTimeoutMs: 30_000,
-  drainGraceMs: 5_000,
+  // 旧 ADR-0017 的有界 drain（等在飞 worker 自我释放，上限 drainGraceMs）未移植：新 pool 靠 dispatcher 的 timeout 兜底
 } as const;
 
 // 调用方请求的超时只能往下调，不能突破上限

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 // 旧 ADR-0039/0032：agent 定义发现——<dir>/<name>.md + 极简 frontmatter（--- 包围的 key: value 行）
@@ -63,15 +63,4 @@ export function findAgent(
     if (existsSync(path)) return parseAgentMarkdown(path, name);
   }
   return null;
-}
-
-export function listAgentNames(dirs: AgentDirs, scope: AgentScope = "both"): string[] {
-  const names = new Set<string>();
-  for (const dir of scopedDirs(dirs, scope)) {
-    if (!existsSync(dir)) continue;
-    for (const file of readdirSync(dir)) {
-      if (file.endsWith(".md")) names.add(file.slice(0, -3));
-    }
-  }
-  return [...names];
 }
