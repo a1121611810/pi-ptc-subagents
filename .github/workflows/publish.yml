@@ -45,6 +45,7 @@ jobs:
       - run: pnpm run lint
       - run: pnpm run fmt:check
       - run: pnpm run build
+      - run: pnpm run test
       # No `--provenance` flag: under trusted publishing npm generates the attestation
       # automatically once the source repository is public. Verbose is the level at
       # which npm reports the OIDC exchange, so the release log records it.
