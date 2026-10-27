@@ -48,6 +48,7 @@ pi 的扩展：PTC（模型写 TypeScript 程序批量调工具）+ 子代理派
 - `docs/prototypes/dispatch-doors-flow.html` — spec/决策（改动语义前先对质它）
 - `docs/prototypes/ptc-runtime-status.html` / `dispatch-engine-status.html` — 两包现状全景（已做/未做/验证基线）
 - `docs/adr/` — 决策记录 16 份（0001–0016，0001–0015 于 2026-10-26 重排）；旧实现的 0001–0046 / 0062–0065 归档在 `backup/main-legacy-20261026` 分支，文中引用写作「旧 ADR-xxxx」
+- `GLOSSARY.md` — 领域词表（词汇随 ADR/spec 走；写 issue/提案/测试名时用这里的词）
 - `docs/research/` — 历史证据笔记（含旧实现时期的研究；其中的 ADR 引用按旧编号）
 - `docs/pi-version-matrix.md` — pi 版本兼容矩阵
 
@@ -63,3 +64,17 @@ pi 的扩展：PTC（模型写 TypeScript 程序批量调工具）+ 子代理派
 测试框架（探针转正 + 机械强制点门禁）· floor 三处考古（executeTool / json 模式形状 / exposure）· 发布包不带 dts（6.0.1 起详情指针随包发布并解析到安装目录）。详见 dispatch 状态页横幅。
 
 已知小拧（记录在案）：pid 复用误判窗口（旧 ADR-0023 原样接受）；`-p` 模式通知进不进模型上下文未实测。
+
+## Agent skills
+
+### Issue tracker
+
+Issue 走 GitHub Issues，一律用 `gh` CLI（远端 `a1121611810/pi-ptc-subagents`，已登录）。详见 `docs/agents/issue-tracker.md`。
+
+### Triage labels
+
+五个标准 triage 标签原样使用：`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`。详见 `docs/agents/triage-labels.md`。
+
+### Domain docs
+
+单上下文布局：根目录一个 `GLOSSARY.md`（已建，词汇随 ADR/spec 走）+ 根目录 `docs/adr/`（已有 0001–0016）。详见 `docs/agents/domain.md`。
