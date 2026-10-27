@@ -13,11 +13,12 @@ export function sanitizeText(text: string): string {
   return stripAnsi(text.replace(/\r/g, ""));
 }
 
-const MAX_LINE_CHARS = 200; // 旧 ADR-0015 §3：行内上限保留本地字符级实现
+// 行内上限引用冻结契约（ADR-0016）：改值走 ADR，不许再本地化
+const MAX_LINE_CHARS = RENDER_BOUNDS.VALUE_TREE_MAX_LINE_CHARS;
 
-export function truncateLine(line: string): string {
-  if (line.length <= MAX_LINE_CHARS) return line;
-  let cut = MAX_LINE_CHARS;
+export function truncateLine(line: string, maxChars: number = MAX_LINE_CHARS): string {
+  if (line.length <= maxChars) return line;
+  let cut = maxChars;
   while (cut > 0 && (line.charCodeAt(cut) & 0xfc00) === 0xdc00) cut--; // 不切半个代理对
   return `${line.slice(0, cut)}…`;
 }
@@ -36,23 +37,36 @@ export function renderModelValue(value: unknown, depth = 0, seen = new WeakSet<o
     seen.add(value);
   }
   if (Array.isArray(value)) {
+    // 审计 F7 / ADR-0016：每层子项上限——超大数组只渲染前 N 个，余量明说
+    const shown = value.slice(0, RENDER_BOUNDS.VALUE_TREE_MAX_CHILDREN);
+    const rest = value.length - shown.length;
+    const oneLine = `[${shown.map((v) => JSON.stringify(v)).join(", ")}]`;
     const rendered =
       value.length === 0
         ? "[]"
-        : value.every((v) => primitive(v))
-          ? `[${value.map((v) => JSON.stringify(v)).join(", ")}]`
-          : `[\n${value.map((v) => `${pad}  ${truncateLine(renderModelValue(v, depth + 1, seen))}`).join(",\n")}\n${pad}]`;
+        : rest === 0 && shown.every((v) => primitive(v)) && oneLine.length <= MAX_LINE_CHARS
+          ? oneLine
+          : `[\n${shown
+              .map((v) => truncateLine(`${pad}  ${renderModelValue(v, depth + 1, seen)}`))
+              .join(",\n")}${rest > 0 ? `,\n${pad}  …（余 ${rest} 项）` : ""}\n${pad}]`;
     seen.delete(value);
     return rendered;
   }
   if (value !== null && typeof value === "object") {
     const entries = Object.entries(value as Record<string, unknown>);
+    const shown = entries.slice(0, RENDER_BOUNDS.VALUE_TREE_MAX_CHILDREN);
+    const rest = entries.length - shown.length;
+    const oneLine = `{ ${shown.map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join(", ")} }`;
     const rendered =
       entries.length === 0
         ? "{}"
-        : entries.every(([, v]) => primitive(v))
-          ? `{ ${entries.map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join(", ")} }`
-          : `{\n${entries.map(([k, v]) => `${pad}  ${k}: ${truncateLine(renderModelValue(v, depth + 1, seen))}`).join(",\n")}\n${pad}}`;
+        : rest === 0 && shown.every(([, v]) => primitive(v)) && oneLine.length <= MAX_LINE_CHARS
+          ? oneLine
+          : `{\n${shown
+              .map(([k, v]) =>
+                truncateLine(`${pad}  ${k}: ${renderModelValue(v, depth + 1, seen)}`),
+              )
+              .join(",\n")}${rest > 0 ? `,\n${pad}  …（余 ${rest} 项）` : ""}\n${pad}}`;
     seen.delete(value);
     return rendered;
   }

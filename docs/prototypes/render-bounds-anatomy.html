@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RENDER_BOUNDS 五项解剖 · 一次性图解</title>
+<style>
+  :root {
+    --wired: #1a7f37;    /* 已接线 */
+    --half: #b35900;     /* 半接线（F7 修） */
+    --placeholder: #6e56cf; /* 占位未建 */
+    --dropped: #8b949e;  /* 重写未登记 */
+    --ink: #1a1d23;
+    --line: #d7dae0;
+    --bg: #f7f8fa;
+    --term: #111418;
+    --term-ink: #d6deeb;
+    --accent: #e5484d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 28px 60px;
+    font: 14px/1.6 -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+    color: var(--ink); background: var(--bg);
+  }
+  .banner {
+    background: #fff7e8; border: 1px solid #ffd591; color: #ad4e00;
+    border-radius: 8px; padding: 8px 14px; margin-bottom: 16px; font-size: 13px;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: #5c6470; margin: 0 0 18px; max-width: 1100px; }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12.5px; margin-bottom: 18px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+
+  .cols { display: flex; gap: 20px; align-items: stretch; flex-wrap: wrap; }
+  .col { flex: 1 1 430px; min-width: 380px; }
+  .col h2 { font-size: 15px; margin: 0 0 8px; }
+  .term {
+    background: var(--term); color: var(--term-ink);
+    border-radius: 10px; padding: 14px 16px;
+    font: 12.5px/1.75 "SF Mono", Menlo, Consolas, monospace;
+    overflow-x: auto; white-space: pre; position: relative;
+  }
+  .term .dim { color: #7d8590; }
+  .tag {
+    display: inline-block; font: 700 10.5px/1.4 -apple-system, "PingFang SC", sans-serif;
+    border-radius: 4px; padding: 0 6px; vertical-align: 1px; margin-left: 6px;
+  }
+  .tag.wired { background: var(--wired); color: #fff; }
+  .tag.half { background: var(--half); color: #fff; }
+  .tag.placeholder { background: var(--placeholder); color: #fff; }
+  .tag.dropped { background: var(--dropped); color: #fff; }
+  .note { font-size: 12.5px; color: #5c6470; margin: 8px 0 0; }
+
+  table { border-collapse: collapse; width: 100%; background: #fff; margin-top: 24px; font-size: 13px; }
+  th, td { border: 1px solid var(--line); padding: 7px 10px; text-align: left; vertical-align: top; }
+  th { background: #eef1f4; font-size: 12.5px; }
+  code { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px; background: #f2f4f7; padding: 1px 5px; border-radius: 4px; }
+  td.st { white-space: nowrap; font-weight: 600; }
+  .st.wired { color: var(--wired); } .st.half { color: var(--half); }
+  .st.placeholder { color: var(--placeholder); } .st.dropped { color: var(--dropped); }
+  .foot { margin-top: 16px; font-size: 12px; color: #8b949e; max-width: 1100px; }
+</style>
+</head>
+<body>
+
+<div class="banner">⚠️ 一次性图解——回答一个问题：RENDER_BOUNDS 里没人引用的五项，各自绑定的是什么 UI 特性。左 = 旧实现富行 renderer（旧 ADR-0013 §6 的完整折叠契约）；右 = 重写版现行 renderer（有意简化）。</div>
+
+<h1>RENDER_BOUNDS 五项解剖：常量 → UI 部位 → 接线状态</h1>
+<p class="sub">看图方式：彩色标签钉在终端 mockup 的具体部位上，标签文字就是常量名和值。绿的已接线、橙的 F7 修、紫的占位等特性、灰的重写版连登记都没登记。</p>
+
+<div class="legend">
+  <span><i class="sw" style="background:var(--wired)"></i>已接线（现行 renderer 在用）</span>
+  <span><i class="sw" style="background:var(--half)"></i>半接线 / 数值漂移（F7 修）</span>
+  <span><i class="sw" style="background:var(--placeholder)"></i>占位未建（重写 renderer 没这部位）</span>
+  <span><i class="sw" style="background:var(--dropped)"></i>重写未登记（旧表有、新表没收）</span>
+</div>
+
+<div class="cols">
+
+  <!-- 左：旧富行 -->
+  <div class="col">
+    <h2>① 旧实现 · 富行 renderer（src/tools/render.ts，1400+ 行）</h2>
+    <div class="term"><span class="dim"># 折叠态（标题行 = 标题 + 值提示 + 统计）</span>
+PTC  Verify inserted temp image file integrity
+  <span style="color:#7ee787">→ {file, clipNow}</span>                    <span class="dim">• 6 output lines · 536ms</span>
+     <span class="tag placeholder">MAX_RESULT_HINT_CHARS=60 值提示/内联切换</span>
+
+<span class="dim"># 折叠态 · 失败时（错误首行直接上折叠行）</span>
+PTC  跑程序  <span style="color:#ffa198">failed: spawn error: ENOENT, no such file or dir…</span>
+     <span class="tag placeholder">MAX_ERROR_CHARS=120 错误首行截断</span>
+
+<span class="dim"># 展开态（程序代码走独立 code 块）</span>
+  <span style="color:#79c0ff">code</span> │ const r = await tools.pi_task_ptc(…)
+         │ return r.report?.summary
+         │ <span class="dim">…（共 47 行）</span>
+     <span class="tag placeholder">MAX_CODE_LINES_EXPANDED=3</span>
+
+<span class="dim"># 展开态（文本块：log / out / 失败详情）</span>
+  <span style="color:#79c0ff">log</span>  │ [phase] 开始抓取…
+         │ [phase] 完成，耗时 536ms
+     <span class="tag wired">MAX_LOG_LINES_EXPANDED=12 ✓ 唯一被重写版接线的</span>
+
+<span class="dim"># 展开态 · workflow 专属（阶段汇总 + 漂移警告 + 子调用树）</span>
+  phases │ <span class="dim">抓取 · 清洗 · 汇总（≤8 个）</span>
+     <span class="tag dropped">MAX_PHASES_EXPANDED=8（重写未登记）</span>
+  warn   │ <span class="dim">计划漂移：跳过第 3 步（≤4 条）</span>
+     <span class="tag dropped">MAX_WARNINGS_EXPANDED=4（重写未登记）</span>
+  calls  │ pi_task_ptc({ task: "审计鉴权代码", wait: true })
+     <span class="tag dropped">MAX_SUBCALL_PREVIEW_CHARS=40（重写未登记；SubCallTracker 数据在、树渲染未建）</span></div>
+    <p class="note">旧 ADR-0013 §6：这张八上限表是<strong>冻结契约</strong>——"changing any one of them is a behaviour change and needs a new ADR"。重写版 renderer 是<strong>有意简化</strong>的另一个设计，所以左边紫色/灰色的部位整个不存在。</p>
+  </div>
+
+  <!-- 右：重写简行 -->
+  <div class="col">
+    <h2>② 重写版 · 简行 renderer（ptc/render.ts，68 行）</h2>
+    <div class="term"><span class="dim"># 折叠态（标题 + 状态 flag，就这些）</span>
+跑程序 · workflow · 审计鉴权代码
+fulfilled · 已截断 · 全文在 /tmp/pi-ptc-….txt
+
+<span class="dim"># 对照左边：没有的部位</span>
+<span class="dim">× 值提示位（→ 没有东西可截，MAX_RESULT_HINT_CHARS 空转）</span>
+<span class="dim">× 错误首行（折叠态只显示 "rejected" 单词）</span>
+<span class="dim">× code 块（代码没有独立渲染，混在文本里）</span>
+<span class="dim">× phases / warn / calls 行（数据层部分在，渲染没建）</span>
+
+<span class="dim"># 展开态（纯文本块）</span>
+  [phase] 开始抓取…
+  [phase] 完成
+     <span class="tag wired">MAX_LOG_LINES_EXPANDED=12 ✓ 接线</span>
+
+<span class="dim"># 模型面排版 · 值树（renderModelValue，tui/text.ts）</span>
+  程序返回值排成可读树：
+    深度 ≤4 <span class="tag wired">VALUE_TREE_MAX_DEPTH=4 ✓ 接线</span>
+    每层子项 <span style="color:#ffb224">10 万个也全渲染</span> <span class="tag half">VALUE_TREE_MAX_CHILDREN=6 未接（=F7）</span>
+    单行宽 <span style="color:#ffb224">本地常量 200</span> <span class="tag half">契约 120 未接且数值漂移（=F7）</span></div>
+    <p class="note">重写版登记的 7 个常量是<strong>一张有意的裁剪表</strong>：旧表收 4 项、新增 3 项值树。橙色两项是"特性在、上限没接"——F7 就是把它们接上（同时把 200 改回契约 120）。</p>
+  </div>
+
+</div>
+
+<h2 style="font-size:15px;margin:26px 0 8px">登记表总览（旧表 8 项 + 新表 7 项对齐）</h2>
+<table>
+  <thead><tr><th style="width:24%">常量</th><th style="width:30%">绑定的 UI 部位</th><th style="width:13%">旧表</th><th style="width:13%">新表</th><th style="width:20%">状态</th></tr></thead>
+  <tbody>
+    <tr><td><code>MAX_LOG_LINES_EXPANDED</code> = 12</td><td>展开态文本块行数</td><td>✓</td><td>✓</td><td class="st wired">已接线（两版唯一共同项）</td></tr>
+    <tr><td><code>VALUE_TREE_MAX_DEPTH</code> = 4</td><td>值树嵌套深度</td><td>—</td><td>✓</td><td class="st wired">已接线（重写新增）</td></tr>
+    <tr><td><code>VALUE_TREE_MAX_CHILDREN</code> = 6</td><td>值树每层子项数</td><td>—</td><td>✓</td><td class="st half">半接线 → F7 兑现</td></tr>
+    <tr><td><code>VALUE_TREE_MAX_LINE_CHARS</code> = 120</td><td>值树单行宽（实现却用 200）</td><td>—</td><td>✓</td><td class="st half">漂移 → F7 修</td></tr>
+    <tr><td><code>MAX_RESULT_HINT_CHARS</code> = 60</td><td>折叠行值提示</td><td>✓</td><td>✓</td><td class="st placeholder">占位：特性未建</td></tr>
+    <tr><td><code>MAX_ERROR_CHARS</code> = 120</td><td>折叠行错误首行</td><td>✓</td><td>✓</td><td class="st placeholder">占位：特性未建</td></tr>
+    <tr><td><code>MAX_CODE_LINES_EXPANDED</code> = 3</td><td>展开态代码块行数</td><td>✓</td><td>✓</td><td class="st placeholder">占位：特性未建</td></tr>
+    <tr><td><code>MAX_CODE_LINE_CHARS</code> = 120</td><td>代码块单行宽</td><td>✓</td><td>—</td><td class="st dropped">重写未登记</td></tr>
+    <tr><td><code>MAX_PHASES_EXPANDED</code> = 8</td><td>workflow 阶段汇总行</td><td>✓</td><td>—</td><td class="st dropped">重写未登记（workflow.phase 数据在）</td></tr>
+    <tr><td><code>MAX_WARNINGS_EXPANDED</code> = 4</td><td>计划漂移警告行</td><td>✓</td><td>—</td><td class="st dropped">重写未登记（计划检测都没有）</td></tr>
+    <tr><td><code>MAX_SUBCALL_PREVIEW_CHARS</code> = 40</td><td>子调用树参数预览</td><td>✓</td><td>—</td><td class="st dropped">重写未登记（SubCall 数据在、树未建）</td></tr>
+  </tbody>
+</table>
+
+<div class="foot">处置（2026-10-27 更新）：富行三项（值提示/错误首行/code 块）经 <strong>ADR-0016</strong> 正式除名——重写版 renderer 有意简化，部位不存在；值树两项保留在册，<strong>已由审计 F7 接线</strong>（每层子项截断 + "余 N 项"标记，text.ts 本地 200 改回契约 120，探针过）。本图是除名前的解剖记录，保留作证据。</div>
+
+</body>
+</html>

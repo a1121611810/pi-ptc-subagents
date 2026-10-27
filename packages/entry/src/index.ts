@@ -98,7 +98,7 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
     // ADR-0015：<ptc> 常驻索引进系统提示词；渲染输入 = 册子 + surface + 详情目录 + 总则句开关——中途 /ptc mode 会废一次提示词缓存（决策 5 例外，见 ADR-0015 修订）
     pi.on("before_agent_start", (event) => {
       applyMode();
-      applyTaskFaceVisibility(pi, session); // resume 重置后任务面可见性再对齐（幂等）
+      applyTaskFaceVisibility(); // resume 重置后任务面可见性再对齐（幂等）
       // floor 版本事件形状未实测：缺 sections 就跳过注入，别让每个 turn 抛 TypeError
       const sections = event.systemPromptOptions?.sections;
       if (sections) sections["ptc"] = renderRouteIndex(surface, detailDir, modeActive);
@@ -131,9 +131,27 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
       projectDir: join(process.cwd(), ".pi", "agents"),
     };
     let session: PtcSession;
+    // 决策 5 的可见性对齐。审计 F9：只撤「本会话自己加的」——用户 loadout 自己固定的任务面工具不动
+    const faceAddedByUs = new Set<string>();
+    const applyTaskFaceVisibility = (): void => {
+      const active = pi.getActiveTools();
+      const has = session.faceVisible();
+      const present = TASK_FACE_NAMES.filter((name) => active.includes(name));
+      if (has && present.length === 0) {
+        pi.setActiveTools([...active, ...TASK_FACE_NAMES]);
+        for (const name of TASK_FACE_NAMES) faceAddedByUs.add(name);
+        return;
+      }
+      if (!has && present.length > 0) {
+        const ours = present.filter((name) => faceAddedByUs.has(name));
+        if (ours.length === 0) return;
+        pi.setActiveTools(active.filter((name) => !ours.includes(name)));
+        for (const name of ours) faceAddedByUs.delete(name);
+      }
+    };
     // 决策 5：registry 每次变迁同步任务面可见性（构造时挂监听器，闭包延迟取 session）
     session = assemblePtcSession({
-      onTransition: () => applyTaskFaceVisibility(pi, session),
+      onTransition: () => applyTaskFaceVisibility(),
       whyEnabled: () => whyEnabledOverride ?? whyEnabledPersisted,
       engine: {
         notifications,
@@ -218,7 +236,7 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
       }
     };
     registerTaskFace(registerTracked, session, surface);
-    applyTaskFaceVisibility(pi, session);
+    applyTaskFaceVisibility();
     // 工具执行上下文：程序内 tools.* 的通道（pi 1.4.0 把 executeTool 放在 ExtensionToolContext 上）
     let toolContext: ExtensionToolContext | undefined;
     // 绑定表按每次程序运行时重建：老版本（0.86/0.87）在 session_start 时活跃表还没成型，
@@ -267,15 +285,6 @@ function readWhyEnabledConfig(agentDir: string): boolean {
   } catch {
     return true;
   }
-}
-
-function applyTaskFaceVisibility(pi: ExtensionAPI, session: PtcSession): void {
-  const active = pi.getActiveTools();
-  const has = session.faceVisible();
-  const present = TASK_FACE_NAMES.filter((name) => active.includes(name));
-  if (has && present.length === 0) pi.setActiveTools([...active, ...TASK_FACE_NAMES]);
-  if (!has && present.length > 0)
-    pi.setActiveTools(active.filter((name) => !TASK_FACE_NAMES.includes(name)));
 }
 
 // ADR-0002：webDsSearch 开关 fail-closed（默认关）；凭据按 pi 同款语义三级解析（auth.json → models.json → env）

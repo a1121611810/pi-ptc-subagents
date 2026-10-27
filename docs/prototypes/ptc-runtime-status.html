@@ -130,7 +130,7 @@
         <div class="arr">→</div>
         <div class="node done"><div class="t"><span class="mark">✓</span>截断契约</div><div class="d">旧 ADR-0015：50KB/2000 行 + 全文临时文件 + 尾注</div></div>
         <div class="arr">→</div>
-        <div class="node done"><div class="t"><span class="mark">✓</span>渲染预算表</div><div class="d">旧 ADR-0013 §6：七个冻结常量唯一持有</div></div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>渲染预算表</div><div class="d">现行 renderer 的冻结常量唯一持有（ADR-0016 裁自旧 ADR-0013 §6：四项在册，富行三项正式除名）</div></div>
         <div class="arr">→</div>
         <div class="node partial"><div class="t"><span class="mark">◐</span>TUI 行渲染</div><div class="d">ptc 两工具 renderResult 已挂（折叠/展开/运行中）；shimmer 与各包 renderer 未写</div></div>
       </div>
@@ -169,7 +169,7 @@
       <tr><td>floor 0.86 binding 通道</td><td>binding 走 <code>ctx.executeTool</code>（pi 1.x）；floor 上程序内调不了内置工具；旧实现在 floor 能跑的机制<b>未考古</b></td><td><span class="st partial">◐</span></td><td>查 pi 0.86 API（矩阵文档待测节）</td></tr>
       <tr><td>池的 runGeneration 防护</td><td>reset 握手已覆盖正确性；「迟到帧/supersede」边角没做</td><td><span class="st partial">◐</span></td><td>边角，需求出现再补</td></tr>
       <tr><td>drain 的 grace 等待</td><td>drain 已改为「杀当代空闲 worker、下轮 acquire 起新一代」（rearm）；在跑 run 靠自身 timeout 兜底——真 pi 冒烟中由模型捉出并修复了「drain 后池永久封死」</td><td><span class="st partial">◐</span></td><td>旧 ADR-0017 W-1 · 已修 rearm</td></tr>
-      <tr><td>渲染预算第 8 项</td><td>bounds.ts 登记了 ADR 点名的 7 个上限；旧实现「八上限」的第 8 个 ADR 摘要未写名</td><td><span class="st partial">◐</span></td><td>有 renderer 时补登（须走新 ADR）</td></tr>
+      <tr><td>渲染预算（ADR-0016，2026-10-27）</td><td><code>RENDER_BOUNDS</code> 四项在册且<b>全部接线</b>：LOG_LINES 12；值树 DEPTH 4 / CHILDREN 6 / LINE_CHARS 120（F7 已接——每层子项截断 + "余 N 项"标记，text.ts 本地 200 已删）；富行三项（值提示/错误首行/code 块）随旧 renderer 退役正式除名</td><td><span class="st done">✓</span></td><td>ADR-0016 · 探针过</td></tr>
     </tbody>
   </table>
 

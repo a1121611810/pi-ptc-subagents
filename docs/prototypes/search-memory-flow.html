@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>搜索记忆 F5 流程图解 · 一次性</title>
+<style>
+  :root {
+    --ok: #1a7f37;
+    --bad: #e5484d;
+    --quota: #b35900;
+    --ink: #1a1d23;
+    --line: #d7dae0;
+    --bg: #f7f8fa;
+    --term: #111418;
+    --term-ink: #d6deeb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 28px 60px;
+    font: 14px/1.65 -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+    color: var(--ink); background: var(--bg);
+  }
+  .banner {
+    background: #fff7e8; border: 1px solid #ffd591; color: #ad4e00;
+    border-radius: 8px; padding: 8px 14px; margin-bottom: 16px; font-size: 13px;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: #5c6470; margin: 0 0 18px; max-width: 1050px; }
+  .cols { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+  .col { flex: 1 1 470px; min-width: 400px; }
+  .col h2 { font-size: 15px; margin: 0 0 8px; }
+  .term {
+    background: var(--term); color: var(--term-ink);
+    border-radius: 10px; padding: 14px 16px;
+    font: 12.5px/1.8 "SF Mono", Menlo, Consolas, monospace;
+    white-space: pre; overflow-x: auto;
+  }
+  .dim { color: #7d8590; }
+  .ok { color: #7ee787; }
+  .bad { color: #ffa198; }
+  .quota { color: #ffb224; }
+  .step { color: #79c0ff; }
+  .term .arr { color: #d2a8ff; }
+  .pill {
+    display: inline-block; font: 700 10.5px/1.5 -apple-system, "PingFang SC", sans-serif;
+    border-radius: 999px; padding: 0 8px; vertical-align: 1px; margin-left: 6px; color: #fff;
+  }
+  .pill.ok { background: var(--ok); }
+  .pill.bad { background: var(--bad); }
+  .pill.quota { background: var(--quota); }
+  .note { font-size: 12.5px; color: #5c6470; margin: 8px 0 0; }
+
+  .struct {
+    background: #fff; border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 18px; margin-top: 22px; font-size: 13px;
+  }
+  .struct h2 { font-size: 15px; margin: 0 0 10px; }
+  .struct pre {
+    font: 12.5px/1.7 "SF Mono", Menlo, Consolas, monospace;
+    background: #f2f4f7; border-radius: 8px; padding: 12px 14px; overflow-x: auto; margin: 0;
+  }
+  .fix {
+    background: #eaf7ee; border: 1px solid #9fd6ae; border-radius: 10px;
+    padding: 12px 16px; margin-top: 18px; font-size: 13px;
+  }
+  .fix b { color: var(--ok); }
+</style>
+</head>
+<body>
+
+<div class="banner">⚠️ 一次性图解——回答：搜索记忆的 F5 缺陷是怎么回事。左 = 从搜索结果来的页面（设计意图，正常）；右 = 直接 open 已知的 URL（F5，正文被丢、同一页烧两次配额）。</div>
+
+<h1>搜索记忆 F5：抓一次免费复用，只对"搜索来的亲戚"成立</h1>
+<p class="sub">场景：子代理里的 <code style="font-family:monospace">web_ds_search</code>，配额 30 次/进程（烧完锁死）。记忆的设计意图是<strong>抓一次、之后免费 serve</strong>——但门槛藏在 <code style="font-family:monospace">storeText</code> 里。</p>
+
+<div class="cols">
+
+  <!-- 左：正常路径 -->
+  <div class="col">
+    <h2>① 正常路径：URL 来自搜索结果 <span class="pill ok">设计意图 ✓ 兑现</span></h2>
+    <div class="term"><span class="dim"># 第 1 步：search —— 建一条记忆条目</span>
+<span class="step">search("pi config 文档")</span> <span class="arr">──►</span> 发请求
+  <span class="arr">──►</span> 记忆条目#3 建好：
+       query + 结果列表 [<span class="ok">url-A</span>, url-B, url-C]
+  <span class="quota">配额 30 → 29</span>
+
+<span class="dim"># 第 2 步：open 结果里的 URL —— 正文有地方存</span>
+<span class="step">open(url-A)</span> <span class="arr">──►</span> 发请求抓正文
+  <span class="arr">──►</span> storeText：在条目#3 的结果列表里找到 url-A <span class="ok">✓ 是亲戚</span>
+  <span class="arr">──►</span> 存进 条目#3.textByUrl[url-A] <span class="ok">✓ 入库</span>
+  <span class="quota">配额 29 → 28</span>
+
+<span class="dim"># 第 3 步：find 同一页 —— 记忆命中，免费</span>
+<span class="step">find(url-A, "model.*=")</span>
+  <span class="arr">──►</span> lookup：遍历条目的 textByUrl <span class="ok">✓ 命中</span>
+  <span class="arr">──►</span> 页内正则匹配 <span class="arr">──►</span> 返回行
+  <span class="ok">不发请求 ✓ 不烧配额 ✓ 仍是 28</span></div>
+    <p class="note">这条路径里"抓一次免费复用"是成立的——因为 URL 先当了搜索结果，<code>storeText</code> 能在条目的结果列表里找到它。</p>
+  </div>
+
+  <!-- 右：F5 病径 -->
+  <div class="col">
+    <h2>② F5 病径：直接 open 已知的 URL <span class="pill bad">正文被丢 · 烧两次</span></h2>
+    <div class="term"><span class="dim"># 第 1 步：open 一个模型早就知道的 URL（没搜过）</span>
+<span class="step">open(https://pi.dev/docs/config)</span> <span class="arr">──►</span> 发请求抓正文
+  <span class="arr">──►</span> storeText：遍历 5 个搜索条目的结果列表…
+       没有这个 URL <span class="bad">✗ 不是亲戚</span>
+  <span class="arr">──►</span> <span class="bad">正文被静默丢弃（函数直接 return，什么都没存）</span>
+  <span class="quota">配额 30 → 29（钱花了，货没存）</span>
+
+<span class="dim"># 第 2 步：find 同一页 —— 记忆里没有</span>
+<span class="step">find(同 URL, "timeout")</span>
+  <span class="arr">──►</span> lookup：5 个条目的 textByUrl 全 miss <span class="bad">✗</span>
+  <span class="arr">──►</span> 重新发请求抓整页 <span class="arr">──►</span> 再存（还是被丢）
+  <span class="quota">配额 29 → 28</span>
+
+<span class="bad">同一个页面烧了两次配额；接口注释承诺的
+"后续 find/open 免费 serve" 在这条路径上兑现不了。</span></div>
+    <p class="note">孩子的典型用法恰恰是这条：模型盯着某个已知文档/仓库 URL 干活，search 根本不出场——<strong>F5 烧的就是最高频的路径</strong>。</p>
+  </div>
+
+</div>
+
+<div class="struct">
+  <h2>记忆结构：为什么"非亲戚"URL 没有家</h2>
+  <pre>createSearchMemory()
+├─ entries[]                       ← 最多 5 条（SEARCH_MEMORY_MAX_ENTRIES）
+│   ├─ query: "pi config 文档"
+│   ├─ matches: [ {url, title, snippet}, … ]   ← search 的结果列表
+│   └─ textByUrl: Map&lt;url, 正文&gt;               ← 只有"出现在 matches 里的 url"才存得进来
+│                                                  （storeText 先按 matches 找门，找不到就 return）
+└─ 总预算 400K 字符（SEARCH_MEMORY_MAX_CHARS），超出淘汰最老条目</pre>
+  <p class="note">病根一句话：<code>textByUrl</code> 挂在搜索条目下面，<strong>正文必须先进搜索结果的门，才配被记忆</strong>。直接 open 的 URL 没有条目可挂，无家可归。</p>
+</div>
+
+<div class="fix">
+  <b>修法（约 10 行，F5）：</b>加一个独立兜底桶 <code style="font-family:monospace">looseTexts: Map&lt;url, 正文&gt;</code>——不挂在任何搜索条目下；<code>storeText</code> 找不到亲戚时存这里，<code>lookup</code> 两个桶都查；共用同一个 400K 预算和淘汰逻辑。改完两条路径都兑现"抓一次免费复用"。
+  <br><br><b style="color:var(--ok)">✓ 已实施（2026-10-27）：</b>memory.ts 落地，探针 5 用例全过（含预算淘汰与宽松匹配）；淘汰顺序为兜底桶最老先（直接 open 的正文是大字节头）。本图是修复前的流程记录，保留作证据。
+</div>
+
+</body>
+</html>

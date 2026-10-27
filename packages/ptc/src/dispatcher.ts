@@ -67,7 +67,6 @@ export async function runPtcProgram(request: RunProgramRequest): Promise<RunOutc
     let settled = false;
     let waitingReset = false;
     let resetTimer: NodeJS.Timeout | undefined;
-    const runAbort = new AbortController();
 
     const send = (frame: HostToWorkerFrame) => worker.postMessage(frame);
 
@@ -76,7 +75,6 @@ export async function runPtcProgram(request: RunProgramRequest): Promise<RunOutc
       settled = true;
       clearTimeout(timer);
       callQueue.length = 0; // 取消后排队中的调用不再拉起：副作用不许落后于「已取消」
-      runAbort.abort();
       for (const abort of controllers) abort.abort();
       const withExtras: RunOutcome = { ...outcome, subCalls: subCalls.snapshot() };
       if (withExtras.status === "fulfilled" && images.length > 0) withExtras.images = images;
@@ -102,13 +100,17 @@ export async function runPtcProgram(request: RunProgramRequest): Promise<RunOutc
       finish({ status: "canceled", reason: `timeout after ${timeoutMs}ms`, logs });
     }, timeoutMs);
 
-    worker.on("message", (frame: WorkerToHostFrame) => {
-      // 池化复用：旧 run 的监听器还挂在同一 worker 上——已 settle 的 run 只等自己的 reset ready
+    // 池化复用：run 结束摘除自己的三个监听（off 在归还时），旧 run 的迟到帧不再经过死闭包
+    const onMessage = (frame: WorkerToHostFrame): void => {
       if (settled && frame.kind !== "ready") return;
       if (frame.kind === "ready") {
         if (waitingReset) {
           waitingReset = false;
           if (resetTimer) clearTimeout(resetTimer);
+          // 审计 F8：归还前先摘除本 run 的三个监听——单 turn 内多次复用不再累积闭包
+          worker.off("message", onMessage);
+          worker.off("error", onError);
+          worker.off("exit", onExit);
           request.pool!.release(worker);
         }
         return;
@@ -202,19 +204,21 @@ export async function runPtcProgram(request: RunProgramRequest): Promise<RunOutc
         }
         finish(outcome);
       }
-    });
+    };
+    worker.on("message", onMessage);
 
-    worker.on("error", (error) =>
-      finish({
+    const onError = (error: unknown): void =>
+      void finish({
         status: "rejected",
         error: `worker error: ${error instanceof Error ? error.message : String(error)}`,
         logs,
-      }),
-    );
-    worker.on("exit", (code) => {
+      });
+    const onExit = (code: number): void => {
       if (!settled)
         finish({ status: "rejected", error: `worker exited early with code ${code}`, logs });
-    });
+    };
+    worker.on("error", onError);
+    worker.on("exit", onExit);
 
     send({
       kind: "init",
