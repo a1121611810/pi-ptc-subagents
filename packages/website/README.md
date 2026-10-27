@@ -130,3 +130,12 @@ Not gaps. Do not "fix" them without reading the reason.
 - **The site deploys on every push to `main`, not on release tags** (旧 ADR-0038). Its content is
   a rendering of the working tree, so a tag-triggered deploy would answer "how do I use this"
   with instructions from weeks ago.
+- **The booklets are not translated, and that is a decision, not a gap** (2026-10-27). Their
+  first reader is the model (ADR-0013 — the Chinese source ships in the npm package and is read
+  at runtime), and a reader who cannot work with the Chinese model surface cannot use the
+  package anyway. The landing page is bilingual (EN default, switchable); projected documents,
+  the version matrix and the status panoramas stay Chinese-only. Revisit only with a stated
+  audience: a directory-locale site (`/zh/` tree, translations kept in this package — never in
+  `packages/routes/docs/routes/`, which would ship them inside the npm package) plus
+  pair-coverage and heading/identifier-parity gates was the designed shape if the need ever
+  returns.
