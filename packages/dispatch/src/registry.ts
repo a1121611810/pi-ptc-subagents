@@ -24,7 +24,13 @@ export type TaskCommand =
       report: TaskRecord["report"];
       channel: TaskRecord["reportChannel"];
     }
-  | { kind: "attach-output"; id: string; outputPath: string };
+  | {
+      kind: "attach-output";
+      id: string;
+      outputPath: string;
+      /** 审计 F2：stdout 超尾部上限被截断的事实，随产出路径一起挂记录 */
+      truncated?: boolean;
+    };
 
 export interface CommandResult {
   record: TaskRecord;
@@ -117,7 +123,11 @@ export class TaskRegistry {
         const current = this.#require(command.id);
         if (isTerminal(current.status))
           return { record: current, fromStatus: current.status, changed: false };
-        const next: TaskRecord = { ...current, outputPath: command.outputPath };
+        const next: TaskRecord = {
+          ...current,
+          outputPath: command.outputPath,
+          outputTruncated: command.truncated ?? false,
+        };
         this.#records.set(command.id, next);
         this.#emit(next, current);
         return { record: next, fromStatus: current.status, changed: true };

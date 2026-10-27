@@ -118,7 +118,7 @@
       <div class="row">
         <div class="node done"><div class="t"><span class="mark">✓</span>查 / 停</div><div class="d">ptc_task_list/output/stop；排队中的抽得掉、在跑的转 stopping（ADR-0011）</div></div>
         <div class="arr">→</div>
-        <div class="node partial"><div class="t"><span class="mark">◐</span>pump</div><div class="d">驱动到终态 ✓（exit → resolve-exit）；usage 累计 ✓（observedUsage 补缺）；结构化事件未做</div></div>
+        <div class="node partial"><div class="t"><span class="mark">◐</span>pump</div><div class="d">驱动到终态 ✓（exit → resolve-exit）；usage 累计 ✓（observedUsage 补缺）；<b>stdout 尾部上限 16MB + outputTruncated 记录标记（审计 F2，2026-10-27）</b>；结构化事件未做</div></div>
         <div class="arr">→</div>
         <div class="node done"><div class="t"><span class="mark">✓</span>停的信号阶梯</div><div class="d">SIGTERM → 5s 宽限 → SIGKILL；shutdown 统一 SIGTERM（BG-14 语义在 shutdown）</div></div>
       </div>
@@ -194,6 +194,7 @@
     真 pi 冒烟 1.4.0 与 floor 0.86.0 各一次全过（run_code + 程序内派发真子进程）。
     <br><b>评审修复轮（2026-10-26 晚）：</b>9 条评审发现全修（路由索引预算、图片 base64、/ptc 回执文案、绑定作用域、重复文档、ADR-0015 修订）；<b>全版本矩阵复跑 16/16</b>（0.86.0–1.4.0，与上轮逐字一致）+ 1.4.0 补充探针 2/2（模型读详情文件首行 ✓、程序内派发返回 handle ✓）。
     <br><b>评审后全链路复测（2026-10-26 晚，提交前）：</b>矩阵再复跑 <b>16/16 逐字一致</b>；workflow（pipeline 归约 <code>a!,b!</code> 精确）/ json（69 事件全 JSON 合法 + tool_execution）/ rpc（stdin prompt → tool_execution → settled）/ TUI（真 Terminal kimi-cu 驱动：fulfilled 折叠行渲染 + <code>OK:42</code>）全过；真子进程派发 floor 0.86.0（prompt-json 兜底）+ 抽测 0.87.0 / 0.99.0 / 1.3.0 全部 <code>fulfilled</code>。
+    <br><b>审计修复轮（2026-10-27，F1/F2）：</b>任务门 cwd 参数删除（全链无消费者，spec 字段表同步标注）；stdout 尾部上限 16MB + <code>outputTruncated</code> 记录标记（审计 F2，pump 节点见④）。全兼容矩阵复跑 <b>16/16</b>（0.86.0–1.4.0 每版 ptc_run_code=OK + 真派发 fulfilled + 0 工具错误；截断行为由假 spawn 探针两用例单独覆盖）。
     <br><b>姐妹页联动（2026-10-26）：</b>ptc 的 <code>workflow.parallel</code> 对齐 spec 决策 12 改 <code>Promise.allSettled</code>（单边失败不丢兄弟结果），真 worker 探针过；本包语义无变化。
   </div>
   <div class="note warn">
@@ -203,7 +204,7 @@
   <footer>
     事实来源：<code>packages/dispatch/src/*.ts</code>、<code>packages/task/src/*.ts</code>、<code>packages/entry/src/index.ts</code>；
     依据 <code>docs/adr/0016/0022/0023/0032/0039/0041/0044/0053/0056/0057/0063/0064/0065</code>。
-    状态截至 2026-10-26，分支 <code>feat/rewrite</code>。
+    状态截至 2026-10-27，分支 <code>main</code>。
   </footer>
 
 </div>

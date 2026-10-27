@@ -1031,6 +1031,7 @@
         <tr><td><code>observedModel</code> / <code>observedProvider</code></td><td><b>观测到的</b>孩子实际跑的模型 / provider（旧 ADR-0045）</td><td>—</td></tr>
         <tr><td><code>errorMessage</code></td><td>拒绝原因；<b>拒绝时必填</b></td><td>—</td></tr>
         <tr><td><code>readOnlyTier</code> / <code>whySuppressed</code></td><td>实际生效的档位 / 理由被丢的事实（<b>拒绝时也带</b>）</td><td>—</td></tr>
+        <tr><td><code>outputTruncated</code></td><td>孩子 stdout 超尾部上限（16MB）被截断——产出只剩尾部，读者知道全貌不在（审计 F2）</td><td>—</td></tr>
         <tr><td><code>taskId</code> / <code>label</code></td><td>—</td><td>后台任务的 id（<code>ptc_task_output</code> 拿它去读）</td></tr>
       </tbody>
     </table>

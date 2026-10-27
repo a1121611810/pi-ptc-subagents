@@ -27,7 +27,7 @@ export type TaskHandle = {
   whySuppressed?: boolean;
 };
 
-// HTML 第七节字段表对齐：status/text/started/agentName/durationMs/exitCode/usage/report/observed*/errorMessage/readOnlyTier/whySuppressed/taskId/label
+// HTML 第七节字段表对齐：status/text/started/agentName/durationMs/exitCode/usage/report/observed*/errorMessage/readOnlyTier/whySuppressed/outputTruncated/taskId/label
 export type DispatchResult = {
   status: "fulfilled" | "rejected" | "canceled";
   taskId: string;
@@ -54,6 +54,8 @@ export type DispatchResult = {
   /** 旧 ADR-0032：报告与通道；没交报告时缺省、channel = none（散文照交，不静默） */
   report?: ChildReport;
   reportChannel: ReportChannel;
+  /** 审计 F2：stdout 超尾部上限被截断——产出只剩尾部，读者知道全貌不在 */
+  outputTruncated: boolean;
 };
 
 export type DispatchOutcome = TaskHandle | TaskRejection | DispatchResult;
@@ -113,6 +115,9 @@ export interface EngineContext {
 }
 
 const DEFAULT_STOP_GRACE_MS = 5_000;
+
+// 审计 F2：stdout 尾部上限（stderr 同款思路，child-process.ts）。留尾的理由：报告/usage 在 JSONL 流尾部
+const STDOUT_KEEP_CHARS = 16 * 1024 * 1024;
 
 // 决策 17：AbortSignal → Promise（已 abort 立即兑现）
 function aborts(signal: AbortSignal): Promise<void> {
@@ -326,8 +331,13 @@ export class TaskEngine {
     const child = this.#spawn(argv, env);
     this.#children.set(taskId, child);
     let text = "";
+    let outputTruncated = false;
     child.onOutput((chunk) => {
       text += chunk;
+      if (text.length > STDOUT_KEEP_CHARS) {
+        text = text.slice(-STDOUT_KEEP_CHARS); // 砍头留尾：首行可能只剩半行，下游 JSONL 解析按行容错
+        outputTruncated = true;
+      }
     });
     const exitCode = await new Promise<number>((resolveExit) => {
       child.onExit((code) => resolveExit(code));
@@ -352,8 +362,13 @@ export class TaskEngine {
     if (report && !report.usage && parsed.observedUsage)
       report = { ...report, usage: parsed.observedUsage };
     await this.#registry.submit({ kind: "attach-report", id: taskId, report, channel });
-    // 产出路径挂回记录：lifecycle face 的 output 工具经此读正文
-    await this.#registry.submit({ kind: "attach-output", id: taskId, outputPath });
+    // 产出路径挂回记录：lifecycle face 的 output 工具经此读正文（truncated = 审计 F2 截断事实）
+    await this.#registry.submit({
+      kind: "attach-output",
+      id: taskId,
+      outputPath,
+      truncated: outputTruncated,
+    });
     const result = await this.#registry.submit({ kind: "resolve-exit", id: taskId, exitCode });
     // 终态落库后才还槽（拆卸中不提拔，见 #releaseSlot）
     this.#releaseSlot(taskId);
@@ -384,6 +399,7 @@ export class TaskEngine {
       whySuppressed,
       report: report ?? undefined,
       reportChannel: channel,
+      outputTruncated,
     };
   }
 
@@ -432,6 +448,7 @@ export class TaskEngine {
       outputPath: "",
       whySuppressed,
       reportChannel: "none",
+      outputTruncated: false,
     };
   }
 

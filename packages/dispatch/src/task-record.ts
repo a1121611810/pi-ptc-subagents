@@ -43,4 +43,6 @@ export interface TaskRecord {
   reportChannel?: import("./report.ts").ReportChannel;
   /** 产出落盘位置（pump 写 output.log 后挂回；任务链的「产出」经此可读） */
   outputPath?: string;
+  /** 审计 F2：孩子 stdout 超尾部上限被截断——读者据此知道全貌不在 */
+  outputTruncated?: boolean;
 }
