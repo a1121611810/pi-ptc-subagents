@@ -1005,7 +1005,7 @@
         <tr><td><code>task</code></td><td><span class="req">是</span></td><td>孩子要干的活</td><td><code>minLength: 1</code>；空串被 schema 拒</td></tr>
         <tr><td><code>agent</code></td><td><span class="opt">否</span></td><td>已注册的 agent 名字，用来收窄孩子</td><td>省略 = <b>通用孩子</b>（fresh generalist pi，pi 自己的提示词 + 完整工具集）；给了但没定义 / 空串 → <b>闸门 4 拒</b></td></tr>
         <tr><td><code>why</code></td><td><span class="opt">否</span></td><td>这一刀为什么切出来（<b>自己的话</b>：不是整段对话，也不是用户原话）</td><td>任务已经说全了就省掉。开关关掉时丢弃，并记 <code>whySuppressed: true</code></td></tr>
-        <tr><td><code>cwd</code></td><td><span class="opt">否</span></td><td>孩子的工作目录</td><td>默认调用方的 cwd</td></tr>
+        <tr><td><code>cwd</code></td><td><span class="opt">否</span></td><td>孩子的工作目录</td><td><s>默认调用方的 cwd</s> <b>2026-10-27 自 schema 删除</b>（无消费者，审计 F1：pi CLI 无 --cwd，spawn cwd 只改相对路径落点）</td></tr>
         <tr><td><code>agentScope</code></td><td><span class="opt">否</span></td><td>去哪找 agent 目录：<code>user</code>（<code>~/.pi/agent/agents</code>）/ <code>project</code>（<code>&lt;cwd&gt;/.pi/agents</code>）/ <code>both</code></td><td>默认 <code>both</code>——两层都看得见，<b>project 优先覆盖同名 user</b>；可收窄到单层</td></tr>
         <tr><td><code>model</code></td><td><span class="opt">否</span></td><td>覆盖孩子跑的模型</td><td>省略 = 继承本会话当前模型（旧 ADR-0044）；agent 定义里钉了优先用定义的</td></tr>
         <tr><td><code>thinkingLevel</code></td><td><span class="opt">否</span></td><td>孩子的思考档位</td><td>沿用 pi 的默认</td></tr>

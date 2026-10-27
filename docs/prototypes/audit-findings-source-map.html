@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>审计发现来源图 · pi-ptc-subagents（一次性 PROTOTYPE）</title>
+<style>
+  :root {
+    --must: #e5484d;
+    --should: #f76b15;
+    --nice: #6e56cf;
+    --ink: #1a1d23;
+    --line: #d7dae0;
+    --bg: #f7f8fa;
+    --card: #ffffff;
+    --mono: "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 32px 60px;
+    font: 14px/1.6 -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+    color: var(--ink); background: var(--bg);
+  }
+  .banner {
+    background: #fff7e8; border: 1px solid #ffd591; color: #ad4e00;
+    border-radius: 8px; padding: 8px 14px; margin-bottom: 16px; font-size: 13px;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: #5c6470; margin: 0 0 18px; }
+  .legend { display: flex; gap: 18px; margin-bottom: 16px; font-size: 13px; flex-wrap: wrap; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .dot.must { background: var(--must); }
+  .dot.should { background: var(--should); }
+  .dot.nice { background: var(--nice); }
+
+  /* 链式概览（静态，任何预览器可见） */
+  .overview {
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 16px; margin-bottom: 20px; font-size: 13px; line-height: 2.1;
+  }
+  .overview .ov-title { font-weight: 700; margin-bottom: 4px; }
+  .ov-node {
+    display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 2px 12px; margin: 2px 2px; background: #fff; white-space: nowrap;
+  }
+  .ov-node .no { font: 700 11px var(--mono); color: #9aa4b2; }
+  .ov-node a { color: var(--ink); text-decoration: none; border-bottom: 1px dashed #b6bcc7; }
+  .ov-node .cnt { font: 700 11px var(--mono); border-radius: 999px; padding: 0 7px; color: #fff; }
+  .cnt.must { background: var(--must); } .cnt.should { background: var(--should); } .cnt.nice { background: var(--nice); }
+  .cnt.zero { background: #b7bec9; }
+  .ov-arrow { color: #9aa4b2; margin: 0 2px; }
+
+  /* 纵向流程：环节 = 通栏卡片 */
+  .flow { display: flex; flex-direction: column; margin-bottom: 22px; }
+  .stage {
+    background: var(--card); border: 1.5px solid var(--line); border-radius: 10px;
+    padding: 12px 16px 14px;
+  }
+  .stage .no { font: 700 11px var(--mono); color: #9aa4b2; letter-spacing: .5px; }
+  .stage h3 { margin: 2px 0 4px; font-size: 15px; }
+  .stage .pkg { font: 11px var(--mono); color: #6b7280; margin-bottom: 8px; }
+  .arrow { text-align: center; color: #9aa4b2; font-size: 16px; line-height: 1.2; padding: 1px 0; }
+  .empty { font-size: 12.5px; color: #9aa4b2; }
+
+  /* 发现：原生 details 折叠，零 JS */
+  details.finding {
+    border: 1px solid; border-left-width: 4px; border-radius: 6px;
+    background: #fff; margin: 8px 0 0;
+  }
+  details.finding.must { border-color: var(--must); }
+  details.finding.should { border-color: var(--should); }
+  details.finding.nice { border-color: var(--nice); }
+  details.finding summary {
+    padding: 7px 10px; font-size: 13px; cursor: pointer; list-style: none;
+    display: flex; align-items: baseline; gap: 8px;
+  }
+  details.finding summary::-webkit-details-marker { display: none; }
+  details.finding summary::before {
+    content: "▸"; color: #9aa4b2; flex: 0 0 auto; font-size: 12px;
+  }
+  details.finding[open] summary::before { content: "▾"; }
+  details.finding.must summary b { color: var(--must); }
+  details.finding.should summary b { color: var(--should); }
+  details.finding.nice summary b { color: var(--nice); }
+  summary b { font-family: var(--mono); font-size: 11px; flex: 0 0 auto; }
+  summary .sev {
+    font-size: 10px; font-weight: 700; color: #fff; border-radius: 4px;
+    padding: 1px 6px; flex: 0 0 auto;
+  }
+  .sev.must { background: var(--must); } .sev.should { background: var(--should); } .sev.nice { background: var(--nice); }
+  .finding .body { padding: 2px 12px 12px 26px; }
+  .finding .loc { font: 11.5px var(--mono); color: #6b7280; margin-bottom: 6px; }
+  .finding dl { margin: 0; display: grid; grid-template-columns: 84px 1fr; row-gap: 5px; }
+  .finding dt { color: #6b7280; font-size: 12.5px; }
+  .finding dd { margin: 0; font-size: 13px; }
+  .foot { margin-top: 18px; font-size: 12px; color: #9aa4b2; }
+
+  @media (max-width: 600px) {
+    body { padding: 16px 14px 40px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="banner">⚠️ 一次性审计图解（PROTOTYPE，非生产文件）——回答一个问题：9 个审计发现分别来自运行链路的哪一环。数据来源：2026-10-27 全仓审计。</div>
+
+<h1>审计发现 × 运行链路来源图</h1>
+<p class="sub">整条链在上方概览里一眼看全；每个环节下面用 ▸ 折叠了挂在它身上的发现，点开看 文件:行 / 问题 / 修复 / 不修后果。四件套（check / build / lint / fmt:check）当时全绿——下面全是逻辑与契约问题，不是编译问题。</p>
+
+<div class="legend">
+  <span><i class="dot must"></i>Must fix（1 个）</span>
+  <span><i class="dot should"></i>Should fix（5 个）</span>
+  <span><i class="dot nice"></i>Nice to have（3 个）</span>
+  <span style="color:#9aa4b2">负载假设：单用户、单 pi 会话、并发 ≤ 8 个子代理</span>
+</div>
+
+<div class="overview">
+  <div class="ov-title">整条链（数字 = 发现编号；点环节名直达）：</div>
+  <span class="ov-node"><span class="no">①</span><a href="#stage-model">模型（pi 宿主）</a><span class="cnt zero">0 ✓</span></span><span class="ov-arrow">→</span>
+  <span class="ov-node"><span class="no">②</span><a href="#stage-entry">entry 装配</a><span class="cnt nice">9</span></span><span class="ov-arrow">→</span>
+  <span class="ov-node"><span class="no">③</span><a href="#stage-ptc">PTC 门面</a><span class="cnt zero">0 ✓</span></span><span class="ov-arrow">→</span>
+  <span class="ov-node"><span class="no">④</span><a href="#stage-worker">worker 池 + 程序执行</a><span class="cnt nice">7</span><span class="cnt nice">8</span></span><span class="ov-arrow">→</span>
+  <span class="ov-node"><span class="no">⑤</span><a href="#stage-door">任务门</a><span class="cnt must">1</span></span><span class="ov-arrow">→</span>
+  <span class="ov-node"><span class="no">⑥</span><a href="#stage-engine">dispatch 引擎</a><span class="cnt should">2</span><span class="cnt should">3</span><span class="cnt should">4</span></span><span class="ov-arrow">→</span>
+  <span class="ov-node"><span class="no">⑦</span><a href="#stage-child">子代理进程</a><span class="cnt should">5</span></span><span class="ov-arrow">→</span>
+  <span class="ov-node"><span class="no">⑧</span><a href="#stage-back">报告回流 / 任务面 / 通知</a><span class="cnt zero">0 ✓</span></span><span class="ov-arrow">→</span>
+  <span class="ov-node"><span class="no">⊘</span><a href="#stage-loose">跨包散落（死代码）</a><span class="cnt should">6</span></span>
+</div>
+
+<div class="flow">
+
+  <div class="stage" id="stage-model">
+    <div class="no">① 环节</div>
+    <h3>模型（pi 宿主）</h3>
+    <div class="pkg">@earendil-works/pi-coding-agent</div>
+    <div class="empty">无发现 ✓</div>
+  </div>
+  <div class="arrow">↓</div>
+
+  <div class="stage" id="stage-entry">
+    <div class="no">② 环节</div>
+    <h3>entry 装配</h3>
+    <div class="pkg">packages/entry</div>
+    <details class="finding nice">
+      <summary><b>F9</b><span class="sev nice">Nice</span>任务面可见性会撤掉用户自己固定的工具</summary>
+      <div class="body">
+        <div class="loc">packages/entry/src/index.ts:267-274</div>
+        <dl>
+          <dt>这是什么</dt><dd>before_agent_start 和每次 registry 变迁时跑 applyTaskFaceVisibility：有记录就加三个任务面工具，没有就滤掉。</dd>
+          <dt>问题</dt><dd>用户在 loadout 里自己固定了 ptc_task_list，而新会话还没有任务记录时，滤掉分支会把用户自己开的工具从活跃表移除。</dd>
+          <dt>修复</dt><dd>只滤「本会话自己加的」——维护一个小集合，或滤前判断非用户 loadout 项。</dd>
+          <dt>不修的后果</dt><dd>用户偶尔困惑「工具怎么没了」，重开即可，无数据损失。</dd>
+        </dl>
+      </div>
+    </details>
+  </div>
+  <div class="arrow">↓</div>
+
+  <div class="stage" id="stage-ptc">
+    <div class="no">③ 环节</div>
+    <h3>PTC 门面</h3>
+    <div class="pkg">packages/ptc · tools.ts</div>
+    <div class="empty">无发现 ✓</div>
+  </div>
+  <div class="arrow">↓</div>
+
+  <div class="stage" id="stage-worker">
+    <div class="no">④ 环节</div>
+    <h3>worker 池 + 程序执行</h3>
+    <div class="pkg">packages/ptc · dispatcher/pool/worker-main</div>
+    <details class="finding nice">
+      <summary><b>F7</b><span class="sev nice">Nice</span>renderModelValue 不限制子项数</summary>
+      <div class="body">
+        <div class="loc">packages/tui/src/text.ts:38-57</div>
+        <dl>
+          <dt>这是什么</dt><dd>程序返回值排版成可读文本给模型，是 worker 结果回宿主后的渲染步。</dd>
+          <dt>问题</dt><dd>只有深度上限 4 层，没有契约里写的每层 6 个子项上限。返回 10 万元素数组 → 先渲染几十 MB 字符串，再被下游截断砍掉，白干 99%。</dd>
+          <dt>修复</dt><dd>循环里数子项，超出加「…（余 N 项）」，五行。</dd>
+          <dt>不修的后果</dt><dd>极端返回值时一次工具调用慢几百毫秒，结果一样。</dd>
+        </dl>
+      </div>
+    </details>
+    <details class="finding nice">
+      <summary><b>F8</b><span class="sev nice">Nice</span>池化 worker 每次 run 挂 3 个监听器、从不摘除</summary>
+      <div class="body">
+        <div class="loc">packages/ptc/src/dispatcher.ts:105-217</div>
+        <dl>
+          <dt>这是什么</dt><dd>runPtcProgram 给 worker 挂 message/error/exit，run 结束只 reset 不复位监听。</dd>
+          <dt>问题</dt><dd>entry 每个 turn_end 都 drain 池（index.ts:236），worker 活不过一个 turn——所以只是单 turn 内累积：一个 turn 跑几十次程序时每个 worker 挂上百个闭包。</dd>
+          <dt>修复</dt><dd>finish 时 removeAllListeners 或改一次性 handler。</dd>
+          <dt>不修的后果</dt><dd>单 turn 内内存缓慢上涨，turn 边界清零。可忍。</dd>
+        </dl>
+      </div>
+    </details>
+  </div>
+  <div class="arrow">↓</div>
+
+  <div class="stage" id="stage-door">
+    <div class="no">⑤ 环节</div>
+    <h3>任务门</h3>
+    <div class="pkg">packages/ptc · task-binding.ts</div>
+    <details class="finding must" open>
+      <summary><b>F1</b><span class="sev must">Must fix</span>任务门声明 cwd 参数，两个入口都静默丢弃</summary>
+      <div class="body">
+        <div class="loc">packages/ptc/src/task-binding.ts:14（schema）· packages/entry/src/index.ts:516（丢弃）</div>
+        <dl>
+          <dt>这是什么</dt><dd>pi_task_ptc 与 pi_task_codemode 共用 TASK_DOOR_PARAMETERS，里面有 cwd——「孩子的工作目录」。</dd>
+          <dt>问题</dt><dd>绑定层转发时没有 cwd 字段；DispatchInput、六道闸、引擎、createTask 全链都没有 cwd。模型传了 cwd 拿到成功返回，孩子却在父目录跑。</dd>
+          <dt>修复</dt><dd>最小修复：从 schema 删掉 cwd；或者真接到 buildPiArgv。倾向先删。</dd>
+          <dt>不修的后果</dt><dd>模型越来越信任这个参数，孩子在错误目录读写文件。</dd>
+        </dl>
+      </div>
+    </details>
+  </div>
+  <div class="arrow">↓</div>
+
+  <div class="stage" id="stage-engine">
+    <div class="no">⑥ 环节</div>
+    <h3>dispatch 引擎</h3>
+    <div class="pkg">packages/dispatch</div>
+    <details class="finding should">
+      <summary><b>F2</b><span class="sev should">Should</span>子进程 stdout 无上限累积（stderr 有 64KB 帽）</summary>
+      <div class="body">
+        <div class="loc">packages/dispatch/src/engine.ts:329-331 · 对比 child-process.ts:5</div>
+        <dl>
+          <dt>这是什么</dt><dd>引擎把孩子的全部 stdout 收进一个内存字符串，收完才落盘、才解析。</dd>
+          <dt>问题</dt><dd>stderr 有 64KB 尾部上限，stdout 没有。json 模式下整段会话流都在 stdout——一个刷输出的孩子就能撑爆宿主内存。单用户负载也成立。</dd>
+          <dt>修复</dt><dd>照 stderr 的样子给 stdout 加 8–16MB 尾部上限，超限在记录里标 outputTruncated。</dd>
+          <dt>不修的后果</dt><dd>一个失控孩子拖垮整个宿主会话。</dd>
+        </dl>
+      </div>
+    </details>
+    <details class="finding should">
+      <summary><b>F3</b><span class="sev should">Should</span>任务记录与产出只增不减</summary>
+      <div class="body">
+        <div class="loc">packages/dispatch/src/engine.ts:473-483 · packages/entry/src/index.ts:144</div>
+        <dl>
+          <dt>这是什么</dt><dd>每个任务一条 TaskRecord（内存 Map + .pi/ptc-tasks/records/*.json）加一份 output.log。</dd>
+          <dt>问题</dt><dd>终态记录永驻内存；磁盘文件跨会话永久保留。会话开几周后 list() 要 sort 全部终态记录，项目目录里持续积垃圾。</dd>
+          <dt>修复</dt><dd>内存侧淘汰最老终态（如超 200 条）；磁盘侧会话启动时清掉/归档上次会话的终态文件。</dd>
+          <dt>不修的后果</dt><dd>变慢 + 用户项目目录无界膨胀。</dd>
+        </dl>
+      </div>
+    </details>
+    <details class="finding should">
+      <summary><b>F4</b><span class="sev should">Should</span>最危险的纯逻辑零自动化测试</summary>
+      <div class="body">
+        <div class="loc">registry.ts:4-12（状态机）· slots.ts（FIFO/提拔）· report.ts:42（报告抠取）</div>
+        <dl>
+          <dt>这是什么</dt><dd>状态转移表、槽位 release/cancelQueued 竞态、extractReportFromText 多代码块回溯——正确性支柱，全是纯逻辑。</dd>
+          <dt>问题</dt><dd>packages/ 下零测试文件，只有 docs/research 里的一次性探针。这三处改错只在真机上炸。</dd>
+          <dt>修复</dt><dd>测试框架（探针转正）落地时按此顺序各盖一个测试文件。</dd>
+          <dt>不修的后果</dt><dd>排查成本远高于测试成本。</dd>
+        </dl>
+      </div>
+    </details>
+  </div>
+  <div class="arrow">↓</div>
+
+  <div class="stage" id="stage-child">
+    <div class="no">⑦ 环节</div>
+    <h3>子代理进程</h3>
+    <div class="pkg">pi child · --mode json</div>
+    <details class="finding should">
+      <summary><b>F5</b><span class="sev should">Should</span>搜索记忆对「非搜索结果」的页面永远存不住</summary>
+      <div class="body">
+        <div class="loc">packages/search/src/memory.ts:49-59</div>
+        <dl>
+          <dt>这是什么</dt><dd>子代理进程内 web_ds_search 的 open 抓到正文后，经 storeText 存进记忆，find 命中则免费。</dd>
+          <dt>问题</dt><dd>storeText 只在「最近 5 次搜索的结果列表里有这个 URL」时才存。直接 open 模型已知的 URL → 正文被静默丢弃 → 随后 find 同一 URL 再抓一次、再烧一次配额。注释承诺兑现不了。</dd>
+          <dt>修复</dt><dd>记忆加一个独立 textByUrl 兜底桶（共用 400K 预算），存不进搜索条目时存那里。</dd>
+          <dt>不修的后果</dt><dd>配额在重复抓取上白烧，搜索上限更快撞墙。</dd>
+        </dl>
+      </div>
+    </details>
+  </div>
+  <div class="arrow">↓</div>
+
+  <div class="stage" id="stage-back">
+    <div class="no">⑧ 环节</div>
+    <h3>报告回流 / 任务面 / 通知</h3>
+    <div class="pkg">jsonl.ts · registry · NotificationCenter</div>
+    <div class="empty">无发现 ✓</div>
+  </div>
+  <div class="arrow">↓</div>
+
+  <div class="stage" id="stage-loose">
+    <div class="no">⊘ 跨包散落</div>
+    <h3>死代码（不属于单一环节）</h3>
+    <div class="pkg">dispatch / ptc / tui / package.json</div>
+    <details class="finding should">
+      <summary><b>F6</b><span class="sev should">Should</span>一批死代码与死配置</summary>
+      <div class="body">
+        <div class="loc">agent-discovery.ts:68 · dispatcher.ts:70 · limits.ts:9-11 · bounds.ts:3-9 · ptc/package.json</div>
+        <dl>
+          <dt>这是什么</dt><dd>listAgentNames 全仓零调用；runAbort 创建了没人监听；drainGraceMs 从未引用；RENDER_BOUNDS 七项里五项无人引用；pi-tui 在 dependencies 和 devDependencies 重复。</dd>
+          <dt>问题</dt><dd>读者会以为这些机制活着，按错误的心智模型改代码。</dd>
+          <dt>修复</dt><dd>删掉或标 TODO；五项冻结 bounds 要么接进 renderModelValue，要么从契约移除。约 -25 行。</dd>
+          <dt>不修的后果</dt><dd>纯债，功能不坏。</dd>
+        </dl>
+      </div>
+    </details>
+  </div>
+
+</div>
+
+<div class="foot">略过的 3 个更小项（搜索 domainTails 表增长 / DeepSeek 响应无大小上限 / 通知空闲延迟）未上图。已记录在案的已知小拧（pid 复用窗口）按规矩不计入发现。本页零 JavaScript：内容全部静态，任何预览器（含移动端）都可完整渲染。</div>
+
+</body>
+</html>

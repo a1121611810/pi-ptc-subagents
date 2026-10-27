@@ -6,12 +6,11 @@ export type { CreateTaskResult, DispatchResult, TaskHandle, TaskRejection } from
 export const TASK_BINDING_NAME = "pi_task_ptc";
 
 // HTML 决策 27 / ADR-0008：两扇门共用同一份参数表（原 DISPATCH_PARAMETERS 的职责）
-// shortcut: 目前生效的只有 task/label，其余参数随 sub 的派发引擎落地后接管；schema 先立住共享形状
+// cwd 预埋过又删除（2026-10-27，审计 F1）：全链无消费者；pi CLI 无 --cwd，spawn cwd 只能改相对路径落点
 export const TASK_DOOR_PARAMETERS = Type.Object({
   task: Type.String({ minLength: 1, description: "孩子要干的活" }),
   agent: Type.Optional(Type.String({ description: "已注册的 agent 名字；省略 = 通用孩子" })),
   why: Type.Optional(Type.String({ description: "这一刀为什么切出来（调用方自己的话）" })),
-  cwd: Type.Optional(Type.String({ description: "孩子的工作目录，默认调用方的" })),
   agentScope: Type.Optional(
     Type.Union([Type.Literal("user"), Type.Literal("project"), Type.Literal("both")]),
   ),

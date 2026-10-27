@@ -78,6 +78,19 @@ floor = **0.86.0**（`peerDependencies: ">=0.86.0"`），ceiling = 跟踪最新�
 **退回的判据是「有没有嵌套调用通道」，不是「活跃表里有没有已知绑定名」**（2026-10-26 修订）——
 后者在 1.4.0 上也会触发（`--tools` 收窄到只剩扩展工具的会话），于是程序会看到一批调不到的绑定。
 
+## 实测增补（2026-10-27）
+
+- **pi 内置工具无 cwd 囚禁（strict 白名单 ≠ 沙箱）**：`read/grep/find/ls/edit/write` 的路径处理全部只有
+  `resolveToCwd`（相对路径拼 cwd，**绝对路径原样放行**）+ 存在性/可读性检查，没有任何
+  "路径必须在 cwd 内"的拒绝逻辑。源码在 floor 0.86.0 与 1.4.0 同构（`dist/core/tools/path-utils.js`），
+  中间版本由 2026-10-26 的 16 版探针覆盖（`tools.read(/etc/hosts)` 0.99–1.4.0 全过）。
+- **两端真机实证（2026-10-27，严格孩子的真实 argv 形状）**：`pi -p --no-session --mode json
+  --tools read,grep,find,ls`，cwd 放在 /tmp 子目录，任务 = 读 cwd 之外的 `/etc/hosts`——
+  **floor 0.86.0 与 1.4.0 双双成功**（toolResult isError=false，原样回显文件头）。
+- 对本包的语义：readOnly `strict` 的真实含义只是「工具白名单收窄（无 bash/edit/write）」，
+  **不是目录囚禁**——strict 孩子用绝对路径可读宿主任何可读文件。给孩子的 argv 即便未来接上
+  `cwd`，也只是改相对路径落点，不开启新能力。审计发现 F1（任务门 cwd 参数未接线）的分析以此为准。
+
 ## 待测
 
 中间版本的**执行链冒烟**已覆盖（0.87 / 0.99 / 1.0 / 1.1 / 1.2 / 1.3，见上）；仍未做的：同一 minor 的补丁版逐版安装（按 minor 分水岭取样）、`1.x` 能力表里未直接观测的 codemode 差分（依赖旧仓 16 项探针结论）、floor 的 codemode/exposure 行为（0.99 以下本就没有）。下次 pi 发版或动了门/可见性/codemode 探测相关代码时补测。
