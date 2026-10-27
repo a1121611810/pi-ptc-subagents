@@ -597,7 +597,7 @@ agent 发现（findAgent，闸 7 与解析共用）：agentScope 层级覆盖—
   <tr><td><code>taskTraceKeep / archiveEnabled / archiveTtlDays</code></td><td>同上</td><td>500 / true / 30</td><td>clamp 夹取</td><td>决策 29 痕迹三键（⑪）</td></tr>
   <tr><td>会话结束位</td><td>session_shutdown 置位</td><td>—</td><td>—</td><td>闸 4 拒新 · teardown：dispatch 拒新、还槽不提拔、泵不 spawn 孤儿、shutdown 抽干等待者+SIGTERM 在跑孩子+排空归档尾链</td></tr>
 </table>
-<p class="note">以上为 F4 立项前的<b>基准流程全貌</b>。后续任何流程转向（含 F4 测试框架对引擎的可测性改造）以本页为对照基准：改一处，图改一处。</p>
+<p class="note">以上为 F4 立项前的<b>基准流程全貌</b>。后续任何流程转向（含 F4 测试框架对引擎的可测性改造）以本页为对照基准：改一处，图改一处。图中全部数字（128/10/8/500/16MB/50KB/560/3s/5s/30d…）镜像自 <code>packages/ptc/src/limits.ts</code>、<code>packages/dispatch/src/engine.ts</code>、<code>packages/routes/src/registry.ts</code> 的常量——改常量同步改图。</p>
 </section>
 
 </body>

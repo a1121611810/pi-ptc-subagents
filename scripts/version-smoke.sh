@@ -9,6 +9,7 @@
 # 程序内建任务走扩展自己的 binding（不经 executeTool），floor 也真派发。
 # 不做（版本敏感度低或不可脚本化）：codemode 面/rpc/TUI/stop 阶梯/通知/web_ds_search——
 # 引擎侧有 node tests 守，真机交互有手工冒烟记录在案。
+# 依赖 GNU coreutils 的 timeout（全新 macOS 需先 brew install coreutils）。
 set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 EXT="$REPO/packages/entry/dist/index.js"

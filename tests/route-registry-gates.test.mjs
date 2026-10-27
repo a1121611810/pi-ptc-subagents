@@ -116,6 +116,13 @@ test("机械点 6 工具 description 必须是 registry 的调用（行为断言
         `${surface}/${name} 的 description 不是 registry 调用（散文漂移）`,
       );
     }
+    // 反向断言：决策 28（一个面一个编排器）——不该注册的注册了就红
+    if (surface === "full_ptc") {
+      assert.ok(!registered["pi_task_codemode"], "full_ptc 不该注册 pi_task_codemode");
+    } else {
+      assert.ok(!registered["ptc_run_code"], "codemode_ptc 不该注册 ptc_run_code");
+      assert.ok(!registered["ptc_workflow"], "codemode_ptc 不该注册 ptc_workflow");
+    }
   }
 });
 
