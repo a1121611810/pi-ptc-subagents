@@ -63,7 +63,7 @@ test("MCP 全握手 + tools/call 真跑程序（含 workdir 锁两分支）", as
     capabilities: {},
     clientInfo: { name: "probe", version: "0" },
   });
-  assert.equal(init.serverInfo.name, "pi-ptc");
+  assert.equal(init.serverInfo.name, "ptc-tools");
   srv.notify("notifications/initialized");
 
   const tools = await srv.request("tools/list");

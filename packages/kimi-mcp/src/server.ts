@@ -30,7 +30,7 @@ function strField(args: unknown, key: string): string {
 }
 
 export function createKimiMcpServer(version: string): Server {
-  const server = new Server({ name: "pi-ptc", version }, { capabilities: { tools: {} } });
+  const server = new Server({ name: "ptc-tools", version }, { capabilities: { tools: {} } });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [

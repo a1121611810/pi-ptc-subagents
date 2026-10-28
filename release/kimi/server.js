@@ -20972,7 +20972,7 @@ function strField(args, key) {
 }
 function createKimiMcpServer(version) {
 	const server = new Server({
-		name: "pi-ptc",
+		name: "ptc-tools",
 		version
 	}, { capabilities: { tools: {} } });
 	server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [{

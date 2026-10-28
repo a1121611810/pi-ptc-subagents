@@ -1,9 +1,9 @@
 {
-  "name": "pi-ptc",
+  "name": "ptc-tools",
   "version": "7.0.0",
   "description": "Programmable tool calling for Kimi Code：模型写 TypeScript 程序批量调工具（PTC），高扇出只回一份摘要",
   "interface": {
-    "displayName": "pi-ptc",
+    "displayName": "PTC Tools（程序批量调工具）",
     "shortDescription": "写程序批量调工具：一次调用跑完整个循环，模型只看归约结果"
   },
   "skills": "./release/kimi/skills/",

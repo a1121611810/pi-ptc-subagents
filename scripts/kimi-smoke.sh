@@ -63,7 +63,7 @@ const request = (method, params) => new Promise((resolve, reject) => {
 });
 (async () => {
   const init = await request("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "smoke", version: "0" } });
-  if (init.serverInfo.name !== "pi-ptc") throw new Error("serverInfo.name != pi-ptc");
+  if (init.serverInfo.name !== "ptc-tools") throw new Error("serverInfo.name != ptc-tools");
   child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
   const tools = await request("tools/list");
   if (tools.tools[0].name !== "ptc_run_code") throw new Error("tools/list 没有 ptc_run_code");

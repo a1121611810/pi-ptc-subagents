@@ -1,15 +1,7 @@
 // Kimi 面多样性压测（手工跑，非门禁）：正确性矩阵 + 速度 + 消耗 + 占用 + 兼容性
 // 用法：node scripts/kimi-bench.mjs（先 pnpm run build:kimi）。正确性断言硬失败；性能只报数。
 import { spawn, execFileSync } from "node:child_process";
-import {
-  mkdtempSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  statSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdtempSync, mkdirSync, readdirSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -68,7 +60,8 @@ function startServer(nodeBin = process.execPath) {
         const { resolve, reject, timer } = pending.get(msg.id);
         pending.delete(msg.id);
         clearTimeout(timer);
-        msg.error ? reject(new Error(JSON.stringify(msg.error))) : resolve(msg.result);
+        if (msg.error) reject(new Error(JSON.stringify(msg.error)));
+        else resolve(msg.result);
       }
     }
   });
@@ -127,7 +120,7 @@ const init = await srv.request("initialize", {
   clientInfo: { name: "bench", version: "0" },
 });
 const tInit = performance.now() - t0;
-if (init.serverInfo.name !== "pi-ptc") throw new Error("serverInfo.name");
+if (init.serverInfo.name !== "ptc-tools") throw new Error("serverInfo.name");
 srv.notify("notifications/initialized");
 const t1 = performance.now();
 const tools = await srv.request("tools/list");
