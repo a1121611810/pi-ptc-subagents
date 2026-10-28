@@ -1,6 +1,8 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { KIMI_MCP_TOOLS } from "@pi-ptc/routes";
 import { renderToolResult } from "@pi-ptc/output";
 import { runPtcProgram } from "@pi-ptc/ptc";
@@ -63,9 +65,26 @@ const WEB_DS_SEARCH_SCHEMA = {
 
 // 搜索上下文：每 server 进程一份（记忆/配额都是 per-process 语义，与 pi 面孩子进程同款）
 // shortcut: 默认 30 次/进程沿用旧实现值，未实测校准；0 = 不限。缺 key 也注册——调用返回可读错误（fail-soft）
+
+// key 三级解析的 Kimi 版（pi 面是 auth.json→models.json→env，这里是 env→宿主 config.toml）：
+// 复用 Kimi Code 已配置的 DeepSeek provider，用户不用为插件再配一遍
+function resolveDeepSeekApiKey(): string {
+  if (process.env.DEEPSEEK_API_KEY) return process.env.DEEPSEEK_API_KEY;
+  try {
+    const home = process.env.KIMI_CODE_HOME ?? join(process.env.HOME ?? "", ".kimi-code");
+    const config = readFileSync(join(home, "config.toml"), "utf8");
+    const section = config.match(/\[providers\."?deepseek"?\][^\n]*\n([\s\S]*?)(?=\n\[|$)/i);
+    const key = section?.[1]?.match(/api_key\s*=\s*"([^"]+)"/)?.[1];
+    if (key) return key;
+  } catch {
+    // 配置不可读就落 missing-key，由 fail-soft 承接
+  }
+  return "missing-key";
+}
+
 function createSearchContext(): SearchRunContext {
   return {
-    provider: createDeepSeekProvider(process.env.DEEPSEEK_API_KEY ?? "missing-key"),
+    provider: createDeepSeekProvider(resolveDeepSeekApiKey()),
     memory: createSearchMemory(),
     quota: createSearchQuota(30),
   };

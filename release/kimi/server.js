@@ -1,7 +1,7 @@
 import { t as createFsBindings } from "./fs-tools-C0exp0qO.js";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import process$1 from "node:process";
 import { tmpdir } from "node:os";
@@ -21368,9 +21368,18 @@ const WEB_DS_SEARCH_SCHEMA = {
 		}
 	}
 };
+function resolveDeepSeekApiKey() {
+	if (process.env.DEEPSEEK_API_KEY) return process.env.DEEPSEEK_API_KEY;
+	try {
+		const home = process.env.KIMI_CODE_HOME ?? join(process.env.HOME ?? "", ".kimi-code");
+		const key = readFileSync(join(home, "config.toml"), "utf8").match(/\[providers\."?deepseek"?\][^\n]*\n([\s\S]*?)(?=\n\[|$)/i)?.[1]?.match(/api_key\s*=\s*"([^"]+)"/)?.[1];
+		if (key) return key;
+	} catch {}
+	return "missing-key";
+}
 function createSearchContext() {
 	return {
-		provider: createDeepSeekProvider(process.env.DEEPSEEK_API_KEY ?? "missing-key"),
+		provider: createDeepSeekProvider(resolveDeepSeekApiKey()),
 		memory: createSearchMemory(),
 		quota: createSearchQuota(30)
 	};

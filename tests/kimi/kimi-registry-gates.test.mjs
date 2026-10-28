@@ -3,6 +3,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { KIMI_MCP_TOOLS } from "../../packages/routes/dist/index.js";
@@ -13,8 +15,11 @@ const SERVER = join(
 );
 const DESCRIPTION_TOKEN_BUDGET = 400; // 单工具描述的启发式预算（中英混排 2 字符/token）
 
-function startServer() {
-  const child = spawn(process.execPath, [SERVER], { stdio: ["pipe", "pipe", "pipe"] });
+function startServer(envOverride) {
+  const child = spawn(process.execPath, [SERVER], {
+    stdio: ["pipe", "pipe", "pipe"],
+    env: envOverride ?? process.env,
+  });
   let buf = "";
   let nextId = 1;
   const pending = new Map();
@@ -105,7 +110,18 @@ test("门禁 K3 web_ds_search 参数校验：缺 query/url、count 越界都拒�
   assert.equal(badCount.isError, true);
   assert.match(badCount.content[0].text, /count 必须是 1–50/);
 
-  // 缺 DEEPSEEK_API_KEY 的 fail-soft：合法参数走到 provider，报可读错误而不是崩 server
-  const noKey = await call({ action: "search", query: "kimi" });
+  // 缺 key 的 fail-soft：合法参数走到 provider，报可读错误而不是崩 server
+  // 本机 kimi config 配了 DeepSeek——必须把 key 来源全掐了才测得到 missing-key 分支
+  const emptyHome = mkdtempSync(join(tmpdir(), "ptc-nokey-home-"));
+  const noKeySrv = startServer({
+    ...process.env,
+    DEEPSEEK_API_KEY: "",
+    KIMI_CODE_HOME: emptyHome,
+  });
+  const noKey = await noKeySrv.request("tools/call", {
+    name: "web_ds_search",
+    arguments: { action: "search", query: "kimi" },
+  });
   assert.equal(noKey.isError, true);
+  noKeySrv.child.kill();
 });
