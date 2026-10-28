@@ -5,6 +5,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.1.0] - 2026-10-29
+
+### Added
+
+- **Kimi Code plugin face (`ptc-tools`, MCP)** (ADR-0020). One repo now ships two install
+  faces: the pi extension (this npm package, unchanged name) and a Kimi Code plugin that
+  exposes `ptc_run_code` over MCP — the model writes one TypeScript program, batch-calls a
+  fixed fs toolset (read/grep/glob/edit) inside a vm cell, and gets one reduced result back
+  (measured context economy 1:138 on a 100-file fan-out). `workdir` is a real trust boundary
+  (realpath-jailed; symlink escapes rejected). Verified end-to-end in real Kimi Code: skill
+  guidance auto-triggers program writing, both Kimi (K2.8) and MiniMax (M3.1-Flash) models
+  answered 12/12 deterministic cases with zero unnecessary tool calls and full jail
+  compliance. Ships as `release/kimi/` committed at the tag plus `kimi.plugin.json`; update
+  detection verified against the official `MoonshotAI/kimi-code` source (GitHub-source-only,
+  needs a GitHub Release object per version).
+- **`web_ds_search` in the Kimi face** (P2): the DeepSeek-backed search core (search/open/find)
+  is now fully host-neutral and exposed as a second MCP tool; per-process quota with
+  fail-soft missing-key behavior. DeepSeek API key resolves env-first, then reuses the key
+  already configured in Kimi Code's own `config.toml` (commented-out keys are honored as
+  disabled).
+- **Kimi-face quality gates** (`tests/kimi`): mechanical registry gates (tools/list ↔ route
+  registry bidirectional with verbatim description match, description token budget, argument
+  matrix), plus `scripts/kimi-bench.mjs` (21-case diversity/stress probe; floor Node 22.21.0
+  verified 21/21) and `scripts/kimi-model-ab.sh` (model A/B harness).
+
+### Changed
+
+- **Host-neutral output core** (`@pi-ptc/output`): run-result shaping (model-visible text,
+  ADR-0012 layout + ADR-0015 truncation) split out of the ptc package so both faces share it;
+  pi-tui rendering stays pi-side. Test suite split three ways: `tests/pi` / `tests/output` /
+  `tests/kimi` (87 cases total, all green).
+- **Worker `execArgv` is now empty** — worker threads no longer inherit the host's exec
+  flags. Found by real-machine testing: the Kimi Code host passes `--max-semi-space-size=16`,
+  which Node's worker flag validation rejects, killing every program run. Blacklist
+  filtering (pi's eval flags) could never keep up with host-specific flags.
+- **Truncation temp files now self-clean**: first truncation in a process sweeps own-prefix
+  temp files older than 24h (previously only grew forever).
+- SKILL.md documents exact argument/return shapes for the four fs tools (removes the #1
+  model-side friction found in A/B testing); README explains the npm-name vs plugin-name
+  split.
+
+### Fixed
+
+- `grep` with a file path (`ENOTDIR`), unreadable files killing the whole grep, stale build
+  chunks leaking into shipped plugin artifacts, raw `ENOENT` for missing workdir, and
+  commented-out DeepSeek keys being picked up as active.
+
 ## [7.0.0] - 2026-10-28
 
 ### Changed
