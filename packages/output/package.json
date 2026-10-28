@@ -1,0 +1,24 @@
+{
+  "name": "@pi-ptc/output",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Host-neutral output core: run-result text shaping, truncation (render bounds), per-host render adapters",
+  "license": "Apache-2.0",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "rolldown -c",
+    "check": "tsrs -p tsconfig.json"
+  },
+  "dependencies": {
+    "@pi-ptc/tui": "workspace:*"
+  }
+}

@@ -2,7 +2,7 @@
 // 基准图：docs/prototypes/full-flow-anatomy.html ⑭记忆
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createSearchMemory } from "../packages/search/dist/index.js";
+import { createSearchMemory } from "../../packages/search/dist/index.js";
 
 test("核心：直接 open（没 search 过）的正文存得住、查得到", () => {
   const m = createSearchMemory();

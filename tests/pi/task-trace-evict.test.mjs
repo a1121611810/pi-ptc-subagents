@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { TaskEngine, TaskRegistry, FileOutputStorage } from "../packages/dispatch/dist/index.js";
+import { TaskEngine, TaskRegistry, FileOutputStorage } from "../../packages/dispatch/dist/index.js";
 
 function fakeSpawn() {
   return () => {

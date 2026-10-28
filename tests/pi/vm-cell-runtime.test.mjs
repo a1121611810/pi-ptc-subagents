@@ -5,7 +5,7 @@
 // 防假绿：B 区全部用例在「软格版」（宿主 facade 直注，本次加固前实现）上必红——构造函数链能摸到 process
 import test from "node:test";
 import assert from "node:assert/strict";
-import { WorkerPool, runPtcProgram, spawnPtcWorker } from "../packages/ptc/dist/index.js";
+import { WorkerPool, runPtcProgram, spawnPtcWorker } from "../../packages/ptc/dist/index.js";
 
 const fakeBindings = {
   read: async (args) => ({ text: `content-${args?.path}`, len: `content-${args?.path}`.length }),

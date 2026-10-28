@@ -29,6 +29,6 @@ export {
   OPT_IN_BINDING_NAMES,
   resolveBindingNames,
 } from "./bindings.ts";
-export { renderToolResult } from "./result-text.ts";
+export { renderToolResult, type ResultTextOutcome } from "@pi-ptc/output";
 export { createPtcRunCodeTool, createPtcWorkflowTool, validateWorkflowArgs } from "./tools.ts";
 export type { PtcToolOptions, RunCodeParams, WorkflowParams } from "./tools.ts";

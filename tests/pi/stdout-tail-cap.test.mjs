@@ -6,7 +6,7 @@ import {
   TaskEngine,
   TaskRegistry,
   InMemoryOutputStorage,
-} from "../packages/dispatch/dist/index.js";
+} from "../../packages/dispatch/dist/index.js";
 
 const CAP = 16 * 1024 * 1024;
 

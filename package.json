@@ -34,7 +34,9 @@
     "prepack": "pnpm run build && rm -rf dist docs/routes && cp -R packages/entry/dist dist && cp -R packages/routes/docs/routes docs/routes",
     "check": "pnpm -r --filter=!@pi-ptc/website run check",
     "lint": "oxlint",
-    "test": "node --test tests/*.test.mjs",
+    "test": "pnpm run test:pi && pnpm run test:output",
+    "test:pi": "node --test tests/pi/*.test.mjs",
+    "test:output": "node --test tests/output/*.test.mjs",
     "pretest": "pnpm run build",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check"

@@ -2,7 +2,7 @@ import type { AgentToolResult, ExtensionToolContext } from "@earendil-works/pi-c
 import { Type, type Static } from "typebox";
 import { TOOLS, type SurfaceMode } from "@pi-ptc/routes";
 import { runPtcProgram, type BindingTable } from "./dispatcher.ts";
-import { renderToolResult } from "./result-text.ts";
+import { renderToolResult } from "@pi-ptc/output";
 import { renderPtcResult, type PtcToolDetails } from "./render.ts";
 
 export interface PtcToolOptions {

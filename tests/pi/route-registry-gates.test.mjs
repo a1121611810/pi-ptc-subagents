@@ -15,9 +15,9 @@ import {
   renderLongOutputGuidance,
   renderRouteIndex,
   renderTaskNotifications,
-} from "../packages/routes/dist/index.js";
+} from "../../packages/routes/dist/index.js";
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const detailDir = join(repoRoot, "packages", "routes", "docs", "routes");
 const routesText = JSON.stringify(ROUTES);
 const toolNames = Object.keys(TOOLS);
@@ -81,7 +81,7 @@ test("机械点 5 每行事实段非空：fact 与 how 每面都要能回答「�
 });
 
 test("机械点 6 工具 description 必须是 registry 的调用（行为断言：假 pi 捕获注册，比对 TOOLS 输出）", async () => {
-  const { default: entryDefault } = await import("../packages/entry/dist/index.js");
+  const { default: entryDefault } = await import("../../packages/entry/dist/index.js");
   process.chdir(mkdtempSync(join(tmpdir(), "gates-mech6-"))); // storageDir 落 tmp，别写仓库
   for (const surface of SURFACES) {
     const handlers = {};

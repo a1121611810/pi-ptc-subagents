@@ -11,10 +11,11 @@ pi 的扩展：PTC（模型写 TypeScript 程序批量调工具）+ 子代理派
 | `dispatch` | 任务引擎：六道闸、DispatchSlotCounter（libuv 队列）、spawn/pump、registry（落盘+重启恢复）、child report、通知中心 | 无（叶子）                  |
 | `task`     | 任务面：list/output/stop 的读/停语义（分层读取：超阈值引导读报告）                                                 | → dispatch                  |
 | `tui`      | 渲染原语叶子：文本卫生、截断契约、渲染预算                                                                         | 无                          |
+| `output`   | 输出核（P0 拆分）：renderToolResult（结果→模型可见文本）、ResultTextOutcome 结构切片；Kimi 面（MCP）与 pi 面共用    | → tui（叶子）               |
 | `routes`   | 模型面散文唯一出处（ADR-0013）：7 条路的册子 + 渲染器（索引/通知/引导语）                                          | 无（叶子）                  |
 | `search`   | 搜索 provider 抽象（DeepSeek 首家）：三动作工具、配额、记忆、预算                                                  | → tui                       |
 
-依赖铁律：**tui / routes 是叶子**（不感知领域概念）；`dispatch` 持全部任务状态，其余只是调用方。
+依赖铁律：**tui / routes / output 是叶子**（不感知领域概念）；`dispatch` 持全部任务状态，其余只是调用方；宿主依赖单向——pi-tui 只出现在 ptc（render.ts 折叠渲染），`output` 零宿主依赖。
 
 ## 工具链（根目录）
 
@@ -23,7 +24,7 @@ pi 的扩展：PTC（模型写 TypeScript 程序批量调工具）+ 子代理派
 ## 验证纪律
 
 - 探针直接跑 `node` 打 `packages/*/dist/index.js`（假 spawn/fake pi harness）；引擎类逻辑必须探针覆盖
-- **仓库测试：`pnpm test`**（node:test 直打 dist，31 用例；改代码后先 `build` 再 `test`）；临时探针转正进 `tests/`，别回 /tmp
+- **仓库测试两制**：`test:pi`（`tests/pi/`，假 pi harness）/ `test:output`（`tests/output/`，宿主中立输出核）；`pnpm test` 串跑（改代码后先 `build` 再 `test`）；`tests/kimi/`（假 MCP 客户端）P1 随 kimi-mcp 建——两面的探针资产互不过河
 - **真 pi 冒烟必须隔离**：`pi -ne -e <entry/dist/index.js>`——本机全局装有旧版 `npm:pi-ptc-subagents`，不加 `-ne` 会同名互踩
 - **16 版本冒烟脚本化**：`scripts/version-smoke.sh`（发版前手工全量，四腿契约：run_code 求值 / 程序内 tools.read（0.99 分水岭：≥0.99 返回数字、floor 明确报 ERR:）/ ptc_workflow parallel / wait:false + 任务面 list·output；`SMOKE_VERSIONS="1.3.0"` 可单版本快查；缺 shim 自动装到 `$SHIM_ROOT`）
 - **四模式都已实测可用**（2026-10-26）：print（`-p`）/ json（`-p --mode json`，事件流可解析）/ rpc（`--mode rpc`，命令 `{"type":"prompt","message":...}` 走 stdin）/ TUI（全屏，用 kimi-cu 驱动真 Terminal——脚本方式起不来，需要图形界面）

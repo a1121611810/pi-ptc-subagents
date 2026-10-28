@@ -3,8 +3,8 @@
 // 依据：docs/prototypes/dispatch-doors-flow.html 第七节字段表（usage 对齐）+ gotchas/prompt-cache-dead-for-fork-per-task-children
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildPiArgv } from "../packages/dispatch/dist/index.js";
-import { parseChildStream } from "../packages/dispatch/dist/index.js";
+import { buildPiArgv } from "../../packages/dispatch/dist/index.js";
+import { parseChildStream } from "../../packages/dispatch/dist/index.js";
 
 const BASE = { task: "do the thing" };
 const CTX = { depth: 1 };

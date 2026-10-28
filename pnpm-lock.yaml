@@ -217,6 +217,12 @@ importers:
         specifier: 1.3.27
         version: 1.3.27
 
+  packages/output:
+    dependencies:
+      '@pi-ptc/tui':
+        specifier: workspace:*
+        version: link:../tui
+
   packages/ptc:
     dependencies:
       '@earendil-works/pi-coding-agent':
@@ -228,6 +234,9 @@ importers:
       '@pi-ptc/dispatch':
         specifier: workspace:*
         version: link:../dispatch
+      '@pi-ptc/output':
+        specifier: workspace:*
+        version: link:../output
       '@pi-ptc/routes':
         specifier: workspace:*
         version: link:../routes

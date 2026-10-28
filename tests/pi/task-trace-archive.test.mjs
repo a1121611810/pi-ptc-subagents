@@ -14,7 +14,7 @@ import {
 import { gzipSync, gunzipSync } from "node:zlib";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { TaskEngine, TaskRegistry, FileOutputStorage } from "../packages/dispatch/dist/index.js";
+import { TaskEngine, TaskRegistry, FileOutputStorage } from "../../packages/dispatch/dist/index.js";
 
 function fakeSpawn(stdoutText = "hello\n") {
   return () => {
