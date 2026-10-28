@@ -296,8 +296,14 @@ section("消耗");
 // ---- 兼容性 ----
 section("兼容性");
 console.log(`本机 node ${process.version}（server 实际运行版本）`);
+if (process.version.startsWith("v22.")) {
+  console.log("宿主 node 即 floor 族（22.x）——本次压测本身就是 floor 实测");
+}
+const VP_RT = join(process.env.HOME ?? "~", ".vite-plus/js_runtime/node");
 for (const alt of [
   "node22",
+  join(VP_RT, "22.21.0/bin/node"),
+  join(VP_RT, "22.22.1/bin/node"),
   "/opt/homebrew/opt/node@22/bin/node",
   "/usr/local/opt/node@22/bin/node",
 ]) {
@@ -341,7 +347,7 @@ for (const alt of [
       console.log("无 node 22 在场（nvm 无 v22）——floor 兼容性未实测，只验证过当前版本");
     }
   } catch {
-    console.log("无 nvm——floor 兼容性未实测");
+    if (!process.version.startsWith("v22.")) console.log("无 nvm——floor 兼容性未实测");
   }
 }
 
