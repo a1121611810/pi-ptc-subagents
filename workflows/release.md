@@ -79,7 +79,7 @@ gh run watch <publish run id> --exit-status
 2. 等传播（60s–2m30s，**即时查不到 ≠ 没发上**）。
 3. `npm view pi-ptc-subagents dist-tags.latest` == X.Y.Z。
 4. `npm view pi-ptc-subagents@X.Y.Z dist.shasum` == 步骤 2 抄的 shasum；`dist.attestations` 有 SLSA provenance。
-5.（附加）空目录 `npm init -y && npm i pi-ptc-subagents@X.Y.Z`，`fs.readFileSync(node_modules/pi-ptc-subagents/package.json)` 直读验证（防 bun shim 假成功坑；`require('<pkg>/package.json')` 会被 exports 拒）。
+   5.（附加）空目录 `npm init -y && npm i pi-ptc-subagents@X.Y.Z`，`fs.readFileSync(node_modules/pi-ptc-subagents/package.json)` 直读验证（防 bun shim 假成功坑；`require('<pkg>/package.json')` 会被 exports 拒）。
 
 ### 6. 收尾
 

@@ -26,6 +26,10 @@ _Avoid_: `pi.dispatch`（旧名）；模型面散文里的「dispatch」；「�
 **binding（绑定）/ 绑定契约（binding contract）**:
 PTC 程序内可调用的宿主能力清单；绑定契约回答「调了得到什么形状」——never throws，读 `status`。
 
+**运行格（vm cell）**:
+PTC 程序的执行环境：每 run 新建一个 `vm.createContext`，格内全局只有注入绑定（`tools`/`args`/`console`，workflow 面另有 `workflow` 四辅助）+ JS 标准内置；`process`/`fetch`/动态 `import()`/`node:*` 不可见。程序唯一的门 = `tools.*`（决策 30，ADR-0019）。reset = 丢格。降事故面，不是安全边界。
+_Avoid_: 单说「沙箱」（与 minimax QuickJS、OS 级沙箱混淆）
+
 ### 任务引擎
 
 **任务（task）/ 任务记录（task record）**:

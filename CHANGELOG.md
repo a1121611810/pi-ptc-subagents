@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **BREAKING: PTC programs run in a dedicated vm cell** (spec 决策 30, ADR-0019). Each run
+  now executes inside a fresh `vm.createContext`. The host injects only three thin bridges;
+  an **IIFE preamble** builds `tools` / `console` / `args` (frozen) / the four `workflow.*`
+  helpers **inside the cell (context realm)** and then drops the bridges — the IIFE matters:
+  script-level `var` in a vm context lands on the cell's global, and a leaked bridge name
+  (`__bridge`) was empirically reachable and escapable during review (fixed, regression-tested).
+  Prototype-chain escapes of the `x.constructor.constructor("return process")()` class find
+  no host object, and tool results cross the boundary as JSON strings so no host
+  Promise/object is ever exposed. `process`, `fetch`, `require`, dynamic `import()`, and all
+  `node:*` modules are unreachable — previously a program could `await import("node:fs")`
+  and bypass pi's tool pipeline (permissions/approvals) entirely. Programs that used those
+  escape hatches will break; programs that only use `tools.*` and `Date`/`Math` are
+  unaffected. Worker reset is now "drop the cell" — the globalThis baseline sweep, its known
+  prototype-pollution shortcut, and the console patch/restore dance are all gone.
+  Tool-call arguments and results are now pure JSON at the cell boundary: `undefined` values
+  in arguments are dropped, a `BigInt` argument rejects the call (old structured-clone
+  semantics differed; pinned by tests).
+- **Changed: `console.log` of objects prints JSON** (`{"a":1}`) instead of `util.inspect`
+  (`{ a: 1 }`) — deterministic, and a side effect of the cell's no-host-object rule.
+  Measured cost: none measurable (n=50, fresh-spawn medians ~35–37ms, same as before the
+  cell). Accident-surface reduction, **not** a security boundary (trust posture unchanged;
+  Node's `vm` is not a sandbox against determined adversaries — see ADR-0019 for the
+  residual cosmetic leaks). Deliberately not adopted from the reference designs: determinism
+  bans (no replay/journal to serve), process-per-run (warm pool is an asset), QuickJS (WASM
+  dependency with no matching gain). 35 new test cases cover visibility, the escape battery
+  (13 cases, incl. preamble-internal names), cross-realm semantics, isolation, and protocol
+  edges — each proven live by mutation probes (3 mutations, each turning exactly its own
+  cases red).
+
 ## [6.2.0] - 2026-10-28
 
 ### Added

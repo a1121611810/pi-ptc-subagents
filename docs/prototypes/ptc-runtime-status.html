@@ -99,7 +99,7 @@
         <div class="arr">→</div>
         <div class="node done"><div class="t"><span class="mark">✓</span>WorkerPool</div><div class="d">容量 4 · acquire 超时 · drain 退役</div></div>
         <div class="arr">→</div>
-        <div class="node done"><div class="t"><span class="mark">✓</span>worker</div><div class="d">reset 握手：拒残留 pending · globalThis 基线清场 · console 还原</div></div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>worker</div><div class="d">reset 握手：拒残留 pending · 每 run 一个 vm 运行格（决策 30），格内只有注入绑定</div></div>
         <div class="arr">→</div>
         <div class="node done"><div class="t"><span class="mark">✓</span>compileProgram</div><div class="d">剥 TS 类型 + 强制严格模式（ADR-0014）</div></div>
       </div>
@@ -141,11 +141,11 @@
   <table>
     <thead><tr><th style="width:24%">模块</th><th style="width:56%">内容</th><th style="width:20%">依据</th></tr></thead>
     <tbody>
-      <tr><td><code>compile.ts</code></td><td>严格模式编译器：剥类型 + <code>"use strict"</code> 内传、顶层 await/return、编译期 SyntaxError</td><td>ADR-0014 · 探针 5/5</td></tr>
+      <tr><td><code>compile.ts</code></td><td>严格模式编译器：剥类型 + <code>"use strict"</code> 内传、顶层 await/return、编译期 SyntaxError；产出为「运行格内求值」的源码（决策 30，ADR-0019）</td><td>ADR-0014/0019 · 探针 5/5 + 格用例 7</td></tr>
       <tr><td><code>limits.ts</code></td><td>全部数字唯一出处：2 分钟超时（上限 10 分）、64 MiB 预算、128 在途 / 10 并行、池参数</td><td>旧 ADR-0003/0004/0017</td></tr>
       <tr><td><code>protocol.ts</code></td><td>host↔worker 帧协议：init / run（含 args）/ cancel / reset / result / log / call / settled / ready</td><td>旧 ADR-0017</td></tr>
       <tr><td><code>dispatcher.ts</code></td><td>超时 terminate、并发双闸门（FIFO 等待）、输出预算校验、abort 在飞调用、worker 早退兜底</td><td>探针 6/6</td></tr>
-      <tr><td><code>pool.ts</code> + worker reset</td><td>warm 复用：reset 握手后才归还；globalThis 基线清场；console 还原</td><td>探针：跨 run 泄漏不可见</td></tr>
+      <tr><td><code>pool.ts</code> + worker reset</td><td>warm 复用：reset 握手后才归还；运行格每 run 新建、reset 即丢格（旧 globalThis 基线清场 + console 还原随格化整段删除，原型污染短路一并消失）</td><td>探针：跨 run 泄漏不可见 + 格用例 7</td></tr>
       <tr><td><code>sub-calls.ts</code></td><td>子调用活树：running/ok/error/rejected + 耗时 + 参数预览，随 outcome 交出</td><td>旧 ADR-0021 · 探针 3/3 状态</td></tr>
       <tr><td>图片上提</td><td>binding 上下文 <code>emitImage</code>；entry 桥 pi 结果 image 块；只挂 fulfilled</td><td>旧 ADR-0014 · 探针</td></tr>
       <tr><td><code>tools.ts</code></td><td>ptc_run_code / ptc_workflow 工厂：schema、execute、isError、workflow args JSON 校验</td><td>真 pi 双冒烟通过</td></tr>
@@ -184,6 +184,7 @@
     <br><b>审计修复轮（2026-10-27）：</b>任务门 cwd 参数删除（F1）；stdout 尾部上限 16MB + <code>outputTruncated</code> 标记（F2，dispatch 侧落地）；<b>决策 29 任务痕迹容量边界</b>（F3：终态留 500 最老先出、内存与磁盘同步、未终态永不驱逐；探针 3 用例含红线断言）；全兼容矩阵复跑 16/16（0.86.0–1.4.0 每版 run_code + 真派发全过）。
     <br><b>F4 测试框架（2026-10-27，ADR-0017）：</b>/tmp 探针全部转正 <code>tests/*.test.mjs</code>（node:test 直打 dist，18 用例）；spec 决策 21 八条机械强制点门禁落地 <code>tests/route-registry-gates.test.mjs</code>（8 用例，变异自证：清空 fact → 机械点 5 红）；<code>pnpm test</code> 26/26 全绿；CI 双闸（publish.yml 加 test 步骤 + ci.yml 守 push main / PR）；issue #291。
     <br><b>减量轮（2026-10-28，feat/shrink-tax worktree）：</b>孩子 argv 恒带 <code>--no-extensions --no-skills</code> + <code>--no-mcp</code> 版本门（1.1.0 起，dispatch 侧落地）；真机 A/B 孩子 input 32575→4356（-86%）；<code>create-a-task.md</code> 加 briefing 纪律段；<code>pnpm test</code> 31/31；版本冒烟三腿全过（0.86.0 / 1.1.0 / 1.4.0，1.4 shim 装不上走 PATH 兜底同版本）。
+    <br><b>运行格轮（2026-10-28，feat/vm-cell-runtime worktree，未合入）：</b><b>决策 30</b>——程序每 run 一个 <code>vm.createContext</code> 运行格：宿主只放三个桥（<code>__ptcCall</code>/<code>__ptcConsole</code>/<code>__ptcArgsJson</code>），<b>IIFE 序言</b>在格内自建 tools/console/args(workflow 四辅助) 后置 undefined 脱手，工具结果 JSON 字符串回格再 parse——<b>constructor 链逃逸面闭合</b>（CVE 同款：<code>tools.constructor.constructor("return process")()</code>；review 实测初版软格与未包 IIFE 的加固版均被 <code>__bridge</code> 全局可达击穿，IIFE 修复后同探针返回 closed）。reset = 丢格（旧 globalThis 基线清场 + console 还原整段删除，原型污染短路消失）。<code>pnpm test</code> <b>66/66</b>（新 <code>tests/vm-cell-runtime.test.mjs</code> 35 用例五区：可见性 3/逃逸面 13/语义跨 realm 10/隔离 4/协议边界 5；防假绿四道——逃逸区软格版必红 + 三变异各精确转红：去脱手 3 红、不冻结 2 红、去 IIFE 1 红）；稳定性 5 连跑全绿；速度 n=50 与格化前<b>持平</b>（34.9/39.1/37.3 vs 35.2/38.5/37.0 median）；<b>全版本冒烟 16/16</b>（0.86.0–1.3.0 + PATH 1.4.0，四腿全 OK 零 isError）。BREAKING（major bump）：程序用过 process/fetch/动态 import 会断、console 对象改 JSON 形态——ADR-0019 + CHANGELOG 已记；已知装饰性泄漏在案（Error 栈续体帧带宿主路径、桥名留枚举但值为 undefined）。
     <br><b>workflow.parallel 对齐决策 12（2026-10-26）：</b>并行改 <code>Promise.allSettled</code>——单边失败不丢兄弟结果，状态读返回记录（两扇门的范式本就这么写；要「一错全拒」的程序自己写 <code>Promise.all</code>）；真 worker 探针过（fulfilled + rejected 同批返回，子调用树 2/2 不丢），详情文件 <code>run-a-phased-workflow.md</code> 已同步。
     <b>附记（2026-10-26 已查证，与本扩展无关）：</b>pi 1.4.0 TUI <code>/exit</code> 打印 Exited/Goodbye 后进程不自退——无扩展对照实验同样复现（进程驻留 2 分钟+，SIGTERM 清理），是 pi 上游行为，非本扩展持有句柄。
   </div>

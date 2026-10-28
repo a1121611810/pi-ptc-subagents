@@ -1,5 +1,4 @@
 export { compileProgram } from "./compile.ts";
-export type { PtcProgram } from "./compile.ts";
 export { createTaskBinding, TASK_BINDING_NAME } from "./task-binding.ts";
 export type {
   CreateTaskResult,
