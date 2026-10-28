@@ -74,7 +74,8 @@ function resolveDeepSeekApiKey(): string {
     const home = process.env.KIMI_CODE_HOME ?? join(process.env.HOME ?? "", ".kimi-code");
     const config = readFileSync(join(home, "config.toml"), "utf8");
     const section = config.match(/\[providers\."?deepseek"?\][^\n]*\n([\s\S]*?)(?=\n\[|$)/i);
-    const key = section?.[1]?.match(/api_key\s*=\s*"([^"]+)"/)?.[1];
+    // 锚行首：注释掉的 api_key（# 开头）不许被捡起来——「注释即停用」是用户的直觉
+    const key = section?.[1]?.match(/^[ \t]*api_key\s*=\s*"([^"]+)"/m)?.[1];
     if (key) return key;
   } catch {
     // 配置不可读就落 missing-key，由 fail-soft 承接

@@ -21372,7 +21372,7 @@ function resolveDeepSeekApiKey() {
 	if (process.env.DEEPSEEK_API_KEY) return process.env.DEEPSEEK_API_KEY;
 	try {
 		const home = process.env.KIMI_CODE_HOME ?? join(process.env.HOME ?? "", ".kimi-code");
-		const key = readFileSync(join(home, "config.toml"), "utf8").match(/\[providers\."?deepseek"?\][^\n]*\n([\s\S]*?)(?=\n\[|$)/i)?.[1]?.match(/api_key\s*=\s*"([^"]+)"/)?.[1];
+		const key = readFileSync(join(home, "config.toml"), "utf8").match(/\[providers\."?deepseek"?\][^\n]*\n([\s\S]*?)(?=\n\[|$)/i)?.[1]?.match(/^[ \t]*api_key\s*=\s*"([^"]+)"/m)?.[1];
 		if (key) return key;
 	} catch {}
 	return "missing-key";

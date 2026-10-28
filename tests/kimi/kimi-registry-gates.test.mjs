@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -112,11 +112,13 @@ test("门禁 K3 web_ds_search 参数校验：缺 query/url、count 越界都拒�
 
   // 缺 key 的 fail-soft：合法参数走到 provider，报可读错误而不是崩 server
   // 本机 kimi config 配了 DeepSeek——必须把 key 来源全掐了才测得到 missing-key 分支
-  const emptyHome = mkdtempSync(join(tmpdir(), "ptc-nokey-home-"));
-  const noKeySrv = startServer({
+  const noKeyEnv = {
     ...process.env,
     DEEPSEEK_API_KEY: "",
-    KIMI_CODE_HOME: emptyHome,
+  };
+  const noKeySrv = startServer({
+    ...noKeyEnv,
+    KIMI_CODE_HOME: mkdtempSync(join(tmpdir(), "ptc-nokey-home-")),
   });
   const noKey = await noKeySrv.request("tools/call", {
     name: "web_ds_search",
@@ -124,4 +126,18 @@ test("门禁 K3 web_ds_search 参数校验：缺 query/url、count 越界都拒�
   });
   assert.equal(noKey.isError, true);
   noKeySrv.child.kill();
+
+  // 注释掉的 api_key 不许被捡起来（「注释即停用」）：段内只留注释 key → 同样落 missing-key
+  const commentedHome = mkdtempSync(join(tmpdir(), "ptc-commented-home-"));
+  writeFileSync(
+    join(commentedHome, "config.toml"),
+    '[providers.DeepSeek]\ntype = "openai"\n# api_key = "sk-stale-disabled"\n',
+  );
+  const commentedSrv = startServer({ ...noKeyEnv, KIMI_CODE_HOME: commentedHome });
+  const commented = await commentedSrv.request("tools/call", {
+    name: "web_ds_search",
+    arguments: { action: "search", query: "kimi" },
+  });
+  assert.equal(commented.isError, true, "注释掉的 api_key 必须视为停用");
+  commentedSrv.child.kill();
 });
