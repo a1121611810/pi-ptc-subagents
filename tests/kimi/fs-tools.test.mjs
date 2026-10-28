@@ -63,6 +63,25 @@ test("glob：按模式列出（绝对路径 jail 内）", async () => {
   assert.ok(found.includes(join("sub", "c.txt")));
 });
 
+test("grep：path 给单个文件时只搜它（不 ENOTDIR）", async () => {
+  const dir = fixture();
+  const hits = await call(createFsBindings(dir).grep, { pattern: "world", path: "a.txt" });
+  assert.deepEqual(hits, ["a.txt:2: world"]);
+});
+
+test("grep：单个文件读不动（权限 000）跳过、其它命中照给", async () => {
+  const dir = fixture();
+  writeFileSync(join(dir, "locked.txt"), "hello locked\n", { mode: 0o000 });
+  const hits = await call(createFsBindings(dir).grep, { pattern: "hello" });
+  const joined = hits.join("\n");
+  assert.match(joined, /a\.txt:1: hello/);
+  assert.match(joined, /sub\/c\.txt:1: hello again/);
+});
+
+test("createFsBindings：workdir 不存在报人话（不是裸 errno）", async () => {
+  assert.throws(() => createFsBindings("/nonexistent-ptc-workdir-xyz"), /workdir 不存在或不可达/);
+});
+
 test("edit：唯一匹配替换成功，原文件真的变了", async () => {
   const dir = fixture();
   const result = await call(createFsBindings(dir).edit, {

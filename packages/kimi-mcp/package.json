@@ -15,7 +15,7 @@
     }
   },
   "scripts": {
-    "build": "rolldown -c",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && rolldown -c",
     "check": "tsrs -p tsconfig.json"
   },
   "dependencies": {

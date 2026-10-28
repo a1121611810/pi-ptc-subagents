@@ -19,7 +19,8 @@ const out = join(root, "release/kimi");
 rmSync(out, { recursive: true, force: true });
 mkdirSync(join(out, "skills", "ptc"), { recursive: true });
 
-const chunks = readdirSync(distDir).filter((f) => f.endsWith(".js"));
+// index.js 是包导出测试面（dist 内用），插件 manifest 不指向它——不进发布物
+const chunks = readdirSync(distDir).filter((f) => f.endsWith(".js") && f !== "index.js");
 for (const f of chunks) cpSync(join(distDir, f), join(out, f));
 cpSync(
   join(root, "packages/routes/docs/kimi-ptc/SKILL.md"),

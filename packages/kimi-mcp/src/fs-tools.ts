@@ -57,7 +57,13 @@ function jailed(workdirReal: string, p: string): string {
 }
 
 function* walk(dir: string): Generator<string> {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return; // 目录不可读：跳过这个子树，不拖死整场 grep
+  }
+  for (const entry of entries) {
     if (entry.isDirectory()) {
       if (SKIP_DIRS.has(entry.name)) continue;
       yield* walk(resolve(dir, entry.name));
@@ -78,7 +84,12 @@ function readPlainText(file: string): string | undefined {
 }
 
 export function createFsBindings(workdir: string): BindingTable {
-  const workdirReal = realpathSync(resolve(workdir));
+  let workdirReal: string;
+  try {
+    workdirReal = realpathSync(resolve(workdir));
+  } catch {
+    throw new Error(`workdir 不存在或不可达: ${workdir}（workdir 传用户工作区绝对路径）`);
+  }
 
   return {
     read: async (args) => {
@@ -103,8 +114,14 @@ export function createFsBindings(workdir: string): BindingTable {
         throw new Error(`invalid pattern: ${pattern}`);
       }
       const hits: string[] = [];
-      outer: for (const file of walk(scope)) {
-        const text = readPlainText(file);
+      const files: Iterable<string> = statSync(scope).isFile() ? [scope] : walk(scope);
+      outer: for (const file of files) {
+        let text: string | undefined;
+        try {
+          text = readPlainText(file);
+        } catch {
+          continue; // 单个文件读不动（权限等）：跳过
+        }
         if (text === undefined) continue;
         const lines = text.split("\n");
         for (let i = 0; i < lines.length; i++) {

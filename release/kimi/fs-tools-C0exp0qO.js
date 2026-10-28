@@ -38,7 +38,13 @@ function jailed(workdirReal, p) {
 	return real;
 }
 function* walk(dir) {
-	for (const entry of readdirSync(dir, { withFileTypes: true })) if (entry.isDirectory()) {
+	let entries;
+	try {
+		entries = readdirSync(dir, { withFileTypes: true });
+	} catch {
+		return;
+	}
+	for (const entry of entries) if (entry.isDirectory()) {
 		if (SKIP_DIRS.has(entry.name)) continue;
 		yield* walk(resolve(dir, entry.name));
 	} else if (entry.isFile()) yield resolve(dir, entry.name);
@@ -52,7 +58,12 @@ function readPlainText(file) {
 	return text.includes("�") ? void 0 : text;
 }
 function createFsBindings(workdir) {
-	const workdirReal = realpathSync(resolve(workdir));
+	let workdirReal;
+	try {
+		workdirReal = realpathSync(resolve(workdir));
+	} catch {
+		throw new Error(`workdir 不存在或不可达: ${workdir}（workdir 传用户工作区绝对路径）`);
+	}
 	return {
 		read: async (args) => {
 			const real = jailed(workdirReal, strArg(args, "path"));
@@ -71,8 +82,14 @@ function createFsBindings(workdir) {
 				throw new Error(`invalid pattern: ${pattern}`);
 			}
 			const hits = [];
-			outer: for (const file of walk(scope)) {
-				const text = readPlainText(file);
+			const files = statSync(scope).isFile() ? [scope] : walk(scope);
+			outer: for (const file of files) {
+				let text;
+				try {
+					text = readPlainText(file);
+				} catch {
+					continue;
+				}
 				if (text === void 0) continue;
 				const lines = text.split("\n");
 				for (let i = 0; i < lines.length; i++) if (regex.test(lines[i])) {
