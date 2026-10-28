@@ -29,9 +29,6 @@ export interface RunProgramRequest {
 // 旧 ADR-0005 F1/F2：环境白名单 + 内存上限——程序以用户身份跑，这些只是降事故面，不是安全边界（旧 ADR-0007）
 const WORKER_ENV_ALLOW_LIST = ["PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "TEMP", "TMP"];
 
-// worker 默认继承 execArgv——宿主若以 -e/--input-type 等启动，原样继承会让 worker 起不来；只剥这几个
-const WORKER_EXEC_ARGV_DENY = /^(-e|--eval|-p|--print|--input-type|-)(=|$)/;
-
 function workerEnv(): NodeJS.ProcessEnv {
   return Object.fromEntries(
     WORKER_ENV_ALLOW_LIST.filter((key) => key in process.env).map((key) => [
@@ -41,10 +38,12 @@ function workerEnv(): NodeJS.ProcessEnv {
   );
 }
 
+// worker 是自包含 bundle，不需要继承宿主 execArgv——继承是净亏损：pi 的 eval 系、
+// kimi 宿主传的 V8 调优旗标（--max-semi-space-size=16）都会被 worker_threads 的旗标校验拒（真机实测）
 export function spawnPtcWorker(): Worker {
   return new Worker(buildWorkerUrl(import.meta.url), {
     env: workerEnv(),
-    execArgv: process.execArgv.filter((arg) => !WORKER_EXEC_ARGV_DENY.test(arg)),
+    execArgv: [],
     resourceLimits: { maxOldGenerationSizeMb: 512, maxYoungGenerationSizeMb: 64 },
   });
 }

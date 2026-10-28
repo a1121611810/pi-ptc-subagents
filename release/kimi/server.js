@@ -20708,14 +20708,13 @@ const WORKER_ENV_ALLOW_LIST = [
 	"TEMP",
 	"TMP"
 ];
-const WORKER_EXEC_ARGV_DENY = /^(-e|--eval|-p|--print|--input-type|-)(=|$)/;
 function workerEnv() {
 	return Object.fromEntries(WORKER_ENV_ALLOW_LIST.filter((key) => key in process.env).map((key) => [key, process.env[key]]));
 }
 function spawnPtcWorker() {
 	return new Worker(buildWorkerUrl(import.meta.url), {
 		env: workerEnv(),
-		execArgv: process.execArgv.filter((arg) => !WORKER_EXEC_ARGV_DENY.test(arg)),
+		execArgv: [],
 		resourceLimits: {
 			maxOldGenerationSizeMb: 512,
 			maxYoungGenerationSizeMb: 64
