@@ -1,6 +1,7 @@
 {
   "ignorePatterns": [
     "**/dist/**",
+    "release/**",
     "docs/prototypes/**/*.html",
     "packages/website/**",
     ".scratch/**"

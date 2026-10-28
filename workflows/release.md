@@ -33,6 +33,7 @@ git merge --ff-only feat/xxx
 
 - CHANGELOG.md 顶插新节（**重写仓没有 `[Unreleased]` 段**，直接插最顶）；英文、Keep a Changelog 格式、含实测数字。
 - `package.json` version → `X.Y.Z`。
+- `kimi.plugin.json` version → 同一 `X.Y.Z`（`build:kimi` 会校验一致性，不一致即拒——一套版本号走到底，Kimi 面不另起版本线）。
 - `git commit -m "chore(release): X.Y.Z——<一句话>"` 并 push main。记此 commit 为 R。
 
 ### 2. 发版前验证（独立发布 worktree）
@@ -43,6 +44,7 @@ cd ../<repo>-release
 pnpm install
 pnpm run check && pnpm run build && pnpm test && pnpm run lint && pnpm run fmt:check
 scripts/version-smoke.sh                        # 全量：15 个 shim 版本 + PATH ceiling，fails 必须 = 0
+pnpm run build:kimi && bash scripts/kimi-smoke.sh  # Kimi 面三腿：布局版本 / bundle 自包含 / 真 spawn 协议探针
 npm publish --dry-run                           # 抄下 shasum（后面与 CI 对账的基准）
 ```
 
@@ -66,6 +68,7 @@ CHANGELOG: <新节标题行>
 ```bash
 git tag -a vX.Y.Z -m "release X.Y.Z: <一句话>" R
 git push origin vX.Y.Z
+gh release create vX.Y.Z --generate-notes   # Kimi 面更新检测只认 Release 对象（/releases/latest 重定向）；漏了 = 用户永远收不到更新
 gh run watch <publish run id> --exit-status
 ```
 

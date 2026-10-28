@@ -5,6 +5,7 @@
   },
   "ignorePatterns": [
     "**/dist/**",
+    "release/**",
     "docs/prototypes/**",
     "docs/research/**",
     "packages/website/**",

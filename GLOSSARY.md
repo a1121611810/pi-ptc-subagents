@@ -87,7 +87,20 @@ _Avoid_: 以创建时间 / 插入序作驱逐键
 **渲染边界（render bounds）**:
 tui 包的截断契约与渲染预算：任何渲染路径不超预算，超了明说（`> WARNING:`）不静默截断。
 
-### 验证与工程
+#### 宿主面
+
+**pi 面 / Kimi 面**:
+同一份源码的两张安装脸：pi 面 = npm 包 + `pi.extensions`（进程内扩展）；Kimi 面 = `kimi.plugin.json` 插件（MCP server，ADR-0020）。靠加载方式区分，**没有运行时宿主分支**。Kimi 面无新编排器（spec 决策 28）——编排器是宿主自己，kimi-mcp 只是运行格供应商。
+_Avoid_: 「兼容 kimi 的 entry 分支」
+
+**四件套**:
+Kimi 面程序内唯一的 tools：read / grep / glob / edit，只在 `workdir` 内活动（realpath 锁，越界即拒）。与 pi 面「程序 tools = 会话工具全集」是两条契约，跨宿主移植以册子为准。
+_Avoid_: 说 Kimi 面程序能调 bash / 能发子代理
+
+**输出核（output）**:
+`packages/output`（P0 拆分）：运行结果 → 模型可见文本的宿主中立整形（旧 ADR-0012 排版 + 0015 截断），pi / Kimi 两面共用；pi-tui 折叠渲染不住这里（在 ptc/render.ts）。
+
+## 验证与工程
 
 **干净室（clean room）**:
 重写纪律：只按 ADR / spec / 研究文档写，不抄旧分支（`main` 等）的实现源码。

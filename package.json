@@ -31,12 +31,14 @@
   },
   "scripts": {
     "build": "pnpm -r --filter=!@pi-ptc/website run build",
+    "build:kimi": "pnpm --filter @pi-ptc/kimi-mcp run build && node scripts/assemble-kimi.mjs",
     "prepack": "pnpm run build && rm -rf dist docs/routes && cp -R packages/entry/dist dist && cp -R packages/routes/docs/routes docs/routes",
     "check": "pnpm -r --filter=!@pi-ptc/website run check",
     "lint": "oxlint",
-    "test": "pnpm run test:pi && pnpm run test:output",
+    "test": "pnpm run test:pi && pnpm run test:output && pnpm run test:kimi",
     "test:pi": "node --test tests/pi/*.test.mjs",
     "test:output": "node --test tests/output/*.test.mjs",
+    "test:kimi": "node --test tests/kimi/*.test.mjs",
     "pretest": "pnpm run build",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check"
