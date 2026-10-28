@@ -1,6 +1,6 @@
 # pi-ptc-subagents
 
-Programmable tool calling and subagent dispatch for [pi](https://pi.dev).
+Programmable tool calling and subagent dispatch for [pi](https://pi.dev) — and a [Kimi Code](https://www.kimi.com/code) plugin (`ptc-tools`, MCP) that brings the same "write one program, batch-call your tools" to Kimi sessions. The npm package name is the pi-face distribution; the Kimi face ships from this repo's releases.
 
 pi calls tools one at a time. This package lets the model write a program that calls them
 in one go — and lets that program spawn pi subagents. Two capabilities. One package.
