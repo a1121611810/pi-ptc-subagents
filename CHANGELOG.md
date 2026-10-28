@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.2.0] - 2026-10-28
+
+### Added
+
+- **Lean child process argv**: children are now spawned with `--no-extensions --no-skills`
+  (extension discovery noise — user skills, host-side prose, discovered extensions — no longer
+  rides into every child), and `--no-mcp` when the host pi is ≥ 1.1.0 (the flag first appears
+  there; `EngineContext.piVersion` is resolved once at session start). Measured on real
+  children: worst-case per-child input drops 86% (32524 → 4356 tokens).
+- **Cache-aware usage observation**: the JSONL stream parser now carries pi ≥ 1.4.0's
+  `usage.cacheRead` / `usage.cacheWrite` into the observed usage (absent on older pi, floor-safe).
+
+### Changed
+
+- **Tighter child report contract prose**: summary is the deliverable, findings carry
+  load-bearing evidence only, no recapping read content, no report .md files. JSON shape
+  unchanged. Measured output reduction: -57% on recap-prone tasks, -9~23% on mixed tasks.
+- `create-a-task.md` gains briefing discipline (exact paths, state what the final message
+  must carry, merge same-domain work into one serial child).
+- `docs/pi-version-matrix.md`: `--no-mcp` first-appearance (1.1.0) and 1.4.0 usage cache
+  fields recorded.
+
 ## [6.1.0] - 2026-10-27
 
 ### Added
