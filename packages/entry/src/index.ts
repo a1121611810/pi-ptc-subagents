@@ -6,6 +6,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { execSync } from "node:child_process";
 import { Type } from "typebox";
 import {
   FileOutputStorage,
@@ -71,6 +72,19 @@ const detailDir = existsSync(publishedDetailDir)
   ? publishedDetailDir
   : join(packageRoot, "..", "routes", "docs", "routes");
 
+// 减量 argv 的版本门素材：孩子与宿主同 binary，启动时解析一次（~几十 ms；取不到返回 undefined，按 floor 处理）
+function resolvePiVersion(): string | undefined {
+  try {
+    const out = execSync("pi --version", {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return out || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // pi 版本能力矩阵与 <0.99.0 floor 的运行时差异：docs/pi-version-matrix.md
 export default function piPtcEntry(pi: ExtensionAPI): void {
   // 旧 ADR-0035：注册发生在 session_start——此刻 getActiveTools() 可用且 trust 已应用；factory 阶段它们是 throw 的桩
@@ -130,6 +144,8 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
       userDir: join(getAgentDir(), "agents"),
       projectDir: join(process.cwd(), ".pi", "agents"),
     };
+    // 减量 argv 的版本门：孩子与宿主同 binary，解析一次宿主 pi 版本（失败按 floor 处理——supportsNoMcp 缺省 false）
+    const piVersion = resolvePiVersion();
     let session: PtcSession;
     // 决策 5 的可见性对齐。审计 F9：只撤「本会话自己加的」——用户 loadout 自己固定的任务面工具不动
     const faceAddedByUs = new Set<string>();
@@ -153,6 +169,7 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
     session = assemblePtcSession({
       onTransition: () => applyTaskFaceVisibility(),
       whyEnabled: () => whyEnabledOverride ?? whyEnabledPersisted,
+      context: { depth: 0, piVersion },
       engine: {
         notifications,
         resolveAgent: (name, scope) => findAgent(name, agentDirs, scope),

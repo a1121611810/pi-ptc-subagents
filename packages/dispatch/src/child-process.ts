@@ -43,6 +43,16 @@ function escapeXmlText(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+// --no-mcp 出现于 pi 1.1.0（0.86/0.87/0.99/1.0 的 --help 均无，实测）；解不出版本按不支持处理
+function supportsNoMcp(piVersion?: string): boolean {
+  if (!piVersion) return false;
+  const [major = "0", minor = "0"] = piVersion.trim().replace(/^v/, "").split(".");
+  const M = Number.parseInt(major, 10);
+  const m = Number.parseInt(minor, 10);
+  if (Number.isNaN(M) || Number.isNaN(m)) return false;
+  return M > 1 || (M === 1 && m >= 1);
+}
+
 // pi 子进程 argv（旧 ADR-0016/0039/0044）：--no-session 不留磁盘状态；追加块告诉孩子它是什么
 export function buildPiArgv(
   input: {
@@ -61,7 +71,7 @@ export function buildPiArgv(
     agentModel?: string;
     agentThinkingLevel?: string;
   },
-  context: { depth: number; sessionModel?: string },
+  context: { depth: number; sessionModel?: string; piVersion?: string },
 ): string[] {
   const block = [
     "<pi-ptc-context>",
@@ -74,6 +84,10 @@ export function buildPiArgv(
     .join("\n");
   // --mode json：工具通道（toolResult 消息）与终态文本/usage 都从这流解析
   const argv = ["pi", "-p", "--no-session", "--mode", "json", "--append-system-prompt", block];
+  // 减量：砍自动发现带进孩子的宿主面散文与技能（pi help 明示显式 -e 不受 --no-extensions 影响）；
+  // --no-mcp 1.1.0 才出现（版本考古实测），floor 0.86 无此旗标——按宿主版本门控，缺省不发
+  argv.push("--no-extensions", "--no-skills");
+  if (supportsNoMcp(context.piVersion)) argv.push("--no-mcp");
   // 旧 ADR-0044 解析序：调用参数 → agent 定义 → 会话当前模型；思考档位挂 :<thinking> 后缀（pi --model 语法）
   const model = input.model ?? input.agentModel ?? context.sessionModel;
   const thinking = input.thinkingLevel ?? input.agentThinkingLevel;

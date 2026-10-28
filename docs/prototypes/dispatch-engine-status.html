@@ -161,8 +161,8 @@
       </tr>
       <tr>
         <td><b>起孩子</b></td>
-        <td>spawn/pump/JSONL 解析/agent 磁盘发现/argv 合并已落地（见上方链路图）</td>
-        <td>会话模型继承、bash 类授权面、TMPDIR 提示词</td>
+        <td>spawn/pump/JSONL 解析/agent 磁盘发现/argv 合并已落地（见上方链路图）；<b>减量 argv（2026-10-28）</b>：孩子恒带 <code>--no-extensions --no-skills</code>，<code>--no-mcp</code> 按宿主版本门控（1.1.0 起，floor 无此旗标）；真机 A/B：孩子 input 32575→4356（-86%）</td>
+        <td>会话模型继承、bash 类授权面、TMPDIR 提示词；孩子侧 MCP 工具随 --no-mcp 不可用（默认面无 MCP 任务，需要时再加 per-task 开关）</td>
       </tr>
       <tr>
         <td><b>在飞</b></td>
@@ -171,7 +171,7 @@
       </tr>
       <tr>
         <td><b>交付</b></td>
-        <td>终态写回判定（resolve-exit 写锁内）；<b>child report 两通道</b>（tool 优先/prompt 兜底/opted-out）；<b>usage</b>（jsonl 实测 + observedUsage 补缺）；<b>通知管线</b>（NotificationCenter + turn_end 批投递）；<b>落盘存储与重启恢复</b>（FileOutputStorage + reconcile-lost）</td>
+        <td>终态写回判定（resolve-exit 写锁内）；<b>child report 两通道</b>（tool 优先/prompt 兜底/opted-out）；<b>usage</b>（jsonl 实测 + observedUsage 补缺；<b>2026-10-28 起接 pi≥1.4.0 的 cacheRead/cacheWrite</b>，旧版缺省 undefined）；<b>通知管线</b>（NotificationCenter + turn_end 批投递）；<b>落盘存储与重启恢复</b>（FileOutputStorage + reconcile-lost）</td>
         <td>—（两通道/usage/通知/存储恢复均落地）</td>
       </tr>
       <tr>
@@ -195,6 +195,9 @@
     <br><b>评审修复轮（2026-10-26 晚）：</b>9 条评审发现全修（路由索引预算、图片 base64、/ptc 回执文案、绑定作用域、重复文档、ADR-0015 修订）；<b>全版本矩阵复跑 16/16</b>（0.86.0–1.4.0，与上轮逐字一致）+ 1.4.0 补充探针 2/2（模型读详情文件首行 ✓、程序内派发返回 handle ✓）。
     <br><b>评审后全链路复测（2026-10-26 晚，提交前）：</b>矩阵再复跑 <b>16/16 逐字一致</b>；workflow（pipeline 归约 <code>a!,b!</code> 精确）/ json（69 事件全 JSON 合法 + tool_execution）/ rpc（stdin prompt → tool_execution → settled）/ TUI（真 Terminal kimi-cu 驱动：fulfilled 折叠行渲染 + <code>OK:42</code>）全过；真子进程派发 floor 0.86.0（prompt-json 兜底）+ 抽测 0.87.0 / 0.99.0 / 1.3.0 全部 <code>fulfilled</code>。
     <br><b>审计修复轮（2026-10-27，F1/F2）：</b>任务门 cwd 参数删除（全链无消费者，spec 字段表同步标注）；stdout 尾部上限 16MB + <code>outputTruncated</code> 记录标记（审计 F2，pump 节点见④）。全兼容矩阵复跑 <b>16/16</b>（0.86.0–1.4.0 每版 ptc_run_code=OK + 真派发 fulfilled + 0 工具错误；截断行为由假 spawn 探针两用例单独覆盖）；<b>F3 = 决策 29 任务痕迹容量边界</b>（registry <code>evictTerminal</code> 按 (finishedAt, taskId) 最老先出；<b>归档层</b>：运行时驱逐 → gzip 压缩冷存（zlib 实测 3.4x，setImmediate 异步尾链 + shutdown 排空，主线不等），boot 债务直删；<code>ptc_task_output</code> 精确 id 回落读者 30 天可解；三配置键进 ptc.json：taskTraceKeep/archiveEnabled/archiveTtlDays；未终态永不驱逐，探针 5 用例）；<b>F7 值树契约接线</b>（每层子项截断 + 余量标记，行宽 200→120）；<b>F8 池化 worker 监听归还即摘</b>；<b>F9 任务面可见性只撤本会话自己加的</b>。
+    <br><b>减量轮（2026-10-28，feat/shrink-tax worktree，未合入）：</b><b>argv 减量</b>——孩子恒带 <code>--no-extensions --no-skills</code>（floor 0.86 已有），<code>--no-mcp</code> 按宿主版本门控（1.1.0 才出现，EngineContext.piVersion 解析于 entry 启动时）；真机 A/B 同 task 同 cwd：孩子 input <b>32575→4356（-86%）</b>；<b>usage 观测</b>——jsonl 接 pi≥1.4.0 的 <code>cacheRead/cacheWrite</code>（fixture 两用例）；<b>契约散文收紧</b>（summary=交付物/findings 只收 load-bearing/禁写报告 .md，JSON 形状不动）；新增 <code>tests/child-context-shrink.test.mjs</code> 5 用例，<code>pnpm test</code> <b>31/31</b>；版本冒烟三腿全过（0.86.0 / 1.1.0 / 1.4.0——floor 腿证明 --no-mcp 正确缺席，1.1.0 腿证明正确出现；1.4 的 shim 安装失败走 PATH 兜底，同版本五腿 OK）。<b>对照实验（同日，60 题/臂×3 臂，truths 全部脚本现算）</b>：准确率三臂等效满分（原始 50/59、50/60、50/60 的差异全是 truth 定义 artifact——行数题 wc -l 语义差一×8、正则提取失败×1、答案格式 0.86 vs 0.86.0、措辞歧义×1、harness ENOBUFS×1；修正后三臂 ≈100%，臂间零差异）；Σinput 208377→35856/33988（<b>-83%</b>）中位 501→291/249；output 无聚合效应（极简答题型任务；复述型任务小样本 -57%）；<b>前缀温度决定缓存命中率</b>：冷前缀 50 连发 24% 全量命中，捶热后 92–100%——瘦前缀的价值 = miss 便宜一个量级 + 热得更快，命中收敛由派发洪流自然达成。
+    <br><b>多样任务电池（2026-10-28 晚，8 类型×50 题×3 臂=150 发，参照 Terminal-Bench 类型学/SWE-bench checker 判定法）</b>：类型=提取6/修改8/修复6（播种子 bug）/定位6/多跳6/转换6（写文件精确比对）/生成6（node 执行 stdout 比对）/边界6（反幻觉，含反向陷阱）；改代码类在 /tmp 副本跑，checker 50/50 突变自证（T2 清洁副本必须不通过、T3 清洁通过+播种红）。结果：A1 46/50、A2 48/50、A3 48/50（新臂不差反高；修复类 A1 5/6 vs 新臂 6/6 为单题噪声）；错题归因后三臂等效满分——i=33「包名」目录名 vs package.json 作用域名两种合法读法、i=35 无 src 包写 0 与省略两种合法读法（宽容判三臂全对）、其余单题噪声；<b>臂×题型无负差异：改代码/跨文件推理/反幻觉面上 argv 裁剪零影响</b>。Σinput 154225→29017/20953（-81%/-86%）中位 413→337/335；Σoutput 23484→22217/21286（-5%/-9%，中位 373→409/288）；缓存捶热后 46-49/50 全量命中。输出纪律三实验收益谱定型：复述型 -57% / 多样真实任务 -9~23% / 极简答题 ≈0。
+    <br><b>收尾三件套（2026-10-29 凌晨，复跑方差+难题梯度+命名探针，含补跑）</b>：①<b>复跑稳定性</b>——7/8 类题型通过率零波动；生成类复跑 1/3 为 harness 漏拷输入文件（三臂同挂，补跑 2/2 全过）；边界 i=44 单题在过/挂/过之间摆动 = 单题噪声（补跑三臂全过且拒绝回答质量优秀：主动 find 核查并列出目录实状）。②<b>难题梯度</b>（6 道语义/跨文件种子 bug：契约追加取反、工具通道工具名写错、usage 补缺条件丢、白名单正则收窄、-e 追加被删、summary 字段名跨文件改错）——表面 A1 4/6 / A2 5/6 / A3 2/6，<b>逐副本归因后三臂 6/6 全满</b>：孩子们用了常量引用（CHILD_REPORT_TOOL_NAME）、等价显式字符类（[A-Za-z0-9_-]≡\w-）、De Morgan 等价三元、等价 spread——修复质量不低于原样。③<b>命名约定探针</b>——Q1 目录名/Q4 作用域名三臂全部答对（上轮"A2/A3 更依赖 package.json"的苗头不复现，无系统性行为差异）。<b>判分器死板 bug 类本轮又抓 3 例（等价代码形式×3、答案区提取×2、分隔符格式×1），会话累计 8 例——「判分脚本是头号误差源」铁律再确认</b>。
     <br><b>F4 测试框架（2026-10-27，ADR-0017）：</b>F2/F3/F4/F5/F7/F8/F9 的 /tmp 探针全部转正 <code>tests/*.test.mjs</code>（18 用例，node:test 直打 dist——f3 探针的「同步删除」断言转正时即按异步归档语义修正）；spec 决策 21 八条机械强制点门禁 <code>tests/route-registry-gates.test.mjs</code>（机械点 6 用行为断言：假 pi 捕获注册比对 TOOLS 输出；变异自证过）；<code>pnpm test</code> 26/26；CI 双闸（publish.yml + ci.yml）；issue #291。
     <br><b>姐妹页联动（2026-10-26）：</b>ptc 的 <code>workflow.parallel</code> 对齐 spec 决策 12 改 <code>Promise.allSettled</code>（单边失败不丢兄弟结果），真 worker 探针过；本包语义无变化。
   </div>

@@ -123,6 +123,8 @@ export interface EngineOptions {
 export interface EngineContext {
   depth: number;
   sessionModel?: string;
+  /** 宿主 pi 版本（entry 启动时解析一次）：孩子 argv 里 1.1.0 才有的旗标按它门控，缺省按 floor 不发 */
+  piVersion?: string;
 }
 
 const DEFAULT_STOP_GRACE_MS = 5_000;

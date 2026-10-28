@@ -3,6 +3,7 @@ import {
   TaskRegistry,
   type DispatchInput,
   type DispatchOutcome,
+  type EngineContext,
   type EngineOptions,
   type Gate,
   type TaskHandle,
@@ -10,7 +11,7 @@ import {
 } from "@pi-ptc/dispatch";
 import { faceVisible, listTasks } from "@pi-ptc/task";
 
-export type { DispatchOutcome, Gate, TaskHandle, TaskRejection };
+export type { DispatchOutcome, EngineContext, Gate, TaskHandle, TaskRejection };
 
 // HTML 第六节：handle（后台，不等）或拒绝；wait 路径拿 DispatchResult——撞闸永远走 status 不抛
 export type CreateTaskResult = DispatchOutcome;
@@ -47,6 +48,8 @@ export interface PtcSessionOptions {
   whyEnabled?: boolean | (() => boolean);
   /** 注入引擎依赖（探针传假 spawn；生产缺省真 pi） */
   engine?: Omit<EngineOptions, "registry" | "gates" | "whyEnabled">;
+  /** 引擎运行时上下文（depth/sessionModel/piVersion）——entry 从宿主解析后经此透传 */
+  context?: EngineContext;
 }
 
 // 装配入口的角色（HTML 决策 27）：sub 持状态，task/ptc 是它的调用方，entry 把它们接到同一个 registry 上
@@ -56,6 +59,7 @@ export function assemblePtcSession(options: PtcSessionOptions = {}): PtcSession 
     registry,
     gates: options.gates,
     whyEnabled: options.whyEnabled,
+    context: options.context,
     ...options.engine,
   });
   return {

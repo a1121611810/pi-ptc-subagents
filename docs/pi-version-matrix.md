@@ -24,12 +24,13 @@ floor = **0.86.0**（`peerDependencies: ">=0.86.0"`），ceiling = 跟踪最新�
 ## 1.x 增量（对本的包有意义的）
 
 - **1.0.0**：`-builtin:<name>` 可禁内置扩展；`registerToolRenderer` API
-- **1.1.0**：扩展 pattern 过 `normalizePath`（tilde/file://）；codemode 声明 `reachesTools`；`-p` 截断响应 exit 1；发布版 settings schema
+- **1.1.0**：扩展 pattern 过 `normalizePath`（tilde/file://）；codemode 声明 `reachesTools`；`-p` 截断响应 exit 1；发布版 settings schema；**`--no-mcp` CLI 旗标首现（0.86–1.0 无，孩子的减量 argv 按它门控）**
 - **1.2.0 / 1.3.0**：对我们无行为变化（16 项能力探针两版全 ✓，codemode switch 差分 40 案例一致）
 - **1.4.0（2026-10-21，本矩阵新增，旧仓未测）**：
   - **codemode 满员改为排队等**（最长 60s，`PI_CODEMODE_MAX_WORKERS` 调上限）——与我们的 libuv 式准入队列方向一致
   - **#11062 恢复会话/分支时扩展工具默认激活**（除非 `defaultActive: false`）——影响 task face 的可见性设计
   - 摘要不再受固定输出上限（compaction 修复）；`before_provider_headers` 归因头变化（我们不碰）
+  - **message_end usage 带 `cacheRead` / `cacheWrite` / `cacheWrite1h`**（jsonl 观测面已接；旧版缺省 undefined，floor 安全）
 
 ## 硬约束（重写仍然成立的事实）
 

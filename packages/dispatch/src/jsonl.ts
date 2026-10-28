@@ -6,8 +6,15 @@ export interface ParsedChildStream {
   text: string;
   /** 工具通道读到的报告（ptc_child_report 的 toolResult） */
   toolReport: ChildReport | null;
-  /** 宿主侧 message_end 上报的 usage（旧 ADR-0044 的 observed 一半） */
-  observedUsage: { input?: number; output?: number; cost?: number; turns?: number } | null;
+  /** 宿主侧 message_end 上报的 usage（旧 ADR-0044 的 observed 一半）；pi ≥1.4.0 带 cacheRead/cacheWrite，旧版缺省 */
+  observedUsage: {
+    input?: number;
+    output?: number;
+    cost?: number;
+    turns?: number;
+    cacheRead?: number;
+    cacheWrite?: number;
+  } | null;
   /** 旧 ADR-0045：流里实测到的孩子模型/provider */
   observedModel: string | null;
   observedProvider: string | null;
@@ -19,7 +26,13 @@ interface JsonlMessage {
   model?: string;
   provider?: string;
   content?: Array<{ type?: string; text?: string }>;
-  usage?: { input?: number; output?: number; cost?: { total?: number } | number };
+  usage?: {
+    input?: number;
+    output?: number;
+    cost?: { total?: number } | number;
+    cacheRead?: number;
+    cacheWrite?: number;
+  };
   details?: unknown;
   structuredContent?: unknown;
 }
@@ -56,6 +69,10 @@ export function parseChildStream(stdout: string): ParsedChildStream {
         observedUsage = {
           input: message.usage.input,
           output: message.usage.output,
+          ...(message.usage.cacheRead !== undefined ? { cacheRead: message.usage.cacheRead } : {}),
+          ...(message.usage.cacheWrite !== undefined
+            ? { cacheWrite: message.usage.cacheWrite }
+            : {}),
           ...(cost !== undefined ? { cost } : {}),
         };
       }

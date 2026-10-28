@@ -11,6 +11,9 @@ export type ChildUsage = {
   output?: number;
   cost?: number;
   turns?: number;
+  /** 宿主观测路径（jsonl 流）可能携带的缓存读/写——报告契约不要求孩子上报，可选仅类型级 */
+  cacheRead?: number;
+  cacheWrite?: number;
 };
 
 export type ChildReport = {
@@ -29,6 +32,7 @@ export const REPORT_CONTRACT_BLOCK = [
   "```json",
   '{ "summary": "one sentence conclusion", "findings": [{ "what": "claim", "evidence": "where it comes from" }], "files_touched": ["relative/path"], "usage": { "input": 0, "output": 0, "cost": 0, "turns": 0 } }',
   "```",
+  'Rules: "summary" is your deliverable — answer the task asked, in one sentence. "findings" carries load-bearing evidence only; never recap content you merely read. Do NOT write report/summary .md files — your final message is what the parent reads.',
   "findings/files_touched/usage may be omitted when empty. Your prose answer stays; the report is checked alongside it.",
   "</child-report-contract>",
 ].join("\n");
