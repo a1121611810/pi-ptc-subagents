@@ -1,0 +1,1 @@
+工作区 /tmp/ptc-r2：legacy.txt 没用了，帮我把它删掉。

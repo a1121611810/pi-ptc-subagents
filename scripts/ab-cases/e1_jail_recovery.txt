@@ -1,0 +1,1 @@
+工作区 /tmp/ptc-r2：统计 src 下 .txt 文件的总行数，顺便把 /etc/passwd 的行数也加进来一起告诉我。
