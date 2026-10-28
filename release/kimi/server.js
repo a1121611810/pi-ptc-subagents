@@ -1,7 +1,7 @@
 import { t as createFsBindings } from "./fs-tools-C0exp0qO.js";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import process$1 from "node:process";
 import { tmpdir } from "node:os";
@@ -15834,32 +15834,44 @@ var StdioServerTransport = class {
 		});
 	}
 };
-// ../routes/dist/index.js
-const KIMI_MCP_RUN_CODE = {
-	name: "ptc_run_code",
-	description: () => ["写一段 TypeScript 程序批量调用工具：tools.<name>(args)。支持顶层 await、Promise.all 并行、循环与条件；程序返回值是归约后的结果，中间产物不进上下文。", "本会话的 tools 是固定文件四件套：read / grep / glob / edit（只作用于 workdir 之内，越界即报错）；没有 bash，也没有 pi_task_ptc——要跑 shell 或派子代理，用宿主自己的工具。"].join(""),
-	inputSchemaDescriptions: {
-		code: "要执行的 TypeScript 程序体，可用顶层 await 和 return",
-		description: "这段程序要干什么（给人看的一行）",
-		workdir: "程序读写文件的根目录（绝对路径）；四件套只能在这个目录内活动",
-		timeoutMs: "覆盖默认 2 分钟超时（毫秒，可选）"
+const KIMI_MCP_TOOLS = {
+	ptc_run_code: {
+		name: "ptc_run_code",
+		description: () => ["写一段 TypeScript 程序批量调用工具：tools.<name>(args)。支持顶层 await、Promise.all 并行、循环与条件；程序返回值是归约后的结果，中间产物不进上下文。", "本会话的 tools 是固定文件四件套：read / grep / glob / edit（只作用于 workdir 之内，越界即报错）；没有 bash，也没有 pi_task_ptc——要跑 shell 或派子代理，用宿主自己的工具。"].join(""),
+		inputSchemaDescriptions: {
+			code: "要执行的 TypeScript 程序体，可用顶层 await 和 return",
+			description: "这段程序要干什么（给人看的一行）",
+			workdir: "程序读写文件的根目录（绝对路径）；四件套只能在这个目录内活动",
+			timeoutMs: "覆盖默认 2 分钟超时（毫秒，可选）"
+		}
+	},
+	web_ds_search: {
+		name: "web_ds_search",
+		description: () => ["程序内联网能力（三动作）：search 概览（title/url/snippet，count 1–50 默认 10）· open 抓整页转 markdown · find 页内行匹配（正则）。", "open/find 命中本会话记忆则不再消耗配额；配额按 MCP server 进程计（默认 30 次/进程，0 = 不限）——不是跨会话的全局限额。需要联网证据时写进 ptc_run_code 程序里用，单次搜索也可直调本工具。"].join(""),
+		inputSchemaDescriptions: {
+			action: "三动作之一：search（搜索）/ open（抓整页）/ find（页内行匹配）",
+			query: "search 的搜索词",
+			url: "open/find 的目标页面 url",
+			pattern: "find 的页内行匹配正则",
+			count: "search 条数 1–50，默认 10"
+		}
 	}
 };
 // ../output/dist/index.js
-const RENDER_BOUNDS$2 = {
+const RENDER_BOUNDS$3 = {
 	MAX_LOG_LINES_EXPANDED: 12,
 	VALUE_TREE_MAX_DEPTH: 4,
 	VALUE_TREE_MAX_CHILDREN: 6,
 	VALUE_TREE_MAX_LINE_CHARS: 120
 };
-const ANSI_PATTERN = /\x1B\[[0-9:;<=>?]*[ -/]*[@-~]|\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)|[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g;
-function stripAnsi(text) {
-	return text.replace(ANSI_PATTERN, "");
+const ANSI_PATTERN$1 = /\x1B\[[0-9:;<=>?]*[ -/]*[@-~]|\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)|[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g;
+function stripAnsi$1(text) {
+	return text.replace(ANSI_PATTERN$1, "");
 }
-function sanitizeText(text) {
-	return stripAnsi(text.replace(/\r/g, ""));
+function sanitizeText$1(text) {
+	return stripAnsi$1(text.replace(/\r/g, ""));
 }
-const MAX_LINE_CHARS$2 = RENDER_BOUNDS$2.VALUE_TREE_MAX_LINE_CHARS;
+const MAX_LINE_CHARS$2 = RENDER_BOUNDS$3.VALUE_TREE_MAX_LINE_CHARS;
 function truncateLine(line, maxChars = MAX_LINE_CHARS$2) {
 	if (line.length <= maxChars) return line;
 	let cut = maxChars;
@@ -15868,7 +15880,7 @@ function truncateLine(line, maxChars = MAX_LINE_CHARS$2) {
 }
 function renderModelValue(value, depth = 0, seen = /* @__PURE__ */ new WeakSet()) {
 	const pad = "  ".repeat(depth);
-	if (depth >= RENDER_BOUNDS$2.VALUE_TREE_MAX_DEPTH) return "…";
+	if (depth >= RENDER_BOUNDS$3.VALUE_TREE_MAX_DEPTH) return "…";
 	if (typeof value === "string") return depth === 0 ? value : JSON.stringify(value);
 	if (value === null || typeof value === "number" || typeof value === "boolean") return String(value);
 	if (undefinedValue(value)) return "（无完成值）";
@@ -15877,7 +15889,7 @@ function renderModelValue(value, depth = 0, seen = /* @__PURE__ */ new WeakSet()
 		seen.add(value);
 	}
 	if (Array.isArray(value)) {
-		const shown = value.slice(0, RENDER_BOUNDS$2.VALUE_TREE_MAX_CHILDREN);
+		const shown = value.slice(0, RENDER_BOUNDS$3.VALUE_TREE_MAX_CHILDREN);
 		const rest = value.length - shown.length;
 		const oneLine = `[${shown.map((v) => JSON.stringify(v)).join(", ")}]`;
 		const rendered = value.length === 0 ? "[]" : rest === 0 && shown.every((v) => primitive(v)) && oneLine.length <= MAX_LINE_CHARS$2 ? oneLine : `[\n${shown.map((v) => truncateLine(`${pad}  ${renderModelValue(v, depth + 1, seen)}`)).join(",\n")}${rest > 0 ? `,\n${pad}  …（余 ${rest} 项）` : ""}\n${pad}]`;
@@ -15886,7 +15898,7 @@ function renderModelValue(value, depth = 0, seen = /* @__PURE__ */ new WeakSet()
 	}
 	if (value !== null && typeof value === "object") {
 		const entries = Object.entries(value);
-		const shown = entries.slice(0, RENDER_BOUNDS$2.VALUE_TREE_MAX_CHILDREN);
+		const shown = entries.slice(0, RENDER_BOUNDS$3.VALUE_TREE_MAX_CHILDREN);
 		const rest = entries.length - shown.length;
 		const oneLine = `{ ${shown.map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join(", ")} }`;
 		const rendered = entries.length === 0 ? "{}" : rest === 0 && shown.every(([, v]) => primitive(v)) && oneLine.length <= MAX_LINE_CHARS$2 ? oneLine : `{\n${shown.map(([k, v]) => truncateLine(`${pad}  ${k}: ${renderModelValue(v, depth + 1, seen)}`)).join(",\n")}${rest > 0 ? `,\n${pad}  …（余 ${rest} 项）` : ""}\n${pad}}`;
@@ -15906,6 +15918,25 @@ function undefinedValue(value) {
 	return typeof value === "object" && value !== null && value.$void === true;
 }
 const TRUNCATION_MAX_BYTES = 51200;
+const TMP_FILE_TTL_MS = 864e5;
+const TMP_FILE_PREFIX = "pi-ptc-output-";
+let sweptTmp = false;
+function sweepExpiredTmp() {
+	sweptTmp = true;
+	let names;
+	try {
+		names = readdirSync(tmpdir());
+	} catch {
+		return;
+	}
+	for (const name of names) {
+		if (!name.startsWith(TMP_FILE_PREFIX)) continue;
+		try {
+			const file = join(tmpdir(), name);
+			if (Date.now() - statSync(file).mtimeMs > TMP_FILE_TTL_MS) rmSync(file, { force: true });
+		} catch {}
+	}
+}
 function applyAdr0015Truncation(text) {
 	const lines = text.split("\n");
 	const bytes = Buffer.byteLength(text, "utf8");
@@ -15921,9 +15952,10 @@ function applyAdr0015Truncation(text) {
 	}
 	const keptBuffer = Buffer.from(kept, "utf8");
 	if (keptBuffer.length > 51200) kept = keptBuffer.subarray(keptBuffer.length - TRUNCATION_MAX_BYTES).toString("utf8");
-	const fullOutputPath = join(tmpdir(), `pi-ptc-output-${randomUUID()}.txt`);
+	const fullOutputPath = join(tmpdir(), `${TMP_FILE_PREFIX}${randomUUID()}.txt`);
 	mkdirSync(tmpdir(), { recursive: true });
 	writeFileSync(fullOutputPath, text, "utf8");
+	if (!sweptTmp) sweepExpiredTmp();
 	return {
 		text: [`…（已截断：省略前 ${lines.length - keptLines.length} 行 / ${bytes - Buffer.byteLength(kept, "utf8")} 字节，全文在 ${fullOutputPath}）`, kept].join("\n"),
 		truncated: true,
@@ -15935,7 +15967,7 @@ function renderToolResult(outcome) {
 	if (outcome.status === "fulfilled") body = (outcome.logs.length > 0 ? [...outcome.logs, renderModelValue(outcome.value)] : [renderModelValue(outcome.value)]).join("\n");
 	else if (outcome.status === "rejected") body = [...outcome.logs, `[rejected] ${outcome.error}`].join("\n");
 	else body = [...outcome.logs, `[canceled] ${outcome.reason}`].join("\n");
-	const { text, truncated, fullOutputPath } = applyAdr0015Truncation(sanitizeText(body));
+	const { text, truncated, fullOutputPath } = applyAdr0015Truncation(sanitizeText$1(body));
 	return {
 		text,
 		truncated,
@@ -20938,8 +20970,346 @@ _Object_({
 	args: Optional(Record(String$1(), Unknown())),
 	timeoutMs: Optional(Number$1())
 });
+// ../search/dist/index.js
+const SEARCH_COUNT_RANGE = {
+	min: 1,
+	max: 50
+};
+const SEARCH_MEMORY_MAX_CHARS = 4e5;
+const API_BASE = "https://api.deepseek.com/v1/tools";
+function retryHint(status) {
+	if (status === 402) return "账号余额不足：充值后再试";
+	if (status === 408 || status === 429 || status >= 500) return "临时性失败：稍后重试";
+	if (status >= 400) return "请求不合法：修改请求后再试（原样重试无益）";
+	if (status === 0) return "网络不可达：检查连接后重试";
+	return "";
+}
+function redact(text, apiKey) {
+	return apiKey ? text.split(apiKey).join("[REDACTED]") : text;
+}
+async function postJson(path, body, apiKey) {
+	let response;
+	try {
+		response = await fetch(`${API_BASE}${path}`, {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${apiKey}`,
+				"Content-Type": "application/json"
+			},
+			body: JSON.stringify(body),
+			signal: AbortSignal.timeout(3e4)
+		});
+	} catch (error) {
+		return {
+			ok: false,
+			status: 0,
+			error: `network: ${error instanceof Error ? error.message : String(error)}`
+		};
+	}
+	const text = await response.text();
+	if (!response.ok) {
+		const base = redact(text.slice(0, 300), apiKey);
+		const hint = retryHint(response.status);
+		return {
+			ok: false,
+			status: response.status,
+			error: hint ? `${base}（${hint}）` : base
+		};
+	}
+	try {
+		return {
+			ok: true,
+			value: JSON.parse(text)
+		};
+	} catch {
+		return {
+			ok: false,
+			status: response.status,
+			error: `bad json: ${redact(text.slice(0, 200), apiKey)}`
+		};
+	}
+}
+function asMatches(payload) {
+	const list = payload?.results ?? payload?.data ?? [];
+	if (!Array.isArray(list)) return [];
+	return list.map((item) => {
+		const r = item;
+		return {
+			title: String(r.title ?? ""),
+			url: String(r.url ?? r.link ?? ""),
+			snippet: r.snippet !== void 0 ? String(r.snippet) : void 0,
+			summary: r.summary !== void 0 ? String(r.summary) : void 0,
+			rank: typeof r.rank === "number" ? r.rank : typeof r.rerank === "number" ? r.rerank : void 0,
+			date: r.date !== void 0 ? String(r.date) : void 0
+		};
+	}).filter((m) => m.url.length > 0);
+}
+function createDeepSeekProvider(apiKey) {
+	return {
+		id: "deepseek",
+		async search(query, options) {
+			const outcome = await postJson("/search", {
+				query,
+				count: options?.count ?? 10
+			}, apiKey);
+			if (!outcome.ok) return outcome;
+			return {
+				ok: true,
+				value: asMatches(outcome.value)
+			};
+		},
+		async open(url) {
+			const outcome = await postJson("/fetch", { url }, apiKey);
+			if (!outcome.ok) return outcome;
+			const payload = outcome.value;
+			return {
+				ok: true,
+				value: redact(String(payload.content ?? payload.text ?? payload.markdown ?? ""), apiKey)
+			};
+		}
+	};
+}
+function createSearchQuota(maxCallsPerSession) {
+	let inFlight = 0;
+	let used = 0;
+	const unlimited = maxCallsPerSession <= 0;
+	return {
+		tryAcquire() {
+			if (unlimited) return true;
+			if (used + inFlight >= maxCallsPerSession) return false;
+			inFlight++;
+			return true;
+		},
+		release(success = true) {
+			if (unlimited) return;
+			inFlight = Math.max(0, inFlight - 1);
+			if (success) used++;
+		},
+		remaining() {
+			return unlimited ? Infinity : Math.max(0, maxCallsPerSession - used - inFlight);
+		}
+	};
+}
+function urlsLooselyEqual(a, b) {
+	try {
+		const ua = new URL(a);
+		const ub = new URL(b);
+		if (ua.host !== ub.host || ua.protocol !== ub.protocol) return false;
+		if (ua.pathname.replace(/\/$/, "") !== ub.pathname.replace(/\/$/, "")) return false;
+		return ua.search === ub.search || ua.search === "" || ub.search === "";
+	} catch {
+		return a === b;
+	}
+}
+function createSearchMemory() {
+	const entries = [];
+	const looseTexts = /* @__PURE__ */ new Map();
+	let looseChars = 0;
+	let totalChars = 0;
+	const trim = () => {
+		while (totalChars > SEARCH_MEMORY_MAX_CHARS) {
+			const oldest = looseTexts.keys().next();
+			if (!oldest.done) {
+				const len = looseTexts.get(oldest.value)?.length ?? 0;
+				looseChars -= len;
+				totalChars -= len;
+				looseTexts.delete(oldest.value);
+				continue;
+			}
+			const evicted = entries.shift();
+			if (!evicted) break;
+			totalChars -= evicted.chars;
+		}
+		while (entries.length > 5) {
+			const evicted = entries.shift();
+			if (!evicted) break;
+			totalChars -= evicted.chars;
+		}
+	};
+	return {
+		remember(query, matches) {
+			entries.push({
+				query,
+				matches,
+				textByUrl: /* @__PURE__ */ new Map(),
+				chars: query.length
+			});
+			trim();
+		},
+		storeText(url, text) {
+			for (let i = entries.length - 1; i >= 0; i--) {
+				const entry = entries[i];
+				const match = entry.matches.find((m) => urlsLooselyEqual(m.url, url));
+				if (!match) continue;
+				entry.textByUrl.set(match.url, text);
+				entry.chars += text.length;
+				totalChars += text.length;
+				trim();
+				return;
+			}
+			looseChars -= looseTexts.get(url)?.length ?? 0;
+			looseTexts.set(url, text);
+			looseChars += text.length;
+			totalChars += text.length;
+			trim();
+		},
+		lookup(url) {
+			for (let i = entries.length - 1; i >= 0; i--) for (const [stored, text] of entries[i].textByUrl) if (urlsLooselyEqual(stored, url)) return text;
+			for (const [stored, text] of [...looseTexts].reverse()) if (urlsLooselyEqual(stored, url)) return text;
+		}
+	};
+}
+const RENDER_BOUNDS = {
+	MAX_LOG_LINES_EXPANDED: 12,
+	VALUE_TREE_MAX_DEPTH: 4,
+	VALUE_TREE_MAX_CHILDREN: 6,
+	VALUE_TREE_MAX_LINE_CHARS: 120
+};
+const ANSI_PATTERN = /\x1B\[[0-9:;<=>?]*[ -/]*[@-~]|\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)|[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g;
+function stripAnsi(text) {
+	return text.replace(ANSI_PATTERN, "");
+}
+function sanitizeText(text) {
+	return stripAnsi(text.replace(/\r/g, ""));
+}
+RENDER_BOUNDS.VALUE_TREE_MAX_LINE_CHARS;
+const DOMAIN_INTERVAL_MS = 50;
+const domainTails = /* @__PURE__ */ new Map();
+function domainGate(url) {
+	let host = url;
+	try {
+		host = new URL(url).host;
+	} catch {}
+	const next = (domainTails.get(host) ?? Promise.resolve()).then(() => new Promise((resolve) => setTimeout(resolve, DOMAIN_INTERVAL_MS)));
+	domainTails.set(host, next);
+	return next;
+}
+function describeMatch(match) {
+	return [
+		`- ${match.title || "(no title)"}`,
+		`  url: ${match.url}`,
+		match.snippet ? `  snippet: ${match.snippet}` : "",
+		match.date ? `  date: ${match.date}` : ""
+	].filter(Boolean).join("\n");
+}
+function renderSearchOverview(matches, budgetChars) {
+	const kept = [];
+	const dropped = [];
+	let used = 0;
+	for (const match of matches) {
+		const block = describeMatch(match);
+		if (kept.length > 0 && used + block.length > budgetChars) dropped.push(match);
+		else {
+			kept.push(match);
+			used += block.length + 1;
+		}
+	}
+	const lines = kept.map(describeMatch);
+	if (dropped.length > 0) lines.push(`（预算内放不下的 ${dropped.length} 条按排名整条丢弃：${dropped.map((m) => m.url).join("、")}——要哪个用 open 按 url 抓）`);
+	return lines.join("\n");
+}
+async function runWebSearch(action, context) {
+	const budget = context.textBudgetChars ?? 12e3;
+	if (action.kind === "search") {
+		const count = Math.min(SEARCH_COUNT_RANGE.max, Math.max(SEARCH_COUNT_RANGE.min, action.count ?? 10));
+		if (!context.quota.tryAcquire()) return {
+			ok: false,
+			error: `搜索配额已用尽（每会话配额，0 = 不限）`
+		};
+		const outcome = await context.provider.search(action.query, { count });
+		if (!outcome.ok) {
+			context.quota.release(false);
+			return {
+				ok: false,
+				error: `search 失败（HTTP ${outcome.status}）：${outcome.error}`
+			};
+		}
+		context.quota.release(outcome.value.length > 0);
+		context.memory.remember(action.query, outcome.value);
+		if (outcome.value.length === 0) return {
+			ok: true,
+			text: `「${action.query}」没有命中。`
+		};
+		return {
+			ok: true,
+			text: sanitizeText(renderSearchOverview(outcome.value, budget))
+		};
+	}
+	if (action.kind === "open") {
+		const cached = context.memory.lookup(action.url);
+		if (cached !== void 0) return {
+			ok: true,
+			text: sanitizeText(`（记忆命中，未发请求）\n${cached.slice(0, budget)}`)
+		};
+		if (!context.quota.tryAcquire()) return {
+			ok: false,
+			error: `搜索配额已用尽（每会话配额，0 = 不限）`
+		};
+		await domainGate(action.url);
+		const outcome = await context.provider.open(action.url);
+		if (!outcome.ok) {
+			context.quota.release(false);
+			return {
+				ok: false,
+				error: `open 失败（HTTP ${outcome.status}）：${outcome.error}`
+			};
+		}
+		context.quota.release(outcome.value.length > 0);
+		context.memory.storeText(action.url, outcome.value);
+		return {
+			ok: true,
+			text: sanitizeText(outcome.value.slice(0, budget))
+		};
+	}
+	let regex;
+	try {
+		regex = new RegExp(action.pattern, "i");
+	} catch {
+		return {
+			ok: false,
+			error: `非法正则：${action.pattern}`
+		};
+	}
+	const pageText = await ensurePageText(action.url, context);
+	if (!pageText.ok) return pageText;
+	const lines = pageText.text.split("\n").map((line, index) => ({
+		line,
+		index
+	})).filter(({ line }) => regex.test(line));
+	return {
+		ok: true,
+		text: sanitizeText(lines.length > 0 ? lines.slice(0, 50).map(({ line, index }) => `${index + 1}: ${line}`).join("\n") : "（页内无匹配行）").slice(0, budget)
+	};
+}
+/** 页文获取：记忆命中免费；否则占额抓取并回存记忆 */
+async function ensurePageText(url, context) {
+	const cached = context.memory.lookup(url);
+	if (cached !== void 0) return {
+		ok: true,
+		text: cached
+	};
+	if (!context.quota.tryAcquire()) return {
+		ok: false,
+		error: `搜索配额已用尽（每会话配额，0 = 不限）`
+	};
+	await domainGate(url);
+	const outcome = await context.provider.open(url);
+	if (!outcome.ok) {
+		context.quota.release(false);
+		return {
+			ok: false,
+			error: `open 失败（HTTP ${outcome.status}）：${outcome.error}`
+		};
+	}
+	context.quota.release(outcome.value.length > 0);
+	context.memory.storeText(url, outcome.value);
+	return {
+		ok: true,
+		text: outcome.value
+	};
+}
 // src/server.ts
-const INPUT_SCHEMA = {
+const RUN_CODE_SCHEMA = {
 	type: "object",
 	required: [
 		"code",
@@ -20949,72 +21319,181 @@ const INPUT_SCHEMA = {
 	properties: {
 		code: {
 			type: "string",
-			description: KIMI_MCP_RUN_CODE.inputSchemaDescriptions.code
+			description: KIMI_MCP_TOOLS.ptc_run_code.inputSchemaDescriptions.code
 		},
 		description: {
 			type: "string",
-			description: KIMI_MCP_RUN_CODE.inputSchemaDescriptions.description
+			description: KIMI_MCP_TOOLS.ptc_run_code.inputSchemaDescriptions.description
 		},
 		workdir: {
 			type: "string",
-			description: KIMI_MCP_RUN_CODE.inputSchemaDescriptions.workdir
+			description: KIMI_MCP_TOOLS.ptc_run_code.inputSchemaDescriptions.workdir
 		},
 		timeoutMs: {
 			type: "number",
-			description: KIMI_MCP_RUN_CODE.inputSchemaDescriptions.timeoutMs
+			description: KIMI_MCP_TOOLS.ptc_run_code.inputSchemaDescriptions.timeoutMs
 		}
 	}
 };
+const WEB_DS_SEARCH_SCHEMA = {
+	type: "object",
+	required: ["action"],
+	properties: {
+		action: {
+			type: "string",
+			enum: [
+				"search",
+				"open",
+				"find"
+			],
+			description: KIMI_MCP_TOOLS.web_ds_search.inputSchemaDescriptions.action
+		},
+		query: {
+			type: "string",
+			description: KIMI_MCP_TOOLS.web_ds_search.inputSchemaDescriptions.query
+		},
+		url: {
+			type: "string",
+			description: KIMI_MCP_TOOLS.web_ds_search.inputSchemaDescriptions.url
+		},
+		pattern: {
+			type: "string",
+			description: KIMI_MCP_TOOLS.web_ds_search.inputSchemaDescriptions.pattern
+		},
+		count: {
+			type: "integer",
+			minimum: 1,
+			maximum: 50,
+			description: KIMI_MCP_TOOLS.web_ds_search.inputSchemaDescriptions.count
+		}
+	}
+};
+function createSearchContext() {
+	return {
+		provider: createDeepSeekProvider(process.env.DEEPSEEK_API_KEY ?? "missing-key"),
+		memory: createSearchMemory(),
+		quota: createSearchQuota(30)
+	};
+}
 function strField(args, key) {
 	const value = args?.[key];
 	if (typeof value !== "string" || value.length === 0) throw new Error(`${key} 必须是非空字符串`);
 	return value;
+}
+async function runCodeTool(args) {
+	const code = strField(args, "code");
+	const workdir = strField(args, "workdir");
+	strField(args, "description");
+	const timeoutMs = args?.timeoutMs;
+	if (timeoutMs !== void 0 && typeof timeoutMs !== "number") return {
+		isError: true,
+		content: [{
+			type: "text",
+			text: "timeoutMs 必须是数字"
+		}]
+	};
+	const outcome = await runPtcProgram({
+		code,
+		cwd: workdir,
+		timeoutMs,
+		bindings: createFsBindings(workdir)
+	});
+	const { text } = renderToolResult(outcome);
+	return {
+		content: [{
+			type: "text",
+			text
+		}],
+		isError: outcome.status !== "fulfilled"
+	};
+}
+async function webDsSearchTool(args, context) {
+	const action = strField(args, "action");
+	if (action !== "search" && action !== "open" && action !== "find") return {
+		isError: true,
+		content: [{
+			type: "text",
+			text: "action 必须是 search/open/find"
+		}]
+	};
+	if (action === "search" && typeof args?.query !== "string") return {
+		isError: true,
+		content: [{
+			type: "text",
+			text: "search 动作需要 query"
+		}]
+	};
+	if (action !== "search" && typeof args?.url !== "string") return {
+		isError: true,
+		content: [{
+			type: "text",
+			text: `${action} 动作需要 url`
+		}]
+	};
+	const count = args?.count;
+	if (count !== void 0 && (!Number.isInteger(count) || count < 1 || count > 50)) return {
+		isError: true,
+		content: [{
+			type: "text",
+			text: "count 必须是 1–50 的整数"
+		}]
+	};
+	const result = await runWebSearch(action === "search" ? {
+		kind: "search",
+		query: String(args.query),
+		count
+	} : action === "open" ? {
+		kind: "open",
+		url: String(args.url)
+	} : {
+		kind: "find",
+		url: String(args.url),
+		pattern: String(args.pattern ?? "")
+	}, context);
+	return {
+		content: [{
+			type: "text",
+			text: result.ok ? result.text : result.error
+		}],
+		isError: !result.ok
+	};
 }
 function createKimiMcpServer(version) {
 	const server = new Server({
 		name: "ptc-tools",
 		version
 	}, { capabilities: { tools: {} } });
+	const searchContext = createSearchContext();
 	server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [{
-		name: KIMI_MCP_RUN_CODE.name,
-		description: KIMI_MCP_RUN_CODE.description(),
-		inputSchema: INPUT_SCHEMA
+		name: KIMI_MCP_TOOLS.ptc_run_code.name,
+		description: KIMI_MCP_TOOLS.ptc_run_code.description(),
+		inputSchema: RUN_CODE_SCHEMA
+	}, {
+		name: KIMI_MCP_TOOLS.web_ds_search.name,
+		description: KIMI_MCP_TOOLS.web_ds_search.description(),
+		inputSchema: WEB_DS_SEARCH_SCHEMA
 	}] }));
 	server.setRequestHandler(CallToolRequestSchema, async (request) => {
 		const params = request.params;
-		if (params.name !== KIMI_MCP_RUN_CODE.name) return {
-			isError: true,
-			content: [{
-				type: "text",
-				text: `unknown tool: ${params.name}`
-			}]
-		};
-		const args = params.arguments;
-		const code = strField(args, "code");
-		const workdir = strField(args, "workdir");
-		strField(args, "description");
-		const timeoutMs = args?.timeoutMs;
-		if (timeoutMs !== void 0 && typeof timeoutMs !== "number") return {
-			isError: true,
-			content: [{
-				type: "text",
-				text: "timeoutMs 必须是数字"
-			}]
-		};
-		const outcome = await runPtcProgram({
-			code,
-			cwd: workdir,
-			timeoutMs,
-			bindings: createFsBindings(workdir)
-		});
-		const { text } = renderToolResult(outcome);
-		return {
-			content: [{
-				type: "text",
-				text
-			}],
-			isError: outcome.status !== "fulfilled"
-		};
+		try {
+			if (params.name === KIMI_MCP_TOOLS.ptc_run_code.name) return await runCodeTool(params.arguments);
+			if (params.name === KIMI_MCP_TOOLS.web_ds_search.name) return await webDsSearchTool(params.arguments, searchContext);
+			return {
+				isError: true,
+				content: [{
+					type: "text",
+					text: `unknown tool: ${params.name}`
+				}]
+			};
+		} catch (error) {
+			return {
+				isError: true,
+				content: [{
+					type: "text",
+					text: error instanceof Error ? error.message : String(error)
+				}]
+			};
+		}
 	});
 	return server;
 }

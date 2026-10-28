@@ -76,6 +76,29 @@ export const KIMI_MCP_RUN_CODE = {
   },
 } as const;
 
+// Kimi 面第二件工具（P2 过河）：程序内联网搜索。搜索核宿主中立，散文仍只住本册子
+export const KIMI_MCP_WEB_DS_SEARCH = {
+  name: "web_ds_search",
+  description: () =>
+    [
+      "程序内联网能力（三动作）：search 概览（title/url/snippet，count 1–50 默认 10）· open 抓整页转 markdown · find 页内行匹配（正则）。",
+      "open/find 命中本会话记忆则不再消耗配额；配额按 MCP server 进程计（默认 30 次/进程，0 = 不限）——不是跨会话的全局限额。需要联网证据时写进 ptc_run_code 程序里用，单次搜索也可直调本工具。",
+    ].join(""),
+  inputSchemaDescriptions: {
+    action: "三动作之一：search（搜索）/ open（抓整页）/ find（页内行匹配）",
+    query: "search 的搜索词",
+    url: "open/find 的目标页面 url",
+    pattern: "find 的页内行匹配正则",
+    count: "search 条数 1–50，默认 10",
+  },
+} as const;
+
+// Kimi 面工具表：server 从这张表循环出 tools/list——模型可见工具的唯一出处
+export const KIMI_MCP_TOOLS = {
+  ptc_run_code: KIMI_MCP_RUN_CODE,
+  web_ds_search: KIMI_MCP_WEB_DS_SEARCH,
+} as const;
+
 export interface RouteEntry {
   id: string;
   name: string;

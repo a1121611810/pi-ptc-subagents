@@ -34,6 +34,11 @@ await tools.edit({ path: "src/a.ts", old_string: "foo", new_string: "bar" });
 - 四件套只在 `workdir` 内活动（越界即报错，可用 try/catch 捕获）；没有 bash，也没有子代理派发——要跑 shell 或派子代理，用宿主自己的工具
 - `workdir` 传用户工作区的绝对路径——插件按用户安装、对所有项目生效，不主动限定项目是你替用户做的安全决定
 
+## 程序内联网搜索
+
+- `web_ds_search({ action, query?, url?, pattern?, count? })`：三动作——`search` 搜索概览（title/url/snippet）· `open` 抓整页 · `find` 页内行匹配。需要联网证据时，把它写进 `ptc_run_code` 的程序里，证据和其它结果一起归约回来；单查一次也可以直调本工具
+- 配额按插件进程计（默认 30 次/进程，open/find 命中本会话记忆不重复消耗）——**不是跨会话的全局限额**；需要更多时模型应在程序里合并查询而不是反复调用
+
 ## 结果与错误
 
 程序日志随结果一起回来；超渲染上限会砍头留尾并给出全文临时文件路径。工具报错程序内可见（读返回的 `status`），不捕获就会让整个程序以 `[rejected]` 收场——预期内的失败自己 try/catch。

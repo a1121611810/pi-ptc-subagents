@@ -4,17 +4,17 @@ pi 的扩展：PTC（模型写 TypeScript 程序批量调工具）+ 子代理派
 
 ## 包结构（packages/，pnpm workspace）
 
-| 包         | 职责                                                                                                               | 依赖                        |
-| ---------- | ------------------------------------------------------------------------------------------------------------------ | --------------------------- |
-| `entry`    | pi extension 装配：session_start 注册、surface 检测、PTC 模式（程序优先引导层）、/ptc off 截断、通知投递           | → 全部                      |
-| `ptc`      | 程序运行时：worker 池、dispatcher、严格模式编译、工具工厂、renderResult                                            | → sub→dispatch、tui、routes |
-| `dispatch` | 任务引擎：六道闸、DispatchSlotCounter（libuv 队列）、spawn/pump、registry（落盘+重启恢复）、child report、通知中心 | 无（叶子）                  |
-| `task`     | 任务面：list/output/stop 的读/停语义（分层读取：超阈值引导读报告）                                                 | → dispatch                  |
-| `tui`      | 渲染原语叶子：文本卫生、截断契约、渲染预算                                                                         | 无                          |
-| `output`   | 输出核（P0 拆分）：renderToolResult（结果→模型可见文本）、ResultTextOutcome 结构切片；Kimi 面（MCP）与 pi 面共用   | → tui（叶子）               |
-| `kimi-mcp` | Kimi 面（MCP，ADR-0020）：ptc_run_code 宿主中立形态——单工具 + 本地 fs 四件套（workdir 锁）+ 运行格装配             | → output、ptc 核心、routes  |
-| `routes`   | 模型面散文唯一出处（ADR-0013）：7 条路的册子 + 渲染器（索引/通知/引导语）+ Kimi 面 KIMI_MCP_RUN_CODE 块            | 无（叶子）                  |
-| `search`   | 搜索 provider 抽象（DeepSeek 首家）：三动作工具、配额、记忆、预算                                                  | → tui                       |
+| 包         | 职责                                                                                                               | 依赖                               |
+| ---------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------- |
+| `entry`    | pi extension 装配：session_start 注册、surface 检测、PTC 模式（程序优先引导层）、/ptc off 截断、通知投递           | → 全部                             |
+| `ptc`      | 程序运行时：worker 池、dispatcher、严格模式编译、工具工厂、renderResult                                            | → sub→dispatch、tui、routes        |
+| `dispatch` | 任务引擎：六道闸、DispatchSlotCounter（libuv 队列）、spawn/pump、registry（落盘+重启恢复）、child report、通知中心 | 无（叶子）                         |
+| `task`     | 任务面：list/output/stop 的读/停语义（分层读取：超阈值引导读报告）                                                 | → dispatch                         |
+| `tui`      | 渲染原语叶子：文本卫生、截断契约、渲染预算                                                                         | 无                                 |
+| `output`   | 输出核（P0 拆分）：renderToolResult（结果→模型可见文本）、ResultTextOutcome 结构切片；Kimi 面（MCP）与 pi 面共用   | → tui（叶子）                      |
+| `kimi-mcp` | Kimi 面（MCP，ADR-0020）：双工具——ptc_run_code（运行格 + fs 四件套，workdir 锁）/ web_ds_search（宿主中立搜索核）  | → output、ptc 核心、routes、search |
+| `routes`   | 模型面散文唯一出处（ADR-0013）：7 条路的册子 + 渲染器（索引/通知/引导语）+ Kimi 面 KIMI_MCP_RUN_CODE 块            | 无（叶子）                         |
+| `search`   | 搜索 provider 抽象（DeepSeek 首家）：三动作工具、配额、记忆、预算                                                  | → tui                              |
 
 依赖铁律：**tui / routes / output 是叶子**（不感知领域概念）；`dispatch` 持全部任务状态，其余只是调用方；宿主依赖单向——pi-tui 只出现在 ptc（render.ts 折叠渲染），`output` 零宿主依赖。
 

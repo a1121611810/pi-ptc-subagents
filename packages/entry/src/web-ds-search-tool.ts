@@ -1,7 +1,8 @@
+// pi 面形状的 web_ds_search 包装（P2 过河：宿主中立搜索核住 search 包，pi 形状住 entry——kimi-mcp 在自家侧另包 MCP 形态）
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
-import type { SearchRunContext } from "./run.ts";
-import { runWebSearch } from "./run.ts";
+import type { SearchRunContext } from "@pi-ptc/search";
+import { runWebSearch } from "@pi-ptc/search";
 
 export const WEB_DS_SEARCH_PARAMETERS = Type.Object({
   action: Type.Union([Type.Literal("search"), Type.Literal("open"), Type.Literal("find")]),

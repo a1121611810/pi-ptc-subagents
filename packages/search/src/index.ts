@@ -13,5 +13,3 @@ export { createSearchMemory, urlsLooselyEqual } from "./memory.ts";
 export type { SearchMemory } from "./memory.ts";
 export { renderSearchOverview, runWebSearch } from "./run.ts";
 export type { SearchAction, SearchRunContext, SearchRunResult } from "./run.ts";
-export { WEB_DS_SEARCH_PARAMETERS, createWebDsSearchTool } from "./tool.ts";
-export type { WebDsSearchParams } from "./tool.ts";

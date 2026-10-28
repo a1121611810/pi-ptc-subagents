@@ -19,10 +19,6 @@
     "check": "tsrs -p tsconfig.json"
   },
   "dependencies": {
-    "@pi-ptc/tui": "workspace:*",
-    "typebox": "1.3.27"
-  },
-  "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.86.0"
+    "@pi-ptc/tui": "workspace:*"
   }
 }

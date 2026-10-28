@@ -67,10 +67,11 @@ test("MCP 全握手 + tools/call 真跑程序（含 workdir 锁两分支）", as
   srv.notify("notifications/initialized");
 
   const tools = await srv.request("tools/list");
-  assert.equal(tools.tools.length, 1);
-  assert.equal(tools.tools[0].name, "ptc_run_code");
-  assert.ok(tools.tools[0].description.includes("tools.<name>"), "工具描述必须是册子渲染的散文");
-  assert.deepEqual(tools.tools[0].inputSchema.required, ["code", "description", "workdir"]);
+  assert.equal(tools.tools.length, 2);
+  const runCode = tools.tools.find((tool) => tool.name === "ptc_run_code");
+  assert.ok(runCode, "工具表必须有 ptc_run_code");
+  assert.ok(runCode.description.includes("tools.<name>"), "工具描述必须是册子渲染的散文");
+  assert.deepEqual(runCode.inputSchema.required, ["code", "description", "workdir"]);
 
   const ok = await srv.request("tools/call", {
     name: "ptc_run_code",

@@ -21,12 +21,8 @@ import {
   taskTextGate,
 } from "@pi-ptc/dispatch";
 import { fileURLToPath } from "node:url";
-import {
-  createDeepSeekProvider,
-  createSearchMemory,
-  createSearchQuota,
-  createWebDsSearchTool,
-} from "@pi-ptc/search";
+import { createDeepSeekProvider, createSearchMemory, createSearchQuota } from "@pi-ptc/search";
+import { createWebDsSearchTool } from "./web-ds-search-tool.ts";
 import {
   createPtcRunCodeTool,
   createPtcWorkflowTool,
