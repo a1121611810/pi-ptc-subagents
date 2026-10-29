@@ -23,6 +23,14 @@
 - 自动前缀缓存：≥512 token，顺序「工具表→system→历史」；**命中率由前缀温度决定**（冷 ~24%，捶热 92–100%）；命中 0.1x 计价是彩蛋非依赖。
 - pi 1.4.0 usage 带 `cacheRead`/`cacheWrite`/`cacheWrite1h`；`ANTHROPIC_LOG=debug` 可看真实请求形状（pi 请求带 `?beta=true`，与缓存命中无关）。
 
+## 网站（@pi-ptc/website）
+
+- `vitepress preview`（sirv）**启动时缓存 dist 文件清单**：`vitepress build` 重建后（chunk 带新 content hash），正在跑的 preview 会给新 chunk 回 404——index.html 是新的、JS 全死，页面看似渲染正常但没有任何交互。改了代码必须重启 preview 再验（2026-10-29 实测，排障花了十轮：点击无效、水合假象）。
+- 内置浏览器 `tab.reload` 在这个预览上常 15s 超时，但导航其实提交了——报错后 `tab.get_state` 看 generation 确认，别直接重试。
+- **VitePress 客户端路由会吃掉 `public/*.html` 的站内点击**（真根因，与 cleanUrls 无关）：router 的 click 拦截器对同源 `.html` 链接一律 `preventDefault` 走客户端导航，而 public 文件不在路由 manifest → 渲染 404 页（URL 不变，极具迷惑性；sirv fallback 又让 curl 状态码恒 200）。绕行三开关（源码 router.js）：`.vp-raw` 祖先类 / 任意 `target` 属性 / `download`。规矩：站内链 public 原始文件必带其一——落地页用 `class="vp-raw"`（同页整载），config 导航用 `target:"_blank"`（无类钩子）。cleanUrls 已顺手关回 false（2026-10-29）。
+- vitepress preview 的 sirv 带 SPA fallback：**任何**未命中路径都回 200 + 404 文档体——`curl -w %{http_code}` 验不出死链，必须看 body/title（`curl -s URL | grep '<title>'`）或真点一次。上次「Status 修好」的假象就是这么来的。
+- 门禁盲区（已补）：check-internal-links 只查「文件在不在」，查不出客户端路由拦截——第五道门 `check-router-links.mjs`（hashmap 感知：同源可拦截链接必须命中 VP 路由或带绕行属性）现在盯这一类，反事实已验证。
+
 ## GitHub
 
 - 仓库 `a1121611810/pi-ptc-subagents`，owner 登录 `a1121611810`（手打易错成 a1121811810，GitHub 对 owner 笔误一律回 404 像「没权限」）。

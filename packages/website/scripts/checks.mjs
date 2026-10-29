@@ -22,6 +22,7 @@ export const CHECKS = [
   ["landing page tool names", "check-landing-tool-names.mjs"],
   ["internal links", "check-internal-links.mjs"],
   ["landing style scope", "check-style-scope.mjs"],
+  ["router links", "check-router-links.mjs"],
 ];
 
 /** Just the script filenames, for callers that have no use for the human labels. */

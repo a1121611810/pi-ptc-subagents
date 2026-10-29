@@ -141,6 +141,10 @@
   font-size: 15px;
 }
 
+.lp-install + .lp-install {
+  margin-top: 10px;
+}
+
 .lp-install button {
   cursor: pointer;
   background: var(--lp-fg);

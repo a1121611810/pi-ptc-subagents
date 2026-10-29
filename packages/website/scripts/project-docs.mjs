@@ -85,22 +85,29 @@ const DOCUMENTS = [
     source: 'packages/routes/docs/routes/use-the-built-in-tools.md',
     slug: 'use-the-built-in-tools',
     title: 'Use the built-in tools',
-    blurb: 'When not to write a program — direct calls, and the opt-in `bash` binding.',
+    blurb: 'When not to write a program — direct calls, and why `bash` is not in the program binding table.',
     order: 6,
   },
   {
     source: 'packages/routes/docs/routes/reach-the-web.md',
     slug: 'reach-the-web',
     title: 'Reach the web',
-    blurb: '`web_ds_search` inside dispatched children: search, open, find, and the quota.',
+    blurb: '`web_ds_search` in pi-face children vs directly on the Kimi face: search, open, find, and the quota.',
     order: 7,
+  },
+  {
+    source: 'docs/kimi-ptc-tools.md',
+    slug: 'kimi-ptc-tools',
+    title: 'Kimi Code 插件（ptc-tools）',
+    blurb: 'The Kimi face: two MCP tools (`ptc_run_code` over the fixed fs four + `web_ds_search`), workdir confinement, `/plugins install`.',
+    order: 8,
   },
   {
     source: 'docs/pi-version-matrix.md',
     slug: 'pi-version-matrix',
     title: 'pi version matrix',
     blurb: 'Measured pi compatibility: the 0.99.0 watershed, floor 0.86.0, and the 16-version smoke.',
-    order: 8,
+    order: 9,
   },
 ];
 

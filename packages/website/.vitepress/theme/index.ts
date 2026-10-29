@@ -2,6 +2,7 @@ import DefaultTheme from 'vitepress/theme'
 import type { Theme } from 'vitepress'
 import Landing from './Landing.vue'
 import './landing.css'
+import './docs.css'
 
 /**
  * `landing` is the layout name `index.md` asks for in its frontmatter. The

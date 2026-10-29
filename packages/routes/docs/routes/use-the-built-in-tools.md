@@ -3,5 +3,6 @@
 单次调用、或每步都需要模型判断的场景（写操作、审批敏感），不要写程序，直接调。
 
 - PTC 程序内：`tools.read / grep / find / ls / edit / write`（绑定表收窄规则见 run-one-program）
-- `bash` 需 opt-in：embedder 的 optIns 参数或 `~/.pi/agent/ptc.json` 的 optInBindings，处处 fail-closed
-- 程序外的逐个直调走 pi 自己的工具调用管线
+- `bash` 不在程序绑定表里（旧 ADR-0040 的 opt-in 尚未接线）——程序里跑 shell 没有路子
+- 程序外的逐个直调走 pi 自己的工具调用管线；注意 pi 内置工具**没有 cwd 囚禁**：
+  strict 只是工具白名单收窄，绝对路径可读工作区外任何可读文件——白名单 ≠ 沙箱

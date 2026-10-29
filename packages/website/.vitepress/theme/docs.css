@@ -1,0 +1,66 @@
+/* Documentation pages theme — same family as the landing (lpb) design.
+ *
+ * Lives in its own file on purpose: check-style-scope.mjs audits landing.css and
+ * forbids chrome-class selectors outside `:has(.lp)` there. Docs chrome restyling
+ * is not the landing's business; this sheet is the docs' own theme.
+ *
+ * Palette mirrors Landing.vue's lpb vars: deep blue-black background, indigo→pink
+ * brand, same code-block treatment. `appearance: 'force-dark'` keeps html.dark
+ * always on; vars are declared for `:root` too so nothing falls back to light.
+ */
+:root,
+html.dark {
+  --vp-c-bg: #0a0a14;
+  --vp-c-bg-alt: #0e0e1c;
+  --vp-c-bg-elv: #121222;
+  --vp-c-text-1: #eef0ff;
+  --vp-c-text-2: #b9bdd4;
+  --vp-c-text-3: #8a8fa8;
+  --vp-c-divider: rgba(255, 255, 255, 0.09);
+  --vp-c-divider-light: rgba(255, 255, 255, 0.06);
+  --vp-c-gutter: rgba(255, 255, 255, 0.09);
+
+  --vp-c-brand-1: #7c8cff;
+  --vp-c-brand-2: #96a5ff;
+  --vp-c-brand-3: rgba(124, 140, 255, 0.28);
+  --vp-c-brand-soft: rgba(124, 140, 255, 0.12);
+
+  --vp-code-block-bg: rgba(8, 8, 18, 0.75);
+  --vp-code-color: #cfd4ff;
+  --vp-code-bg: rgba(255, 255, 255, 0.07);
+  --vp-code-tab-divider: rgba(255, 255, 255, 0.09);
+  --vp-code-tab-text-color: #8a8fa8;
+  --vp-code-tab-active-text-color: #eef0ff;
+
+  --vp-nav-bg-color: rgba(10, 10, 20, 0.85);
+  --vp-sidebar-bg-color: #0a0a14;
+
+  --vp-font-family-base: ui-sans-serif, system-ui, -apple-system, "PingFang SC",
+    "Noto Sans CJK SC", sans-serif;
+}
+
+/* The projected-from banner (.lp-generated, styled in landing.css) consumes the
+   --lp-* vars, whose dark variant there keys on prefers-color-scheme — but docs are
+   force-dark via the .dark class regardless of OS. Re-declare the same values under
+   html.dark so the banner follows the page, not the OS. */
+html.dark {
+  --lp-fg: #eceef4;
+  --lp-dim: #949bb0;
+  --lp-line: #23262f;
+  --lp-accent: #ff6369;
+  --lp-code-bg: #16181e;
+  --lp-hero-bg: #0e0f13;
+  --lp-alt-bg: #111319;
+}
+
+/* Docs content surface: soft radial glows like the landing hero. */
+html.dark .vp-doc {
+  background:
+    radial-gradient(900px 420px at 90% -5%, rgba(124, 140, 255, 0.07), transparent 60%),
+    transparent;
+}
+
+/* Custom containers / badges pick up the accent gradient family. */
+html.dark .vp-doc a:hover {
+  color: #96a5ff;
+}

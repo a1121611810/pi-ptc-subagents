@@ -63,9 +63,11 @@ const REPO_FILE =
 /**
  * Every built HTML file, as a route path.
  *
- * `cleanUrls` is on, so `/docs/install` is served by `docs/install.html`. Both
- * spellings are registered: a link may carry either, and a gate that only
- * understood the one the build happens to emit would report the other as dead.
+ * Both spellings are registered (`docs/install.html` and `/docs/install`): a link
+ * may carry either, and a gate that only understood the one the build happens to
+ * emit would report the other as dead. (`cleanUrls` is off since 2026-10-29 —
+ * vitepress preview's sirv cannot resolve extensionless URLs; keep registering
+ * both spellings so the setting can flip back without touching this gate.)
  */
 function builtRoutes(dir, acc = new Set()) {
   for (const entry of readdirSync(dir)) {

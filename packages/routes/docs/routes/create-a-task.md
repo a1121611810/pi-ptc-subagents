@@ -8,8 +8,9 @@
 参数：`task`（必填，孩子要干的活）、`label`、`wait`、`why`、`agent`、`agentScope`、`model`、`thinkingLevel`、`readOnly`；
 agent 定义里的 `tools / model / thinkingLevel / childReport` 由 frontmatter 钉住。
 
-返回 handle：`{ taskId, label?, status: "queued" }`。默认不等；撞闸（随闸门落地）返回
-`{ status: "rejected", errorMessage }`，不抛异常。
+返回 handle：`{ taskId, label?, status: "queued" }`。默认不等；撞闸排队等（ADR-0010），
+不抛异常。唯一的拒绝是派发被关（`/ptc off`，ADR-0004）：此时返回
+`{ status: "rejected", errorMessage }`。
 
 任务建成后在任务记录里排队（满员排队不拒绝，ADR-0010），经
 `ptc_task_list / ptc_task_output / ptc_task_stop` 查/停。

@@ -14,16 +14,16 @@ import { defineConfig } from "vitepress";
 export default defineConfig({
   title: "pi-ptc-subagents",
   description:
-    "Programmable tool calling (PTC) and subagent fan-out for pi — the model writes a JS/TS program that calls pi's tools in one go, and the program can spawn pi subagent tasks.",
+    "Programmable tool calling (PTC) and subagent fan-out for pi — the model writes a JS/TS program that calls the session tools in one go; also a Kimi Code plugin (ptc-tools) that brings the same one-program-many-calls to Kimi sessions.",
   base: "/pi-ptc-subagents/",
-  cleanUrls: true,
+  // cleanUrls 关：开了它客户端路由会把 .html 规范化成无扩展名，GitHub Pages 能解析、
+  // vitepress preview 的 sirv 不能（点 Status 404 的元凶）。带 .html 的链接两种环境都通。
+  cleanUrls: false,
+  // 与首页同族：docs 恒暗色（样式在 docs.css），不给亮/暗切换
+  appearance: "force-dark",
   lastUpdated: true,
   themeConfig: {
-    nav: [
-      { text: "Documentation", link: "/docs/" },
-      { text: "Status", link: "/status/ptc-runtime-status.html" },
-      { text: "Source", link: "https://github.com/a1121611810/pi-ptc-subagents" },
-    ],
+    nav: [{ text: "Documentation", link: "/docs/" }],
     sidebar: {
       "/docs/": [
         {
@@ -36,6 +36,7 @@ export default defineConfig({
             { text: "Report what you did", link: "/docs/report-what-you-did" },
             { text: "Use the built-in tools", link: "/docs/use-the-built-in-tools" },
             { text: "Reach the web", link: "/docs/reach-the-web" },
+            { text: "Kimi Code 插件", link: "/docs/kimi-ptc-tools" },
             { text: "pi version matrix", link: "/docs/pi-version-matrix" },
           ],
         },

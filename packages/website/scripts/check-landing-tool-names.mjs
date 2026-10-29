@@ -32,12 +32,14 @@
  *    says which side it is on.
  *
  * Direction 3 is what this gate was missing, and it is deliberately **not**
- * "the page must list every tool". `ptc_child_report` and `web_ds_search` are
- * what a dispatched child registers (the parent session never has them); no
- * reader of this package calls them directly. A literal two-way set comparison
- * would have demanded the page mention them, encoding a wrong requirement as a
- * check. The partition enforces the thing that actually drifts instead: a new
- * tool nobody decided to advertise.
+ * "the page must list every tool". `ptc_child_report` is what a dispatched
+ * child registers (the parent session never has it); no reader of this package
+ * calls it directly. A literal two-way set comparison would have demanded the
+ * page mention it, encoding a wrong requirement as a check. The partition
+ * enforces the thing that actually drifts instead: a new tool nobody decided
+ * to advertise. (`web_ds_search` used to sit in DECLARED_ABSENT under the same
+ * child-only reasoning, but the Kimi face (ADR-0020) made it model-callable
+ * there, so it graduated to MUST_APPEAR.)
  *
  * Exit code is 1 on any failure, and every failure names what to change. A
  * silent pass here would be indistinguishable from a pass.
@@ -63,7 +65,14 @@ const WILDCARD = /\*$/;
  * without listing them twice. Removing one of the three from the page does **not**
  * fail the build; removing the family claim does.
  */
-const MUST_APPEAR = ["ptc_run_code", "ptc_workflow", "pi_task_ptc", "pi_task_codemode", "ptc_task_*"];
+const MUST_APPEAR = [
+  "ptc_run_code",
+  "ptc_workflow",
+  "pi_task_ptc",
+  "pi_task_codemode",
+  "ptc_task_*",
+  "web_ds_search",
+];
 
 /**
  * Registered tools the landing page deliberately does not mention, each with its reason.
@@ -78,12 +87,6 @@ const DECLARED_ABSENT = new Map([
     "what a dispatched child calls to return its report; it registers only inside the child " +
       "process, no reader of this package calls it, and the landing page advertises the " +
       "parent-side surface",
-  ],
-  [
-    "web_ds_search",
-    "search (DeepSeek) registers only inside a dispatched child, by design (ADR-0001/0049 — " +
-      "the judgment about a source stays with the worker that read it); the parent session " +
-      "never has this tool",
   ],
 ]);
 

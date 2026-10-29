@@ -7,3 +7,6 @@
 - `ptc_task_stop({ task_id, reason? })`：排队中的抽掉（canceled）；在跑的转 stopping
 
 任务记录是派发的唯一痕迹：每次建任务都建记录，前台任务也一样。
+
+终态记录热存留最近 500 条（决策 29），被挤出的进压缩存档（默认留 30 天，
+`archiveEnabled: false` 则直接删），凭精确 task id 经 `ptc_task_output` 仍读得到。
