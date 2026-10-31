@@ -24,6 +24,7 @@ description: 批量调工具时把循环写进程序（ptc_run_code），别看�
 
 ## 工具形态
 
+- **工具全名带宿主前缀**：`mcp__` 开头、以 `__ptc_run_code` 结尾的那件就是它（`__web_ds_search` 同理）——枚举工具表时按后缀认
 - `ptc_run_code({ code, description, workdir })`：程序体内 `await tools.<name>(args)`，支持顶层 await / Promise.all 并行 / 循环与条件；程序 `return` 的值是唯一回到上下文的结果
 - 程序里的 `tools` 是**固定文件四件套**（以下返回形态都实测，照抄即可，不用猜）：
 
