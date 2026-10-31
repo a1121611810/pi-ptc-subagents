@@ -1,7 +1,14 @@
-// P1 → 测试：Kimi 面程序四件套（read/grep/glob/edit）——语义与 workdir 锁（信任边界）
+// P1 → 测试：Kimi 面程序五件套（read/write/grep/glob/edit）——语义与 workdir 锁（信任边界）
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createFsBindings } from "../../packages/kimi-mcp/dist/index.js";
@@ -106,4 +113,27 @@ test("edit：零匹配与多匹配都拒（不猜、不动文件）", async () =
     /must be unique/,
   );
   assert.equal(readFileSync(join(dir, "multi.txt"), "utf8"), "dup dup", "拒绝时文件必须原样");
+});
+
+test("write：新文件写入 + 覆写已存在（原子落盘语义与 edit 同级）", async () => {
+  const dir = fixture();
+  const r1 = await call(createFsBindings(dir).write, { path: "sub/new.txt", content: "fresh\n" });
+  assert.equal(r1.written, "sub/new.txt");
+  assert.equal(readFileSync(join(dir, "sub/new.txt"), "utf8"), "fresh\n");
+  const r2 = await call(createFsBindings(dir).write, { path: "a.txt", content: "replaced\n" });
+  assert.equal(r2.written, "a.txt");
+  assert.equal(readFileSync(join(dir, "a.txt"), "utf8"), "replaced\n");
+});
+
+test("write：父目录不存在即拒（不隐式 mkdir），越界即拒", async () => {
+  const dir = fixture();
+  await assert.rejects(
+    call(createFsBindings(dir).write, { path: "deep/nested/x.txt", content: "x" }),
+    /parent dir does not exist/,
+  );
+  await assert.rejects(
+    call(createFsBindings(dir).write, { path: "/etc/ptc-kimi-jail-probe", content: "x" }),
+    /escapes workdir/,
+  );
+  assert.equal(existsSync("/etc/ptc-kimi-jail-probe"), false, "越界写入绝不能落盘");
 });

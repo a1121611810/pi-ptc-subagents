@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { globSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, globSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, resolve, sep } from "node:path";
 // src/fs-tools.ts
 const SKIP_DIRS = /* @__PURE__ */ new Set(["node_modules", ".git"]);
@@ -21,6 +21,7 @@ const SKIP_SUFFIXES = /* @__PURE__ */ new Set([
 const GREP_MAX_RESULTS = 500;
 const GLOB_MAX_RESULTS = 1e3;
 const READ_MAX_BYTES = 2097152;
+const WRITE_MAX_BYTES = 2097152;
 function strArg(args, key) {
 	const value = args?.[key];
 	if (typeof value !== "string" || value.length === 0) throw new Error(`${key} 必须是非空字符串`);
@@ -57,20 +58,35 @@ function readPlainText(file) {
 	const text = readFileSync(file, "utf8");
 	return text.includes("�") ? void 0 : text;
 }
-function createFsBindings(workdir) {
+function createFsBindings(workdir, onCall) {
 	let workdirReal;
 	try {
 		workdirReal = realpathSync(resolve(workdir));
 	} catch {
 		throw new Error(`workdir 不存在或不可达: ${workdir}（workdir 传用户工作区绝对路径）`);
 	}
-	return {
+	const table = {
 		read: async (args) => {
 			const real = jailed(workdirReal, strArg(args, "path"));
 			const stat = statSync(real);
 			if (!stat.isFile()) throw new Error(`not a file: ${strArg(args, "path")}`);
 			if (stat.size > READ_MAX_BYTES) throw new Error(`file too large (${stat.size} bytes > ${READ_MAX_BYTES})`);
 			return readFileSync(real, "utf8");
+		},
+		write: async (args) => {
+			const p = strArg(args, "path");
+			const content = strArg(args, "content");
+			const bytes = Buffer.byteLength(content, "utf8");
+			if (bytes > WRITE_MAX_BYTES) throw new Error(`content too large (${bytes} bytes > ${WRITE_MAX_BYTES} bytes)`);
+			const abs = resolve(workdirReal, p);
+			const parentAbs = dirname(abs);
+			if (!existsSync(parentAbs)) throw new Error(`parent dir does not exist: ${dirname(p)}（write 不隐式建目录）`);
+			const parentReal = jailed(workdirReal, parentAbs);
+			const real = resolve(parentReal, basename(abs));
+			const tmp = `${real}.ptc-${randomUUID()}`;
+			writeFileSync(tmp, content, "utf8");
+			renameSync(tmp, real);
+			return { written: real.slice(workdirReal.length + 1) };
 		},
 		grep: async (args) => {
 			const pattern = strArg(args, "pattern");
@@ -124,6 +140,29 @@ function createFsBindings(workdir) {
 			writeFileSync(tmp, text.replace(oldString, newString), "utf8");
 			renameSync(tmp, real);
 			return { edited: real.slice(workdirReal.length + 1) };
+		}
+	};
+	if (!onCall) return table;
+	return {
+		read: (a) => {
+			onCall();
+			return table.read(a);
+		},
+		write: (a) => {
+			onCall();
+			return table.write(a);
+		},
+		grep: (a) => {
+			onCall();
+			return table.grep(a);
+		},
+		glob: (a) => {
+			onCall();
+			return table.glob(a);
+		},
+		edit: (a) => {
+			onCall();
+			return table.edit(a);
 		}
 	};
 }

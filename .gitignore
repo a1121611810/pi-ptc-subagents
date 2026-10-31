@@ -30,3 +30,5 @@ bench/octobench/*.jsonl
 
 # A/B 台架跑出来的工件（工作区副本 / 轨迹 / 报告）：可重跑，不入库
 bench/ab/out*/
+bench/kimi-ab/results*.jsonl
+bench/kimi-ab/fixture/

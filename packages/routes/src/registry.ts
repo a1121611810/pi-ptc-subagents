@@ -94,12 +94,13 @@ export const KIMI_MCP_RUN_CODE = {
   description: () =>
     [
       "写一段 TypeScript 程序批量调用工具：tools.<name>(args)。支持顶层 await、Promise.all 并行、循环与条件；程序返回值是归约后的结果，中间产物不进上下文。",
-      "本会话的 tools 是固定文件四件套：read / grep / glob / edit（只作用于 workdir 之内，越界即报错）；没有 bash，也没有 pi_task_ptc——要跑 shell 或派子代理，用宿主自己的工具。",
+      "同一形态的读写预计重复 5 次以上时，写程序一次跑完比逐个调更省。",
+      "本会话的 tools 是固定文件五件套：read / write / grep / glob / edit（只作用于 workdir 之内，越界即报错）；没有 bash，也没有 pi_task_ptc——要跑 shell 或派子代理，用宿主自己的工具。",
     ].join(""),
   inputSchemaDescriptions: {
     code: "要执行的 TypeScript 程序体，可用顶层 await 和 return",
     description: "这段程序要干什么（给人看的一行）",
-    workdir: "程序读写文件的根目录（绝对路径）；四件套只能在这个目录内活动",
+    workdir: "程序读写文件的根目录（绝对路径）；五件套只能在这个目录内活动",
     timeoutMs: "覆盖默认 2 分钟超时（毫秒，可选）",
   },
 } as const;
@@ -109,8 +110,8 @@ export const KIMI_MCP_WEB_DS_SEARCH = {
   name: "web_ds_search",
   description: () =>
     [
-      "程序内联网能力（三动作）：search 概览（title/url/snippet，count 1–50 默认 10）· open 抓整页转 markdown · find 页内行匹配（正则）。",
-      "open/find 命中本会话记忆则不再消耗配额；配额按 MCP server 进程计（默认 30 次/进程，0 = 不限）——不是跨会话的全局限额。需要联网证据时写进 ptc_run_code 程序里用，单次搜索也可直调本工具。",
+      "联网搜索三动作：search 概览（title/url/snippet，count 1–50 默认 10）· open 抓整页转 markdown · find 页内行匹配（正则）。单次搜索可直调本工具；要批量取证再写进 ptc_run_code 程序。",
+      "配额按 MCP server 进程计（默认 30 次/进程，0 = 不限）——不是跨会话的全局限额；open/find 命中本会话记忆不重复消耗。",
     ].join(""),
   inputSchemaDescriptions: {
     action: "三动作之一：search（搜索）/ open（抓整页）/ find（页内行匹配）",
@@ -120,6 +121,11 @@ export const KIMI_MCP_WEB_DS_SEARCH = {
     count: "search 条数 1–50，默认 10",
   },
 } as const;
+
+// Kimi 面结果页脚（P2 经济学）：程序成功且确有工具调用时拼在结果尾部——
+// 每次「该用而被用」都回一行正强化，纯计算（0 调用）不拼
+export const KIMI_MCP_RESULT_FOOTER = (calls: number): string =>
+  `程序内 ${calls} 次工具调用，归约成这 1 次结果（逐个调要走 ${calls} 轮）。`;
 
 // Kimi 面工具表：server 从这张表循环出 tools/list——模型可见工具的唯一出处
 export const KIMI_MCP_TOOLS = {
