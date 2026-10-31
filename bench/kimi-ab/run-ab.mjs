@@ -45,6 +45,10 @@ function buildArm(arm) {
   if (untar.status !== 0) throw new Error("tar 解包失败");
   console.log(`[arm ${arm}] worktree 源码就绪（${ARMS[arm]}）`);
   execFileSync("pnpm", ["install", "--frozen-lockfile"], { cwd: wt, stdio: "inherit" });
+  // 必须先全量构建 workspace 依赖包（@pi-ptc/* 的 dist 指向源码树内，缺了 rolldown 会把它们
+  // 当 external 外置——运行时 installed 插件目录无 node_modules，MCP server 直接起不来，
+  // 2026-10-31 首跑 36 轮全踩此坑：wire 里 0 个 tools_discovered，采用率假 0）
+  execFileSync("pnpm", ["run", "build"], { cwd: wt, stdio: "inherit" });
   execFileSync("pnpm", ["run", "build:kimi"], { cwd: wt, stdio: "inherit" });
   return bundle;
 }
@@ -86,8 +90,12 @@ function runOnce(arm, task, i) {
   const resume = /session_([0-9a-f-]+)/.exec(wire ?? "")?.[0] ?? null;
   const counts = {};
   let toolCalls = 0;
+  let ptcToolsListed = false;
   if (wire) {
     for (const line of readFileSync(wire, "utf8").split("\n")) {
+      if (line.includes("mcp.tools_discovered") && line.includes("ptc_run_code")) {
+        ptcToolsListed = true;
+      }
       if (!line.includes('"type":"tool.call"')) continue;
       try {
         const e = JSON.parse(line);
@@ -102,12 +110,13 @@ function runOnce(arm, task, i) {
   const builtinSearch = (counts.WebSearch ?? 0) + (counts.FetchURL ?? 0);
   const g = spawnSync(process.execPath, [join(BENCH, "tasks", task, "grade.mjs"), runDir], { encoding: "utf8" });
   const row = {
-    arm, task, run: i, wallMs, sessionId: resume, wire: !!wire,
+    arm, task, run: i, wallMs, sessionId: resume, wire: !!wire, ptcToolsListed,
     toolCalls, ptcCalls: ptc, webdsCalls: webds, builtinSearch,
     ptcUsed: ptc > 0, grade: g.status === 0 ? "PASS" : "FAIL",
     gradeOut: (g.stdout ?? "").trim().split("\n").pop() ?? "",
   };
   writeFileSync(resultsPath, JSON.stringify(row) + "\n", { flag: "a" });
+  if (!ptcToolsListed) throw new Error(`[${arm}/${task}#${i}] 该会话 wire 里没有 ptc 工具的 tools_discovered——插件没起来，结果无效，中止`);
   console.log(`[${arm}/${task}#${i}] ${row.grade} ptc=${ptc} webds=${webds} builtinSearch=${builtinSearch} calls=${toolCalls} ${wallMs / 1000 | 0}s`);
   rmSync(runDir, { recursive: true, force: true });
 }
