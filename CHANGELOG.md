@@ -5,6 +5,73 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.2.0] - 2026-10-31
+
+### Added
+
+- **`timeoutMs` and `projectContext` knobs on task dispatch** (dispatch). `timeoutMs` arms a
+  timer only when given: timeout goes through the normal stop path (SIGTERM → SIGKILL),
+  `stopReason` records the timeout, terminal state `canceled` — no host-side default; whether
+  to use it is the model's call. `projectContext: "none"` loads no AGENTS.md/CLAUDE.md into
+  the child (`--no-context-files`, present since pi 0.86.0, so no version gate; default
+  `auto` unchanged). Engine-level real-machine probe `scripts/knobs-smoke.mjs` (assertions
+  need no model cooperation — timeout reaping, auto/none A/B, report channel, usage fallback)
+  passes on eight pi versions 0.86.0 / 0.87.1 / 0.99.0 / 1.0.0 / 1.1.0 / 1.2.0 / 1.3.0 / 1.4.0.
+- **Delivery check** (dispatch + entry + routes): the engine extracts the child's real tool
+  trajectory from `tool_execution_start/end` into `ChildDelivery` {tool counts, paths
+  touched, tool errors, text chars} — measured from the stream, not model self-report —
+  attaches it to the task record alongside the report, and the task surface renders a
+  one-line check; when the child delivered nothing, the parent is told to re-dispatch or
+  name the gap rather than fill in numbers. Verified against real print-mode streams on pi
+  0.86.0 and 1.4.0 (parser on real events yields e.g. `tools={read:1}`,
+  `paths=["/etc/hosts"]`).
+- **`write` — a fifth fs tool in the Kimi face** (`ptc_run_code`): programs can now create
+  files, closing the "can't create a file in-program" capability gap found in A/B. Shape
+  `{path, content}`, overwrite allowed, parent directory must already exist (clean error, no
+  implicit mkdir), 2MB cap counted in bytes, atomic tmp+rename, same realpath jail.
+- **Kimi-face adoption guidance from A/B benching**: SKILL.md gains a two-column "when to
+  write a program" checklist (≥5 same-shape calls / ≥20-file read-then-reduce / known-anchor
+  batch edits, plus four negative examples); when a fulfilled program made calls, the result
+  footer shows "N in-program tool calls reduced to 1"; tool mentions use the full-name
+  pattern (`mcp__` prefix + `__ptc_run_code` suffix) after the "skill says write a program
+  but the tool isn't in my list" perception break; `ptc_run_code`'s description gains a
+  quantified trigger line; `web_ds_search` loses its "in-program" demotion box.
+
+### Changed
+
+- **Env pass-through fix, with measured child cost**: the default spawn dropped `env`, so
+  `PI_PTC_DEPTH` / `PI_PTC_TASK_ID` never reached the child — children fully assembled as
+  depth 0 (whole route book injected, recursion gate ineffective). After the fix children
+  take the depth>0 early exit: per-child input −43% (ptc 2830→1607, both 3121→1766).
+  Model-side cost multiple corrected to "about 10×" (measured 9–12×; the old 15–22× was
+  from before this fix).
+- **Report contract**: the old contract block said `"summary" is your deliverable`, so
+  children stuffed facts into self-invented JSON blocks that were then dropped (3/12
+  affected; parent recomputed → grader flagged hallucinations). Reworded: the report is the
+  summary, the deliverable goes in the task's own format, and the parent-side briefing now
+  names the child-report JSON block shape. Measured: named shape → 12/12 reports delivered;
+  self-invented formats → 0/4.
+- **Usage fallback**: a child self-reporting all-empty/zero usage no longer masks the
+  host-observed value (the task surface was permanently showing 0).
+- **`projectContext: none` docs corrected by measurement** (2026-10-31): none only removes
+  the injection — children still read AGENTS.md on their own and apply its conventions
+  (none-vs-auto input diff ≈15%, not the "about half" previously claimed; in 6/6 rounds the
+  model chose none unprompted).
+- **Parent-side route book**: new first guidance section — dispatch criteria and cost
+  ("lots of material / disjoint topics / each piece needs reading ⇒ dispatch; one computable
+  job ⇒ don't"); briefing discipline adds "parent writes it wrong → child executes it
+  wrong, consistently".
+
+### Fixed
+
+- `scripts/version-smoke.sh` installed the wrong package: npm's `pi` is
+  IonicaBizau/pi-number (no `pi` bin exists), so every shim install failed — the real
+  package is `@earendil-works/pi-coding-agent`.
+- Kimi-face review round: partial run-ab runs no longer wipe `results.jsonl`; arm-restore
+  validates its backup (missing or identical-to-arm → refuse to run); the batch-read grader
+  verifies per-file line counts; the `write` cap counts `Buffer.byteLength` (1M CJK chars ≈
+  3MB slipped through the character count).
+
 ## [7.1.0] - 2026-10-29
 
 ### Added
