@@ -28,12 +28,12 @@ export type ReportChannel = "tool" | "prompt-json" | "none" | "opted-out";
 
 export const REPORT_CONTRACT_BLOCK = [
   "<child-report-contract>",
-  "Before finishing, you MUST deliver a child report as a fenced JSON block at the very end of your final message:",
+  "Before finishing, deliver a child report — preferably by calling the ptc_child_report tool (its schema fixes the shape); if that tool is not available, put a fenced JSON block at the very end of your final message:",
   "```json",
   '{ "summary": "one sentence conclusion", "findings": [{ "what": "claim", "evidence": "where it comes from" }], "files_touched": ["relative/path"], "usage": { "input": 0, "output": 0, "cost": 0, "turns": 0 } }',
   "```",
-  'Rules: "summary" is your deliverable — answer the task asked, in one sentence. "findings" carries load-bearing evidence only; never recap content you merely read. Do NOT write report/summary .md files — your final message is what the parent reads.',
-  "findings/files_touched/usage may be omitted when empty. Your prose answer stays; the report is checked alongside it.",
+  'Rules: the report is a SUMMARY — it is NOT the deliverable. The deliverable is your prose answer, in exactly the format the task asked for; never hide the deliverable inside the JSON block. "summary" is one sentence of conclusion. "findings" carries load-bearing evidence only; never recap content you merely read. Do NOT write report/summary .md files — your final message is what the parent reads.',
+  "findings/files_touched/usage may be omitted when empty.",
   "</child-report-contract>",
 ].join("\n");
 

@@ -17,7 +17,8 @@ floor = **0.86.0**（`peerDependencies: ">=0.86.0"`），ceiling = 跟踪最新�
 
 **floor 0.86.0 的运行时含义**（不是缺陷，是「pi 不提供这个 API」）：
 
-- `exposure` 被忽略 → 我们的 codemode 门在 floor 上对模型可见（≥0.99.0 才真正实现「模型不可见」）
+- `exposure` 被忽略 → 我们的 codemode 门在 floor 上**压根不注册**（门控在注册之前：`surface` 判定不
+  含 `codemode` → 不调 `registerTaskDoor`），floor 上模型看不见它（比「可见」更安全）
 - codemode 不存在 → 门注册后无从被脚本调用（无 codemode surface）
 - 失败工具 throw 而不是 isError → 调用方 try/catch 语义两版都要
 
@@ -31,6 +32,8 @@ floor = **0.86.0**（`peerDependencies: ">=0.86.0"`），ceiling = 跟踪最新�
   - **#11062 恢复会话/分支时扩展工具默认激活**（除非 `defaultActive: false`）——影响 task face 的可见性设计
   - 摘要不再受固定输出上限（compaction 修复）；`before_provider_headers` 归因头变化（我们不碰）
   - **message_end usage 带 `cacheRead` / `cacheWrite` / `cacheWrite1h`**（jsonl 观测面已接；旧版缺省 undefined，floor 安全）
+    —— ⚠️ **2026-10-31 更正**：这不是 1.4.0 新增，**floor 0.86.0 的 usage 就已带 `cacheRead`/`cacheWrite`**
+    （floor 实测 `usage={input,output,cacheRead,cacheWrite,totalTokens,cost{…total},cacheWrite1h}`）
 
 ## 硬约束（重写仍然成立的事实）
 
@@ -92,6 +95,60 @@ floor = **0.86.0**（`peerDependencies: ">=0.86.0"`），ceiling = 跟踪最新�
   **不是目录囚禁**——strict 孩子用绝对路径可读宿主任何可读文件。给孩子的 argv 即便未来接上
   `cwd`，也只是改相对路径落点，不开启新能力。审计发现 F1（任务门 cwd 参数未接线）的分析以此为准。
 
+## 实测增补（2026-10-31，floor 三处考古 + 新旋钮跨版本复测）
+
+> ⚠️ **前提修正**：npm 上的 `pi` 包是 `IonicaBizau/pi-number`（算 π 的数学库，只有 16 个版本、
+> 最早 1.0.0、**没有 0.8x/0.9x**）。真包名是 **`@earendil-works/pi-coding-agent`**（61 个版本，
+> 0.80.1→2.0.5，0.86.0 = floor，发布于 2026-09-19）。`scripts/version-smoke.sh` 的 shim 自愈此前写的是
+> `npm install "pi@$want"` → 装成 pi-number（没有 `pi` 这个 bin）→ `INSTALL-FAIL`——
+> **「老版本装不上、floor 考古做不了」是假象**，已修包名。
+
+### floor 0.86.0 真机（`@earendil-works/pi-coding-agent@0.86.0` 实装实跑）
+
+- **我们扩展在 floor 上加载成功**（`-ne -e <entry/dist>` 退出码 0），模型面前的工具 9 个：
+  `read / bash / edit / write` + `ptc_task_list / ptc_task_output / ptc_task_stop / ptc_run_code / ptc_workflow`。
+  **`pi_task_codemode` 不在其中**（门不注册，见上）；`pi_task_ptc` 本就不是模型面工具（程序内 binding）。
+- **floor 的 json 事件形状与 1.4.0 同构**，我们 `parseChildStream` 的假设逐条成立：
+  事件类型 = `session / agent_start / turn_start / message_start / message_update / message_end / turn_end / agent_end / agent_settled`；
+  assistant `message_end` 的 `content=[{type:"text",text}]`、`usage{input,output,cacheRead,cacheWrite,cost.total}`、
+  `model`/`provider` 全部符合。**无需改动**。
+- **floor 的 toolResult 消息无 `details` / `structuredContent`**（只有 `content/isError/role/timestamp/toolCallId/toolName`）
+  → **工具通道在 floor 上必然拿不到报告**，只走 prompt-json 兜底（与旧结论一致）。
+  注意：消息层的 `isError` 有，但**扩展工具返回值里的 `isError` 没有**（floor 的 `AgentToolResult` =
+  `content/details/usage?/terminate?`）→ 我们返回的 `isError: rejected` 在 floor 上被忽略。
+- **floor 的 `ToolDefinition` 没有 `outputSchema` / `exposure` / `defaultActive`**；`execute` 的第 5 个参数
+  是 `ExtensionContext`（1.4.0 是 `ExtensionToolContext`）→ 「通道位置随版本变」成立；
+  `dist` 里的 `executeTool` 全是内部函数 `executeToolCalls`，**没有 `ctx.executeTool` 这个 API** → 旧结论成立。
+- **floor 有 `setActiveTools` / `getActiveTools`**（旧矩阵未记）→ 任务面可见性设计在 floor 可用。
+  但 floor 无 `defaultActive` 字段 → 我们写的 `defaultActive:false` 被忽略 →
+  **floor 上 `ptc_task_list/output/stop` 默认对模型可见**（实测在上面那 9 个工具里）；1.4.0 上默认隐藏。
+- **「旧实现在 floor 能跑的机制」这条悬案收敛**：floor 上程序内调 pi 内置工具确实不可用（无 `ctx.executeTool`），
+  但**我们自己的 binding（`pi_task_ptc`）不依赖它** → floor 的派发走 PTC 门（程序内 binding），实测可用。
+  本仓是干净室重写、不抄旧实现 → 这条悬案对本仓**无待办价值**。
+
+### 新旋钮跨版本复测（`scripts/knobs-smoke.mjs`，真机真子进程）
+
+探针断言不靠模型配合（旋钮是引擎/argv 层的）：`timeoutMs` 真收尸 + `projectContext` auto/none
+引擎层 A/B（孩子系统提示词节表）+ 报告通道 + usage 兜底（宿主观测值非零）。
+
+| pi 版本         | timeoutMs 收尸 | auto 带上下文 | none 不带上下文 | 报告通道 + usage 兜底 | 孩子系统提示词 auto→none   |
+| --------------- | -------------- | ------------- | --------------- | --------------------- | -------------------------- |
+| 0.86.0（floor） | ✓              | ✓             | ✓               | ✓                     | 4386 → 3697（省 689 字符） |
+| 0.99.0          | ✓              | ✓             | ✓               | ✓                     | 4413 → 3724（省 689）      |
+| 1.3.0           | ✓              | ✓             | ✓               | ✓                     | 4503 → 3814（省 689）      |
+| 1.4.0（现行）   | ✓              | ✓             | ✓               | ✓                     | 4545 → 3856（省 689）      |
+
+- **省的是系统提示词的固定字节**（本探针的 AGENTS.md 是 689 字符）；`usage.input` 受缓存冷热影响，
+  **跨版本/跨轮不可横比**（缓存命中时几乎为 0）——比大小要看节长，不看 input。
+- **`--no-context-files` 在 0.86.0/0.87.1/0.99.0/1.0.0/1.1.0/1.2.0/1.3.0/1.4.0 全部存在**
+  （`npm pack` 静态核验 + floor 真机）→ `projectContext` **无需版本门**；`--no-mcp` 确证 1.1.0 起才有。
+- 顺带一条行为差异：**floor 的孩子更可能不按契约交报告**（任务只写「只回答 OK」时 floor 的
+  `reportChannel=none`，1.4.0 照交）→ 父面**点名 child report 的 JSON 块形状**在老版本上更必要
+  （实测：点名后 4 个版本全部交上）。
+
 ## 待测
 
-中间版本的**执行链冒烟**已覆盖（0.87 / 0.99 / 1.0 / 1.1 / 1.2 / 1.3，见上）；仍未做的：同一 minor 的补丁版逐版安装（按 minor 分水岭取样）、`1.x` 能力表里未直接观测的 codemode 差分（依赖旧仓 16 项探针结论）、floor 的 codemode/exposure 行为（0.99 以下本就没有）。下次 pi 发版或动了门/可见性/codemode 探测相关代码时补测。
+中间版本的**执行链冒烟**已覆盖（0.87 / 0.99 / 1.0 / 1.1 / 1.2 / 1.3，见上）；**floor 的 codemode/exposure
+行为已于 2026-10-31 查清**（见上）。仍未做的：同一 minor 的补丁版逐版安装（按 minor 分水岭取样）、
+`1.x` 能力表里未直接观测的 codemode 差分（依赖旧仓 16 项探针结论）。下次 pi 发版或动了门/可见性/codemode
+探测相关代码时补测。

@@ -70,6 +70,8 @@ export function buildPiArgv(
     /** 旧 ADR-0044：解析出的 agent 定义钉的模型/档位（调用参数优先于它们） */
     agentModel?: string;
     agentThinkingLevel?: string;
+    /** projectContext:"none" = 孩子不加载 AGENTS.md/CLAUDE.md（省固定税；旗标 0.86.1 起就有） */
+    projectContext?: "auto" | "none";
   },
   context: { depth: number; sessionModel?: string; piVersion?: string },
 ): string[] {
@@ -87,6 +89,8 @@ export function buildPiArgv(
   // 减量：砍自动发现带进孩子的宿主面散文与技能（pi help 明示显式 -e 不受 --no-extensions 影响）；
   // --no-mcp 1.1.0 才出现（版本考古实测），floor 0.86 无此旗标——按宿主版本门控，缺省不发
   argv.push("--no-extensions", "--no-skills");
+  // 孩子的固定税一大块：项目上下文（AGENTS.md/CLAUDE.md，实测 2127 字符 ≈ 一半）——按调用方的选择关掉
+  if (input.projectContext === "none") argv.push("--no-context-files");
   if (supportsNoMcp(context.piVersion)) argv.push("--no-mcp");
   // 旧 ADR-0044 解析序：调用参数 → agent 定义 → 会话当前模型；思考档位挂 :<thinking> 后缀（pi --model 语法）
   const model = input.model ?? input.agentModel ?? context.sessionModel;

@@ -26,7 +26,17 @@ export const TOOLS = {
         "写一段 TypeScript 程序批量调用工具：tools.<name>(args)。支持顶层 await、Promise.all 并行、循环与条件；程序返回值是归约后的结果，中间产物不进上下文。",
         s === "codemode_ptc"
           ? "本会话里我从 codemode 脚本可达，模型直走 codemode。"
-          : "什么时候写程序而不是逐个调工具，看系统提示词 <ptc> 节的路由表。",
+          : [
+              "什么时候写程序而不是逐个调工具，看系统提示词 <ptc> 节的路由表。",
+              // 实测（2026-10-30 分档 A/B）：模型因「不确定程序内工具的参数形状」放弃写程序——
+              // thinking 原话「It supports tools.<name>(args) presumably … risk of format differences」，
+              // 宽题 0/3、窄题 0/2 轮调用 ptc_run_code；对照 pi 自带 codemode 给每个工具完整
+              // inputSchema+outputSchema，模型 5/6 轮主动用。故这里把「参数与同名 pi 工具一致」
+              // +「返回文本、失败抛异常」写明——不硬编码字段名（pi 的 edit 是 edits[] 数组，
+              // 硬编码必错），让模型复用它已经见过的同名工具声明。
+              "程序内可调本会话已启用的同名工具（read / write / edit / grep / find / ls；bash 默认不可用），参数与直接调用该工具完全一致；每次调用返回 Promise，要 await，返回文本结果，失败抛异常。",
+              '例：const files = await tools.find({ pattern: "*.py" }); for (const f of files) await tools.write({ path: f, content: body });',
+            ].join(""),
       ].join(""),
   },
   ptc_workflow: {
@@ -58,6 +68,24 @@ export const TOOLS = {
     description: () => "按 task_id 叫停任务：排队中的直接抽掉（canceled），在跑的转 stopping。",
   },
 } as Record<ToolName, ToolEntry>;
+
+// 派发参数说明（ADR-0008：两扇门共用一份参数表）——文案住本册子，ptc 的 schema 从这里取
+// 每个参数都写清代价：宿主不写死默认，用不用由模型自己判断
+export const TASK_DOOR_PARAM_DESCRIPTIONS = {
+  task: "孩子要干的活",
+  agent: "已注册的 agent 名字；省略 = 通用孩子",
+  agentScope: "agent 定义的查找范围（user / project / both）",
+  why: "这一刀为什么切出来（调用方自己的话）——它会进孩子的提示词、多花孩子的 token；孩子从 task 里已经能读懂就别传",
+  model: "覆盖孩子跑的模型",
+  thinkingLevel: "覆盖孩子的思考档位——孩子的思考 token 是可调的成本项",
+  wait: "true = 等这个任务完成再返回结果；false = 立刻返回 handle，结果走任务面/通知",
+  label: "后台任务给人看的标签",
+  readOnly:
+    "strict = 孩子只有读工具（read/grep/find/ls，搜索开启时含 web_ds_search）；lenient = 默认全工具。只需要读的活别给写权限",
+  timeoutMs: "孩子的运行时长上限（毫秒）——超了按超时收尸；不传 = 不限（与不传时同）",
+  projectContext:
+    "孩子的项目上下文（AGENTS.md/CLAUDE.md）：auto = 照常加载；none = 不加载——它占孩子固定税约一半，这活不需要项目约定就传 none",
+} as const;
 
 // Kimi 面（MCP，ADR-0018）：ptc_run_code 的宿主中立形态。散文仍住本册子——
 // 门禁（双向覆盖/token 预算）扩展随 P2 落地，本块由 tests/kimi 的协议探针守存在性
@@ -117,8 +145,10 @@ export const ROUTES = [
     name: "派一个子代理",
     when: "这件事需要它自己的上下文，或者要跟别的活并行",
     how: {
-      full_ptc: "tools.pi_task_ptc({ task, label? })（程序内）",
-      codemode_ptc: "tools.pi_task_codemode({ task, label? })（脚本内）",
+      full_ptc:
+        "tools.pi_task_ptc({ task, label? })（程序内）——task 里写清交付物格式；要报告就点名 child report 的 JSON 块（summary/findings），别自创报告格式",
+      codemode_ptc:
+        "tools.pi_task_codemode({ task, label? })（脚本内）——task 里写清交付物格式；要报告就点名 child report 的 JSON 块（summary/findings），别自创报告格式",
     },
     fact: "默认不等，立刻返回 handle；任务在任务记录里排队，可经任务面三工具查/停",
     detail: "docs/routes/create-a-task.md",

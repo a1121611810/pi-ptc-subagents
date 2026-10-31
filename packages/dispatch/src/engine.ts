@@ -191,7 +191,8 @@ export class TaskEngine {
     this.#registry = options.registry;
     this.#slots = options.slots ?? new DispatchSlotCounter();
     this.#output = options.output ?? new InMemoryOutputStorage();
-    this.#spawn = options.spawnChild ?? ((argv) => defaultSpawn(argv));
+    // env 必须透传：PI_PTC_DEPTH / PI_PTC_TASK_ID 是孩子的血缘（entry 靠 depth>0 走 child-only 装配）
+    this.#spawn = options.spawnChild ?? ((argv, env) => defaultSpawn(argv, env));
     this.#gates = options.gates ?? [];
     this.#buildArgv = options.buildArgv ?? ((input, context) => buildPiArgv(input, context));
     this.#resolveAgent = options.resolveAgent ?? (() => null);
@@ -360,6 +361,16 @@ export class TaskEngine {
     };
     const child = this.#spawn(argv, env);
     this.#children.set(taskId, child);
+    // timeoutMs 开关：给了才计时（不传 = 原行为，不限）。超时走 stop 路径收（SIGTERM→SIGKILL），
+    // stopReason 写明超时——模型据此知道这孩子是被掐掉的，不是自己跑完的
+    const timeoutMs =
+      typeof input.timeoutMs === "number" && input.timeoutMs > 0 ? input.timeoutMs : undefined;
+    const timer = timeoutMs
+      ? setTimeout(() => {
+          void this.stop(taskId, `timeout after ${timeoutMs}ms`);
+        }, timeoutMs)
+      : undefined;
+    timer?.unref();
     let text = "";
     let outputTruncated = false;
     child.onOutput((chunk) => {
@@ -372,6 +383,7 @@ export class TaskEngine {
     const exitCode = await new Promise<number>((resolveExit) => {
       child.onExit((code) => resolveExit(code));
     });
+    if (timer) clearTimeout(timer);
     this.#children.delete(taskId);
     const outputPath = await this.#output.write(taskId, text);
     // 旧 ADR-0032：工具通道（--mode json 的 toolResult）优先；退 prompt 通道；opted-out 明说
@@ -389,7 +401,11 @@ export class TaskEngine {
       report = extracted.report ?? undefined;
       channel = extracted.channel;
     }
-    if (report && !report.usage && parsed.observedUsage)
+    // 自报 usage 恒为 0（孩子不会算自己的 token）——空/零的自报要让位给宿主观测值，
+    // 否则父在任务面看到的永远是 0（判分台架因此只能去子会话日志里读真实用量）
+    const selfUsage = report?.usage;
+    const selfUsageEmpty = !selfUsage || (!selfUsage.input && !selfUsage.output && !selfUsage.cost);
+    if (report && selfUsageEmpty && parsed.observedUsage)
       report = { ...report, usage: parsed.observedUsage };
     await this.#registry.submit({ kind: "attach-report", id: taskId, report, channel });
     // 产出路径挂回记录：lifecycle face 的 output 工具经此读正文（truncated = 审计 F2 截断事实）

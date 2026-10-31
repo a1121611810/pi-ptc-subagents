@@ -33,7 +33,10 @@ shim_for() { # $1=version → 输出 bin 目录；缺 shim 先装
     if [ ! -x "$dir/node_modules/.bin/pi" ]; then
       echo "… 装 pi@$want 到 $dir" >&2
       mkdir -p "$dir"
-      (cd "$dir" && npm init -y >/dev/null 2>&1 && npm install "pi@$want" --no-fund --no-audit >/dev/null 2>&1) || true
+      # ⚠️ 包名不是 `pi`：npm 上的 `pi` 是 IonicaBizau/pi-number（算 π 的数学库，没有 pi 这个 bin）。
+      # 真包名是 @earendil-works/pi-coding-agent（0.80.1 起，0.86.0 = floor）。写错会装成别的包、
+      # 拿不到 bin → INSTALL-FAIL，看起来像「老版本装不上」。
+      (cd "$dir" && npm init -y >/dev/null 2>&1 && npm install "@earendil-works/pi-coding-agent@$want" --no-fund --no-audit >/dev/null 2>&1) || true
     fi
   fi
   [ -x "$dir/node_modules/.bin/pi" ] && echo "$dir/node_modules/.bin"

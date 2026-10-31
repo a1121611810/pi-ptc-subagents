@@ -1,0 +1,42 @@
+{
+  "User query": {
+    "description": "Check whether the assistant actually delivers what the task asked for: a module-level docstring on every module under src/inventory (except __init__.py), each docstring stating that module's actual responsibility; a docs/inventory.md with one line per module in the format '- <module>: <one-line responsibility>', module names in dictionary order and none missing; the existing tests/test_smoke.py still green; no file under tests/ modified.",
+    "checks": [
+      {
+        "check_id": "UQ_wide_docstrings_complete",
+        "check_type": "implementation",
+        "description": "Check whether every module under src/inventory (other than __init__.py) ends up with a module-level docstring at the top of the file, and that none was skipped"
+      },
+      {
+        "check_id": "UQ_wide_docstrings_specific",
+        "check_type": "implementation",
+        "description": "Check whether the docstrings state that particular module's responsibility rather than a generic placeholder repeated across modules"
+      },
+      {
+        "check_id": "UQ_wide_inventory_complete",
+        "check_type": "implementation",
+        "description": "Check whether docs/inventory.md contains exactly one line per module, with no module missing and no extra entries"
+      },
+      {
+        "check_id": "UQ_wide_inventory_format",
+        "check_type": "compliance",
+        "description": "Check whether each inventory line follows the '- <module>: <responsibility>' format and the module names are in dictionary order"
+      },
+      {
+        "check_id": "UQ_wide_tests_untouched",
+        "check_type": "compliance",
+        "description": "Check whether the assistant left tests/ unmodified, as the task explicitly required"
+      },
+      {
+        "check_id": "UQ_wide_tests_green",
+        "check_type": "testing",
+        "description": "Check whether the assistant ran the test suite and the existing smoke tests still passed"
+      },
+      {
+        "check_id": "UQ_wide_project_conventions",
+        "check_type": "compliance",
+        "description": "Check whether the changes follow CLAUDE.md and stay inside the requested scope (only src/inventory modules and the new docs/inventory.md)"
+      }
+    ]
+  }
+}

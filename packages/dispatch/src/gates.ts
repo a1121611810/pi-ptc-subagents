@@ -14,6 +14,10 @@ export type DispatchInput = {
   thinkingLevel?: string;
   /** 决策 17：调用方取消信号——只在「还在排队」时生效（uv_cancel：已起 = EBUSY 不动） */
   signal?: AbortSignal;
+  /** 孩子的运行时长上限（毫秒）——不传 = 不限（旧行为）；给了超时就收尸，慢孩子不再一直烧 token */
+  timeoutMs?: number;
+  /** 孩子的项目上下文（AGENTS.md/CLAUDE.md）：auto = 照常加载（旧行为）；none = 不加载（省孩子的固定税） */
+  projectContext?: "auto" | "none";
 };
 
 export type TaskRejection = {

@@ -5,6 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildPiArgv } from "../../packages/dispatch/dist/index.js";
 import { parseChildStream } from "../../packages/dispatch/dist/index.js";
+import { REPORT_CONTRACT_BLOCK } from "../../packages/dispatch/dist/index.js";
 
 const BASE = { task: "do the thing" };
 const CTX = { depth: 1 };
@@ -40,6 +41,20 @@ test("argv：既有语义不受旗标影响（strict 白名单 / childReport:fal
   const noReportArgv = buildPiArgv({ ...BASE, childReport: false }, CTX);
   const block = noReportArgv[noReportArgv.indexOf("--append-system-prompt") + 1];
   assert.ok(!block.includes("child-report-contract"));
+});
+
+test("argv：projectContext=none 关掉孩子的项目上下文（默认照常加载）", () => {
+  assert.ok(!buildPiArgv(BASE, CTX).includes("--no-context-files"));
+  assert.ok(!buildPiArgv({ ...BASE, projectContext: "auto" }, CTX).includes("--no-context-files"));
+  assert.ok(buildPiArgv({ ...BASE, projectContext: "none" }, CTX).includes("--no-context-files"));
+});
+
+test("契约块：报告≠交付物，且优先引导工具通道（防回退）", () => {
+  // 旧误导句会让孩子把交付物塞进 JSON 块 → 形状不对 → 报告被丢 → 父重算（实测 3/12 孩子中招）
+  assert.ok(!REPORT_CONTRACT_BLOCK.includes("is your deliverable"));
+  assert.ok(REPORT_CONTRACT_BLOCK.includes("NOT the deliverable"));
+  // 工具通道的形状由 schema 保证（prompt 通道靠抠 JSON，形状不对就静默丢）
+  assert.ok(REPORT_CONTRACT_BLOCK.includes("ptc_child_report"));
 });
 
 test("jsonl：usage 携带 cacheRead/cacheWrite 时进 observedUsage（pi 1.4.0 形状）", () => {

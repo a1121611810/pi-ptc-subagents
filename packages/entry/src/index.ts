@@ -579,6 +579,8 @@ function registerTaskDoor(
         model: args.model,
         thinkingLevel: args.thinkingLevel,
         readOnly: args.readOnly,
+        timeoutMs: args.timeoutMs,
+        projectContext: args.projectContext,
       });
       // 决策 7/12：拒绝走 status，不抛；两个入口同形
       return {

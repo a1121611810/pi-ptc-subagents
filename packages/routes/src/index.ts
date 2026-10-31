@@ -6,6 +6,7 @@ export {
   KIMI_MCP_WEB_DS_SEARCH,
   ROUTES,
   ROUTE_INDEX_TOKEN_CEILING,
+  TASK_DOOR_PARAM_DESCRIPTIONS,
   TOOLS,
   renderLongOutputGuidance,
   renderRouteIndex,

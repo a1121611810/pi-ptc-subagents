@@ -24,3 +24,9 @@ packages/website/public/status/
 /procedures/
 /_rules/
 /_prompts/
+
+# OctoBench 外部基准：数据集与生成的 checklist 都可从 HuggingFace 重下，不入库
+bench/octobench/*.jsonl
+
+# A/B 台架跑出来的工件（工作区副本 / 轨迹 / 报告）：可重跑，不入库
+bench/ab/out*/
