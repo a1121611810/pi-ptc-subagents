@@ -1,3 +1,4 @@
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   TaskEngine,
   TaskRegistry,
@@ -74,5 +75,27 @@ export function assemblePtcSession(options: PtcSessionOptions = {}): PtcSession 
     outputSize: (taskId) => engine.outputSize(taskId),
     readOutputTail: (taskId, maxBytes) => engine.readOutputTail(taskId, maxBytes),
     readArchivedRecord: (taskId) => engine.readArchivedRecord(taskId),
+  };
+}
+
+/**
+ * 引擎运行时上下文：孩子的模型默认继承父会话的当前模型。
+ * 优先级（旧 ADR-0044）：调用参数 → agent 定义 → 会话模型（缺省继承）。
+ * sessionModel 是活 getter——派发那一刻才读，用户中途换模型也跟着换；
+ * floor 0.86 也有 ctx.model（实测 0.86.0 的 ExtensionContext.model 同为活 getter，provider/id 同形）→ 无版本门；
+ * 会话没有模型 → undefined → 不发 --model；扩展被卸载后 ctx 的 getter 会抛（pi 的 assertActive）→ 吞掉退回旧行为。
+ */
+export function buildEngineContext(ctx: ExtensionContext, piVersion?: string): EngineContext {
+  return {
+    depth: 0,
+    piVersion,
+    get sessionModel(): string | undefined {
+      try {
+        const model = ctx.model;
+        return model ? `${model.provider}/${model.id}` : undefined;
+      } catch {
+        return undefined;
+      }
+    },
   };
 }

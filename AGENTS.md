@@ -29,6 +29,7 @@ pi 的扩展：PTC（模型写 TypeScript 程序批量调工具）+ 子代理派
 - **真 pi 冒烟必须隔离**：`pi -ne -e <entry/dist/index.js>`——本机全局装有旧版 `npm:pi-ptc-subagents`，不加 `-ne` 会同名互踩
 - **16 版本冒烟脚本化**：`scripts/version-smoke.sh`（发版前手工全量，四腿契约：run_code 求值 / 程序内 tools.read（0.99 分水岭：≥0.99 返回数字、floor 明确报 ERR:）/ ptc_workflow parallel / wait:false + 任务面 list·output；`SMOKE_VERSIONS="1.3.0"` 可单版本快查；缺 shim 自动装到 `$SHIM_ROOT`——⚠️ 真包名是 `@earendil-works/pi-coding-agent`，npm 上的 `pi` 是 pi-number，装错包没有 `pi` 这个 bin）
 - **旋钮真机探针**：`scripts/knobs-smoke.mjs`（断言不靠模型配合——旋钮是引擎/argv 层的，宿主自己看：`timeoutMs` 真收尸 / `projectContext` auto-vs-none 引擎层 A/B / 报告通道 / usage 兜底 / 口径事实；切版本跑：`PATH=<该版 bin>:$PATH node scripts/knobs-smoke.mjs`；2026-10-31 实测 0.86.0/0.87.1/0.99.0/1.0.0/1.1.0/1.2.0/1.3.0/1.4.0 **八版全过**）
+- **会话模型继承真机探针**：`scripts/session-model-smoke.mjs`（断言全宿主自读——父的模型从父的 `message_end` 读、孩子的从孩子自己的 `output.log` 事件流读；模型只负责「派一个孩子」，程序体里出现 `model:` 参数即判红，那测的就不是继承了。**跑两轮差分**：父显式 `minimax-cn/MiniMax-M3.1-Flash` vs 父用默认（`minimax-cn-512k/…`）——孩子必须跟着各自的父走，写死任何一个模型都会红。切版本跑：`PATH=<该版 bin>:$PATH node scripts/session-model-smoke.mjs`；2026-10-31 实测 0.86.0/0.87.1/0.99.0/1.0.0/1.1.0/1.2.0/1.3.0/1.4.0 **八版全过**；负向对照已验：撤掉 entry 的接线重跑即红——孩子落到 pi 默认模型 `minimax-cn-512k`）
 - **`projectContext:none` 的真实语义：省 token，不隔离知识**（2026-10-31 真机 + bench）：none 只去掉注入
   （孩子系统提示词少一节 `project_context`），文件仍在 cwd、pi 内置工具无 cwd 囚禁 ⇒ 孩子会自己
   `read AGENTS.md` 并照样用上口径（实测 none 臂答案与 auto 臂相同，输入只差 −15%，不是 −45%）。

@@ -175,6 +175,20 @@ F3-3 = 330；按字面读是 3300 / 300）。**判分器零复制**：bench 加 
   （幻觉 0/0/0）⇒ `projectContext:auto` 不是「无害的知识补充」。
 - 细节见 `bench/ab/README.md` 第十一轮。
 
+### 会话模型继承（2026-10-31 实测，`npm pack` 静态核验 floor 与 ceiling）
+
+孩子的模型默认继承父会话的当前模型（entry 的 `buildEngineContext` → 孩子 argv 的 `--model provider/id`）。
+静态核验 **0.86.0 与 1.4.0 完全同形** ⇒ **无版本门**：
+
+- `ExtensionContext.model` 两版都在，且**都是活 getter**（0.86.0 `dist/core/extensions/runner.js:559`
+  `get model()` → `getModel()`；1.4.0 同构）⇒ 派发那一刻才读，用户中途切模型孩子跟着切。
+- 模型引用格式两版都是 `${model.provider}/${model.id}`（0.86.0 `dist/core/model-resolver.js:75`；
+  1.4.0 同）；`--model` 的接受格式两版都是 `provider/id` + 可选 `:<thinking>`（`cli/args.js` help 同文）。
+- ⇒ **floor 上孩子同样继承父会话模型**；不发 `--model` 的唯一情形是「会话本身没有模型」。
+- **真机矩阵**：`scripts/session-model-smoke.mjs` 在 0.86.0/0.87.1/0.99.0/1.0.0/1.1.0/1.2.0/1.3.0/1.4.0
+  **八版全过**——两轮差分（父显式 `minimax-cn/MiniMax-M3.1-Flash` vs 父用默认 `minimax-cn-512k/…`），
+  孩子都跟着各自的父走；负向对照（撤掉 entry 的接线）如期变红——孩子落到 pi 默认模型。
+
 ## 待测
 
 中间版本的**执行链冒烟**已覆盖（0.87 / 0.99 / 1.0 / 1.1 / 1.2 / 1.3，见上）；

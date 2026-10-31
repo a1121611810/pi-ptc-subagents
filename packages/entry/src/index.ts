@@ -46,9 +46,9 @@ import {
   type SurfaceMode,
 } from "@pi-ptc/routes";
 import { TRUNCATION_MAX_BYTES, applyAdr0015Truncation } from "@pi-ptc/tui";
-import { assemblePtcSession, type PtcSession } from "./session.ts";
+import { assemblePtcSession, buildEngineContext, type PtcSession } from "./session.ts";
 
-export { assemblePtcSession } from "./session.ts";
+export { assemblePtcSession, buildEngineContext } from "./session.ts";
 export type {
   CreateTaskResult,
   DispatchOutcome,
@@ -185,7 +185,7 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
     session = assemblePtcSession({
       onTransition: () => applyTaskFaceVisibility(),
       whyEnabled: () => whyEnabledOverride ?? whyEnabledPersisted,
-      context: { depth: 0, piVersion },
+      context: buildEngineContext(ctx, piVersion),
       engine: {
         notifications,
         resolveAgent: (name, scope) => findAgent(name, agentDirs, scope),
