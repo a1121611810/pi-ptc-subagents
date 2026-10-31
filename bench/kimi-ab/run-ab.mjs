@@ -23,7 +23,11 @@ const PLUGIN_DIR = join(
   process.env.HOME ?? "",
   ".kimi-code/plugins/managed/ptc-tools/release/kimi",
 );
-const ARMS = { A: "ef09ddb", B: "cf1d8b2" }; // A=两行描述；B=A+检查表+经济学 footer
+const ARMS = {
+  A: "ef09ddb",
+  B: "cf1d8b2", // A+检查表+经济学 footer
+  C: "cbf3fc9", // B+工具全名桥+write 绑定（五件套）
+};
 const RUN_TIMEOUT_MS = 8 * 60 * 1000;
 
 const arg = (name, dflt) => {
