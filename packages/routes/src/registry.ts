@@ -143,12 +143,12 @@ export const ROUTES = [
   {
     id: "create-a-task",
     name: "派一个子代理",
-    when: "这件事需要它自己的上下文，或者要跟别的活并行",
+    when: "材料多、主题互不相干、每份都要读一堆材料时派——父一个人扛会算错（实测 92%→100%，n=3）；成本 10 倍上下，一件能算完的活别派",
     how: {
       full_ptc:
-        "tools.pi_task_ptc({ task, label? })（程序内）——task 里写清交付物格式；要报告就点名 child report 的 JSON 块（summary/findings），别自创报告格式",
+        "tools.pi_task_ptc({ task, label? })（程序内）——task 是孩子的唯一规格（写死路径/命令/交付物格式）；要报告就点名 child report 的 JSON 块（summary/findings），别自创报告格式",
       codemode_ptc:
-        "tools.pi_task_codemode({ task, label? })（脚本内）——task 里写清交付物格式；要报告就点名 child report 的 JSON 块（summary/findings），别自创报告格式",
+        "tools.pi_task_codemode({ task, label? })（脚本内）——task 是孩子的唯一规格（写死路径/命令/交付物格式）；要报告就点名 child report 的 JSON 块（summary/findings），别自创报告格式",
     },
     fact: "默认不等，立刻返回 handle；任务在任务记录里排队，可经任务面三工具查/停",
     detail: "docs/routes/create-a-task.md",
@@ -268,9 +268,10 @@ function estimateTokens(text: string): number {
 
 // 总则句（旧 ADR-0010 的「引导」一半：先给地图再收枪）——按面切换，随索引一起渲染
 const ROUTE_INDEX_LEAD: Record<SurfaceMode, string> = {
-  full_ptc: "批量调工具默认先写程序（ptc_run_code）；单次调用或要逐步判断、审批敏感的才直连。",
+  full_ptc:
+    "批量调工具默认先写程序（ptc_run_code）；单次调用或要逐步判断、审批敏感的才直连。派不派子代理自己判断——路由表第一行写了代价。",
   codemode_ptc:
-    "编排写 codemode 脚本；批量派活经脚本内的 pi_task_codemode；要查/停任务用任务面三工具。",
+    "编排写 codemode 脚本；批量派活经脚本内的 pi_task_codemode；要查/停任务用任务面三工具。派不派自己判断——路由表第一行写了代价。",
 };
 
 export function renderRouteIndex(surface: SurfaceMode, detailBase?: string, nudge = true): string {
