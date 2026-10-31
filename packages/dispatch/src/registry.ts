@@ -23,6 +23,8 @@ export type TaskCommand =
       id: string;
       report: TaskRecord["report"];
       channel: TaskRecord["reportChannel"];
+      /** 孩子的真实交付轨迹——与报告同批挂上（引擎抽的，不是模型自述） */
+      delivery?: TaskRecord["delivery"];
     }
   | {
       kind: "attach-output";
@@ -128,6 +130,7 @@ export class TaskRegistry {
           ...current,
           report: command.report,
           reportChannel: command.channel,
+          delivery: command.delivery ?? current.delivery,
         };
         this.#records.set(command.id, next);
         this.#emit(next, current);

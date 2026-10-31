@@ -15,7 +15,11 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { gunzipSync, gzip } from "node:zlib";
 import { promisify } from "node:util";
-import { isTerminal as isTerminalRecord, type TaskRecord } from "./task-record.ts";
+import {
+  isTerminal as isTerminalRecord,
+  type ChildDelivery,
+  type TaskRecord,
+} from "./task-record.ts";
 import type { AgentDefinition } from "./agent-discovery.ts";
 import type { DispatchInput, Gate, TaskRejection } from "./gates.ts";
 import { rejection } from "./gates.ts";
@@ -59,6 +63,8 @@ export type DispatchResult = {
   /** 旧 ADR-0032：报告与通道；没交报告时缺省、channel = none（散文照交，不静默） */
   report?: ChildReport;
   reportChannel: ReportChannel;
+  /** 孩子的真实交付轨迹（引擎从事件流抽）——父核对结论用，不靠模型自述 */
+  delivery?: ChildDelivery;
   /** 审计 F2：stdout 超尾部上限被截断——产出只剩尾部，读者知道全貌不在 */
   outputTruncated: boolean;
 };
@@ -407,7 +413,13 @@ export class TaskEngine {
     const selfUsageEmpty = !selfUsage || (!selfUsage.input && !selfUsage.output && !selfUsage.cost);
     if (report && selfUsageEmpty && parsed.observedUsage)
       report = { ...report, usage: parsed.observedUsage };
-    await this.#registry.submit({ kind: "attach-report", id: taskId, report, channel });
+    await this.#registry.submit({
+      kind: "attach-report",
+      id: taskId,
+      report,
+      channel,
+      delivery: parsed.delivery,
+    });
     // 产出路径挂回记录：lifecycle face 的 output 工具经此读正文（truncated = 审计 F2 截断事实）
     await this.#registry.submit({
       kind: "attach-output",
@@ -447,6 +459,7 @@ export class TaskEngine {
       whySuppressed,
       report: report ?? undefined,
       reportChannel: channel,
+      delivery: parsed.delivery,
       outputTruncated,
     };
   }

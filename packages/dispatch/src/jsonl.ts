@@ -1,4 +1,8 @@
 import type { ChildReport } from "./report.ts";
+import type { ChildDelivery } from "./task-record.ts";
+
+// 路径清单上限：父面只看前几条，超出部分不记（shortcut: 20 条；何时该升级——需要逐条核对全部触达路径时）
+const MAX_PATHS = 20;
 
 // pi --mode json 的事件流（v3，2026-10-26 实测）：message_end 带最终文本与 usage；toolResult 消息带 toolName/details
 export interface ParsedChildStream {
@@ -18,6 +22,8 @@ export interface ParsedChildStream {
   /** 旧 ADR-0045：流里实测到的孩子模型/provider */
   observedModel: string | null;
   observedProvider: string | null;
+  /** 孩子的真实工具轨迹（引擎从事件流抽，不依赖模型自述）——父核对结论用 */
+  delivery: ChildDelivery;
 }
 
 interface JsonlMessage {
@@ -43,13 +49,37 @@ export function parseChildStream(stdout: string): ParsedChildStream {
   let observedUsage: ParsedChildStream["observedUsage"] = null;
   let observedModel: string | null = null;
   let observedProvider: string | null = null;
+  const tools: Record<string, number> = {};
+  const paths: string[] = [];
+  let errors = 0;
   for (const line of stdout.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed.startsWith("{")) continue;
-    let event: { type?: string; message?: JsonlMessage };
+    let event: {
+      type?: string;
+      message?: JsonlMessage;
+      toolName?: string;
+      args?: { path?: unknown };
+      isError?: boolean;
+      result?: { isError?: boolean };
+    };
     try {
       event = JSON.parse(trimmed);
     } catch {
+      continue;
+    }
+    // 工具轨迹（floor 0.86 与 1.4.0 同构：tool_execution_start 带 toolName+args，tool_execution_end 带 isError）
+    if (event.type === "tool_execution_start") {
+      const name = typeof event.toolName === "string" ? event.toolName : "unknown";
+      tools[name] = (tools[name] ?? 0) + 1;
+      const path = event.args?.path;
+      if (typeof path === "string" && path && !paths.includes(path) && paths.length < MAX_PATHS) {
+        paths.push(path);
+      }
+      continue;
+    }
+    if (event.type === "tool_execution_end") {
+      if (event.isError === true || event.result?.isError === true) errors++;
       continue;
     }
     if (event.type !== "message_end" || !event.message) continue;
@@ -85,5 +115,12 @@ export function parseChildStream(stdout: string): ParsedChildStream {
       if (candidate && typeof candidate.summary === "string") toolReport = candidate;
     }
   }
-  return { text, toolReport, observedUsage, observedModel, observedProvider };
+  return {
+    text,
+    toolReport,
+    observedUsage,
+    observedModel,
+    observedProvider,
+    delivery: { tools, paths, errors, textChars: text.length },
+  };
 }

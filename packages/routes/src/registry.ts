@@ -138,6 +138,49 @@ export interface RouteEntry {
   detail: string;
 }
 
+// 交付核对（父面）：孩子**实际**干了什么（引擎从事件流抽）vs 它**声称**交了什么（模型自述）
+// 散文住本册子（ADR-0013）——父面拿到的每一句引导语都从这里出
+export interface DeliveryFacts {
+  tools: Record<string, number>;
+  paths: string[];
+  errors: number;
+  textChars: number;
+}
+
+export const DELIVERY_CHECK_LEAD = "交付核对（引擎实测）";
+export const DELIVERY_CHECK_NOTHING = "这孩子的结论没有依据：重派它，或明说缺口，别替它补数。";
+
+/** 父面渲染一行交付核对：工具/路径（实测）· 报错 · 正文长度 · 报告条数（自述） */
+export function renderDeliveryCheck(input: {
+  delivery?: DeliveryFacts;
+  findings?: number;
+  channel?: string;
+}): string {
+  const d = input.delivery;
+  if (!d) return "";
+  const calls = Object.entries(d.tools);
+  const totalCalls = calls.reduce((sum, [, count]) => sum + count, 0);
+  const parts: string[] = [];
+  if (calls.length > 0) {
+    const tools = calls.map(([name, count]) => `${name}×${count}`).join(" ");
+    const paths =
+      d.paths.length > 0
+        ? `（${d.paths.slice(0, 5).join("、")}${d.paths.length > 5 ? ` 等 ${d.paths.length} 条` : ""}）`
+        : "";
+    parts.push(`工具 ${tools}${paths}`);
+  } else {
+    parts.push("没调用任何工具");
+  }
+  parts.push(`报错 ${d.errors}`);
+  parts.push(`正文 ${d.textChars} 字`);
+  const findings = input.findings ?? 0;
+  parts.push(`报告 ${findings} 条（${input.channel ?? "none"}）`);
+  const nothing = totalCalls === 0 && findings === 0 && d.textChars === 0;
+  return nothing
+    ? `${DELIVERY_CHECK_LEAD}：零产出——${parts.join(" · ")}。${DELIVERY_CHECK_NOTHING}`
+    : `${DELIVERY_CHECK_LEAD}：${parts.join(" · ")}`;
+}
+
 // 路由集完整性（机械点 3）已全量：7 条路在每个 surface 都有交代
 export const ROUTES = [
   {
@@ -146,9 +189,9 @@ export const ROUTES = [
     when: "材料多、主题互不相干、每份都要读一堆材料时派——父一个人扛会算错（实测 92%→100%，n=3）；成本 10 倍上下，一件能算完的活别派",
     how: {
       full_ptc:
-        "tools.pi_task_ptc({ task, label? })（程序内）——task 是孩子的唯一规格（写死路径/命令/交付物格式）；要报告就点名 child report 的 JSON 块（summary/findings），别自创报告格式",
+        "tools.pi_task_ptc({ task, label? })（程序内）——task 是孩子的唯一规格（写死路径/命令/交付物格式）；要报告就点名 child report 的 JSON 块（summary/findings），别自创报告格式；汇总前核对孩子产出（delivery），零产出就重派别补数",
       codemode_ptc:
-        "tools.pi_task_codemode({ task, label? })（脚本内）——task 是孩子的唯一规格（写死路径/命令/交付物格式）；要报告就点名 child report 的 JSON 块（summary/findings），别自创报告格式",
+        "tools.pi_task_codemode({ task, label? })（脚本内）——task 是孩子的唯一规格（写死路径/命令/交付物格式）；要报告就点名 child report 的 JSON 块（summary/findings），别自创报告格式；汇总前核对孩子产出（delivery），零产出就重派别补数",
     },
     fact: "默认不等，立刻返回 handle；任务在任务记录里排队，可经任务面三工具查/停",
     detail: "docs/routes/create-a-task.md",
@@ -215,8 +258,9 @@ export const ROUTES = [
     name: "管一个任务",
     when: "要知道孩子跑得怎样、读它的产出、或叫停它",
     how: {
-      full_ptc: "ptc_task_list / ptc_task_output / ptc_task_stop（模型直调）",
-      codemode_ptc: "同左（模型直调；脚本经结构化返回）",
+      full_ptc:
+        "ptc_task_list / ptc_task_output / ptc_task_stop（模型直调）——产出里的 delivery 是引擎实测轨迹",
+      codemode_ptc: "同左（模型直调；脚本经结构化返回）——产出里的 delivery 是引擎实测轨迹",
     },
     fact: "有任务记录这三个工具才出现在模型面前（ADR-0007）",
     detail: "docs/routes/manage-a-task.md",

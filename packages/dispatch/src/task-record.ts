@@ -25,6 +25,19 @@ export interface TaskOwner {
   bootMs: number;
 }
 
+// 孩子的真实交付轨迹（引擎从孩子事件流抽，不依赖模型自述）——父核对结论的唯一非自述证据
+// 用 type 而非 interface：类型别名才有隐式索引签名（要进 pi 的 JsonValue 结构化载荷）
+export type ChildDelivery = {
+  /** 实际调用的工具与次数（按工具名） */
+  tools: Record<string, number>;
+  /** 实际碰过的路径（去重，按出现顺序） */
+  paths: string[];
+  /** 工具执行失败次数 */
+  errors: number;
+  /** 孩子最终正文长度（字符）——0 = 空交 */
+  textChars: number;
+};
+
 // 记录本体：字段随 pump / 通知 / 报告落地再长（旧 ADR-0022 的 25 字段是演进结果，不是起点）
 export interface TaskRecord {
   id: string;
@@ -41,6 +54,8 @@ export interface TaskRecord {
   /** 旧 ADR-0032：孩子交回的结构化报告与到达通道（prompt-json / none；tool 通道落地后加 tool） */
   report?: import("./report.ts").ChildReport;
   reportChannel?: import("./report.ts").ReportChannel;
+  /** 孩子的真实交付轨迹（引擎抽，不靠模型自述）——与报告同批挂上 */
+  delivery?: ChildDelivery;
   /** 产出落盘位置（pump 写 output.log 后挂回；任务链的「产出」经此可读） */
   outputPath?: string;
   /** 审计 F2：孩子 stdout 超尾部上限被截断——读者据此知道全貌不在 */

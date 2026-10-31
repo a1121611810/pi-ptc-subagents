@@ -38,9 +38,11 @@ import {
 import {
   FALLBACK_SURFACE_MODE,
   TOOLS,
+  renderDeliveryCheck,
   renderLongOutputGuidance,
   renderRouteIndex,
   renderTaskNotifications,
+  type DeliveryFacts,
   type SurfaceMode,
 } from "@pi-ptc/routes";
 import { TRUNCATION_MAX_BYTES, applyAdr0015Truncation } from "@pi-ptc/tui";
@@ -60,6 +62,24 @@ const textResult = (value: unknown): AgentToolResult => ({
   content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
   details: undefined,
 });
+
+// 交付核对：孩子**实际**干了什么（引擎从事件流抽）+ 它声称交了几条（报告）——父据此判断该不该信
+// 散文在 routes（ADR-0013）；这里只拼形状。DispatchResult 与 TaskRecord 同形，两扇门与任务面共用
+export function withDeliveryNote<T>(value: T): T {
+  if (!value || typeof value !== "object") return value;
+  const record = value as {
+    reportChannel?: string;
+    report?: { findings?: unknown[] };
+    delivery?: DeliveryFacts;
+  };
+  if (!("reportChannel" in record)) return value;
+  const note = renderDeliveryCheck({
+    delivery: record.delivery,
+    findings: Array.isArray(record.report?.findings) ? record.report.findings.length : 0,
+    channel: record.reportChannel,
+  });
+  return (note ? { ...record, deliveryNote: note } : record) as unknown as T;
+}
 
 // 详情文件目录：发布包里是 <pkg>/docs/routes，开发态是 packages/routes/docs/routes
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -481,8 +501,8 @@ function createBindingTable(
   );
   // C1 / 派发链左栏：程序内建任务的门（ADR-0006）——binding 表注入点接上，tools.pi_task_ptc 在程序内可达
   const taskBinding = createTaskBinding(session);
-  table[TASK_BINDING_NAME] = (args) =>
-    taskBinding.execute(args as { task: string; label?: string });
+  table[TASK_BINDING_NAME] = async (args) =>
+    withDeliveryNote(await taskBinding.execute(args as { task: string; label?: string }));
   return table;
 }
 
@@ -526,24 +546,26 @@ function registerTaskFace(
         session.registry.get(args.task_id) ?? (await session.readArchivedRecord(args.task_id));
       if (!record) return textResult({ error: `unknown task id ${args.task_id}` });
       const outputBytes = await session.outputSize(args.task_id);
-      if (outputBytes === undefined) return textResult(record);
+      if (outputBytes === undefined) return textResult(withDeliveryNote(record));
       // 分层读取：报告是归约层，响应里的 output 是尾部原始层（完整原文在 outputPath）
       if (outputBytes > TRUNCATION_MAX_BYTES) {
         const tail = (await session.readOutputTail(args.task_id, TRUNCATION_MAX_BYTES)) ?? "";
         const { text } = applyAdr0015Truncation(tail);
-        return textResult({
-          ...record,
-          output: text,
-          guidance: renderLongOutputGuidance({
-            bytes: outputBytes,
-            report: record.report,
-            reportChannel: record.reportChannel ?? "none",
+        return textResult(
+          withDeliveryNote({
+            ...record,
+            output: text,
+            guidance: renderLongOutputGuidance({
+              bytes: outputBytes,
+              report: record.report,
+              reportChannel: record.reportChannel ?? "none",
+            }),
           }),
-        });
+        );
       }
       const output = (await session.readOutputTail(args.task_id, TRUNCATION_MAX_BYTES)) ?? "";
       const { text } = applyAdr0015Truncation(output);
-      return textResult({ ...record, output: text });
+      return textResult(withDeliveryNote({ ...record, output: text }));
     },
   });
   registerTool({
@@ -583,9 +605,10 @@ function registerTaskDoor(
         projectContext: args.projectContext,
       });
       // 决策 7/12：拒绝走 status，不抛；两个入口同形
+      const shaped = withDeliveryNote(result);
       return {
-        ...textResult(result),
-        structuredContent: result,
+        ...textResult(shaped),
+        structuredContent: shaped,
         isError: result.status === "rejected",
       };
     },

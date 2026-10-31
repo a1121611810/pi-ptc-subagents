@@ -1,5 +1,5 @@
 export { isTerminal, TERMINAL_STATUSES } from "./task-record.ts";
-export type { TaskOwner, TaskRecord, TaskStatus } from "./task-record.ts";
+export type { ChildDelivery, TaskOwner, TaskRecord, TaskStatus } from "./task-record.ts";
 export { TaskRegistry } from "./registry.ts";
 export type { CommandResult, TaskCommand } from "./registry.ts";
 export { createTaskId } from "./task-id.ts";
