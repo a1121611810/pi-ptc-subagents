@@ -84,7 +84,7 @@ export const TASK_DOOR_PARAM_DESCRIPTIONS = {
     "strict = 孩子只有读工具（read/grep/find/ls，搜索开启时含 web_ds_search）；lenient = 默认全工具。只需要读的活别给写权限",
   timeoutMs: "孩子的运行时长上限（毫秒）——超了按超时收尸；不传 = 不限（与不传时同）",
   projectContext:
-    "孩子的项目上下文（AGENTS.md/CLAUDE.md）：auto = 照常加载；none = 不加载——它占孩子固定税约一半，这活不需要项目约定就传 none",
+    "孩子的项目上下文（AGENTS.md/CLAUDE.md）：auto = 照常加载；none = 不加载——注意 none 只关「注入」不关「知识」：文件还在工作目录里，孩子会自己去翻（实测输入只差约 15%，不是省一半）；这活不需要项目约定就传 none，要孩子遵守项目规矩就照常传（auto 也可能把项目里的写码规矩套进答案）",
 } as const;
 
 // Kimi 面（MCP，ADR-0018）：ptc_run_code 的宿主中立形态。散文仍住本册子——

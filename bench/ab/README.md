@@ -598,7 +598,8 @@ node bench/ab/run-ab.mjs --task bench/ab/task-facts --prompt bench/ab/task-promp
 ### 台架变了两处（不改造就测不出来）
 
 1. **工作区加一份中性 AGENTS.md**（2279 字节，内容与派发无关）——没有它，孩子根本不背项目上下文，
-   `projectContext` 旋钮无从测；加了它，孩子那份上下文实测 **2127 字符**（≈ 一半固定税）。
+   `projectContext` 旋钮无从测；加了它，孩子那份上下文实测 **2127 字符**（≈ 孩子系统提示词的一半；
+   ⚠️ 注意这只是**注入那一节的体积**，净省输入只有约 15%——见第十一轮）。
 2. **判分器口径修正**（`grader-facts/check_facts.py`）：孩子事实来源从「只读 `record.report`」
    改成「`record.report` ∪ **孩子的最终正文**」——父在任务面实际读到的就是那份 `text`，
    报告通道一丢就把孩子说对的事实全记成「幻觉」。
