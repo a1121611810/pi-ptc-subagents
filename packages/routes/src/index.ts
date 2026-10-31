@@ -3,6 +3,7 @@ export type { SurfaceMode } from "./surface.ts";
 export {
   DELIVERY_CHECK_LEAD,
   DELIVERY_CHECK_NOTHING,
+  KIMI_MCP_RESULT_FOOTER,
   KIMI_MCP_RUN_CODE,
   KIMI_MCP_TOOLS,
   KIMI_MCP_WEB_DS_SEARCH,

@@ -122,6 +122,11 @@ export const KIMI_MCP_WEB_DS_SEARCH = {
   },
 } as const;
 
+// Kimi 面结果页脚（P2 经济学）：程序成功且确有工具调用时拼在结果尾部——
+// 每次「该用而被用」都回一行正强化，纯计算（0 调用）不拼
+export const KIMI_MCP_RESULT_FOOTER = (calls: number): string =>
+  `程序内 ${calls} 次工具调用，归约成这 1 次结果（逐个调要走 ${calls} 轮）。`;
+
 // Kimi 面工具表：server 从这张表循环出 tools/list——模型可见工具的唯一出处
 export const KIMI_MCP_TOOLS = {
   ptc_run_code: KIMI_MCP_RUN_CODE,

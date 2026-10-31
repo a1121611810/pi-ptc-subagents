@@ -83,6 +83,15 @@ test("MCP 全握手 + tools/call 真跑程序（含 workdir 锁两分支）", as
   });
   assert.equal(ok.isError, false);
   assert.match(ok.content[0].text, new RegExp(`LEN=${"kimi-mcp-fixture".length}`));
+  // 经济学 footer：fulfilled 且有 ≥1 次程序内调用才拼（散文逐字取册子模板）
+  assert.match(ok.content[0].text, /程序内 1 次工具调用，归约成这 1 次结果/);
+
+  const pure = await srv.request("tools/call", {
+    name: "ptc_run_code",
+    arguments: { code: "return 1 + 1;", description: "probe pure", workdir: dir },
+  });
+  assert.equal(pure.isError, false);
+  assert.doesNotMatch(pure.content[0].text, /次工具调用/); // 纯计算（0 调用）不拼 footer
 
   const jail = await srv.request("tools/call", {
     name: "ptc_run_code",

@@ -3,7 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { KIMI_MCP_TOOLS } from "@pi-ptc/routes";
+import { KIMI_MCP_RESULT_FOOTER, KIMI_MCP_TOOLS } from "@pi-ptc/routes";
 import { renderToolResult } from "@pi-ptc/output";
 import { runPtcProgram } from "@pi-ptc/ptc";
 import {
@@ -107,15 +107,20 @@ async function runCodeTool(args: unknown) {
   if (timeoutMs !== undefined && typeof timeoutMs !== "number") {
     return { isError: true, content: [{ type: "text", text: "timeoutMs 必须是数字" }] };
   }
+  let calls = 0;
   const outcome = await runPtcProgram({
     code,
     cwd: workdir,
     timeoutMs,
-    bindings: createFsBindings(workdir),
+    bindings: createFsBindings(workdir, () => calls++),
   });
   const { text } = renderToolResult(outcome);
+  const withFooter =
+    outcome.status === "fulfilled" && calls > 0
+      ? `${text}\n${KIMI_MCP_RESULT_FOOTER(calls)}`
+      : text;
   return {
-    content: [{ type: "text", text }],
+    content: [{ type: "text", text: withFooter }],
     isError: outcome.status !== "fulfilled",
   };
 }

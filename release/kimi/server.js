@@ -1,4 +1,4 @@
-import { t as createFsBindings } from "./fs-tools-C0exp0qO.js";
+import { t as createFsBindings } from "./fs-tools-YKokYbgv.js";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -15834,32 +15834,36 @@ var StdioServerTransport = class {
 		});
 	}
 };
-const KIMI_MCP_TOOLS = {
-	ptc_run_code: {
-		name: "ptc_run_code",
-		description: () => [
-			"写一段 TypeScript 程序批量调用工具：tools.<name>(args)。支持顶层 await、Promise.all 并行、循环与条件；程序返回值是归约后的结果，中间产物不进上下文。",
-			"同一形态的读写预计重复 5 次以上时，写程序一次跑完比逐个调更省。",
-			"本会话的 tools 是固定文件四件套：read / grep / glob / edit（只作用于 workdir 之内，越界即报错）；没有 bash，也没有 pi_task_ptc——要跑 shell 或派子代理，用宿主自己的工具。"
-		].join(""),
-		inputSchemaDescriptions: {
-			code: "要执行的 TypeScript 程序体，可用顶层 await 和 return",
-			description: "这段程序要干什么（给人看的一行）",
-			workdir: "程序读写文件的根目录（绝对路径）；四件套只能在这个目录内活动",
-			timeoutMs: "覆盖默认 2 分钟超时（毫秒，可选）"
-		}
-	},
-	web_ds_search: {
-		name: "web_ds_search",
-		description: () => ["联网搜索三动作：search 概览（title/url/snippet，count 1–50 默认 10）· open 抓整页转 markdown · find 页内行匹配（正则）。单次搜索可直调本工具；要批量取证再写进 ptc_run_code 程序。", "配额按 MCP server 进程计（默认 30 次/进程，0 = 不限）——不是跨会话的全局限额；open/find 命中本会话记忆不重复消耗。"].join(""),
-		inputSchemaDescriptions: {
-			action: "三动作之一：search（搜索）/ open（抓整页）/ find（页内行匹配）",
-			query: "search 的搜索词",
-			url: "open/find 的目标页面 url",
-			pattern: "find 的页内行匹配正则",
-			count: "search 条数 1–50，默认 10"
-		}
+// ../routes/dist/index.js
+const KIMI_MCP_RUN_CODE = {
+	name: "ptc_run_code",
+	description: () => [
+		"写一段 TypeScript 程序批量调用工具：tools.<name>(args)。支持顶层 await、Promise.all 并行、循环与条件；程序返回值是归约后的结果，中间产物不进上下文。",
+		"同一形态的读写预计重复 5 次以上时，写程序一次跑完比逐个调更省。",
+		"本会话的 tools 是固定文件四件套：read / grep / glob / edit（只作用于 workdir 之内，越界即报错）；没有 bash，也没有 pi_task_ptc——要跑 shell 或派子代理，用宿主自己的工具。"
+	].join(""),
+	inputSchemaDescriptions: {
+		code: "要执行的 TypeScript 程序体，可用顶层 await 和 return",
+		description: "这段程序要干什么（给人看的一行）",
+		workdir: "程序读写文件的根目录（绝对路径）；四件套只能在这个目录内活动",
+		timeoutMs: "覆盖默认 2 分钟超时（毫秒，可选）"
 	}
+};
+const KIMI_MCP_WEB_DS_SEARCH = {
+	name: "web_ds_search",
+	description: () => ["联网搜索三动作：search 概览（title/url/snippet，count 1–50 默认 10）· open 抓整页转 markdown · find 页内行匹配（正则）。单次搜索可直调本工具；要批量取证再写进 ptc_run_code 程序。", "配额按 MCP server 进程计（默认 30 次/进程，0 = 不限）——不是跨会话的全局限额；open/find 命中本会话记忆不重复消耗。"].join(""),
+	inputSchemaDescriptions: {
+		action: "三动作之一：search（搜索）/ open（抓整页）/ find（页内行匹配）",
+		query: "search 的搜索词",
+		url: "open/find 的目标页面 url",
+		pattern: "find 的页内行匹配正则",
+		count: "search 条数 1–50，默认 10"
+	}
+};
+const KIMI_MCP_RESULT_FOOTER = (calls) => `程序内 ${calls} 次工具调用，归约成这 1 次结果（逐个调要走 ${calls} 轮）。`;
+const KIMI_MCP_TOOLS = {
+	ptc_run_code: KIMI_MCP_RUN_CODE,
+	web_ds_search: KIMI_MCP_WEB_DS_SEARCH
 };
 // ../output/dist/index.js
 const RENDER_BOUNDS$3 = {
@@ -21420,17 +21424,18 @@ async function runCodeTool(args) {
 			text: "timeoutMs 必须是数字"
 		}]
 	};
+	let calls = 0;
 	const outcome = await runPtcProgram({
 		code,
 		cwd: workdir,
 		timeoutMs,
-		bindings: createFsBindings(workdir)
+		bindings: createFsBindings(workdir, () => calls++)
 	});
 	const { text } = renderToolResult(outcome);
 	return {
 		content: [{
 			type: "text",
-			text
+			text: outcome.status === "fulfilled" && calls > 0 ? `${text}\n${KIMI_MCP_RESULT_FOOTER(calls)}` : text
 		}],
 		isError: outcome.status !== "fulfilled"
 	};

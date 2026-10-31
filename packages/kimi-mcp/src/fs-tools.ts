@@ -83,7 +83,7 @@ function readPlainText(file: string): string | undefined {
   return text.includes("�") ? undefined : text;
 }
 
-export function createFsBindings(workdir: string): BindingTable {
+export function createFsBindings(workdir: string, onCall?: () => void): BindingTable {
   let workdirReal: string;
   try {
     workdirReal = realpathSync(resolve(workdir));
@@ -91,7 +91,7 @@ export function createFsBindings(workdir: string): BindingTable {
     throw new Error(`workdir 不存在或不可达: ${workdir}（workdir 传用户工作区绝对路径）`);
   }
 
-  return {
+  const table = {
     read: async (args) => {
       const real = jailed(workdirReal, strArg(args, "path"));
       const stat = statSync(real);
@@ -158,6 +158,26 @@ export function createFsBindings(workdir: string): BindingTable {
       writeFileSync(tmp, text.replace(oldString, newString), "utf8");
       renameSync(tmp, real); // 原子落盘：半途不写坏原文件
       return { edited: real.slice(workdirReal.length + 1) };
+    },
+  } satisfies BindingTable;
+  if (!onCall) return table;
+  // 计数只包一层：返回值与异常原样穿透，onCall 不影响四件套语义（经济学 footer 的数据源）
+  return {
+    read: (a) => {
+      onCall();
+      return table.read(a);
+    },
+    grep: (a) => {
+      onCall();
+      return table.grep(a);
+    },
+    glob: (a) => {
+      onCall();
+      return table.glob(a);
+    },
+    edit: (a) => {
+      onCall();
+      return table.edit(a);
     },
   };
 }
