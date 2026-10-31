@@ -8,7 +8,7 @@
 // 不能靠「模型恰好传了这个参数」——那是 bench 的活（见 bench/ab/README.md）。
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -34,14 +34,14 @@ if (existsSync(auth)) cpSync(auth, join(agentDir, "auth.json"));
 writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ extensions: [] }));
 process.env.PI_CODING_AGENT_DIR = agentDir;
 
-// 工作区带一份中性 AGENTS.md：不涉及派发，只模拟真实仓库里上下文文件的体量
+// 工作区带一份项目上下文文件：中性内容 + 一条**项目口径**（口径只在这里，材料里不写）
 const workspace = mkdtempSync(join(tmpdir(), "knobs-smoke-ws-"));
 writeFileSync(
   join(workspace, "AGENTS.md"),
   [
     "# orders-api",
     "",
-    "> 样例项目说明（中性内容：不涉及派发/工具，只模拟真实仓库里 AGENTS.md 的体量与内容类型）",
+    "> 样例项目说明（中性内容 + 一条项目口径；不涉及派发/工具）",
     "",
     "## 目录结构",
     "",
@@ -58,10 +58,33 @@ writeFileSync(
     "- 新增依赖要在 PR 描述里写清用途与替代方案。",
     "- 日志用结构化输出，不许拼接裸字符串。",
     "",
+    "## 口径（本项目统一，档案里不重复写）",
+    "",
+    "- **加班费 = 基础时薪 × 1.2**（本项目自定义倍率，**不按法定倍数**）。档案里的「加班费 N 元/小时」是**基础时薪**，不是实付单价。",
+    "",
     "## 测试",
     "",
     "- 每个修 bug 的 PR 至少补一条能复现原问题的用例。",
-    "- 涉及金额的改动必须覆盖边界值（0、1、最大值）。",
+    "",
+  ].join("\n"),
+);
+// 一份材料：口径题（档案里只有基础时薪，没有 1.5 倍那条）
+mkdirSync(join(workspace, "materials"), { recursive: true });
+writeFileSync(
+  join(workspace, "materials/team.md"),
+  [
+    "# 班组档案：TEAM-C",
+    "",
+    "- 班组人数：12 人",
+    "- 人均日薪：240 元（按实际出勤人数计薪）",
+    "- 每日加班时长：2 小时（加班费 30 元/小时，按实际出勤人数计）",
+    "- 出勤情况：当日缺勤 1 人（缺勤者不计薪、不计加班费，也不计加班时长）",
+    "",
+    "## 待求指标",
+    "",
+    "1. 实际出勤人数（人）",
+    "2. 每日人力成本（元）＝ 日薪合计 + 加班费合计",
+    "3. 人均日成本（元）＝ 每日人力成本 ÷ 实际出勤人数",
     "",
   ].join("\n"),
 );
@@ -118,6 +141,12 @@ function assistantTextOf(stdout) {
       .join("\n");
   }
   return text;
+}
+
+/** 从孩子正文里取一条事实（F3-2 = 3300 这种） */
+function factOf(stdout, id) {
+  const match = new RegExp(`${id}\\s*=\\s*(-?[\\d.]+)`).exec(assistantTextOf(stdout));
+  return match ? Number(match[1]) : null;
 }
 
 const results = [];
@@ -197,6 +226,32 @@ await check("报告通道 + usage 兜底（观测值非零）", async () => {
       `${label}：usage.input 应是宿主观测值，实际 ${run.report?.usage?.input}`,
     );
   }
+});
+
+// ⑤ 口径事实：带上下文必按项目口径算；不带上下文时——孩子仍可能自己读到那个文件
+// （旋钮去掉的是「注入」，不是「知识」：AGENTS.md 还在 cwd 里，孩子有 read 就能找到）
+await check("口径事实：带上下文按项目口径算（none 臂的结果一并记录）", async () => {
+  const costTask =
+    "读 materials/team.md，按档案的「待求指标」算出 3 条数值事实，" +
+    "最终消息里按 F3-1 = <数值> / F3-2 = <数值> / F3-3 = <数值> 三行给出数值本身。";
+  const withCtx = await engine.dispatch({ task: costTask, wait: true, model: MODEL });
+  const withoutCtx = await engine.dispatch({
+    task: costTask,
+    wait: true,
+    projectContext: "none",
+    model: MODEL,
+  });
+  const withValue = factOf(await rawStdout(withCtx), "F3-2");
+  const withoutValue = factOf(await rawStdout(withoutCtx), "F3-2");
+  // 带上下文 → 按项目口径（30 是基础时薪，×1.2 = 36）→ 人力成本 2640+792 = 3432
+  assert.equal(withValue, 3432, `带上下文应按口径算，实际 ${withValue}`);
+  assert.notEqual(withoutValue, null, "无上下文的孩子也得给出数值");
+  console.log(
+    `  口径事实 F3-2：带上下文=${withValue}　不带上下文=${withoutValue}` +
+      (withoutValue === 3432
+        ? "（孩子自己读了 AGENTS.md → 旋钮省 token，不隔离知识）"
+        : "（孩子没找到口径 → 关掉确实丢了知识）"),
+  );
 });
 
 // 尺寸口径：usage.input 受缓存冷热影响（缓存命中时几乎为 0，跨版本不可横比），

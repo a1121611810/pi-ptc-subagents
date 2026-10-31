@@ -274,6 +274,11 @@ function parseArgs(argv) {
         args.grader = value;
         take();
         break;
+      case "--truth":
+        // ground truth 可以与判分器分开放：同一份判分器配不同的题（判分器读工作区里的 truth.json）
+        args.truth = value;
+        take();
+        break;
       case "--checks":
         args.checks = value;
         take();
@@ -722,7 +727,7 @@ function buildTools(messages) {
 }
 
 /* ---------- 客观判分 ---------- */
-function objectiveGrade(arm, graderDir, workspace) {
+function objectiveGrade(arm, graderDir, workspace, truthPath) {
   const result = {
     passed: 0,
     failed: 0,
@@ -734,8 +739,10 @@ function objectiveGrade(arm, graderDir, workspace) {
   if (!existsSync(graderDir)) return result;
 
   // ground truth：模型**跑完之后**才拷进工作区（判分器要读它，但模型不能提前看见）
-  if (existsSync(join(graderDir, "truth.json"))) {
-    cpSync(join(graderDir, "truth.json"), join(workspace, "truth.json"));
+  // truthPath 给了就用它（同一判分器配不同题），否则用判分器目录里那份
+  const truthSrc = truthPath ?? join(graderDir, "truth.json");
+  if (existsSync(truthSrc)) {
+    cpSync(truthSrc, join(workspace, "truth.json"));
   }
 
   // 隐藏 pytest 题：拷进工作区 tests/（先拷后跑）
@@ -1092,7 +1099,7 @@ async function main() {
         const stdout = readFileSync(eventsPath, "utf8");
         const { metrics } = parseTrajectory(stdout);
         const workspace = join(dir, "workspace");
-        const grade = objectiveGrade(arm, args.grader, workspace);
+        const grade = objectiveGrade(arm, args.grader, workspace, args.truth);
         const dispatch = await collectDispatch(arm, workspace, metrics);
         const before = previous.get(`${arm}-${iteration}`);
         runs.push({
@@ -1188,7 +1195,7 @@ async function main() {
           .map((m) => m.content)
           .join("\n"),
       );
-      const grade = objectiveGrade(arm, args.grader, run.workspace);
+      const grade = objectiveGrade(arm, args.grader, run.workspace, args.truth);
       // 工作区归档：放在客观判分**之后**——final_answer.md（父最终输出）、truth.json（ground truth）
       // 与判分器拷贝都是刚写进工作区的，缺了它们归档目录就复现不了判分
       cpSync(run.workspace, join(dir, "workspace"), { recursive: true });

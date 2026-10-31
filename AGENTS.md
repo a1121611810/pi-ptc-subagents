@@ -28,7 +28,11 @@ pi 的扩展：PTC（模型写 TypeScript 程序批量调工具）+ 子代理派
 - **仓库测试三制**：`test:pi`（`tests/pi/`，假 pi harness）/ `test:output`（`tests/output/`，宿主中立输出核）/ `test:kimi`（`tests/kimi/`，假 MCP 客户端 stdio 打 server bundle）；`pnpm test` 串跑（改代码后先 `build` 再 `test`）——两面的探针资产互不过河
 - **真 pi 冒烟必须隔离**：`pi -ne -e <entry/dist/index.js>`——本机全局装有旧版 `npm:pi-ptc-subagents`，不加 `-ne` 会同名互踩
 - **16 版本冒烟脚本化**：`scripts/version-smoke.sh`（发版前手工全量，四腿契约：run_code 求值 / 程序内 tools.read（0.99 分水岭：≥0.99 返回数字、floor 明确报 ERR:）/ ptc_workflow parallel / wait:false + 任务面 list·output；`SMOKE_VERSIONS="1.3.0"` 可单版本快查；缺 shim 自动装到 `$SHIM_ROOT`——⚠️ 真包名是 `@earendil-works/pi-coding-agent`，npm 上的 `pi` 是 pi-number，装错包没有 `pi` 这个 bin）
-- **旋钮真机探针**：`scripts/knobs-smoke.mjs`（断言不靠模型配合——旋钮是引擎/argv 层的，宿主自己看：`timeoutMs` 真收尸 / `projectContext` auto-vs-none 引擎层 A/B / 报告通道 / usage 兜底；切版本跑：`PATH=<该版 bin>:$PATH node scripts/knobs-smoke.mjs`；2026-10-31 实测 0.86.0/0.99.0/1.3.0/1.4.0 四版全过）
+- **旋钮真机探针**：`scripts/knobs-smoke.mjs`（断言不靠模型配合——旋钮是引擎/argv 层的，宿主自己看：`timeoutMs` 真收尸 / `projectContext` auto-vs-none 引擎层 A/B / 报告通道 / usage 兜底 / 口径事实；切版本跑：`PATH=<该版 bin>:$PATH node scripts/knobs-smoke.mjs`；2026-10-31 实测 0.86.0/0.87.1/0.99.0/1.0.0/1.1.0/1.2.0/1.3.0/1.4.0 **八版全过**）
+- **`projectContext:none` 的真实语义：省 token，不隔离知识**（2026-10-31 真机 + bench）：none 只去掉注入
+  （孩子系统提示词少一节 `project_context`），文件仍在 cwd、pi 内置工具无 cwd 囚禁 ⇒ 孩子会自己
+  `read AGENTS.md` 并照样用上口径（实测 none 臂答案与 auto 臂相同，输入只差 −15%，不是 −45%）。
+  口径确实有用时模型 **3/3 轮显式选 auto、0 次 none** ⇒ 「用不用由模型自己判断」在旋钮上成立。
 - **四模式都已实测可用**（2026-10-26）：print（`-p`）/ json（`-p --mode json`，事件流可解析）/ rpc（`--mode rpc`，命令 `{"type":"prompt","message":...}` 走 stdin）/ TUI（全屏，用 kimi-cu 驱动真 Terminal——脚本方式起不来，需要图形界面）
 - **floor 0.86.0 冒烟已过**（2026-10-26）：`ptc_run_code` 与程序内 `pi_task_ptc` 派发各一次；floor 测试用 `PATH=<0.86 bin>:$PATH` 让子进程也跑 0.86（详见 `docs/pi-version-matrix.md`）
 - **中间版本 0.87–1.3 冒烟已过**（2026-10-26）：0.87 / 0.99 / 1.0 / 1.1 / 1.2 / 1.3 各跑一次 `ptc_run_code`；派发用例抽测 0.87 / 0.99 / 1.3（报告通道分水岭在 0.99）
@@ -66,9 +70,12 @@ pi 的扩展：PTC（模型写 TypeScript 程序批量调工具）+ 子代理派
 
 ## 已知未做（按价值）
 
-**发布包不带 dts —— 已评估，不做**（2026-10-31）：发布形态是单包 `pi-ptc-subagents`（9 个 `@pi-ptc/*` 子包未发布），
-`files` 只含 `dist/**/*.js`；要带 dts 得引入 typescript（本仓只有 tsrs 检查器、无 emit 能力）并解决 dts 跨包引用
-`@pi-ptc/*` 而子包不在单包里的问题——而当前没有 TS 消费者（宿主是 JS 运行时）。
+**发布包不带 dts —— 已评估，不做**（2026-10-31 实测过）：卡点不是「能不能生成」——
+`tsrs`（TS7 原生编译器）能直接 emit d.ts（8 个包 50 个 .d.ts 出得来，**不必引入 typescript 依赖**），
+假发布形态下消费者解析实测也通过；真卡点是**发布形态**：单包 `pi-ptc-subagents` 的 d.ts 引用 7 个
+未发布的 `@pi-ptc/*` 子包（npm 上 `@pi-ptc/routes` = 404）⇒ 消费者解析会断。三条可选路：
+(a) 9 个子包各自发布、各带 dts；(b) dts 打包内联（需新工具或新依赖）；(c) 收窄 entry 的公开类型面。
+当前 TS 消费者为 0（宿主是 JS 运行时）⇒ 维持不做。
 
 floor 三处考古（executeTool / json 模式形状 / exposure）——**2026-10-31 已做完**，结论见
 `docs/pi-version-matrix.md` 的 2026-10-31 节（含三处文档事实更正：floor 上 codemode 门不注册、
