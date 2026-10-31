@@ -56,7 +56,8 @@ pi 的扩展：PTC（模型写 TypeScript 程序批量调工具）+ 子代理派
 
 - `docs/prototypes/dispatch-doors-flow.html` — spec/决策（改动语义前先对质它）
 - `docs/prototypes/ptc-runtime-status.html` / `dispatch-engine-status.html` — 两包现状全景（已做/未做/验证基线）
-- `docs/adr/` — 决策记录 16 份（0001–0016，0001–0015 于 2026-10-26 重排）；旧实现的 0001–0046 / 0062–0065 归档在 `backup/main-legacy-20261026` 分支，文中引用写作「旧 ADR-xxxx」
+- `docs/adr/` — 决策记录 20 份（0001–0020，0001–0015 于 2026-10-26 重排）；旧实现的 0001–0046 / 0062–0065 归档在 `backup/main-legacy-20261026` 分支，文中引用写作「旧 ADR-xxxx」
+- `docs/INDEX.md` — 全量文档索引（每份一行：是什么 / 验证状态 / 处置候选）——要压文档或决定删哪份，先看它
 - `GLOSSARY.md` — 领域词表（词汇随 ADR/spec 走；写 issue/提案/测试名时用这里的词）
 - `docs/research/` — 历史证据笔记（含旧实现时期的研究；其中的 ADR 引用按旧编号）
 - `docs/pi-version-matrix.md` — pi 版本兼容矩阵

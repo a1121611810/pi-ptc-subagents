@@ -48,8 +48,15 @@ const READER_FACING = [
   },
 ];
 
-/** Reader-facing-by-location documents that are not for the site, each with why. None today. */
-const FILE_EXCLUSIONS = new Map([]);
+/** Reader-facing-by-location documents that are not for the site, each with why. */
+const FILE_EXCLUSIONS = new Map([
+  [
+    "docs/INDEX.md",
+    "the repository's own document inventory — what exists and how far each document is verified, so that " +
+      "deciding what to compress or delete is one table instead of eighty reads; a maintainer tool, not " +
+      "something a reader of the package needs on the site",
+  ],
+]);
 
 /** Directory trees under `docs/` that are accounted for wholesale, each with why. */
 const DIRECTORY_EXCLUSIONS = new Map([
