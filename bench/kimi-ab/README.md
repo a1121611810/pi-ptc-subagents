@@ -76,6 +76,28 @@ MCP server 起不来（wire 0 tools_discovered），0 采用率是「工具缺�
 - 行动含义：Kimi 面引导散文的边际收益已饱和，停手；再要提采用只剩宿主层杠杆
   （会话中循环检测提醒）或接受利基定位。
 
+## 未采用轮归因（案头读 wire，2026-10-31）
+
+6 个未采用轮逐轮读 thinking + 工具序列归类：
+
+| 轮 | 类别 | 证据 |
+|---|---|---|
+| A/grep-agg#1 | G（一次够用） | thinking 明说「这正是 ptc 场景」，随后一条递归 Grep 全捞完——内置 Grep 本身就是批量器 |
+| A/grep-agg#2 | G（能力缝） | 「perfect for ptc——但四件套没有 write，exports.txt 写不了」→ Glob+Grep+Write |
+| B/grep-agg#1/#3 | G（Bash 更快） | 「用 shell 快」→ 一条 Bash 循环 |
+| B/batch-edit#1 | **R（感知）** | 原话「skill 说 ≥5 该写程序，但我在可用工具列表里没看到 ptc_run_code」→ Bash sed 循环 |
+| B/batch-read#1 | **R（感知）** | 同上枚举工具列表后认定没有 → Bash 循环 |
+
+两个 actionable 发现（都与散文无关）：
+
+1. **工具名桥断裂**：工具在场（wire 级证据），但模型枚举工具表时没把
+   `mcp__plugin-ptc-tools_ptc__ptc_run_code` 匹配到 SKILL 里的「ptc_run_code」。
+   两次都发生在 B 臂 ⇒ 检查表治不了感知；候选修法是 SKILL.md 里点一次全名
+   （一行字，6 轮定向可验），值得做与否待议。
+2. **四件套缺 write 是真实能力缝**（kimi 面绑定 = read/grep/glob/edit，pi 面有 write）：
+   「程序内创建新文件」做不到时模型会整轮放弃程序。要不要给 kimi 面补 write 绑定
+   （含越界/覆写语义）是产品决定，超出本台架范围。
+
 ## 运行
 
 ```bash
