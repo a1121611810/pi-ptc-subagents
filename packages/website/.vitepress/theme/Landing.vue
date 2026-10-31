@@ -159,7 +159,7 @@ const M = {
           step: '程序内工具',
           providers: [
             { face: 'pi', html: '会话工具全集 <code>tools.*</code>&mdash;&mdash;与直调同一条工具管线' },
-            { face: 'kimi', html: '固定文件四件套 <code>read</code> / <code>grep</code> / <code>glob</code> / <code>edit</code>，realpath 囚禁在 <code>workdir</code> 内' },
+            { face: 'kimi', html: '固定文件五件套 <code>read</code> / <code>grep</code> / <code>glob</code> / <code>edit</code>，realpath 囚禁在 <code>workdir</code> 内' },
           ],
         },
         {

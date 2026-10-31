@@ -3,7 +3,15 @@
 // 用法: node bench/kimi-ab/run-ab.mjs [--arm A] [--tasks batch-read,anti-small] [--n 3]
 import { execFileSync, spawnSync } from "node:child_process";
 import {
-  cpSync, existsSync, globSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync,
+  cpSync,
+  existsSync,
+  globSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -12,7 +20,8 @@ import { fileURLToPath } from "node:url";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const BENCH = join(ROOT, "bench/kimi-ab");
 const PLUGIN_DIR = join(
-  process.env.HOME ?? "", ".kimi-code/plugins/managed/ptc-tools/release/kimi",
+  process.env.HOME ?? "",
+  ".kimi-code/plugins/managed/ptc-tools/release/kimi",
 );
 const ARMS = { A: "ef09ddb", B: "cf1d8b2" }; // A=两行描述；B=A+检查表+经济学 footer
 const RUN_TIMEOUT_MS = 8 * 60 * 1000;
@@ -36,10 +45,17 @@ execFileSync(process.execPath, [join(BENCH, "gen-fixture.mjs")], { stdio: "inher
 function buildArm(arm) {
   const wt = join(tmpdir(), `kimi-ab-src-${arm}`);
   const bundle = join(wt, "release/kimi");
-  if (existsSync(join(bundle, "server.js"))) { console.log(`[arm ${arm}] 复用已有 bundle`); return bundle; }
+  if (existsSync(join(bundle, "server.js"))) {
+    console.log(`[arm ${arm}] 复用已有 bundle`);
+    return bundle;
+  }
   rmSync(wt, { recursive: true, force: true });
   mkdirSync(wt, { recursive: true });
-  const tar = spawnSync("git", ["archive", ARMS[arm]], { cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  const tar = spawnSync("git", ["archive", ARMS[arm]], {
+    cwd: ROOT,
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
   if (tar.status !== 0) throw new Error(`git archive ${ARMS[arm]} 失败`);
   const untar = spawnSync("tar", ["-x", "-C", wt], { input: tar.stdout });
   if (untar.status !== 0) throw new Error("tar 解包失败");
@@ -77,15 +93,19 @@ function runOnce(arm, task, i) {
   cpSync(join(BENCH, "fixture"), runDir, { recursive: true });
   const prompt = readFileSync(join(BENCH, "tasks", task, "prompt.md"), "utf8");
   const t0 = Date.now();
-  const r = spawnSync("kimi", ["-p", prompt], {
-    cwd: runDir, encoding: "utf8", timeout: RUN_TIMEOUT_MS,
+  spawnSync("kimi", ["-p", prompt], {
+    cwd: runDir,
+    encoding: "utf8",
+    timeout: RUN_TIMEOUT_MS,
     env: { ...process.env },
   });
   const wallMs = Date.now() - t0;
   // 会话定位不靠 stdout：Kimi 把 workspace 目录名小写化，按 mtime 取最新 wire
   const wires = globSync(
     `${process.env.HOME}/.kimi-code/sessions/wd_${basename(runDir).toLowerCase()}_*/session_*/agents/main/wire.jsonl`,
-  ).map((p) => ({ p, m: statSync(p).mtimeMs })).sort((a, b) => b.m - a.m);
+  )
+    .map((p) => ({ p, m: statSync(p).mtimeMs }))
+    .sort((a, b) => b.m - a.m);
   const wire = wires[0]?.p ?? null;
   const resume = /session_([0-9a-f-]+)/.exec(wire ?? "")?.[0] ?? null;
   const counts = {};
@@ -102,22 +122,45 @@ function runOnce(arm, task, i) {
         if (e.event?.type !== "tool.call") continue;
         toolCalls++;
         counts[e.event.name] = (counts[e.event.name] ?? 0) + 1;
-      } catch { /* 跳过坏行 */ }
+      } catch {
+        /* 跳过坏行 */
+      }
     }
   }
-  const ptc = Object.entries(counts).filter(([k]) => /ptc_run_code/.test(k)).reduce((a, [, v]) => a + v, 0);
-  const webds = Object.entries(counts).filter(([k]) => /web_ds_search/.test(k)).reduce((a, [, v]) => a + v, 0);
+  const ptc = Object.entries(counts)
+    .filter(([k]) => /ptc_run_code/.test(k))
+    .reduce((a, [, v]) => a + v, 0);
+  const webds = Object.entries(counts)
+    .filter(([k]) => /web_ds_search/.test(k))
+    .reduce((a, [, v]) => a + v, 0);
   const builtinSearch = (counts.WebSearch ?? 0) + (counts.FetchURL ?? 0);
-  const g = spawnSync(process.execPath, [join(BENCH, "tasks", task, "grade.mjs"), runDir], { encoding: "utf8" });
+  const g = spawnSync(process.execPath, [join(BENCH, "tasks", task, "grade.mjs"), runDir], {
+    encoding: "utf8",
+  });
   const row = {
-    arm, task, run: i, wallMs, sessionId: resume, wire: !!wire, ptcToolsListed,
-    toolCalls, ptcCalls: ptc, webdsCalls: webds, builtinSearch,
-    ptcUsed: ptc > 0, grade: g.status === 0 ? "PASS" : "FAIL",
+    arm,
+    task,
+    run: i,
+    wallMs,
+    sessionId: resume,
+    wire: !!wire,
+    ptcToolsListed,
+    toolCalls,
+    ptcCalls: ptc,
+    webdsCalls: webds,
+    builtinSearch,
+    ptcUsed: ptc > 0,
+    grade: g.status === 0 ? "PASS" : "FAIL",
     gradeOut: (g.stdout ?? "").trim().split("\n").pop() ?? "",
   };
   writeFileSync(resultsPath, JSON.stringify(row) + "\n", { flag: "a" });
-  if (!ptcToolsListed) throw new Error(`[${arm}/${task}#${i}] 该会话 wire 里没有 ptc 工具的 tools_discovered——插件没起来，结果无效，中止`);
-  console.log(`[${arm}/${task}#${i}] ${row.grade} ptc=${ptc} webds=${webds} builtinSearch=${builtinSearch} calls=${toolCalls} ${wallMs / 1000 | 0}s`);
+  if (!ptcToolsListed)
+    throw new Error(
+      `[${arm}/${task}#${i}] 该会话 wire 里没有 ptc 工具的 tools_discovered——插件没起来，结果无效，中止`,
+    );
+  console.log(
+    `[${arm}/${task}#${i}] ${row.grade} ptc=${ptc} webds=${webds} builtinSearch=${builtinSearch} calls=${toolCalls} ${(wallMs / 1000) | 0}s`,
+  );
   rmSync(runDir, { recursive: true, force: true });
 }
 
@@ -134,14 +177,20 @@ try {
 }
 
 // 6) 汇总 + 验收判据
-const rows = readFileSync(resultsPath, "utf8").trim().split("\n").filter(Boolean)
-  .map((l) => JSON.parse(l)).filter((r) => arms.includes(r.arm));
+const rows = readFileSync(resultsPath, "utf8")
+  .trim()
+  .split("\n")
+  .filter(Boolean)
+  .map((l) => JSON.parse(l))
+  .filter((r) => arms.includes(r.arm));
 const byArm = (arm, pred) => rows.filter((r) => r.arm === arm && pred(r));
 for (const arm of arms) {
   const expPtc = byArm(arm, (r) => ["batch-read", "batch-edit", "grep-aggregate"].includes(r.task));
   const anti = byArm(arm, (r) => ["anti-small", "anti-bash"].includes(r.task));
   const adopt = expPtc.filter((r) => r.ptcUsed).length;
   const pass = rows.filter((r) => r.arm === arm && r.grade === "PASS").length;
-  console.log(`臂 ${arm}: 期望形态题采用 ${adopt}/${expPtc.length}，过度触发 ${anti.filter((r) => r.ptcUsed).length}/${anti.length}，判分 PASS ${pass}/${rows.filter((r) => r.arm === arm).length}`);
+  console.log(
+    `臂 ${arm}: 期望形态题采用 ${adopt}/${expPtc.length}，过度触发 ${anti.filter((r) => r.ptcUsed).length}/${anti.length}，判分 PASS ${pass}/${rows.filter((r) => r.arm === arm).length}`,
+  );
 }
 console.log("明细见 bench/kimi-ab/results.jsonl");

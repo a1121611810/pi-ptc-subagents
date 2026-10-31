@@ -1,4 +1,4 @@
-import { t as createFsBindings } from "./fs-tools-YKokYbgv.js";
+import { t as createFsBindings } from "./fs-tools-DFjqgoxt.js";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -15840,12 +15840,12 @@ const KIMI_MCP_RUN_CODE = {
 	description: () => [
 		"写一段 TypeScript 程序批量调用工具：tools.<name>(args)。支持顶层 await、Promise.all 并行、循环与条件；程序返回值是归约后的结果，中间产物不进上下文。",
 		"同一形态的读写预计重复 5 次以上时，写程序一次跑完比逐个调更省。",
-		"本会话的 tools 是固定文件四件套：read / grep / glob / edit（只作用于 workdir 之内，越界即报错）；没有 bash，也没有 pi_task_ptc——要跑 shell 或派子代理，用宿主自己的工具。"
+		"本会话的 tools 是固定文件五件套：read / write / grep / glob / edit（只作用于 workdir 之内，越界即报错）；没有 bash，也没有 pi_task_ptc——要跑 shell 或派子代理，用宿主自己的工具。"
 	].join(""),
 	inputSchemaDescriptions: {
 		code: "要执行的 TypeScript 程序体，可用顶层 await 和 return",
 		description: "这段程序要干什么（给人看的一行）",
-		workdir: "程序读写文件的根目录（绝对路径）；四件套只能在这个目录内活动",
+		workdir: "程序读写文件的根目录（绝对路径）；五件套只能在这个目录内活动",
 		timeoutMs: "覆盖默认 2 分钟超时（毫秒，可选）"
 	}
 };

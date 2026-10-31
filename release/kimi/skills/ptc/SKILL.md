@@ -18,7 +18,7 @@ description: 批量调工具时把循环写进程序（ptc_run_code），别看�
 **都不命中，就别写：**
 
 - 探索期的头几个探测调用——先逐个摸清结构，形态确定了再说批量化
-- 要 shell 的活（四件套没有 bash，判不动就别硬塞）
+- 要 shell 的活（五件套没有 bash，判不动就别硬塞）
 - 总共 ≤3 次调用——写程序、想 workdir、担超时的成本不划算
 - 单步要判断/审批敏感的（写生产数据、删文件）——逐步来，别把批准权交给循环
 
@@ -26,11 +26,14 @@ description: 批量调工具时把循环写进程序（ptc_run_code），别看�
 
 - **工具全名带宿主前缀**：`mcp__` 开头、以 `__ptc_run_code` 结尾的那件就是它（`__web_ds_search` 同理）——枚举工具表时按后缀认
 - `ptc_run_code({ code, description, workdir })`：程序体内 `await tools.<name>(args)`，支持顶层 await / Promise.all 并行 / 循环与条件；程序 `return` 的值是唯一回到上下文的结果
-- 程序里的 `tools` 是**固定文件四件套**（以下返回形态都实测，照抄即可，不用猜）：
+- 程序里的 `tools` 是**固定文件五件套**（以下返回形态都实测，照抄即可，不用猜）：
 
 ```ts
 // read：返回整个文件内容的纯字符串（不是对象；没有行号参数）
 const text = await tools.read({ path: "src/a.ts" }); // → string
+
+// write：写入/覆写文件（父目录须已存在，不隐式建目录）；返回 { written: "相对路径" }
+await tools.write({ path: "out/summary.md", content: text }); // → { written: "out/summary.md" }
 
 // glob：返回相对路径字符串数组（相对 workdir）
 const files = await tools.glob({ pattern: "src/**/*.ts" }); // → string[]
@@ -42,7 +45,7 @@ const hits = await tools.grep({ pattern: "TODO", path: "src" }); // → string[]
 await tools.edit({ path: "src/a.ts", old_string: "foo", new_string: "bar" });
 ```
 
-- 四件套只在 `workdir` 内活动（越界即报错，可用 try/catch 捕获）；没有 bash，也没有子代理派发——要跑 shell 或派子代理，用宿主自己的工具
+- 五件套只在 `workdir` 内活动（越界即报错，可用 try/catch 捕获）；没有 bash，也没有子代理派发——要跑 shell 或派子代理，用宿主自己的工具
 - `workdir` 传用户工作区的绝对路径——插件按用户安装、对所有项目生效，不主动限定项目是你替用户做的安全决定
 
 ## 联网搜索（三动作）

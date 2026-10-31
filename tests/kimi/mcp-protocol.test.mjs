@@ -1,5 +1,5 @@
 // P1 → 测试：Kimi 面 MCP 协议探针——真 spawn server.js 走 stdio JSON-RPC（initialize/tools/list/tools/call）
-// 防假绿：tools/call 真起 worker 运行格，程序经四件套读写 fixture；workdir 越界走 isError 分支
+// 防假绿：tools/call 真起 worker 运行格，程序经五件套读写 fixture；workdir 越界走 isError 分支
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  existsSync,
   globSync,
   readFileSync,
   readdirSync,
@@ -11,7 +12,7 @@ import {
 import { basename, dirname, resolve, sep } from "node:path";
 import type { BindingTable } from "@pi-ptc/ptc";
 
-// Kimi 面程序四件套：read / grep / glob / edit，语义对齐 pi 会话工具的常用子集。
+// Kimi 面程序五件套：read / write / grep / glob / edit，语义对齐 pi 会话工具的常用子集。
 // workdir 是信任边界：所有路径先 realpath 再判定（防符号链接逃逸），越界即拒
 const SKIP_DIRS = new Set(["node_modules", ".git"]);
 const SKIP_SUFFIXES = new Set([
@@ -32,6 +33,7 @@ const SKIP_SUFFIXES = new Set([
 const GREP_MAX_RESULTS = 500;
 const GLOB_MAX_RESULTS = 1000;
 const READ_MAX_BYTES = 2 * 1024 * 1024;
+const WRITE_MAX_BYTES = 2 * 1024 * 1024;
 
 function strArg(args: unknown, key: string): string {
   const value = (args as Record<string, unknown>)?.[key];
@@ -101,6 +103,25 @@ export function createFsBindings(workdir: string, onCall?: () => void): BindingT
       }
       return readFileSync(real, "utf8");
     },
+    write: async (args) => {
+      const p = strArg(args, "path");
+      const content = strArg(args, "content");
+      if (content.length > WRITE_MAX_BYTES) {
+        throw new Error(`content too large (${content.length} chars > ${WRITE_MAX_BYTES} bytes)`);
+      }
+      // 父目录须已存在：不隐式 mkdir（语义可预测）；新建目录不在程序五件套的面上
+      const abs = resolve(workdirReal, p);
+      const parentAbs = dirname(abs);
+      if (!existsSync(parentAbs)) {
+        throw new Error(`parent dir does not exist: ${dirname(p)}（write 不隐式建目录）`);
+      }
+      const parentReal = jailed(workdirReal, parentAbs);
+      const real = resolve(parentReal, basename(abs));
+      const tmp = `${real}.ptc-${randomUUID()}`;
+      writeFileSync(tmp, content, "utf8");
+      renameSync(tmp, real); // 原子落盘：半途不写坏目标
+      return { written: real.slice(workdirReal.length + 1) };
+    },
     grep: async (args) => {
       const pattern = strArg(args, "pattern");
       const scope =
@@ -161,11 +182,15 @@ export function createFsBindings(workdir: string, onCall?: () => void): BindingT
     },
   } satisfies BindingTable;
   if (!onCall) return table;
-  // 计数只包一层：返回值与异常原样穿透，onCall 不影响四件套语义（经济学 footer 的数据源）
+  // 计数只包一层：返回值与异常原样穿透，onCall 不影响五件套语义（经济学 footer 的数据源）
   return {
     read: (a) => {
       onCall();
       return table.read(a);
+    },
+    write: (a) => {
+      onCall();
+      return table.write(a);
     },
     grep: (a) => {
       onCall();
