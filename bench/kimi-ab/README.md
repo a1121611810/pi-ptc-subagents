@@ -56,10 +56,10 @@
 MCP server 起不来（wire 0 tools_discovered），0 采用率是「工具缺席」不是「引导无效」。
 修 buildArm 顺序 + 执行器加 tools_discovered 硬门禁后重跑。
 
-| 臂 | 期望形态题采用 | 过度触发 | 判分 |
-|---|---|---|---|
-| A（两行描述） | **7/9**（batch-read 3/3、batch-edit 3/3、grep-agg 1/3） | 0/6 | 17/18 |
-| B（A+检查表+经济学 footer） | 5/9（batch-read 2/3、batch-edit 2/3、grep-agg 1/3） | 0/6 | 18/18 |
+| 臂                          | 期望形态题采用                                          | 过度触发 | 判分  |
+| --------------------------- | ------------------------------------------------------- | -------- | ----- |
+| A（两行描述）               | **7/9**（batch-read 3/3、batch-edit 3/3、grep-agg 1/3） | 0/6      | 17/18 |
+| B（A+检查表+经济学 footer） | 5/9（batch-read 2/3、batch-edit 2/3、grep-agg 1/3）     | 0/6      | 18/18 |
 
 **判据裁决**（预先钉死的三条）：① B>A——**不满足**（5/9 < 7/9，差在噪声内，n=9 无显著性）；
 ② 质量不降——满足（唯一 FAIL 是 A/batch-read#3 模型总计算错，工具行为正常）；
@@ -80,13 +80,13 @@ MCP server 起不来（wire 0 tools_discovered），0 采用率是「工具缺�
 
 6 个未采用轮逐轮读 thinking + 工具序列归类：
 
-| 轮 | 类别 | 证据 |
-|---|---|---|
-| A/grep-agg#1 | G（一次够用） | thinking 明说「这正是 ptc 场景」，随后一条递归 Grep 全捞完——内置 Grep 本身就是批量器 |
-| A/grep-agg#2 | G（能力缝） | 「perfect for ptc——但四件套没有 write，exports.txt 写不了」→ Glob+Grep+Write |
-| B/grep-agg#1/#3 | G（Bash 更快） | 「用 shell 快」→ 一条 Bash 循环 |
-| B/batch-edit#1 | **R（感知）** | 原话「skill 说 ≥5 该写程序，但我在可用工具列表里没看到 ptc_run_code」→ Bash sed 循环 |
-| B/batch-read#1 | **R（感知）** | 同上枚举工具列表后认定没有 → Bash 循环 |
+| 轮              | 类别           | 证据                                                                                 |
+| --------------- | -------------- | ------------------------------------------------------------------------------------ |
+| A/grep-agg#1    | G（一次够用）  | thinking 明说「这正是 ptc 场景」，随后一条递归 Grep 全捞完——内置 Grep 本身就是批量器 |
+| A/grep-agg#2    | G（能力缝）    | 「perfect for ptc——但四件套没有 write，exports.txt 写不了」→ Glob+Grep+Write         |
+| B/grep-agg#1/#3 | G（Bash 更快） | 「用 shell 快」→ 一条 Bash 循环                                                      |
+| B/batch-edit#1  | **R（感知）**  | 原话「skill 说 ≥5 该写程序，但我在可用工具列表里没看到 ptc_run_code」→ Bash sed 循环 |
+| B/batch-read#1  | **R（感知）**  | 同上枚举工具列表后认定没有 → Bash 循环                                               |
 
 两个 actionable 发现（都与散文无关）：
 
@@ -97,6 +97,28 @@ MCP server 起不来（wire 0 tools_discovered），0 采用率是「工具缺�
 2. **四件套缺 write 是真实能力缝**（kimi 面绑定 = read/grep/glob/edit，pi 面有 write）：
    「程序内创建新文件」做不到时模型会整轮放弃程序。要不要给 kimi 面补 write 绑定
    （含越界/覆写语义）是产品决定，超出本台架范围。
+
+## C 臂定向验证（2026-10-31 深夜，9 轮）
+
+C = B + 工具全名桥 + write 绑定（五件套，cbf3fc9）。跑 batch-edit / batch-read /
+grep-aggregate ×3：
+
+| 题 | A | B | C |
+|---|---|---|---|
+| batch-edit | 3/3 | 2/3 | **3/3** |
+| batch-read | 3/3* | 2/3 | 2/3 |
+| grep-aggregate | 1/3 | 1/3 | **3/3** |
+| **合计** | 7/9 | 5/9 | **8/9** |
+
+*A 臂 3/3 中有一轮判分 FAIL（总计算错），采用计 3。
+
+C 臂 9/9 判分 PASS。唯一未采用轮（C/batch-read#1）thinking 原话：「skill 说 ≥20 文件
+该写程序，但一条 bash `wc -l` + `grep -c` 就行」——G 类 Bash 竞争的不可约残留，
+两个修复都够不着它，符合归因预期。
+
+**读法**：两个非散文修复各自打在已归类的拒绝模式上（感知桥 → batch-edit 翻转；
+write 缝 → grep-aggregate 翻转），定向任务如期翻转——机制归因被独立复验（n=9 方向级）。
+散文（A↔B）无效应、能力+识别（→C）有效应，这条分界是本轮实验最值钱的产出。
 
 ## 运行
 
@@ -110,11 +132,13 @@ node bench/kimi-ab/run-ab.mjs          # A/B 双臂 × 全题 × n=3（自动换
 回放 ba948c91 的 8 个真实 query（另 2 个是该场 FetchURL 直开，无 query 可比）。
 
 **优势（实测）**：
+
 - **官方源命中强**：带 `site:doc.dcloud.net.cn` 的 query 前 2 名正是官方文档页（uni-app-x/web、vite-config.html）——原会话里模型用内置 WebSearch 没找到官方页、最后靠 FetchURL 直猜 URL 才到；web_ds_search 一步到位。
 - **延迟低**：成功 query 全部 ~0.4s；返回带 date 字段，利于时效判断。
 - **fail-soft 可用**：失败返回可读文本不炸会话（HTTP 500 时模型看得见原因）。
 
 **劣势（实测）**：
+
 - **query 级稳定 500**：`site:ask.dcloud.net.cn` 组合 2/2 复现 Internal Server Error——不是随机抖动，是后端对该 query 的稳定失败；内置 WebSearch 无此现象。fail-soft 救了场，但模型得多花一轮换措辞或换工具。
 - **无摘要直读**：结果只有 title/url/snippet（snippet 即摘要），想要全文还要再 open 一次（耗配额）；内置 WebSearch 的 FetchURL 链路心智更熟。
 
