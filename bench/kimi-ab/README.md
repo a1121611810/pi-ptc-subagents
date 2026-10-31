@@ -103,12 +103,12 @@ MCP server 起不来（wire 0 tools_discovered），0 采用率是「工具缺�
 C = B + 工具全名桥 + write 绑定（五件套，cbf3fc9）。跑 batch-edit / batch-read /
 grep-aggregate ×3：
 
-| 题 | A | B | C |
-|---|---|---|---|
-| batch-edit | 3/3 | 2/3 | **3/3** |
-| batch-read | 3/3* | 2/3 | 2/3 |
-| grep-aggregate | 1/3 | 1/3 | **3/3** |
-| **合计** | 7/9 | 5/9 | **8/9** |
+| 题             | A    | B   | C       |
+| -------------- | ---- | --- | ------- |
+| batch-edit     | 3/3  | 2/3 | **3/3** |
+| batch-read     | 3/3* | 2/3 | 2/3     |
+| grep-aggregate | 1/3  | 1/3 | **3/3** |
+| **合计**       | 7/9  | 5/9 | **8/9** |
 
 *A 臂 3/3 中有一轮判分 FAIL（总计算错），采用计 3。
 
