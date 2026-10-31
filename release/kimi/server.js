@@ -15837,7 +15837,11 @@ var StdioServerTransport = class {
 const KIMI_MCP_TOOLS = {
 	ptc_run_code: {
 		name: "ptc_run_code",
-		description: () => ["写一段 TypeScript 程序批量调用工具：tools.<name>(args)。支持顶层 await、Promise.all 并行、循环与条件；程序返回值是归约后的结果，中间产物不进上下文。", "本会话的 tools 是固定文件四件套：read / grep / glob / edit（只作用于 workdir 之内，越界即报错）；没有 bash，也没有 pi_task_ptc——要跑 shell 或派子代理，用宿主自己的工具。"].join(""),
+		description: () => [
+			"写一段 TypeScript 程序批量调用工具：tools.<name>(args)。支持顶层 await、Promise.all 并行、循环与条件；程序返回值是归约后的结果，中间产物不进上下文。",
+			"同一形态的读写预计重复 5 次以上时，写程序一次跑完比逐个调更省。",
+			"本会话的 tools 是固定文件四件套：read / grep / glob / edit（只作用于 workdir 之内，越界即报错）；没有 bash，也没有 pi_task_ptc——要跑 shell 或派子代理，用宿主自己的工具。"
+		].join(""),
 		inputSchemaDescriptions: {
 			code: "要执行的 TypeScript 程序体，可用顶层 await 和 return",
 			description: "这段程序要干什么（给人看的一行）",
@@ -15847,7 +15851,7 @@ const KIMI_MCP_TOOLS = {
 	},
 	web_ds_search: {
 		name: "web_ds_search",
-		description: () => ["程序内联网能力（三动作）：search 概览（title/url/snippet，count 1–50 默认 10）· open 抓整页转 markdown · find 页内行匹配（正则）。", "open/find 命中本会话记忆则不再消耗配额；配额按 MCP server 进程计（默认 30 次/进程，0 = 不限）——不是跨会话的全局限额。需要联网证据时写进 ptc_run_code 程序里用，单次搜索也可直调本工具。"].join(""),
+		description: () => ["联网搜索三动作：search 概览（title/url/snippet，count 1–50 默认 10）· open 抓整页转 markdown · find 页内行匹配（正则）。单次搜索可直调本工具；要批量取证再写进 ptc_run_code 程序。", "配额按 MCP server 进程计（默认 30 次/进程，0 = 不限）——不是跨会话的全局限额；open/find 命中本会话记忆不重复消耗。"].join(""),
 		inputSchemaDescriptions: {
 			action: "三动作之一：search（搜索）/ open（抓整页）/ find（页内行匹配）",
 			query: "search 的搜索词",
@@ -20665,23 +20669,38 @@ function AddImmutableInstantiate(context, state, type, options) {
 function AddImmutable(type, options = {}) {
 	return AddImmutableAction(type, options);
 }
+const TASK_DOOR_PARAM_DESCRIPTIONS = {
+	task: "孩子要干的活",
+	agent: "已注册的 agent 名字；省略 = 通用孩子",
+	agentScope: "agent 定义的查找范围（user / project / both）",
+	why: "这一刀为什么切出来（调用方自己的话）——它会进孩子的提示词、多花孩子的 token；孩子从 task 里已经能读懂就别传",
+	model: "覆盖孩子跑的模型",
+	thinkingLevel: "覆盖孩子的思考档位——孩子的思考 token 是可调的成本项",
+	wait: "true = 等这个任务完成再返回结果；false = 立刻返回 handle，结果走任务面/通知",
+	label: "后台任务给人看的标签",
+	readOnly: "strict = 孩子只有读工具（read/grep/find/ls，搜索开启时含 web_ds_search）；lenient = 默认全工具。只需要读的活别给写权限",
+	timeoutMs: "孩子的运行时长上限（毫秒）——超了按超时收尸；不传 = 不限（与不传时同）",
+	projectContext: "孩子的项目上下文（AGENTS.md/CLAUDE.md）：auto = 照常加载；none = 不加载——注意 none 只关「注入」不关「知识」：文件还在工作目录里，孩子会自己去翻（实测输入只差约 15%，不是省一半）；这活不需要项目约定就传 none，要孩子遵守项目规矩就照常传（auto 也可能把项目里的写码规矩套进答案）"
+};
 _Object_({
 	task: String$1({
 		minLength: 1,
-		description: "孩子要干的活"
+		description: TASK_DOOR_PARAM_DESCRIPTIONS.task
 	}),
-	agent: Optional(String$1({ description: "已注册的 agent 名字；省略 = 通用孩子" })),
-	why: Optional(String$1({ description: "这一刀为什么切出来（调用方自己的话）" })),
+	agent: Optional(String$1({ description: TASK_DOOR_PARAM_DESCRIPTIONS.agent })),
+	why: Optional(String$1({ description: TASK_DOOR_PARAM_DESCRIPTIONS.why })),
 	agentScope: Optional(Union([
 		Literal("user"),
 		Literal("project"),
 		Literal("both")
-	])),
-	model: Optional(String$1({ description: "覆盖孩子跑的模型" })),
-	thinkingLevel: Optional(String$1()),
-	wait: Optional(Boolean$1({ description: "true = 等这个任务完成再返回结果" })),
-	label: Optional(String$1({ description: "后台任务给人看的标签" })),
-	readOnly: Optional(Union([Literal("strict"), Literal("lenient")]))
+	], { description: TASK_DOOR_PARAM_DESCRIPTIONS.agentScope })),
+	model: Optional(String$1({ description: TASK_DOOR_PARAM_DESCRIPTIONS.model })),
+	thinkingLevel: Optional(String$1({ description: TASK_DOOR_PARAM_DESCRIPTIONS.thinkingLevel })),
+	wait: Optional(Boolean$1({ description: TASK_DOOR_PARAM_DESCRIPTIONS.wait })),
+	label: Optional(String$1({ description: TASK_DOOR_PARAM_DESCRIPTIONS.label })),
+	readOnly: Optional(Union([Literal("strict"), Literal("lenient")], { description: TASK_DOOR_PARAM_DESCRIPTIONS.readOnly })),
+	timeoutMs: Optional(Number$1({ description: TASK_DOOR_PARAM_DESCRIPTIONS.timeoutMs })),
+	projectContext: Optional(Union([Literal("auto"), Literal("none")], { description: TASK_DOOR_PARAM_DESCRIPTIONS.projectContext }))
 });
 const DEFAULT_LIMITS = {
 	timeoutMs: 12e4,

@@ -94,6 +94,7 @@ export const KIMI_MCP_RUN_CODE = {
   description: () =>
     [
       "写一段 TypeScript 程序批量调用工具：tools.<name>(args)。支持顶层 await、Promise.all 并行、循环与条件；程序返回值是归约后的结果，中间产物不进上下文。",
+      "同一形态的读写预计重复 5 次以上时，写程序一次跑完比逐个调更省。",
       "本会话的 tools 是固定文件四件套：read / grep / glob / edit（只作用于 workdir 之内，越界即报错）；没有 bash，也没有 pi_task_ptc——要跑 shell 或派子代理，用宿主自己的工具。",
     ].join(""),
   inputSchemaDescriptions: {
@@ -109,8 +110,8 @@ export const KIMI_MCP_WEB_DS_SEARCH = {
   name: "web_ds_search",
   description: () =>
     [
-      "程序内联网能力（三动作）：search 概览（title/url/snippet，count 1–50 默认 10）· open 抓整页转 markdown · find 页内行匹配（正则）。",
-      "open/find 命中本会话记忆则不再消耗配额；配额按 MCP server 进程计（默认 30 次/进程，0 = 不限）——不是跨会话的全局限额。需要联网证据时写进 ptc_run_code 程序里用，单次搜索也可直调本工具。",
+      "联网搜索三动作：search 概览（title/url/snippet，count 1–50 默认 10）· open 抓整页转 markdown · find 页内行匹配（正则）。单次搜索可直调本工具；要批量取证再写进 ptc_run_code 程序。",
+      "配额按 MCP server 进程计（默认 30 次/进程，0 = 不限）——不是跨会话的全局限额；open/find 命中本会话记忆不重复消耗。",
     ].join(""),
   inputSchemaDescriptions: {
     action: "三动作之一：search（搜索）/ open（抓整页）/ find（页内行匹配）",
