@@ -56,3 +56,18 @@
 node bench/kimi-ab/gen-fixture.mjs     # 造工作区（确定性内容，判分有硬答案）
 node bench/kimi-ab/run-ab.mjs          # A/B 双臂 × 全题 × n=3（自动换装插件、备份/还原）
 ```
+
+## 阶段 3 结果（2026-10-31）：web_ds_search vs 内置 WebSearch 回放对照
+
+回放 ba948c91 的 8 个真实 query（另 2 个是该场 FetchURL 直开，无 query 可比）。
+
+**优势（实测）**：
+- **官方源命中强**：带 `site:doc.dcloud.net.cn` 的 query 前 2 名正是官方文档页（uni-app-x/web、vite-config.html）——原会话里模型用内置 WebSearch 没找到官方页、最后靠 FetchURL 直猜 URL 才到；web_ds_search 一步到位。
+- **延迟低**：成功 query 全部 ~0.4s；返回带 date 字段，利于时效判断。
+- **fail-soft 可用**：失败返回可读文本不炸会话（HTTP 500 时模型看得见原因）。
+
+**劣势（实测）**：
+- **query 级稳定 500**：`site:ask.dcloud.net.cn` 组合 2/2 复现 Internal Server Error——不是随机抖动，是后端对该 query 的稳定失败；内置 WebSearch 无此现象。fail-soft 救了场，但模型得多花一轮换措辞或换工具。
+- **无摘要直读**：结果只有 title/url/snippet（snippet 即摘要），想要全文还要再 open 一次（耗配额）；内置 WebSearch 的 FetchURL 链路心智更熟。
+
+**结论**：web_ds_search 与内置 WebSearch 是**互补**关系——官方源/site: 限定检索它更强，通用探索与全文读取内置链路更顺。单独立得住，但描述里已写明「单次搜索可直调、批量取证进程序」的分工是对的。
