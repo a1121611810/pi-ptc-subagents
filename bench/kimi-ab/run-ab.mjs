@@ -37,10 +37,14 @@ const arg = (name, dflt) => {
 const arms = arg("arm", "A,B").split(",");
 const taskFilter = arg("tasks", "") ? arg("tasks", "").split(",") : null;
 const n = Number(arg("n", "3"));
+// 全量跑才写 results.jsonl 并清空；局部跑写带时间戳的文件——否则 --arm C 会把 36 轮 A/B 数据清掉
+const isFullRun = process.argv.indexOf("--arm") < 0 && process.argv.indexOf("--tasks") < 0;
+const resultsPath = isFullRun
+  ? join(BENCH, "results.jsonl")
+  : join(BENCH, `results-${arms.join("")}-${Date.now()}.jsonl`);
 const tasks = readdirSync(join(BENCH, "tasks")).filter(
   (d) => !taskFilter || taskFilter.includes(d),
 );
-const resultsPath = join(BENCH, "results.jsonl");
 
 // 1) 夹具（幂等）
 execFileSync(process.execPath, [join(BENCH, "gen-fixture.mjs")], { stdio: "inherit" });
@@ -74,8 +78,25 @@ function buildArm(arm) {
 }
 
 // 3) 备份插件 + 换装
+for (const d of globSync(join(tmpdir(), "kimi-ab-plugin-backup-*"))) {
+  rmSync(d, { recursive: true, force: true }); // 历史备份随跑随清，残留无意义
+}
 const backup = join(tmpdir(), `kimi-ab-plugin-backup-${process.pid}`);
 cpSync(PLUGIN_DIR, backup, { recursive: true });
+// 防中毒：备份若与任一已构建臂包同内容，说明上次跑被强杀在换装态——拒绝开跑，避免把臂包「还原」成日常插件
+const backupServerPath = join(backup, "server.js");
+const backupOk =
+  existsSync(backupServerPath) &&
+  existsSync(join(backup, "worker.js")) &&
+  existsSync(join(backup, "skills", "ptc", "SKILL.md")) &&
+  !globSync(join(tmpdir(), "kimi-ab-src-*/release/kimi/server.js")).some(
+    (armServer) => readFileSync(armServer, "utf8") === readFileSync(backupServerPath, "utf8"),
+  );
+if (!backupOk) {
+  throw new Error(
+    "插件备份校验失败：现装插件缺件或与臂包同内容（上次可能被强杀在换装态）。请人工检查 ~/.kimi-code/plugins/managed/ptc-tools 后重试。",
+  );
+}
 let restored = false;
 function restore() {
   if (restored) return;
@@ -168,8 +189,8 @@ function runOnce(arm, task, i) {
   rmSync(runDir, { recursive: true, force: true });
 }
 
-// 5) 主循环（每次完整跑清空结果文件，避免历史冒烟数据污染汇总）
-writeFileSync(resultsPath, "");
+// 5) 主循环（仅全量跑清空结果文件；局部跑的时间戳文件在创建时已为空，无需清）
+if (isFullRun) writeFileSync(resultsPath, "");
 try {
   for (const arm of arms) {
     swap(buildArm(arm));

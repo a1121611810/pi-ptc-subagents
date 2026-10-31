@@ -76,7 +76,8 @@ function createFsBindings(workdir, onCall) {
 		write: async (args) => {
 			const p = strArg(args, "path");
 			const content = strArg(args, "content");
-			if (content.length > WRITE_MAX_BYTES) throw new Error(`content too large (${content.length} chars > ${WRITE_MAX_BYTES} bytes)`);
+			const bytes = Buffer.byteLength(content, "utf8");
+			if (bytes > WRITE_MAX_BYTES) throw new Error(`content too large (${bytes} bytes > ${WRITE_MAX_BYTES} bytes)`);
 			const abs = resolve(workdirReal, p);
 			const parentAbs = dirname(abs);
 			if (!existsSync(parentAbs)) throw new Error(`parent dir does not exist: ${dirname(p)}（write 不隐式建目录）`);

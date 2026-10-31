@@ -106,8 +106,9 @@ export function createFsBindings(workdir: string, onCall?: () => void): BindingT
     write: async (args) => {
       const p = strArg(args, "path");
       const content = strArg(args, "content");
-      if (content.length > WRITE_MAX_BYTES) {
-        throw new Error(`content too large (${content.length} chars > ${WRITE_MAX_BYTES} bytes)`);
+      const bytes = Buffer.byteLength(content, "utf8");
+      if (bytes > WRITE_MAX_BYTES) {
+        throw new Error(`content too large (${bytes} bytes > ${WRITE_MAX_BYTES} bytes)`);
       }
       // 父目录须已存在：不隐式 mkdir（语义可预测）；新建目录不在程序五件套的面上
       const abs = resolve(workdirReal, p);

@@ -25,7 +25,12 @@ try {
   console.log("FAIL: answer.md 不存在");
   process.exit(1);
 }
-const miss = truth.filter((t) => !ans.includes(t.file) || !ans.includes(String(t.todos)));
+// 按行解析：找到含文件名的那行，提取行内数字——全文件 includes 会被文件名自带数字骗过（mod11 的 "11"）
+const miss = truth.filter((t) => {
+  const line = ans.split("\n").find((l) => l.includes(t.file)) ?? "";
+  const nums = (line.match(/\d+/g) ?? []).map(Number);
+  return !nums.includes(t.todos) || !nums.includes(t.lines);
+});
 console.log(`真值: 总 TODO=${totalTodos} 总行数=${totalLines} 文件数=${truth.length}`);
 if (miss.length) {
   console.log("FAIL: 缺/错的文件行:", miss.map((m) => m.file).join(","));
