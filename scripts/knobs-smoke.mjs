@@ -254,6 +254,25 @@ await check("口径事实：带上下文按项目口径算（none 臂的结果�
   );
 });
 
+// ⑥ 停滞护栏（宿主自愈）：孩子「什么都没在做」就被收尸——引擎侧默认 5 分钟，这里调小到 1ms
+//    A 臂：护栏开 ⇒ 孩子被收尸（stopReason 写明 stalled）
+//    B 臂：护栏关（stallMs=0）⇒ 同样的孩子正常跑完 ⇒ 证明是护栏收的，不是别的
+await check("停滞护栏：没动静的孩子被收尸（护栏关掉时同样的孩子跑完）", async () => {
+  const makeEngine = (stallMs) =>
+    new TaskEngine({
+      registry: new TaskRegistry(),
+      output: new InMemoryOutputStorage(),
+      buildArgv: (input, context) => buildPiArgv(input, { ...context, piVersion }),
+      stallMs,
+    });
+  const guarded = await makeEngine(1).dispatch({ task: CHILD_TASK, wait: true });
+  assert.equal(guarded.status, "canceled", `护栏开时孩子应被收尸，实际 ${guarded.status}`);
+  assert.match(guarded.errorMessage ?? "", /stalled/, "stopReason 要写明是停滞");
+
+  const unguarded = await makeEngine(0).dispatch({ task: CHILD_TASK, wait: true });
+  assert.equal(unguarded.status, "fulfilled", "护栏关时同样的孩子应跑完");
+});
+
 // 尺寸口径：usage.input 受缓存冷热影响（缓存命中时几乎为 0，跨版本不可横比），
 // 确定的量是孩子系统提示词的节总长——那正是 project_context 节占掉的份。
 function sysChars(sections) {
@@ -272,4 +291,6 @@ console.log(
 );
 
 for (const line of results) console.log(line);
-console.log(`\n[knobs-smoke PASS] pi ${piVersion}：两个旋钮 + 报告/usage 兜底在真机上全部成立。`);
+console.log(
+  `\n[knobs-smoke PASS] pi ${piVersion}：两个旋钮 + 停滞护栏 + 报告/usage 兜底在真机上全部成立。`,
+);

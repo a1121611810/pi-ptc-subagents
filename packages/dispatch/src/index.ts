@@ -26,6 +26,7 @@ export { NOTIFICATION_BATCH_MAX_BYTES, NotificationCenter } from "./notification
 export type { TaskNotification } from "./notifications.ts";
 export { CHILD_REPORT_TOOL_NAME, REPORT_CONTRACT_BLOCK, extractReportFromText } from "./report.ts";
 export type { ChildFinding, ChildReport, ChildUsage, ReportChannel } from "./report.ts";
+export { ChildActivityTracker, DEFAULT_STALL_MS, STALL_CHECK_INTERVAL_MS } from "./activity.ts";
 export { TaskEngine } from "./engine.ts";
 export type {
   ChildHandle,

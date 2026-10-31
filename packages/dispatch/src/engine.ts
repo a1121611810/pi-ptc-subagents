@@ -1,6 +1,7 @@
 import { spawnChild as defaultSpawn, buildPiArgv } from "./child-process.ts";
 import { extractReportFromText, type ChildReport, type ReportChannel } from "./report.ts";
 import { parseChildStream } from "./jsonl.ts";
+import { ChildActivityTracker, DEFAULT_STALL_MS, STALL_CHECK_INTERVAL_MS } from "./activity.ts";
 import {
   existsSync,
   mkdirSync,
@@ -124,6 +125,9 @@ export interface EngineOptions {
   /** 旧 ADR-0043：whyEnabled 默认开；关掉时丢弃 why 并记 whySuppressed——剥夺类开关 fail-open（坏值视为开）。
    * 谓词非值：/ptc why 的会话级覆盖要热生效，值会在装配时被冻住（同 旧 ADR-0065 sessionEnding 的教训） */
   whyEnabled?: boolean | (() => boolean);
+  /** 停滞护栏阈值（毫秒）：孩子既没有新动静、又没在飞的工具调用，超过它就收尸；0 = 关掉。
+   * 与 timeoutMs 并行——墙钟管预算与 straggler 摘除，护栏只管「孩子什么都没在做」。默认 5 分钟 */
+  stallMs?: number;
 }
 
 export interface EngineContext {
@@ -188,6 +192,7 @@ export class TaskEngine {
   readonly #terminalRecordKeep: number;
   readonly #archiveEnabled: boolean;
   readonly #archiveTtlDays: number;
+  readonly #stallMs: number;
   #purgeTail: Promise<void> = Promise.resolve();
   readonly #children = new Map<string, ChildHandle>();
   #ending = false;
@@ -209,6 +214,7 @@ export class TaskEngine {
     this.#terminalRecordKeep = options.terminalRecordKeep ?? DEFAULT_TERMINAL_RECORD_KEEP;
     this.#archiveEnabled = options.archiveEnabled ?? true;
     this.#archiveTtlDays = options.archiveTtlDays ?? DEFAULT_ARCHIVE_TTL_DAYS;
+    this.#stallMs = options.stallMs ?? DEFAULT_STALL_MS;
     this.#ready = options.storageDir ? this.#restore(options.storageDir) : Promise.resolve();
     this.#stopGraceMs = options.stopGraceMs ?? DEFAULT_STOP_GRACE_MS;
     const whyOpt = options.whyEnabled;
@@ -377,9 +383,25 @@ export class TaskEngine {
         }, timeoutMs)
       : undefined;
     timer?.unref();
+    // 停滞护栏（宿主自愈）：孩子既没有新动静、又没在飞的工具调用，超过阈值就收尸。
+    // 与 timeoutMs 并行——墙钟管预算与 straggler 摘除，护栏只管「孩子什么都没在做」
+    const activity = new ChildActivityTracker();
+    const stallMs = this.#stallMs > 0 ? this.#stallMs : undefined;
+    const stallGuard = stallMs
+      ? setInterval(
+          () => {
+            if (activity.isStalled(Date.now(), stallMs)) {
+              void this.stop(taskId, `stalled: no activity for ${stallMs}ms`);
+            }
+          },
+          Math.min(STALL_CHECK_INTERVAL_MS, stallMs),
+        )
+      : undefined;
+    stallGuard?.unref();
     let text = "";
     let outputTruncated = false;
     child.onOutput((chunk) => {
+      activity.push(chunk);
       text += chunk;
       if (text.length > STDOUT_KEEP_CHARS) {
         text = text.slice(-STDOUT_KEEP_CHARS); // 砍头留尾：首行可能只剩半行，下游 JSONL 解析按行容错
@@ -390,6 +412,7 @@ export class TaskEngine {
       child.onExit((code) => resolveExit(code));
     });
     if (timer) clearTimeout(timer);
+    if (stallGuard) clearInterval(stallGuard);
     this.#children.delete(taskId);
     const outputPath = await this.#output.write(taskId, text);
     // 旧 ADR-0032：工具通道（--mode json 的 toolResult）优先；退 prompt 通道；opted-out 明说
