@@ -1,34 +1,7 @@
-export { compileProgram } from "./compile.ts";
-export { createTaskBinding, TASK_BINDING_NAME, TASK_RECORDS_BINDING_NAME } from "./task-binding.ts";
-export type {
-  CreateTaskResult,
-  TaskBinding,
-  TaskDoor,
-  TaskHandle,
-  TaskRejection,
-} from "./task-binding.ts";
-export { DEFAULT_LIMITS, effectiveTimeoutMs } from "./limits.ts";
-export type { HostToWorkerFrame, RunOutcome, WorkerToHostFrame } from "./protocol.ts";
+// PTC 引擎：运行格、协议、池、编译、文件绑定。零依赖、零宿主——可脱离 pi 单独使用。
+export { DEFAULT_LIMITS } from "./limits.ts";
+export type { RunOutcome } from "./protocol.ts";
 export { runPtcProgram, spawnPtcWorker } from "./dispatcher.ts";
-export type { BindingTable, RunProgramRequest } from "./dispatcher.ts";
-export { buildWorkerUrl } from "./worker-source.ts";
+export type { BindingContext, BindingTable, RunProgramRequest } from "./dispatcher.ts";
 export { WorkerPool } from "./pool.ts";
-export { SubCallTracker } from "./sub-calls.ts";
-export type { SubCallRecord } from "./sub-calls.ts";
-export { TASK_DOOR_PARAMETERS } from "./task-binding.ts";
-export { renderModelValue, sanitizeText, stripAnsi, truncateLine } from "@pi-ptc/tui";
-export {
-  applyAdr0015Truncation,
-  RENDER_BOUNDS,
-  TRUNCATION_MAX_BYTES,
-  TRUNCATION_MAX_LINES,
-} from "@pi-ptc/tui";
-export {
-  DEFAULT_BINDING_NAMES,
-  KNOWN_BINDING_NAMES,
-  OPT_IN_BINDING_NAMES,
-  resolveBindingNames,
-} from "./bindings.ts";
-export { renderToolResult, type ResultTextOutcome } from "@pi-ptc/output";
-export { createPtcRunCodeTool, createPtcWorkflowTool, validateWorkflowArgs } from "./tools.ts";
-export type { PtcToolOptions, RunCodeParams, WorkflowParams } from "./tools.ts";
+export { createFsBindings } from "./fs-bindings.ts";

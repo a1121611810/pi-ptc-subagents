@@ -1,4 +1,9 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "rolldown";
+
+// 直接吃各包源码：workspace exports 的 default 指向 dist，单包 filter 构建会把陈旧的
+// 兄弟包 dist 静默打进 bundle——build:kimi 不重建 ptc，陈旧代码会进 release/kimi
+const src = (pkg) => fileURLToPath(new URL(`../${pkg}/src/index.ts`, import.meta.url));
 
 export default defineConfig({
   input: {
@@ -8,6 +13,15 @@ export default defineConfig({
     worker: "../ptc/src/worker-entry.ts",
   },
   platform: "node",
+  resolve: {
+    alias: {
+      "@pi-ptc/output": src("output"),
+      "@pi-ptc/ptc": src("ptc"),
+      "@pi-ptc/routes": src("routes"),
+      "@pi-ptc/search": src("search"),
+      "@pi-ptc/tui": src("tui"),
+    },
+  },
   output: {
     dir: "dist",
     entryFileNames: "[name].js",

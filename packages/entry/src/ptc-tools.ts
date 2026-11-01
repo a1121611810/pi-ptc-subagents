@@ -1,15 +1,15 @@
 import type { AgentToolResult, ExtensionToolContext } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
 import { TOOLS, type SurfaceMode } from "@pi-ptc/routes";
-import { runPtcProgram, type BindingTable } from "./dispatcher.ts";
+import { runPtcProgram, type BindingTable } from "@pi-ptc/ptc";
 import { renderToolResult } from "@pi-ptc/output";
-import { renderPtcResult, type PtcToolDetails } from "./render.ts";
+import { renderPtcResult, type PtcToolDetails } from "./ptc-render.ts";
 
 export interface PtcToolOptions {
   getBindings: () => BindingTable;
   cwd?: string;
   surface?: SurfaceMode;
-  getPool?: () => import("./pool.ts").WorkerPool | undefined;
+  getPool?: () => import("@pi-ptc/ptc").WorkerPool | undefined;
   /** pi 把工具执行上下文交给 execute——程序内 tools.* 的通道在那里（ctx.executeTool）；老版本没有则传 undefined */
   onToolContext?: (ctx: ExtensionToolContext | undefined) => void;
 }

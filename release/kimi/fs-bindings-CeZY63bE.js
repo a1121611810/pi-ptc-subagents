@@ -1,7 +1,7 @@
-import { randomUUID } from "node:crypto";
 import { existsSync, globSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { basename, dirname, resolve, sep } from "node:path";
-// src/fs-tools.ts
+// ../ptc/src/fs-bindings.ts
 const SKIP_DIRS = /* @__PURE__ */ new Set(["node_modules", ".git"]);
 const SKIP_SUFFIXES = /* @__PURE__ */ new Set([
 	".png",

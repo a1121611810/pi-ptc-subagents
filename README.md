@@ -81,6 +81,35 @@ URL tracks the latest GitHub Release (pinned URLs get no update checks); run `/r
 activate. A bundled `ptc` skill teaches the model when to write a program instead of
 fanning out tool calls one by one.
 
+## The engine on its own (no model, no pi)
+
+The PTC runtime is a zero-dependency engine inside this package. Install it and run programs
+with no model in the loop — a batch job, a CI step, or a script you wrote yourself.
+
+```bash
+npm i pi-ptc-subagents
+```
+
+```ts
+import { createFsBindings, runPtcProgram } from "pi-ptc-subagents/ptc";
+
+const outcome = await runPtcProgram({
+  code: `const files = await tools.glob({ pattern: "*.md" });
+         return { files, hits: await tools.grep({ pattern: "TODO", path: "." }) };`,
+  bindings: createFsBindings(process.cwd()),
+  cwd: process.cwd(),
+});
+```
+
+Or from the shell:
+
+```bash
+ptc prog.ts --workdir .
+```
+
+The program sees the same vm cell as on pi: `tools.*` is the only door out, and the file tool
+set is confined to `workdir`. The engine pulls in nothing — no pi, no dependencies at all.
+
 ## Install (pi)
 
 ```bash
@@ -128,9 +157,14 @@ full pi process running as you. `bash` is not in the program binding table on ei
 
 pi `>= 0.86.0`, tracked against latest (currently 1.4.0). Two version facts matter:
 
-- **In-program `tools.*` needs pi ≥ 0.99.** On 0.86/0.87 a program still evaluates and can
-  still dispatch a task, but session-tool calls fail with a clear version error. The
-  codemode surface itself also only exists from 0.99.
+- **In-program session tools need pi ≥ 0.99 for the nested call channel.** On 0.86/0.87 a
+  program still evaluates, still dispatches tasks, and still calls `read` / `write` / `edit` /
+  `grep` / `ls` / `find` — pi has no nested tool-call channel there, so the extension builds
+  pi's own tool definitions (its public `create*ToolDefinition` factories) and calls them
+  directly. Same tools, same parameter shapes as 0.99; only the call path differs. The
+  codemode surface itself still only exists from 0.99. That fallback is gated on the pi
+  version: on 0.99+ a missing call channel is an error, not a silent bypass of pi's tool
+  pipeline.
 - Everything else in the 0.86–1.4 range is covered by real-machine smoke tests, including
   a program that dispatches a real child process. Per-version details:
   [docs/pi-version-matrix.md](./docs/pi-version-matrix.md).

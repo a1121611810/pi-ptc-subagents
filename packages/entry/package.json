@@ -18,6 +18,7 @@
   "dependencies": {
     "@earendil-works/pi-tui": "1.4.0",
     "@pi-ptc/dispatch": "workspace:*",
+    "@pi-ptc/output": "workspace:*",
     "@pi-ptc/ptc": "workspace:*",
     "@pi-ptc/routes": "workspace:*",
     "@pi-ptc/search": "workspace:*",

@@ -2,7 +2,7 @@
 # 发版前手工全量冒烟：16 个 pi 版本 × 四腿契约（覆盖 0.99 分水岭两侧）。
 # 用法：bash scripts/version-smoke.sh；SMOKE_VERSIONS="1.3.0" 只跑指定版本（快查）。
 # 四腿：RUN=42（run_code 求值）· READ（程序内 tools.read——≥0.99 走 executeTool 通道返回数字，
-# floor 明确报 ERR:）· PAR=2（ptc_workflow 的 parallel allSettled）· HND 非空（wait:false
+# floor 无通道 ⇒ 自己造出 pi 的真工具来调，同样返回数字）· PAR=2（ptc_workflow 的 parallel allSettled）· HND 非空（wait:false
 # handle + 任务面 list/output 活）。判定：RUN=42 + READ/PAR/HND + 0 个 "isError":true。
 # 素材自愈：shim 缺了自动 npm install pi@<ver> 到 $SHIM_ROOT/ptc-smoke-pi-<ver>；
 # 已存在的 /tmp/pi-<ver>（与 /tmp/pi086）直接复用。
@@ -64,12 +64,9 @@ run() { # $1=version（"PATH" = 当前 PATH 上的现行版）
   local hnd_ok="FAIL"
   local err_ok="OK"
   grep -q "RUN=42" "$log" && run_ok="OK"
-  # READ 腿分侧：floor（0.86/0.87，无 executeTool 通道）明确报 ERR: 即语义正确；≥0.99 要数字
-  if [[ "$want" == 0.86.* || "$want" == 0.87.* ]]; then
-    grep -qE "READ=ERR:[^[:space:]]*" "$log" && read_ok="OK"
-  else
-    grep -qE "READ=[0-9]+" "$log" && read_ok="OK"
-  fi
+  # READ 腿：floor（0.86/0.87）没有嵌套调用通道 ⇒ 自己造出 pi 的真工具来调；≥0.99 走 pi 会话工具
+  # ——两条路都返回文件内容字符串，所以都是数字（哪条路坏了会变 ERR: ⇒ 这里判红）
+  grep -qE "READ=[0-9]+" "$log" && read_ok="OK"
   grep -qE "PAR=2([^0-9]|$)" "$log" && par_ok="OK"
   grep -qE "HND=[0-9a-f-]+" "$log" && hnd_ok="OK"
   grep -q '"isError":true' "$log" && err_ok="FAIL"

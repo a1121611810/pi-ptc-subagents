@@ -120,7 +120,7 @@ function registeredToolNames() {
 
   // Style 2 — the name behind a constant, which is how `pi_task_ptc` is
   // declared: `name: TASK_BINDING_NAME` over
-  // `export const TASK_BINDING_NAME = "pi_task_ptc"` (packages/ptc/src/task-binding.ts).
+  // `export const TASK_BINDING_NAME = "pi_task_ptc"` (packages/entry/src/task-binding.ts).
   // Scanning only style 1 was a real bug in the old single-package tree: it found
   // six tools and silently omitted a seventh that the page was entitled to name.
   // The constant's declaration is the registration site in this shape.

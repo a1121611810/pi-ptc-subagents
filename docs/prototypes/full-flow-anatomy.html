@@ -168,7 +168,7 @@ applyTaskFaceVisibility() 幂等重放（resume 重置后对齐，见 ⑫）
 <!-- ===================== ④ ===================== -->
 <section id="s4">
 <h2><span class="no">④</span>ptc_run_code / ptc_workflow：一次程序运行的宿主链路</h2>
-<p class="src">出处：<code>ptc/src/tools.ts:26-130</code> · <code>ptc/src/dispatcher.ts:53-229</code>（runPtcProgram）</p>
+<p class="src">出处：<code>entry/src/ptc-tools.ts:26-130</code> · <code>ptc/src/dispatcher.ts:53-229</code>（runPtcProgram）</p>
 <pre class="term">模型调 ptc_run_code({code, description, timeoutMs?})（full_ptc 面才有此工具）
         │
         ▼
@@ -217,7 +217,7 @@ isError = (status ≠ fulfilled)；details 带 {status, truncated, fullOutputPat
 <!-- ===================== ⑤ ===================== -->
 <section id="s5">
 <h2><span class="no">⑤</span>程序内 tools.*：binding 表与一次调用的往返</h2>
-<p class="src">出处：<code>entry/src/index.ts:426-474</code>（createBindingTable）· <code>ptc/src/bindings.ts</code> · <code>ptc/src/dispatcher.ts:124-190</code></p>
+<p class="src">出处：<code>entry/src/index.ts:477-540</code>（createBindingTable）· <code>entry/src/ptc-bindings.ts</code> · <code>ptc/src/dispatcher.ts:124-190</code></p>
 <pre class="term">绑定表（<b>每次程序运行重建</b>——session_start 时活跃表未成型，早建会得到空表）：
   作用域：◇ 有 executeTool 通道(≥0.99)？active=getActiveTools()：getAllTools() 名字全表
   名单：KNOWN(read,bash,grep,find,ls,edit,write) ∩ 作用域 − OPT_IN(bash)   <span class="dim">// bash 是唯一 opt-in，当前未接线</span>
@@ -290,7 +290,7 @@ reset 帧（宿主归还前）：currentRunId=null → 拒掉全部 pending → 
 <!-- ===================== ⑦ ===================== -->
 <section id="s7">
 <h2><span class="no">⑦</span>结果渲染与截断：模型最终看到什么</h2>
-<p class="src">出处：<code>ptc/src/result-text.ts</code> · <code>tui/src/truncate.ts</code>（ADR-0015）· <code>tui/src/text.ts</code>（ADR-0016 值树）· <code>ptc/src/render.ts</code></p>
+<p class="src">出处：<code>ptc/src/result-text.ts</code> · <code>tui/src/truncate.ts</code>（ADR-0015）· <code>tui/src/text.ts</code>（ADR-0016 值树）· <code>entry/src/ptc-render.ts</code></p>
 <pre class="term">outcome → 正文：
   fulfilled → [logs…, renderModelValue(value)]
   rejected  → [logs…, "[rejected] &lt;error&gt;"]
@@ -312,7 +312,7 @@ renderModelValue 值树契约（F7/ADR-0016，每层递归都判）：
 <!-- ===================== ⑧ ===================== -->
 <section id="s8">
 <h2><span class="no">⑧</span>派发主链：六道闸 → 铸记录 → 等不等槽</h2>
-<p class="src">出处：<code>dispatch/src/gates.ts</code>（六道闸）· <code>dispatch/src/engine.ts:212-296</code>（#dispatchReady）· 两扇门面 <code>entry/src/index.ts:471,559</code> 与 <code>ptc/src/task-binding.ts</code></p>
+<p class="src">出处：<code>dispatch/src/gates.ts</code>（六道闸）· <code>dispatch/src/engine.ts:212-296</code>（#dispatchReady）· 两扇门面 <code>entry/src/index.ts:468,565</code> 与 <code>entry/src/task-binding.ts</code></p>
 <pre class="term">两扇门面（同参同拒绝语义，决策 7/12/19）：
   full_ptc：程序内 tools.pi_task_ptc(binding)
   codemode_ptc：脚本内 tools.pi_task_codemode(工具, exposure:codemode)

@@ -18,6 +18,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@pi-ptc/dispatch": src("dispatch"),
+      "@pi-ptc/output": src("output"),
       "@pi-ptc/ptc": src("ptc"),
       "@pi-ptc/routes": src("routes"),
       "@pi-ptc/search": src("search"),

@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { KIMI_MCP_RESULT_FOOTER, KIMI_MCP_TOOLS } from "@pi-ptc/routes";
 import { renderToolResult } from "@pi-ptc/output";
-import { runPtcProgram } from "@pi-ptc/ptc";
+import { createFsBindings, runPtcProgram } from "@pi-ptc/ptc";
 import {
   createDeepSeekProvider,
   createSearchMemory,
@@ -13,7 +13,6 @@ import {
   runWebSearch,
   type SearchRunContext,
 } from "@pi-ptc/search";
-import { createFsBindings } from "./fs-tools.ts";
 
 // Kimi 面（MCP，ADR-0020）：工具表唯一出处 = 册子 KIMI_MCP_TOOLS。stdout 是 JSON-RPC 通道——本文件不许 console.log
 const RUN_CODE_SCHEMA = {

@@ -2,8 +2,10 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type {
   AgentToolResult,
   ExtensionAPI,
+  ExtensionContext,
   ExtensionToolContext,
 } from "@earendil-works/pi-coding-agent";
+import * as piHost from "@earendil-works/pi-coding-agent";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { execSync } from "node:child_process";
@@ -25,19 +27,15 @@ import { fileURLToPath } from "node:url";
 import { compactedTaskReminder, readTaskOutput, taskListSnapshot } from "@pi-ptc/task";
 import { createDeepSeekProvider, createSearchMemory, createSearchQuota } from "@pi-ptc/search";
 import { createWebDsSearchTool } from "./web-ds-search-tool.ts";
+import { WorkerPool, spawnPtcWorker, type BindingTable } from "@pi-ptc/ptc";
+import { createPtcRunCodeTool, createPtcWorkflowTool } from "./ptc-tools.ts";
+import { KNOWN_BINDING_NAMES, resolveBindingNames } from "./ptc-bindings.ts";
 import {
-  createPtcRunCodeTool,
-  createPtcWorkflowTool,
   createTaskBinding,
-  KNOWN_BINDING_NAMES,
-  resolveBindingNames,
   TASK_BINDING_NAME,
   TASK_RECORDS_BINDING_NAME,
   TASK_DOOR_PARAMETERS,
-  WorkerPool,
-  spawnPtcWorker,
-  type BindingTable,
-} from "@pi-ptc/ptc";
+} from "./task-binding.ts";
 import {
   FALLBACK_SURFACE_MODE,
   TOOLS,
@@ -295,12 +293,14 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
     let toolContext: ExtensionToolContext | undefined;
     // 绑定表按每次程序运行时重建：老版本（0.86/0.87）在 session_start 时活跃表还没成型，
     // 早建会得到空表，程序里 tools.* 全是 undefined
-    const getBindings = () => createBindingTable(pi, session, () => toolContext);
+    const cwd = process.cwd();
+    const getBindings = () =>
+      createBindingTable(pi, session, () => toolContext, { cwd, extCtx: ctx, piVersion });
     registerPtcTools(
       registerTracked,
       {
         getBindings,
-        cwd: process.cwd(),
+        cwd,
         surface,
         getPool: () => pool,
         onToolContext: (ctx) => {
@@ -477,24 +477,77 @@ function normalizeToolValue(value: unknown): unknown {
 // 通道在**工具执行上下文**上：pi 1.4.0 的 ToolDefinition.execute 第 5 个参数是
 // ExtensionToolContext，它的 executeTool(name, args, options?) 才是程序内调用工具的入口
 // （session_start 的 ExtensionContext 上没有它——早期实现取错上下文，程序内 tools.* 全程是死的）
+// floor（0.86/0.87）没有 ctx.executeTool ⇒ 自己造出 pi 的真工具来调：
+// pi 的工具工厂是公开导出（create*ToolDefinition，0.86.0–1.4.0 全有），execute 独立于 agent
+// 循环（只用 ctx?.cwd || cwd）——所以老版本的程序工具与 ≥0.99 逐字同形（含 edit 的 {path, edits}
+// 形状与 ls/find 的存在）。用命名空间取工厂：某个版本缺了也不炸——那个工具就报「没有通道」。
+type PiToolDefinition = {
+  prepareArguments?: (args: unknown) => unknown;
+  execute: (
+    toolCallId: string,
+    params: never,
+    signal: AbortSignal | undefined,
+    onUpdate: undefined,
+    ctx: unknown,
+  ) => Promise<{ content?: unknown[]; structuredContent?: unknown; isError?: boolean }>;
+};
+
+const PI_TOOL_NAMES = ["read", "write", "edit", "grep", "ls", "find"] as const;
+
+const PI_TOOL_FACTORIES = Object.fromEntries(
+  PI_TOOL_NAMES.map((name) => [
+    name,
+    (piHost as unknown as Record<string, unknown>)[
+      `create${name[0]!.toUpperCase()}${name.slice(1)}ToolDefinition`
+    ],
+  ]),
+);
+
+// pi 的嵌套调用通道（ctx.executeTool）出现在 0.99.0；floor 0.86/0.87 没有（版本矩阵 2026-11-01）
+// 判定用版本号（和 argv 的版本门同一份解析）：「没认出 executeTool」有两种可能——真是 floor，
+// 或是未来的 pi 挪了它的位置。后者必须报错，不能悄悄用自造工具绕过 pi 的工具管线
+// （别的扩展的 tool_call 钩子会拦不到程序发起的调用，用量也不记）。版本认不出 → 当作有通道。
+function hasNestedToolCalls(piVersion: string | undefined): boolean {
+  if (!piVersion) return true;
+  const [major = "0", minor = "0"] = piVersion.trim().replace(/^v/, "").split(".");
+  const M = Number.parseInt(major, 10);
+  const m = Number.parseInt(minor, 10);
+  if (Number.isNaN(M) || Number.isNaN(m)) return true;
+  return M > 0 || (M === 0 && m >= 99);
+}
+
 function createBindingTable(
   pi: ExtensionAPI,
   session: PtcSession,
   getToolContext: () => ExtensionToolContext | undefined,
+  env: { cwd: string; extCtx: ExtensionContext; piVersion: string | undefined },
 ): BindingTable {
+  const { cwd, extCtx, piVersion } = env;
   // emitImage 桥：pi 工具结果里的图片块经此上提到运行结果（旧 ADR-0014）
   const active = pi.getActiveTools();
   // 作用域 = 程序真能调到的内置工具：
   // 有通道的版本（≥0.99）：getActiveTools() 就是「向模型声明的集合」，直接用（--tools 收窄也 respected）
   // 没有通道的老版本（0.86/0.87）：getActiveTools() 只含扩展自己的工具（实测 ["zz_probe"]），
-  // 内置工具只在 getAllTools() 里——那两版没有嵌套调用通道，程序里的 tools.* 无论如何都会拿到明确错误，
-  // 但至少不再是无声的 undefined。
+  // 内置工具只在 getAllTools() 里——那两版走下面的 pi 自造工具，作用域得从 getAllTools() 取。
   const known = new Set<string>(KNOWN_BINDING_NAMES);
   const scope =
     !getToolContext() && !active.some((name) => known.has(name))
       ? pi.getAllTools().map((tool) => tool.name)
       : active;
   const names = resolveBindingNames(scope);
+  // floor 的 pi 自造工具：惰性建（工厂在 cwd 上构造一次）
+  let piTools: Record<string, PiToolDefinition> | undefined;
+  const piToolFor = (name: string): PiToolDefinition | undefined => {
+    if (!piTools) {
+      piTools = {};
+      for (const [tool, factory] of Object.entries(PI_TOOL_FACTORIES)) {
+        if (typeof factory === "function") {
+          piTools[tool] = (factory as (dir: string) => PiToolDefinition)(cwd);
+        }
+      }
+    }
+    return piTools[name];
+  };
   const table: BindingTable = Object.fromEntries(
     names.map((name) => [
       name,
@@ -504,7 +557,34 @@ function createBindingTable(
       ) => {
         const ctx = getToolContext();
         if (!ctx?.executeTool) {
-          throw new Error(`此 pi 版本没有程序内调用工具的通道（需 pi ≥ 0.99，binding: ${name}）`);
+          // floor（0.86/0.87）：没有嵌套调用通道 ⇒ 自己造出 pi 的真工具来调——与 ≥0.99 同形同语义。
+          // 现代 pi 上认不出通道是异常 ⇒ 报错，不悄悄绕过 pi 的工具管线。
+          const def = hasNestedToolCalls(piVersion) ? undefined : piToolFor(name);
+          if (!def) {
+            throw new Error(`此 pi 版本没有程序内调用工具的通道（需 pi ≥ 0.99，binding: ${name}）`);
+          }
+          // prepareArguments 是管线的兼容垫片（如 edits 传成字符串/单个对象）——直接调 execute 会跳过它
+          const prepared = def.prepareArguments ? def.prepareArguments(args) : args;
+          const result = await def.execute(
+            `ptc-${name}`,
+            prepared as never,
+            callCtx.signal,
+            undefined,
+            extCtx,
+          );
+          for (const block of result.content ?? []) {
+            if ((block as { type?: string }).type === "image") callCtx.emitImage(block);
+          }
+          if (result.isError) {
+            const text = (result.content ?? [])
+              .map((block) => {
+                const obj = block as { type?: string; text?: string };
+                return obj.type === "text" ? (obj.text ?? "") : `[${obj.type ?? "block"}]`;
+              })
+              .join("\n");
+            throw new Error(text || `工具 ${name} 执行失败`);
+          }
+          return normalizeToolValue(result.structuredContent ?? result.content);
         }
         const outcome = await ctx.executeTool(name, args, { signal: callCtx.signal });
         for (const block of outcome.result.content) {

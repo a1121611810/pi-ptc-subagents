@@ -56,7 +56,10 @@ floor = **0.86.0**（`peerDependencies: ">=0.86.0"`），ceiling = 跟踪最新�
   的第 5 个参数是 `ExtensionToolContext`，它的 `executeTool(name, args, options?)` 才是程序内
   调会话工具的入口。`session_start` 的 `ExtensionContext` 上没有它。
 - **0.86 / 0.87 没有这条通道**（全包里搜不到 `executeTool`）：程序仍可求值、可派发子任务，
-  但 `tools.*` 调用返回明确错误（"此 pi 版本没有程序内调用工具的通道（需 pi ≥ 0.99）"）。
+  且 **2026-11-01 起文件类调用改用 pi 自造的工具**（pi 公开导出的 `create*ToolDefinition(cwd)` 工厂，
+  那些 `execute` 独立于 agent 循环）——`read` / `write` / `edit` / `grep` / `ls` / `find` 照常可用，
+  参数形状与 ≥0.99 逐字一致。**这条路有版本门**：只在 pi < 0.99 开放，现代 pi 上认不出通道是异常 ⇒ 报错
+  （详见下面「floor 自造工具加版本门」一节）。
 - 工具执行上下文的位置随版本变（1.4.0 是第 5 个参数，更早是第 3 个）——实现按「哪个参数带
   `executeTool`」认，不写死位置。
 - **pi 1.4.0 的可调用集 = active 的 direct 工具 + codemode/deferred 工具**：从活跃表里收窄
@@ -73,8 +76,68 @@ floor = **0.86.0**（`peerDependencies: ">=0.86.0"`），ceiling = 跟踪最新�
 | 0.86.0 · 0.86.1 · 0.87.0 · 0.87.1                                                                | ✗ 平台没有嵌套调用通道 → 明确报错「需 pi ≥ 0.99」     |
 | 0.99.0 · 0.99.1 · 0.99.2 · 1.0.0 · 1.0.1 · 1.0.2 · 1.0.3 · 1.0.4 · 1.1.0 · 1.2.0 · 1.3.0 · 1.4.0 | ✓ 程序读 `/etc/hosts` 拿到 295 字符（结果统一成文本） |
 
+### 引擎抽出后复跑（2026-11-01）
+
+> `packages/ptc` 拆成「引擎 + 模型面」（模型面搬进 `packages/entry`，fs 四件套绑定搬进 ptc，
+> 引擎零依赖零宿主）后，同口径全量复跑：**16/16 全过，fails=0**——floor 四版当时的 `tools.read`
+> 仍是明确的版本错误（`ERR:此 pi 版本没有程序内调用工具的通道（需 pi ≥ 0.99）`，**扩展不崩，
+> 只是那条调用失败**），0.99.0–1.3.0 与 PATH 1.4.0 是 `RUN=42` / `READ=2216`（读 `package.json`
+> 的长度）/ `PAR=2` / 任务面 handle 非空。
+
+### floor 退回绑定（2026-11-01，同日第二轮）
+
+> floor 四版的**文件类**调用先改成**退回宿主中立的文件绑定**（`createFsBindings`：`node:fs` 底 +
+> workdir realpath 锁）——`read` / `write` / `grep` / `edit` 照常可用。改动只在 `packages/entry`
+> 的绑定表，**引擎一行没动**。⚠️ 但这版留了个**契约分叉**：pi 的 edit 是
+> `{path, edits:[{oldText,newText}]}`（驼峰），文件绑定是 `{path, old_string, new_string}`
+> （蛇形）——为 ≥0.99 写的程序到 floor 上 `tools.edit` 会坏。
+
+### floor 用 pi 自造工具（2026-11-01，同日第三轮，取代上一轮）
+
+> floor 上 pi 的**工具工厂是公开导出**（`create*ToolDefinition(cwd)`，0.86.0 / 0.86.1 / 0.87.0 /
+> 0.87.1 与 1.4.0 全有），返回带 `execute` 的完整 ToolDefinition；那些 `execute` **独立于 agent
+> 循环**（只用 `ctx?.cwd || cwd`，ctx 可缺省）⇒ floor 改为**自己造出 pi 的真工具来调**。
+>
+> **程序工具集与形状与 ≥0.99 逐字一致**：`read` / `write` / `edit` / `grep` / `ls` / `find`
+> （`bash` 是 opt-in，从未在程序绑定表里），`edit` 用 pi 的 `{path, edits:[{oldText,newText}]}`。
+>
+> 直接调 `execute` 会跳过管线的两件事：**`prepareArguments` 垫片**（已补：edits 传成字符串/单对象的
+> 归一化）与**参数 schema 校验**（未补：管线的 `runToolCall` 做）——参数不合法时由工具自身抛错。
+
+| pi 版本                           | 程序内 `tools.*`                                  |
+| --------------------------------- | ------------------------------------------------- |
+| 0.86.0 · 0.86.1 · 0.87.0 · 0.87.1 | ✓ pi 自造工具：同一批工具、同一套参数形状         |
+| 0.99.0 … 1.3.0 · 1.4.0（12 版）   | ✓ 走 pi 会话工具（`ctx.executeTool`，过工具管线） |
+
+**老版本不再是「更窄的路」**：工具集与参数形状与 ≥0.99 相同，差别只在调用路径（自造 vs 管线）。
+
+**真机冒烟 16/16 全过**（`scripts/version-smoke.sh`，fails=0）：floor 四版的 READ 腿从「`ERR:`」
+变成数字 **2216**（读 `package.json` 的长度，与 ≥0.99 逐字相同），其余各腿 `RUN=42` / `PAR=2` /
+任务面 handle 非空 / 0 个 `isError:true` 全程不变。
+
 探针口径：真实 pi（隔离 `-ne`），程序里 `try { tools.read({path:"/etc/hosts"}) } catch { 回错误原文 }`，
 程序自己回字符串，模型只负责原样转述。
+
+### floor 自造工具加版本门（2026-11-01，同日第四轮）
+
+> 自造工具那条路的判定原本是「这个工具上下文上没有 `executeTool`」——**只看当下认不认得出通道**。
+> 问题：未来的 pi 若挪了 `executeTool` 的位置，我们会**悄悄绕过 pi 的工具管线**——别的扩展的
+> `tool_call` 钩子拦不到程序发起的调用、用量也不记。改动前是明确报错。
+>
+> 现在**用版本号把这条路锁在 pi < 0.99**（判定照抄 `packages/dispatch/src/child-process.ts` 的
+> `supportsNoMcp` 写法，版本取自 `pi --version`；取不到 → 当作有通道）。现代 pi 上认不出通道 ⇒ 报
+> 「此 pi 版本没有程序内调用工具的通道（需 pi ≥ 0.99，binding: …）」。
+>
+> 顺带删掉了一条**走不到的路**：上一轮先加的「宿主中立文件绑定」退回落（`createFsBindings`）——
+> floor 四版都有工具工厂，那条路永远进不去；而且它的 `edit` 形状（`{path, old_string, new_string}`）
+> 与 pi 的（`{path, edits:[{oldText,newText}]}`）不同，留着是雷。fs 绑定仍留在 `packages/ptc`，
+> 服务 Kimi 面与独立 CLI。
+>
+> 覆盖：`tests/pi/floor-file-fallback.test.mjs`（用 PATH 上的假 `pi` 脚本控版本，6 个用例：floor 读文件 /
+> ls / edit 两种形状 / **现代 pi 缺通道必须报错** / 有通道时仍走会话工具）。
+>
+> **真机冒烟 16/16 全过**（`scripts/version-smoke.sh`，fails=0）：floor 四版与 ≥0.99 的 `READ=2216`
+> 逐字相同——版本门放行自造工具、≥0.99 照旧走会话工具，两条路给模型的形状是同一个。
 
 老版本另有一处语义差异：**0.86/0.87 的 `getActiveTools()` 只含扩展自己的工具**（实测 `["zz_probe"]`），
 内置工具只在 `getAllTools()` 里——那两版没有「向模型声明的集合」这个语义，所以绑定作用域退回

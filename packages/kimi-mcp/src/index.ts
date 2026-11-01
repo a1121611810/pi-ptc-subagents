@@ -1,1 +1,1 @@
-export { createFsBindings } from "./fs-tools.ts";
+export { createFsBindings } from "@pi-ptc/ptc";

@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, resolve, sep } from "node:path";
-import type { BindingTable } from "@pi-ptc/ptc";
+import type { BindingTable } from "./dispatcher.ts";
 
 // Kimi 面程序五件套：read / write / grep / glob / edit，语义对齐 pi 会话工具的常用子集。
 // workdir 是信任边界：所有路径先 realpath 再判定（防符号链接逃逸），越界即拒

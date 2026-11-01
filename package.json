@@ -18,6 +18,9 @@
     "type": "git",
     "url": "git+https://github.com/a1121611810/pi-ptc-subagents.git"
   },
+  "bin": {
+    "ptc": "./dist/ptc/cli.js"
+  },
   "files": [
     "dist/**/*.js",
     "docs/routes/**/*.md",
@@ -27,18 +30,20 @@
   "type": "module",
   "main": "./dist/index.js",
   "exports": {
-    ".": "./dist/index.js"
+    ".": "./dist/index.js",
+    "./ptc": "./dist/ptc/index.js"
   },
   "scripts": {
     "build": "pnpm -r --filter=!@pi-ptc/website run build",
     "build:kimi": "pnpm --filter @pi-ptc/kimi-mcp run build && node scripts/assemble-kimi.mjs",
-    "prepack": "pnpm run build && rm -rf dist docs/routes && cp -R packages/entry/dist dist && cp -R packages/routes/docs/routes docs/routes",
+    "prepack": "pnpm run build && rm -rf dist docs/routes && cp -R packages/entry/dist dist && cp -R packages/ptc/dist dist/ptc && cp -R packages/routes/docs/routes docs/routes",
     "check": "pnpm -r --filter=!@pi-ptc/website run check",
     "lint": "oxlint",
-    "test": "pnpm run test:pi && pnpm run test:output && pnpm run test:kimi",
+    "test": "pnpm run test:pi && pnpm run test:output && pnpm run test:kimi && pnpm run test:standalone",
     "test:pi": "node --test tests/pi/*.test.mjs",
     "test:output": "node --test tests/output/*.test.mjs",
     "test:kimi": "node --test tests/kimi/*.test.mjs",
+    "test:standalone": "node --test tests/standalone/*.test.mjs",
     "pretest": "pnpm run build",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check"
