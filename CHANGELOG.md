@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **常驻子代理状态面板**（pi TUI 编辑器上方）：把「派出去的子代理现在什么状态」从模型上下文搬到人的视线里。
-  面板逐条列出进行中的子代理（字形 + 状态色 + 起始时刻），标题给「任务 · 进行中 N · 成功 M · 失败 K」；没有进行中的任务时面板自动消失。
+  面板逐条列出进行中的子代理（字形 + 状态色 + 起始时刻），标题给「Tasks · N running · M succeeded · K failed」；没有进行中的任务时面板自动消失。**面板文案默认英文**（跟 pi 宿主界面同一语言）。
   刷新挂在 registry 既有的变迁回调上，记录怎么变面板就怎么变。守卫是 `ctx.mode === "tui"`（`hasUI` 在 RPC 模式也是
   true，不能当守卫）；字符串数组形态即可——宿主自带 10 行 widget 上限，pi-tui 的 `Text` 保留 ANSI，颜色直接由主题上。
   两条冻结上限（ADR-0022 §8）：面板行数派生自宿主上限，label 截断沿用旧 ADR-0022 §11 的 48。

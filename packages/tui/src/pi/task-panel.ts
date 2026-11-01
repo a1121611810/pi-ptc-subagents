@@ -33,7 +33,7 @@ function clockOf(startedAt: number): string {
  * 面板行（纯函数）：本会话进行中的子代理逐条 + 计数标题；没有进行中的任务 ⇒ 空数组（宿主据此卸载面板）。
  * 只出字符串数组——宿主自带 10 行上限，pi-tui 的 Text 保留 ANSI ⇒ 颜色直接由 theme.fg 上。
  *
- * 只看本会话的记录：registry 启动时会把磁盘上的历史会话记录一并恢复（真机实测：标题一度写「成功 180」——
+ * 只看本会话的记录：registry 启动时会把磁盘上的历史会话记录一并恢复（真机实测：标题一度写「succeeded 180」——
  * 那是上一轮会话攒下的）。sessionId 缺失时不筛（老记录没有这个字段）。
  */
 export function renderTaskPanel(
@@ -50,7 +50,7 @@ export function renderTaskPanel(
   const lines = [
     theme.fg(
       "accent",
-      `任务 · 进行中 ${inFlight.length} · 成功 ${count("succeeded")} · 失败 ${count("failed")}`,
+      `Tasks · ${inFlight.length} running · ${count("succeeded")} succeeded · ${count("failed")} failed`,
     ),
   ];
 
@@ -66,7 +66,7 @@ export function renderTaskPanel(
     );
   }
   if (inFlight.length > MAX_PANEL_ROWS) {
-    lines.push(theme.fg("dim", `└─ …还有 ${inFlight.length - MAX_PANEL_ROWS} 条`));
+    lines.push(theme.fg("dim", `└─ …${inFlight.length - MAX_PANEL_ROWS} more`));
   }
   return lines;
 }

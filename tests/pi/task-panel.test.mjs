@@ -1,5 +1,6 @@
-// 常驻子代理状态面板（ADR-0022）：进行中子代理逐条 + 计数标题，纯函数 → 字符串数组
-// 基准：宿主 widget 的 10 行上限（pi InteractiveMode.MAX_WIDGET_LINES）；冻结上限见 ADR-0022 §8
+// 常驻子代理状态面板（ADR-0022）：进行中的子代理逐条 + 计数标题，纯函数 → 字符串数组
+// 面板文案默认英文（跟 pi 宿主界面同一语言）；基准：宿主 widget 的 10 行上限
+// （pi InteractiveMode.MAX_WIDGET_LINES）；冻结上限见 ADR-0022 §8
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -23,13 +24,13 @@ function record(overrides = {}) {
   };
 }
 
-test("没有进行中任务 ⇒ 空数组（宿主据此卸载面板）", () => {
+test("没有进行中的任务 ⇒ 空数组（宿主据此卸载面板）", () => {
   assert.deepEqual(renderTaskPanel([], theme), []);
   assert.deepEqual(renderTaskPanel([record({ status: "succeeded" })], theme), []);
   assert.deepEqual(renderTaskPanel([record({ status: "failed" })], theme), []);
 });
 
-test("标题给出进行中/成功/失败三个计数", () => {
+test("标题给出 running/succeeded/failed 三个计数", () => {
   const lines = renderTaskPanel(
     [
       record(),
@@ -40,12 +41,12 @@ test("标题给出进行中/成功/失败三个计数", () => {
     theme,
   );
   assert.equal(lines.length, 3);
-  assert.match(lines[0], /进行中 2/);
-  assert.match(lines[0], /成功 1/);
-  assert.match(lines[0], /失败 1/);
+  assert.match(lines[0], /2 running/);
+  assert.match(lines[0], /1 succeeded/);
+  assert.match(lines[0], /1 failed/);
 });
 
-test("进行中任务逐条列出，字形与颜色按状态走", () => {
+test("进行中的任务逐条列出，字形与颜色按状态走", () => {
   const lines = renderTaskPanel(
     [
       record(),
@@ -70,7 +71,7 @@ test("超过面板行上限 ⇒ 收尾一行报还剩多少", () => {
   const many = Array.from({ length: MAX_PANEL_ROWS + 3 }, (_, i) => record({ id: `t${i}` }));
   const lines = renderTaskPanel(many, theme);
   assert.equal(lines.length, MAX_PANEL_ROWS + 2); // 标题 + 行 + 溢出行
-  assert.match(lines[lines.length - 1], /还有 3 条/);
+  assert.match(lines[lines.length - 1], /3 more/);
   assert.ok(lines.length <= 8, "面板自限 8 行（宿主上限 10 行）");
 });
 
@@ -79,7 +80,7 @@ test("widget key 是常量——同 key 覆盖才能保证 /reload 幂等", () =
 });
 
 test("只算本会话的记录——历史会话的成功不进计数", () => {
-  // 真机实测：registry 启动会恢复磁盘上的历史记录，标题一度写「成功 180」
+  // 真机实测：registry 启动会恢复磁盘上的历史记录，标题一度写「succeeded 180」
   const lines = renderTaskPanel(
     [
       record({ status: "succeeded", sessionId: "old-session" }),
@@ -88,6 +89,6 @@ test("只算本会话的记录——历史会话的成功不进计数", () => {
     theme,
     "new-session",
   );
-  assert.match(lines[0], /进行中 1/);
-  assert.match(lines[0], /成功 0/);
+  assert.match(lines[0], /1 running/);
+  assert.match(lines[0], /0 succeeded/);
 });

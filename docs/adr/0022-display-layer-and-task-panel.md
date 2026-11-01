@@ -64,7 +64,8 @@ packages/tui/
 - 形态：`ctx.ui.setWidget("ptc-tasks", lines)`，**不用** pi-tui 组件形式（factory）。理由：宿主已给 10 行上限、字符串数组可透传 ANSI（同 key 幂等、卸载即 `undefined`），组件形式要额外背 `requestRender` 管线与宽度截断。
 - 守卫：`ctx.mode === "tui"`；子代理进程（`PI_PTC_DEPTH>0`）沿用既有早退分支，不注册。
 - 刷新：registry 每次变迁（既有的 `onTransition` 回调）⇒ 重算并重设；没有进行中的任务 ⇒ `undefined` ⇒ 面板消失。
-- **只算本会话的记录**：registry 启动会把磁盘上的历史会话记录一并恢复（真机实测：标题一度写「成功 180」——那是上一轮会话攒下的）⇒ 按 `record.sessionId` 过滤（engine 在 spawn 时盖章，`engine.ts:265`）；`sessionId` 缺失时不筛（老记录没这个字段）。
+- **只算本会话的记录**：registry 启动会把磁盘上的历史会话记录一并恢复（真机实测：标题一度写「succeeded 180」——那是上一轮会话攒下的）⇒ 按 `record.sessionId` 过滤（engine 在 spawn 时盖章，`engine.ts:265`）；`sessionId` 缺失时不筛（老记录没这个字段）。
+- **面板文案默认英文**：标题 `Tasks · N running · M succeeded · K failed`、溢出行 `…N more`——面板就画在 pi 的界面里，与宿主界面同一语言（pi 的 TUI 是英文）；仓内注释与模型面散文仍是中文，那是不同的面。
 - **上限（冻结，改动需新 ADR）**：
 
 | 常量                    | 值  | 出处                                                                                                                          |
@@ -96,5 +97,5 @@ packages/tui/
 - **`packages/tui` 从「零依赖」变成「根零依赖 + `/pi` 带宿主 peer」**。peer 声明是**包级**的，故 `pi-coding-agent` 声明为 optional peer（`peerDependenciesMeta.optional`），免得 `output` / `search` / `task` 间接背上 pi 依赖；`pi-tui` 是 `/pi` 的真实依赖。
 - **旧 ADR-0022 §11 的五条上限继续只管旧面板**（工具结果里的那一块）；本面板另立两条并在本 ADR 注册。旧仓的教训是「数字没有声明来源」——这次两条都有出处。
 - **旧 ADR-0022 §2 是六态无 `queued`**，本仓实现是七态；面板状态表按现在的七态写。
-- **真机已验**（2026-11-01，pi 1.4.0 的真 TUI 跑在真 pty 上，120×40）：面板画在**编辑器正上方**（working 条之下、状态行之上），逐条列出进行中的子代理，状态随任务完成实时更新（`任务 · 进行中 2 · 成功 0` → `任务 · 进行中 1 · 成功 1`）。真机同时暴露了一个缺陷：标题一度把历史会话的恢复记录算进来（写「成功 180」），已按 `record.sessionId` 修掉并补了单测。
+- **真机已验**（2026-11-01，pi 1.4.0 的真 TUI 跑在真 pty 上，120×40）：面板画在**编辑器正上方**（working 条之下、状态行之上），逐条列出进行中的子代理，状态随任务完成实时更新（`Tasks · 2 running · 0 succeeded · 0 failed` → `Tasks · 1 running · 1 succeeded · 0 failed`）。真机同时暴露了一个缺陷：标题一度把历史会话的恢复记录算进来（写「succeeded 180」），已按 `record.sessionId` 修掉并补了单测。
 - **仍未验**：`/reload` 后是否残留死面板；floor 0.86 的真机渲染；窄终端下 `Text` 按宽度折行会多吃行预算（label 截断 48 + 宿主 10 行上限兜底）。
