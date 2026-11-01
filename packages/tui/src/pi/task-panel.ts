@@ -30,7 +30,7 @@ function clockOf(startedAt: number): string {
 }
 
 /**
- * 面板行（纯函数）：本会话在飞子代理逐条 + 计数标题；没有在飞 ⇒ 空数组（宿主据此卸载面板）。
+ * 面板行（纯函数）：本会话进行中的子代理逐条 + 计数标题；没有进行中的任务 ⇒ 空数组（宿主据此卸载面板）。
  * 只出字符串数组——宿主自带 10 行上限，pi-tui 的 Text 保留 ANSI ⇒ 颜色直接由 theme.fg 上。
  *
  * 只看本会话的记录：registry 启动时会把磁盘上的历史会话记录一并恢复（真机实测：标题一度写「成功 180」——
@@ -50,7 +50,7 @@ export function renderTaskPanel(
   const lines = [
     theme.fg(
       "accent",
-      `任务 · 在飞 ${inFlight.length} · 成功 ${count("succeeded")} · 失败 ${count("failed")}`,
+      `任务 · 进行中 ${inFlight.length} · 成功 ${count("succeeded")} · 失败 ${count("failed")}`,
     ),
   ];
 

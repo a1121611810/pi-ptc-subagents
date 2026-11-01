@@ -136,7 +136,7 @@
         <div class="arr">→</div>
         <div class="node partial"><div class="t"><span class="mark">◐</span>TUI 行渲染</div><div class="d">ptc 两工具 renderResult 已挂（折叠/展开/运行中）；shimmer 与各包 renderer 未写</div></div>
         <div class="arr">→</div>
-        <div class="node done"><div class="t"><span class="mark">✓</span>常驻状态面板</div><div class="d">2026-11-02（ADR-0022）：<b>编辑器上方常驻</b>（<code>packages/tui/pi</code> 的 pi 画面层）——逐条列在飞子代理（字形 + 状态色 + 起始时刻），标题给「在飞 N · 成功 M · 失败 K」，只算本会话的记录；没有在飞任务即消失。<b>真机已验</b>：pi 1.4.0 的真 TUI 跑在真 pty（120×40）——画在编辑器正上方、随任务完成实时更新、全部跑完即消失；真机暴露的「标题把历史会话记录算进来（成功 180）」已按 <code>record.sessionId</code> 修掉</div></div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>常驻状态面板</div><div class="d">2026-11-02（ADR-0022）：<b>编辑器上方常驻</b>（<code>packages/tui/pi</code> 的 pi 画面层）——逐条列进行中的子代理（字形 + 状态色 + 起始时刻），标题给「任务 · 进行中 N · 成功 M · 失败 K」，只算本会话的记录；没有进行中的任务即消失。<b>真机已验</b>：pi 1.4.0 的真 TUI 跑在真 pty（120×40）——画在编辑器正上方、随任务完成实时更新、全部跑完即消失；真机暴露的「标题把历史会话记录算进来（成功 180）」已按 <code>record.sessionId</code> 修掉</div></div>
       </div>
     </div>
   </div>

@@ -1,4 +1,4 @@
-// 常驻子代理状态面板（ADR-0022）：在飞子代理逐条 + 计数标题，纯函数 → 字符串数组
+// 常驻子代理状态面板（ADR-0022）：进行中子代理逐条 + 计数标题，纯函数 → 字符串数组
 // 基准：宿主 widget 的 10 行上限（pi InteractiveMode.MAX_WIDGET_LINES）；冻结上限见 ADR-0022 §8
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -23,13 +23,13 @@ function record(overrides = {}) {
   };
 }
 
-test("没有在飞任务 ⇒ 空数组（宿主据此卸载面板）", () => {
+test("没有进行中任务 ⇒ 空数组（宿主据此卸载面板）", () => {
   assert.deepEqual(renderTaskPanel([], theme), []);
   assert.deepEqual(renderTaskPanel([record({ status: "succeeded" })], theme), []);
   assert.deepEqual(renderTaskPanel([record({ status: "failed" })], theme), []);
 });
 
-test("标题给出在飞/成功/失败三个计数", () => {
+test("标题给出进行中/成功/失败三个计数", () => {
   const lines = renderTaskPanel(
     [
       record(),
@@ -40,12 +40,12 @@ test("标题给出在飞/成功/失败三个计数", () => {
     theme,
   );
   assert.equal(lines.length, 3);
-  assert.match(lines[0], /在飞 2/);
+  assert.match(lines[0], /进行中 2/);
   assert.match(lines[0], /成功 1/);
   assert.match(lines[0], /失败 1/);
 });
 
-test("在飞任务逐条列出，字形与颜色按状态走", () => {
+test("进行中任务逐条列出，字形与颜色按状态走", () => {
   const lines = renderTaskPanel(
     [
       record(),
@@ -88,6 +88,6 @@ test("只算本会话的记录——历史会话的成功不进计数", () => {
     theme,
     "new-session",
   );
-  assert.match(lines[0], /在飞 1/);
+  assert.match(lines[0], /进行中 1/);
   assert.match(lines[0], /成功 0/);
 });
