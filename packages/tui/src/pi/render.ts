@@ -9,7 +9,7 @@ interface ToolRenderContextLike {
   args: unknown;
 }
 import { Box, type Component, Text } from "@earendil-works/pi-tui";
-import { RENDER_BOUNDS } from "@pi-ptc/tui";
+import { RENDER_BOUNDS } from "../bounds.ts";
 
 export interface PtcToolDetails {
   status: "fulfilled" | "rejected" | "canceled";

@@ -16,7 +16,6 @@
     "check": "tsrs -p tsconfig.json"
   },
   "dependencies": {
-    "@earendil-works/pi-tui": "1.4.0",
     "@pi-ptc/dispatch": "workspace:*",
     "@pi-ptc/output": "workspace:*",
     "@pi-ptc/ptc": "workspace:*",

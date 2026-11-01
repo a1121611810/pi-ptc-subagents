@@ -3,7 +3,7 @@ import { Type, type Static } from "typebox";
 import { TOOLS, type SurfaceMode } from "@pi-ptc/routes";
 import { runPtcProgram, type BindingTable } from "@pi-ptc/ptc";
 import { renderToolResult } from "@pi-ptc/output";
-import { renderPtcResult, type PtcToolDetails } from "./ptc-render.ts";
+import { renderPtcResult, type PtcToolDetails } from "@pi-ptc/tui/pi";
 
 export interface PtcToolOptions {
   getBindings: () => BindingTable;

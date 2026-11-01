@@ -35,6 +35,15 @@ cpSync(
   join(out, "skills", "ptc", "SKILL.md"),
 );
 
+// Kimi 面是 MCP，产物里不许带 pi 宿主代码（ADR-0022 §5）：根入口一旦 re-export 了 pi 分面就破
+for (const f of readdirSync(out).filter((f) => f.endsWith(".js"))) {
+  if (readFileSync(join(out, f), "utf8").includes("@earendil-works")) {
+    throw new Error(
+      `release/kimi/${f} 含 @earendil-works 引用——Kimi 面不许带 pi 宿主代码（查 packages/tui 根入口有没有 re-export pi 分面）`,
+    );
+  }
+}
+
 for (const f of ["server.js", "worker.js"]) {
   if (!existsSync(join(out, f)))
     throw new Error(`装配缺 ${f}（worker 必须与 server 同目录：buildWorkerUrl 相对解析）`);

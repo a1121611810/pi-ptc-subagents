@@ -4,6 +4,8 @@ import { defineConfig } from "rolldown";
 // 直接吃各包源码：workspace exports 的 default 指向 dist，单包 filter 构建会把陈旧的
 // 兄弟包 dist 静默打进 bundle；alias 到 src 后 entry 构建不再依赖任何兄弟包的 dist
 const src = (pkg) => fileURLToPath(new URL(`../${pkg}/src/index.ts`, import.meta.url));
+// 子路径入口：必须排在同包的短 alias 之前——rolldown 的 alias 是前缀匹配，短 alias 会捕获子路径并解析失败
+const sub = (pkg, rel) => fileURLToPath(new URL(`../${pkg}/src/${rel}/index.ts`, import.meta.url));
 
 export default defineConfig({
   input: {
@@ -23,6 +25,7 @@ export default defineConfig({
       "@pi-ptc/routes": src("routes"),
       "@pi-ptc/search": src("search"),
       "@pi-ptc/task": src("task"),
+      "@pi-ptc/tui/pi": sub("tui", "pi"),
       "@pi-ptc/tui": src("tui"),
     },
   },
