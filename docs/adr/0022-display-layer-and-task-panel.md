@@ -16,20 +16,20 @@ Status: accepted (2026-11-01)。
 
 **三、实测事实（2026-11-01，逐条读 pi 1.4.0 与 floor 0.86.0 的类型与实现）。**
 
-| 事实 | 出处 |
-| --- | --- |
-| `ctx.ui.setWidget(key, string[] \| factory, { placement })` 在 0.86.0 与 1.4.0 **签名逐字同形** | `pi086/.../extensions/types.d.ts:98` vs `pi-1.4.0/.../types.d.ts:101` |
-| `placement` 只有 `aboveEditor` / `belowEditor`，默认 `aboveEditor` | 同上 `WidgetPlacement` |
-| 宿主自带 **10 行** widget 上限，超出追加 `... (widget truncated)` | `interactive-mode.js` `MAX_WIDGET_LINES = 10` |
-| 同一 key 重复 set **幂等**（先删旧再设新）；`undefined` = 卸载 | `setExtensionWidget` → `removeExisting` |
-| pi-tui 的 `Text` **保留 ANSI**、不套默认颜色 ⇒ 字符串数组可直接上色 | `pi-tui/dist/components/text.js`（`wrapTextWithAnsi` 注释明写 preserves ANSI） |
-| floor 0.86 也有 `ctx.ui.theme` 与 `Theme.fg` ⇒ 颜色无需版本门 | `pi086/.../types.d.ts:108`、`theme.d.ts:31` |
-| `ctx.hasUI` 在 **RPC 模式也是 true**；print/json 模式下 `ctx.ui` 是 **no-op 桩**（`setWidget: () => {}`，不抛） | pi `types.d.ts` 的 `hasUI` 注释、`core/extensions/runner.js:143` |
-| RPC 模式**真的实现了** `setWidget`（只支持 string[]，factory 被忽略），会向客户端发 `extension_ui_request` | `modes/rpc/rpc-mode.js:123-136` |
-| registry **每次记录变迁都 `#emit`**（spawn / transition / stop / resolve-exit / attach-report / attach-output） | `packages/dispatch/src/registry.ts:100,136,147,178` |
-| 发布产物 `dist/index.js` 只有两个外部 import（`pi-coding-agent` / `pi-tui`），根包 `dependencies` 为空 ⇒ pi 宿主在运行时提供它们 | `dist/index.js`、根 `package.json` |
-| **Kimi 产物 `release/kimi/server.js` 里 `@earendil-works` 出现 0 次** | 实测 grep |
-| rolldown 的 `resolve.alias` 对字符串键是**前缀匹配** ⇒ 子路径导入需更长 alias 且排在短 alias 之前（实测：短 alias 单独存在时子路径 `UNRESOLVED_IMPORT`，长 alias 在前则构建成功） | 本仓 `rolldown@1.2.15` 实测 |
+| 事实                                                                                                                                                                              | 出处                                                                           |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `ctx.ui.setWidget(key, string[] \| factory, { placement })` 在 0.86.0 与 1.4.0 **签名逐字同形**                                                                                   | `pi086/.../extensions/types.d.ts:98` vs `pi-1.4.0/.../types.d.ts:101`          |
+| `placement` 只有 `aboveEditor` / `belowEditor`，默认 `aboveEditor`                                                                                                                | 同上 `WidgetPlacement`                                                         |
+| 宿主自带 **10 行** widget 上限，超出追加 `... (widget truncated)`                                                                                                                 | `interactive-mode.js` `MAX_WIDGET_LINES = 10`                                  |
+| 同一 key 重复 set **幂等**（先删旧再设新）；`undefined` = 卸载                                                                                                                    | `setExtensionWidget` → `removeExisting`                                        |
+| pi-tui 的 `Text` **保留 ANSI**、不套默认颜色 ⇒ 字符串数组可直接上色                                                                                                               | `pi-tui/dist/components/text.js`（`wrapTextWithAnsi` 注释明写 preserves ANSI） |
+| floor 0.86 也有 `ctx.ui.theme` 与 `Theme.fg` ⇒ 颜色无需版本门                                                                                                                     | `pi086/.../types.d.ts:108`、`theme.d.ts:31`                                    |
+| `ctx.hasUI` 在 **RPC 模式也是 true**；print/json 模式下 `ctx.ui` 是 **no-op 桩**（`setWidget: () => {}`，不抛）                                                                   | pi `types.d.ts` 的 `hasUI` 注释、`core/extensions/runner.js:143`               |
+| RPC 模式**真的实现了** `setWidget`（只支持 string[]，factory 被忽略），会向客户端发 `extension_ui_request`                                                                        | `modes/rpc/rpc-mode.js:123-136`                                                |
+| registry **每次记录变迁都 `#emit`**（spawn / transition / stop / resolve-exit / attach-report / attach-output）                                                                   | `packages/dispatch/src/registry.ts:100,136,147,178`                            |
+| 发布产物 `dist/index.js` 只有两个外部 import（`pi-coding-agent` / `pi-tui`），根包 `dependencies` 为空 ⇒ pi 宿主在运行时提供它们                                                  | `dist/index.js`、根 `package.json`                                             |
+| **Kimi 产物 `release/kimi/server.js` 里 `@earendil-works` 出现 0 次**                                                                                                             | 实测 grep                                                                      |
+| rolldown 的 `resolve.alias` 对字符串键是**前缀匹配** ⇒ 子路径导入需更长 alias 且排在短 alias 之前（实测：短 alias 单独存在时子路径 `UNRESOLVED_IMPORT`，长 alias 在前则构建成功） | 本仓 `rolldown@1.2.15` 实测                                                    |
 
 **四、旧 ADR-0022 §11 的教训要照着走。**
 
@@ -66,22 +66,22 @@ packages/tui/
 - 刷新：registry 每次变迁（既有的 `onTransition` 回调）⇒ 重算并重设；无在飞任务 ⇒ `undefined` ⇒ 面板消失。
 - **上限（冻结，改动需新 ADR）**：
 
-| 常量 | 值 | 出处 |
-| --- | --- | --- |
-| `MAX_PANEL_ROWS` | 6 | 派生：宿主 widget 上限 10 行（`InteractiveMode.MAX_WIDGET_LINES`）⇒ 标题 1 行 + 任务行 6 行 + 溢出行 1 行 = 8 行，留 2 行余量 |
-| `MAX_PANEL_LABEL_CHARS` | 48 | 沿用旧 ADR-0022 §11 的 `MAX_LABEL_CHARS`（同一个 label 字段、同一个上限，不另立数字） |
+| 常量                    | 值  | 出处                                                                                                                          |
+| ----------------------- | --- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `MAX_PANEL_ROWS`        | 6   | 派生：宿主 widget 上限 10 行（`InteractiveMode.MAX_WIDGET_LINES`）⇒ 标题 1 行 + 任务行 6 行 + 溢出行 1 行 = 8 行，留 2 行余量 |
+| `MAX_PANEL_LABEL_CHARS` | 48  | 沿用旧 ADR-0022 §11 的 `MAX_LABEL_CHARS`（同一个 label 字段、同一个上限，不另立数字）                                         |
 
 - **状态→字形/颜色表（冻结，补上旧仓从未写下来的那条）**：
 
-| 状态 | 字形 | 颜色 |
-| --- | --- | --- |
-| `queued` | `○` | `muted` |
-| `running` | `●` | `accent` |
-| `stopping` | `◐` | `warning` |
-| `succeeded` | `✓` | `success` |
-| `failed` | `✗` | `error` |
-| `canceled` | `⊘` | `muted` |
-| `lost` | `?` | `dim` |
+| 状态        | 字形 | 颜色      |
+| ----------- | ---- | --------- |
+| `queued`    | `○`  | `muted`   |
+| `running`   | `●`  | `accent`  |
+| `stopping`  | `◐`  | `warning` |
+| `succeeded` | `✓`  | `success` |
+| `failed`    | `✗`  | `error`   |
+| `canceled`  | `⊘`  | `muted`   |
+| `lost`      | `?`  | `dim`     |
 
 配色沿用旧实现的状态色表（running=accent / stopping=warning / succeeded=success / failed=error / lost=dim / canceled=muted），`queued` 是本仓第七态，取 `muted`。
 
