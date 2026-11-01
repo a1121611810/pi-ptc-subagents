@@ -84,3 +84,8 @@ export function createTaskBinding(door: TaskDoor): TaskBinding {
     },
   };
 }
+
+// 任务面查询（程序内）：机械扫描在宿主做，筛选/归约在程序里做——
+// 正则跑在 worker（terminate 兜底），宿主没有隔离；程序返回什么只有什么进上下文。
+// 参数形状（scope: recent | all）由宿主侧实现与册子散文约定，程序侧无需 schema。
+export const TASK_RECORDS_BINDING_NAME = "task_records";

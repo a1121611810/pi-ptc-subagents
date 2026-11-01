@@ -32,6 +32,7 @@ import {
   KNOWN_BINDING_NAMES,
   resolveBindingNames,
   TASK_BINDING_NAME,
+  TASK_RECORDS_BINDING_NAME,
   TASK_DOOR_PARAMETERS,
   WorkerPool,
   spawnPtcWorker,
@@ -523,6 +524,12 @@ function createBindingTable(
   const taskBinding = createTaskBinding(session);
   table[TASK_BINDING_NAME] = async (args) =>
     withDeliveryNote(await taskBinding.execute(args as { task: string; label?: string }));
+  // 任务面查询（程序内）：机械扫描在宿主，筛选/归约在程序里——正则跑在 worker（terminate 兜底），宿主没有隔离
+  table[TASK_RECORDS_BINDING_NAME] = async (args) => {
+    const records = session.registry.list();
+    if ((args as { scope?: string } | undefined)?.scope !== "all") return records;
+    return [...records, ...(await session.readArchivedRecords())];
+  };
   return table;
 }
 

@@ -1,5 +1,5 @@
 export { compileProgram } from "./compile.ts";
-export { createTaskBinding, TASK_BINDING_NAME } from "./task-binding.ts";
+export { createTaskBinding, TASK_BINDING_NAME, TASK_RECORDS_BINDING_NAME } from "./task-binding.ts";
 export type {
   CreateTaskResult,
   TaskBinding,

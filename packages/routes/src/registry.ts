@@ -35,6 +35,7 @@ export const TOOLS = {
               // +「返回文本、失败抛异常」写明——不硬编码字段名（pi 的 edit 是 edits[] 数组，
               // 硬编码必错），让模型复用它已经见过的同名工具声明。
               "程序内可调本会话已启用的同名工具（read / write / edit / grep / find / ls；bash 默认不可用），参数与直接调用该工具完全一致；每次调用返回 Promise，要 await，返回文本结果，失败抛异常。",
+              '程序内还可调 task_records({ scope: "all" }) 取任务记录（all 含压缩归档）——要挑很多条时在程序里筛完只 return 要的几条。',
               '例：const files = await tools.find({ pattern: "*.py" }); for (const f of files) await tools.write({ path: f, content: body });',
             ].join(""),
       ].join(""),
