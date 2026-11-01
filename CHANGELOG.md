@@ -5,27 +5,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [7.6.0] - 2026-11-02
 
 ### Added
 
-- **常驻子代理状态面板**（pi TUI 编辑器上方）：把「派出去的子代理现在什么状态」从模型上下文搬到人的视线里。
-  面板逐条列出进行中的子代理（字形 + 状态色 + 起始时刻），标题给「Tasks · N running · M succeeded · K failed」；没有进行中的任务时面板自动消失。**面板文案默认英文**（跟 pi 宿主界面同一语言）。
-  刷新挂在 registry 既有的变迁回调上，记录怎么变面板就怎么变。守卫是 `ctx.mode === "tui"`（`hasUI` 在 RPC 模式也是
-  true，不能当守卫）；字符串数组形态即可——宿主自带 10 行 widget 上限，pi-tui 的 `Text` 保留 ANSI，颜色直接由主题上。
-  两条冻结上限（ADR-0022 §8）：面板行数派生自宿主上限，label 截断沿用旧 ADR-0022 §11 的 48。
-  面板正文（模型写的、常照抄用户的话）先剥 ANSI 与控制符、再把空白压成空格、最后才截断——
-  不然转义序列会被终端执行、换行会把一条任务拆成两行。面板接线住在 `packages/tui/pi` 的
-  `createTaskPanel`，它自己订阅 registry 的变迁，entry 只管建与卸载。
-  面板跨 `/reload` 存活：无残留、无双份（同一 widget key 覆盖，重载后的新实例重新订阅 registry 并跟着状态走）。
+- **Persistent subagent status panel** (above the pi TUI editor): the state of dispatched
+  subagents moves out of the model context into the human's line of sight. The panel lists every
+  in-flight subagent (glyph + status color + start time) under the title
+  `Tasks · N running · M succeeded · K failed`, and disappears when nothing is in flight.
+  **Panel text is English by default** — the same language as the pi host UI.
+  Refresh rides the registry's existing transition callback, so the panel changes exactly when a
+  record changes. The guard is `ctx.mode === "tui"` (`hasUI` is also true in RPC mode, so it
+  cannot serve as the guard); a plain string array is enough — the host caps widgets at 10 rows,
+  and pi-tui's `Text` keeps ANSI, so the colors come straight from the theme.
+  Two frozen limits (ADR-0022 §8): the row count is derived from the host cap, and the label
+  truncation stays at the 48 chars of the old ADR-0022 §11.
+  Panel text (written by the model, often copied verbatim from the user) is stripped of ANSI and
+  control characters, then whitespace is collapsed, and only then is it truncated — in the other
+  order escape sequences would be cut in half and a newline would split one task into two lines.
+  The wiring lives in `packages/tui/pi`'s `createTaskPanel`, which subscribes to the registry
+  itself; `entry` only creates and disposes it.
+  The panel survives `/reload` with no leftover and no duplicate: the same widget key overwrites,
+  and the reloaded instance re-subscribes and follows the state.
 
 ### Changed
 
-- **`packages/tui` 升格为显示层**（ADR-0022）：根入口仍是零依赖的共享文本零件（`output` / `search` / `task` 四个消费方零改动），
-  pi 画面（折叠渲染 + 上面那块面板）走 `./pi` 子路径；`entry` 回归装配，去掉了全仓唯一那处 pi-tui 依赖。
-  根入口**不得** re-export pi 分面——`kimi-mcp` 的构建 alias 指向 `src/index.ts`，带出去就会把 pi 宿主代码打进 Kimi 产物；
-  `build:kimi` 装配因此加了门禁：产物里出现 `@earendil-works` 即抛。发布物形态不变（仍只有 pi-coding-agent 与 pi-tui
-  两个外部 import），Kimi 产物逐字未变。
+- **`packages/tui` is now the display layer** (ADR-0022): the root entry is still the
+  zero-dependency shared text primitives (`output` / `search` / `task` are unchanged), while the
+  pi picture — the collapsible result rendering plus the panel above — moves behind the `./pi`
+  subpath. `entry` goes back to assembly only, and the repository's single pi-tui import is
+  gone.
+  The root entry **must not** re-export the pi face: `kimi-mcp`'s build alias points at
+  `src/index.ts`, so a re-export would bundle pi host code into the Kimi artifact. `build:kimi`
+  therefore gained a gate — the artifact throws if `@earendil-works` shows up in it. The
+  published shape is unchanged (still only `pi-coding-agent` and `pi-tui` as external imports)
+  and the Kimi artifact is byte-identical.
+
+### Verification
+
+- Real pi TUI over a real pty (120×40): the panel draws right above the editor, updates as
+  tasks finish (`Tasks · 2 running · 0 succeeded · 0 failed` → `Tasks · 1 running · 1 succeeded
+  · 0 failed`), and vanishes when they are all done. Floor 0.86.0 renders it too (`setWidget`
+  has the same signature on both — no version gate).
+- 16-version real-machine smoke (`scripts/version-smoke.sh`): **16/16, fails=0** — 0.86.0 /
+  0.86.1 / 0.87.0 / 0.87.1 / 0.99.0 / 0.99.1 / 0.99.2 / 1.0.0–1.0.4 / 1.1.0 / 1.2.0 / 1.3.0 plus
+  1.4.0 on PATH.
+- Repository tests: **172 pass, 0 fail** (139 pi / 6 output / 17 Kimi / 10 standalone); the panel
+  probe is 12/12 (9 for the pure renderer, 3 for the wiring).
 
 ## [7.5.0] - 2026-11-01
 
