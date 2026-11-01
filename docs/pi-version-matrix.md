@@ -199,10 +199,20 @@ F3-3 = 330；按字面读是 3300 / 300）。**判分器零复制**：bench 加 
   `ContextEventResult = { messages?: AgentMessage[] }` 与 **1.4.0 逐字同形**；
   `agent-session.js:1666` / `:1933` 经扩展总线 emit `session_compact`）。
   ⇒ 压缩后重注入**无版本门**。
-- **⚠️ 真机只验过 1.4.0**：1.4.0 上 `session_compact reason=manual` 触发、压缩后第一次 `context` 里
-  任务清单注入了且**只注一次**。floor 0.86 的真机探针**扩展事件总线收到了压缩事件**
-  （`ctx.compact()` ⇒ `session_compact_failed reason=manual` 到达 ⇒ 事件通道通），但**压缩本身每次都失败**
-  （`Nothing to compact (session too small)`——压缩阈值设置未按预期生效）⇒ **成功路径未验，不能算 floor 已验**。
+- **真机两版都过（2026-11-01）**：floor 0.86.0 与 1.4.0 用同一探针
+  `scripts/compact-inject-smoke.mjs` 都跑通——0.86.0：`session_before_compact branchEntries=17`
+  ⇒ `session_compact reason=manual` ⇒ 下一次 `context` 里任务清单注入了（messages 14→7）；
+  1.4.0：`branchEntries=28` ⇒ `session_compact` ⇒ `context messages=8 清单=有`（23→8）。
+  ⇒ **压缩重注入无版本门**。中间版本（0.87–1.3）未逐版核。
+- **顺带**：任务面响应改对象（`ptc_task_list` / `ptc_task_output`）在
+  `scripts/version-smoke.sh` 第四腿上**真机全绿**——1.4.0 / 0.86.0 / PATH 三档 `task_face=OK`、
+  `isError` 0 ⇒ 形状变更没打断既有腿。
+- **探针的四个坑**（写在 `scripts/compact-inject-smoke.mjs` 头）：rpc 命令走 **stdin**（写 stdout
+  等于没发 ⇒ 会话是空的 ⇒ 压缩报「会话太小」）；压缩要等 **agent 空闲**（在飞轮次里压会 abort
+  在飞轮次，0.86 上 branch 为空 ⇒ 同样报「会话太小」）；floor 0.86 读 **`models.json`** 拿 provider
+  配置（1.4.0 读 `models-store.json` 就够）——隔离目录缺它 ⇒ prompt 静默不跑；会话要比
+  **`keepRecentTokens`** 大（默认 20000 token ⇒ 小会话没东西可摘要 ⇒ 同样报「会话太小」——
+  脚本自建隔离配置目录并把阈值压到 1000）。
 - **0.86–1.3 中间版本未逐版核**。
 
 ## 待测
