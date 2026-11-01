@@ -203,7 +203,7 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
     const panelUi = ctx.mode === "tui" ? ctx.ui : undefined;
     const refreshPanel = (): void => {
       if (!panelUi) return;
-      const lines = renderTaskPanel(session.registry.list(), panelUi.theme);
+      const lines = renderTaskPanel(session.registry.list(), panelUi.theme, session.sessionId);
       panelUi.setWidget(TASK_PANEL_KEY, lines.length > 0 ? lines : undefined);
     };
     // 决策 5：registry 每次变迁同步任务面可见性（构造时挂监听器，闭包延迟取 session）

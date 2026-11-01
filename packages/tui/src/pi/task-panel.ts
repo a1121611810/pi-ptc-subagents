@@ -30,15 +30,23 @@ function clockOf(startedAt: number): string {
 }
 
 /**
- * 面板行（纯函数）：在飞子代理逐条 + 计数标题；没有在飞 ⇒ 空数组（宿主据此卸载面板）。
+ * 面板行（纯函数）：本会话在飞子代理逐条 + 计数标题；没有在飞 ⇒ 空数组（宿主据此卸载面板）。
  * 只出字符串数组——宿主自带 10 行上限，pi-tui 的 Text 保留 ANSI ⇒ 颜色直接由 theme.fg 上。
+ *
+ * 只看本会话的记录：registry 启动时会把磁盘上的历史会话记录一并恢复（真机实测：标题一度写「成功 180」——
+ * 那是上一轮会话攒下的）。sessionId 缺失时不筛（老记录没有这个字段）。
  */
-export function renderTaskPanel(records: readonly TaskRecord[], theme: Theme): string[] {
-  const inFlight = records.filter((record) => IN_FLIGHT.includes(record.status));
+export function renderTaskPanel(
+  records: readonly TaskRecord[],
+  theme: Theme,
+  sessionId?: string,
+): string[] {
+  const mine = sessionId ? records.filter((record) => record.sessionId === sessionId) : records;
+  const inFlight = mine.filter((record) => IN_FLIGHT.includes(record.status));
   if (inFlight.length === 0) return [];
 
   const count = (status: TaskStatus): number =>
-    records.filter((record) => record.status === status).length;
+    mine.filter((record) => record.status === status).length;
   const lines = [
     theme.fg(
       "accent",

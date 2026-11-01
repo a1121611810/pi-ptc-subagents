@@ -77,3 +77,17 @@ test("超过面板行上限 ⇒ 收尾一行报还剩多少", () => {
 test("widget key 是常量——同 key 覆盖才能保证 /reload 幂等", () => {
   assert.equal(TASK_PANEL_KEY, "ptc-tasks");
 });
+
+test("只算本会话的记录——历史会话的成功不进计数", () => {
+  // 真机实测：registry 启动会恢复磁盘上的历史记录，标题一度写「成功 180」
+  const lines = renderTaskPanel(
+    [
+      record({ status: "succeeded", sessionId: "old-session" }),
+      record({ sessionId: "new-session" }),
+    ],
+    theme,
+    "new-session",
+  );
+  assert.match(lines[0], /在飞 1/);
+  assert.match(lines[0], /成功 0/);
+});
