@@ -9,6 +9,12 @@
 - 发布物核验四件：run 绿 + `+ pkg@ver` 日志行 / dist-tags.latest / shasum 对账（CI vs 本地 dry-run）/ SLSA provenance。registry 传播 60s–2m30s，即时查不到正常。
 - 「空目录 npm install 假成功」坑：无 package.json 的目录里 bun-shim npm 可能显示 changed 1 package 但 node_modules 为空；干净安装核验必须 `npm init -y` 再装 + fs 直读 package.json（exports 字段挡 `require('<pkg>/package.json')`）。
 - npm 包 `pi`（registry 现网）无 1.3.x/1.4.x——version-smoke 的 shim 自愈对 ceiling 版本不可用。
+- **npm 11 的 bin 警告是文案误导，不是真删**（2026-11-01 实测，npm 11.20.0）：`npm publish --dry-run` 打
+  `npm warn publish "bin[ptc]" script name dist/ptc/cli.js was invalid and removed`，看着像 bin 被删了。
+  真相在 `@npmcli/package-json/lib/normalize.js`：`secureAndUnixifyPath` 把 `./dist/ptc/cli.js` 规整成
+  `dist/ptc/cli.js`，因 `binTarget !== pkg.bin[binKey]` 就推一条 "was invalid and removed"，
+  **紧接着 `pkg.bin[base] = binTarget` 又写回去了**——只有 `base !== binKey`（改名那种）才真 delete。
+  判定办法：解包 tarball 直读 `package/package.json` 的 `bin` 字段，别信警告文案。
 
 ## pi 版本素材（冒烟/验证用）
 
