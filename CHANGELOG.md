@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   面板正文（模型写的、常照抄用户的话）先剥 ANSI 与控制符、再把空白压成空格、最后才截断——
   不然转义序列会被终端执行、换行会把一条任务拆成两行。面板接线住在 `packages/tui/pi` 的
   `createTaskPanel`，它自己订阅 registry 的变迁，entry 只管建与卸载。
+  面板跨 `/reload` 存活：无残留、无双份（同一 widget key 覆盖，重载后的新实例重新订阅 registry 并跟着状态走）。
 
 ### Changed
 
