@@ -271,6 +271,10 @@ importers:
       '@earendil-works/pi-tui':
         specifier: 1.4.0
         version: 1.4.0
+    devDependencies:
+      '@pi-ptc/dispatch':
+        specifier: workspace:*
+        version: link:../dispatch
 
   packages/website:
     devDependencies:
