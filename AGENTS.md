@@ -16,7 +16,7 @@ pi 的扩展：PTC（模型写 TypeScript 程序批量调工具）+ 子代理派
 | `routes`   | 模型面散文唯一出处（ADR-0013）：7 条路的册子 + 渲染器（索引/通知/引导语）+ Kimi 面 KIMI_MCP_RUN_CODE 块                                             | 无（叶子）                    |
 | `search`   | 搜索 provider 抽象（DeepSeek 首家）：三动作工具、配额、记忆、预算                                                                                   | → tui                         |
 
-依赖铁律：**tui 的根入口 / routes / output / ptc 是叶子**（不感知领域概念；`ptc` 更是零依赖零宿主——引擎可脱离 pi 单独安装）；`dispatch` 持全部任务状态，其余只是调用方；宿主依赖单向——pi-tui 只出现在 `packages/tui/pi`（pi 画面层，ADR-0022），`output` 与 `ptc` 零宿主依赖。
+依赖铁律：**tui 的根入口 / routes / output / ptc 是叶子**（不感知领域概念；`ptc` 更是零依赖零宿主——引擎可脱离 pi 单独安装）；`dispatch` 持全部任务状态，其余只是调用方；宿主依赖单向——pi-tui 的**导入点**只在 `packages/tui/pi`（pi 画面层，ADR-0022），但 **`entry` 打包出的 `dist/index.js` 仍 import 它** ⇒ entry 的 package.json 也要声明它（**声明跟产物走，不只跟源码走**：干净树安装解析不到就是红，2026-11-02 发版前实测抓到）；`output` 与 `ptc` 零宿主依赖。
 
 **引擎单独使用（2026-11-01）**：`packages/ptc` 是零依赖零宿主的 PTC 引擎——装根包后 `import { runPtcProgram, createFsBindings } from "pi-ptc-subagents/ptc"` 即可脱离 pi 与模型跑程序（绑定契约见 GLOSSARY.md），命令行 `ptc <program.ts> --workdir .`。模型面（工具工厂 / 绑定表 / 任务门）在 `packages/entry`，pi 画面（折叠渲染 / 常驻子代理状态面板）在 `packages/tui/pi`——只有 pi 面用；Kimi 面直接用引擎 + `createFsBindings`，不经模型面。
 

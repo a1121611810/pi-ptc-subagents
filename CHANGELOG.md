@@ -33,8 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`packages/tui` is now the display layer** (ADR-0022): the root entry is still the
   zero-dependency shared text primitives (`output` / `search` / `task` are unchanged), while the
   pi picture — the collapsible result rendering plus the panel above — moves behind the `./pi`
-  subpath. `entry` goes back to assembly only, and the repository's single pi-tui import is
-  gone.
+  subpath. `entry` goes back to assembly only, and the repository's single pi-tui **import site**
+  is gone from `entry`'s sources. `entry` keeps declaring `@earendil-works/pi-tui`, though: its
+  built `dist/index.js` still imports it, so the declaration follows the artifact, not just the
+  source (a clean install that cannot resolve it breaks the extension — caught by the
+  pre-release clean-worktree check).
   The root entry **must not** re-export the pi face: `kimi-mcp`'s build alias points at
   `src/index.ts`, so a re-export would bundle pi host code into the Kimi artifact. `build:kimi`
   therefore gained a gate — the artifact throws if `@earendil-works` shows up in it. The
