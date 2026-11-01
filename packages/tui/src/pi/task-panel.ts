@@ -1,6 +1,6 @@
 import type { TaskRecord, TaskStatus } from "@pi-ptc/dispatch";
 import type { Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
-import { truncateLine } from "../text.ts";
+import { sanitizeText, truncateLine } from "../text.ts";
 
 /** 面板的宿主 widget key——同 key 覆盖 ⇒ /reload 与重复注册都幂等（pi 的 setExtensionWidget 先删旧再设新） */
 export const TASK_PANEL_KEY = "ptc-tasks";
@@ -57,7 +57,13 @@ export function renderTaskPanel(
   const shown = inFlight.slice(0, MAX_PANEL_ROWS);
   for (const [index, record] of shown.entries()) {
     const style = STATUS_STYLE[record.status];
-    const label = truncateLine(record.label ?? record.task, MAX_PANEL_LABEL_CHARS);
+    // 任务正文是模型写的、常照抄用户的话：先剥 ANSI/控制符（终端里会被执行）、
+    // 再把换行压成空格（pi-tui 的 Text 按 \n 拆行 ⇒ 一条任务会多占一行），
+    // 最后才截断——反过来会把转义序列截成半截
+    const text = sanitizeText(record.label || record.task)
+      .replace(/\s+/g, " ")
+      .trim();
+    const label = truncateLine(text, MAX_PANEL_LABEL_CHARS);
     const last = index === shown.length - 1 && inFlight.length <= MAX_PANEL_ROWS;
     lines.push(
       theme.fg("dim", last ? "└─ " : "├─ ") +

@@ -25,7 +25,7 @@ import {
 } from "@pi-ptc/dispatch";
 import { fileURLToPath } from "node:url";
 import { compactedTaskReminder, readTaskOutput, taskListSnapshot } from "@pi-ptc/task";
-import { TASK_PANEL_KEY, renderTaskPanel } from "@pi-ptc/tui/pi";
+import { createTaskPanel } from "@pi-ptc/tui/pi";
 import { createDeepSeekProvider, createSearchMemory, createSearchQuota } from "@pi-ptc/search";
 import { createWebDsSearchTool } from "./web-ds-search-tool.ts";
 import { showUpgradeNotice } from "./upgrade-notice.ts";
@@ -199,19 +199,9 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
         for (const name of ours) faceAddedByUs.delete(name);
       }
     };
-    // 常驻子代理状态面板（ADR-0022）：只有 TUI 有屏幕——mode 进程内固定，session_start 判一次
-    const panelUi = ctx.mode === "tui" ? ctx.ui : undefined;
-    const refreshPanel = (): void => {
-      if (!panelUi) return;
-      const lines = renderTaskPanel(session.registry.list(), panelUi.theme, session.sessionId);
-      panelUi.setWidget(TASK_PANEL_KEY, lines.length > 0 ? lines : undefined);
-    };
     // 决策 5：registry 每次变迁同步任务面可见性（构造时挂监听器，闭包延迟取 session）
     session = assemblePtcSession({
-      onTransition: () => {
-        applyTaskFaceVisibility();
-        refreshPanel();
-      },
+      onTransition: () => applyTaskFaceVisibility(),
       whyEnabled: () => whyEnabledOverride ?? whyEnabledPersisted,
       context: buildEngineContext(ctx, piVersion),
       engine: {
@@ -266,9 +256,15 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
         );
       },
     });
+    // 常驻子代理状态面板（ADR-0022）：只有 TUI 有屏幕——mode 进程内固定，session_start 判一次
+    const taskPanel = createTaskPanel({
+      ui: ctx.mode === "tui" ? ctx.ui : undefined,
+      source: session.registry,
+      sessionId: session.sessionId,
+    });
     pi.on("session_shutdown", () => {
       sessionEnding = true;
-      panelUi?.setWidget(TASK_PANEL_KEY, undefined); // 面板不留残影
+      taskPanel.dispose(); // 面板不留残影
       pool.drain(); // 退役空闲 worker：特定关闭时序下别让 ref 着的线程拖住退出
       void session.shutdown();
     });

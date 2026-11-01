@@ -3,7 +3,9 @@
 // （pi InteractiveMode.MAX_WIDGET_LINES）；冻结上限见 ADR-0022 §8
 import test from "node:test";
 import assert from "node:assert/strict";
+import { TaskRegistry } from "../../packages/dispatch/dist/index.js";
 import {
+  createTaskPanel,
   MAX_PANEL_LABEL_CHARS,
   MAX_PANEL_ROWS,
   renderTaskPanel,
@@ -67,6 +69,22 @@ test("label 缺省退回 task 文本，且按冻结上限截断", () => {
   assert.ok(!lines[1].includes("x".repeat(MAX_PANEL_LABEL_CHARS + 1)));
 });
 
+test("空 label 也退回 task 文本（空串不是 nullish）", () => {
+  const lines = renderTaskPanel([record({ label: "", task: "写测试" })], theme);
+  assert.match(lines[1], /写测试/);
+});
+
+test("任务正文里的 ANSI 与换行不进终端", () => {
+  // 正文是模型写的、常照抄用户的话：ANSI 会被终端执行，换行会被 pi-tui 拆成多行
+  const lines = renderTaskPanel(
+    [record({ label: undefined, task: "读 \x1b[2J 文件\n第二行" })],
+    theme,
+  );
+  assert.ok(!lines[1].includes("\x1b"), "ANSI 不该进面板");
+  assert.ok(!lines[1].includes("\n"), "正文里的换行不该把一行拆成两行");
+  assert.match(lines[1], /读 文件 第二行/);
+});
+
 test("超过面板行上限 ⇒ 收尾一行报还剩多少", () => {
   const many = Array.from({ length: MAX_PANEL_ROWS + 3 }, (_, i) => record({ id: `t${i}` }));
   const lines = renderTaskPanel(many, theme);
@@ -91,4 +109,49 @@ test("只算本会话的记录——历史会话的成功不进计数", () => {
   );
   assert.match(lines[0], /1 running/);
   assert.match(lines[0], /0 succeeded/);
+});
+
+// ── 接线（createTaskPanel）：registry 变迁 → 面板出现/消失 ──
+
+function fakeUi() {
+  const calls = [];
+  return { calls, ui: { theme, setWidget: (key, value) => calls.push([key, value]) } };
+}
+
+test("接线：派一条任务 ⇒ 面板出现；任务落终态 ⇒ 面板消失", async () => {
+  const { calls, ui } = fakeUi();
+  const registry = new TaskRegistry();
+  const panel = createTaskPanel({ ui, source: registry, sessionId: "s1" });
+  await registry.submit({
+    kind: "spawn",
+    record: { id: "t1", status: "running", task: "写测试", sessionId: "s1" },
+  });
+  assert.equal(calls.at(-1)[0], TASK_PANEL_KEY);
+  assert.match(calls.at(-1)[1][0], /1 running/);
+  await registry.submit({ kind: "transition", id: "t1", to: "succeeded" });
+  assert.equal(calls.at(-1)[1], undefined, "没有在飞任务 ⇒ 面板该被卸载");
+  panel.dispose();
+});
+
+test("接线：没有 ui（print/json 模式）⇒ 什么都不画", async () => {
+  const registry = new TaskRegistry();
+  const panel = createTaskPanel({ source: registry, sessionId: "s1" });
+  await registry.submit({
+    kind: "spawn",
+    record: { id: "t1", status: "running", task: "写测试", sessionId: "s1" },
+  });
+  panel.dispose(); // 不抛就算过
+});
+
+test("接线：dispose 之后再来变迁 ⇒ 面板不再回来", async () => {
+  const { calls, ui } = fakeUi();
+  const registry = new TaskRegistry();
+  const panel = createTaskPanel({ ui, source: registry, sessionId: "s1" });
+  panel.dispose();
+  const before = calls.length;
+  await registry.submit({
+    kind: "spawn",
+    record: { id: "t1", status: "running", task: "写测试", sessionId: "s1" },
+  });
+  assert.equal(calls.length, before, "卸载后不该再设 widget");
 });
