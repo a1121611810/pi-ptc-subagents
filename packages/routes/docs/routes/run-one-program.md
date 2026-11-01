@@ -7,6 +7,7 @@
 
 - 绑定表 = 内置名单 ∩ 会话活跃工具（`--tools` 收窄的会话不会拿到被滤掉的绑定）
 - `bash` 不在程序绑定表里——旧 ADR-0040 的 opt-in 尚未接线，当前没有任何开关能开它
+- 程序内还能调 `task_records({ scope })` 取任务记录、`task_output({ taskId })` 取孩子交回的正文（归约后的散文）——返回 `{text}`；`text` 空时看 `status`：还在跑（`queued`/`running`/`stopping`）就等一会儿再取，别当没产出
 - 程序返回值是归约后的结果；undefined 返回标记为「无完成值」
 
 默认 2 分钟超时（可经 timeoutMs 调整）。输出超 50 KB 按 pi 截断契约切尾，

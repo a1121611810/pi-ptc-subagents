@@ -32,8 +32,10 @@ import { createPtcRunCodeTool, createPtcWorkflowTool } from "./ptc-tools.ts";
 import { KNOWN_BINDING_NAMES, resolveBindingNames } from "./ptc-bindings.ts";
 import {
   createTaskBinding,
+  createTaskOutputBinding,
   TASK_BINDING_NAME,
   TASK_RECORDS_BINDING_NAME,
+  TASK_OUTPUT_BINDING_NAME,
   TASK_DOOR_PARAMETERS,
 } from "./task-binding.ts";
 import {
@@ -48,6 +50,7 @@ import {
 import { assemblePtcSession, buildEngineContext, type PtcSession } from "./session.ts";
 
 export { assemblePtcSession, buildEngineContext } from "./session.ts";
+export { createTaskOutputBinding } from "./task-binding.ts";
 export type {
   CreateTaskResult,
   DispatchOutcome,
@@ -610,6 +613,8 @@ function createBindingTable(
     if ((args as { scope?: string } | undefined)?.scope !== "all") return records;
     return [...records, ...(await session.readArchivedRecords())];
   };
+  // 任务产出（程序内）：归约层——孩子的散文正文；wait:false 派发后取不回的正文在这里取回
+  table[TASK_OUTPUT_BINDING_NAME] = createTaskOutputBinding(session);
   return table;
 }
 

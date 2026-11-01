@@ -1,5 +1,6 @@
 import { Type, type Static } from "typebox";
-import type { CreateTaskResult } from "@pi-ptc/dispatch";
+import type { CreateTaskResult, TaskRecord } from "@pi-ptc/dispatch";
+import { readTaskOutput, type TaskOutputView } from "@pi-ptc/task";
 import { TASK_DOOR_PARAM_DESCRIPTIONS } from "@pi-ptc/routes";
 export type { CreateTaskResult, DispatchResult, TaskHandle, TaskRejection } from "@pi-ptc/dispatch";
 
@@ -89,3 +90,33 @@ export function createTaskBinding(door: TaskDoor): TaskBinding {
 // 正则跑在 worker（terminate 兜底），宿主没有隔离；程序返回什么只有什么进上下文。
 // 参数形状（scope: recent | all）由宿主侧实现与册子散文约定，程序侧无需 schema。
 export const TASK_RECORDS_BINDING_NAME = "task_records";
+
+// 任务产出（程序内）：归约层——孩子的散文正文。与模型面 ptc_task_output 同一套读法
+// （readTaskOutput：正文优先，没正文才退回原始尾部 + 分层引导）
+export const TASK_OUTPUT_BINDING_NAME = "task_output";
+
+export interface TaskOutputBindingSource {
+  registry: { get(taskId: string): TaskRecord | undefined };
+  readArchivedRecord(taskId: string): Promise<(TaskRecord & { archived: true }) | undefined>;
+  outputSize(taskId: string): Promise<number | undefined>;
+  readOutput(taskId: string): Promise<string | undefined>;
+  readOutputTail(taskId: string, maxBytes: number): Promise<string | undefined>;
+}
+
+// 绑定契约：never throws——查不到给 { error }，与任务面 ptc_task_output 同形
+export function createTaskOutputBinding(
+  source: TaskOutputBindingSource,
+): (args: unknown) => Promise<(TaskOutputView & { status?: string }) | { error: string }> {
+  return async (args) => {
+    // 模型面工具的参数是 task_id（下划线），程序内习惯驼峰——两种都收
+    const raw = args as { taskId?: unknown; task_id?: unknown } | undefined;
+    const taskId = raw?.taskId ?? raw?.task_id;
+    if (typeof taskId !== "string" || taskId === "") {
+      return { error: "taskId 必须是非空字符串" };
+    }
+    const record = source.registry.get(taskId) ?? (await source.readArchivedRecord(taskId));
+    if (!record) return { error: `unknown task id ${taskId}` };
+    // status 一起给：还在跑时归约层是空的，程序靠它分辨「没跑完」与「跑完但没交正文」
+    return { ...(await readTaskOutput(source, record)), status: record.status };
+  };
+}

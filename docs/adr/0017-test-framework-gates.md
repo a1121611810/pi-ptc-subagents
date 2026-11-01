@@ -22,7 +22,7 @@ Status: accepted (2026-10-27)。审计 F4，issue #291。基准流程图：[full
 
 ## Consequences
 
-- `pnpm test` 26 用例全绿（五探针转正 18 + 门禁 8）；门禁经变异自证（清空一条 route 的 fact → 机械点 5 立刻红；重建后 8/8 绿）。
+- `pnpm test` 26 用例全绿（五探针转正 18 + 门禁 8）；门禁经变异自证（清空一条 route 的 fact → 机械点 5 立刻红；重建后 8/8 绿）。**（2026-11-01：`fact` 字段删除，机械点 5 改守 `how` 段——变异对象随之换成 `how` 的某一面，仍是当场变红。）**
 - 转正即修出两处**测试环境**坑（与 src 无关，不动运行时）：Node 24 的 `--test` 目录参数行为；`node --test` 给宿主注入 Worker 不认的 execArgv——F8 用例内临时清空 execArgv，真实宿主只有 eval 系参数（`spawnPtcWorker` 的 deny list 已剥，见 AGENTS.md 验证纪律）。
 - spec 决策 21「怎么测」列的过期声明改为指向 `tests/route-registry-gates.test.mjs`；两份状态页未做清单划掉 F4。
 - 已知未做收窄为：floor 三处考古、发布包不带 dts；16 版本冒烟仍是发版前手工步骤。

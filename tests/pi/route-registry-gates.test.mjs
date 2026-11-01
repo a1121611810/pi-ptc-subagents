@@ -22,6 +22,13 @@ const detailDir = join(repoRoot, "packages", "routes", "docs", "routes");
 const routesText = JSON.stringify(ROUTES);
 const toolNames = Object.keys(TOOLS);
 const SURFACES = ["full_ptc", "codemode_ptc"];
+// 预算按**真实安装路径**算：详情目录的绝对路径会进索引（出现一次），路径越长索引越大。
+// 用短相对路径测会假绿——2026-11-01 实测：当时短路径 555 ✓ 而真实安装路径 625–632 都超 560
+// ⇒ 模型每 turn 都吃到一行 > WARNING。门禁改用现实里最长的那种安装路径（100 字符，fnm 装法 + 长用户名）。
+// shortcut: 超过 100 字符的安装路径（如 yarn-berry 的 zip 缓存 110 字符）会超预算（603 token），
+// 那时削索引文案，别调高 ceiling
+const REAL_DETAIL_BASE =
+  "/Users/someone/.fnm/node-versions/v22.19.0/installation/lib/node_modules/pi-ptc-subagents/docs/routes";
 
 test("机械点 1 工具→行：每个模型可见的工具至少被一条 route 提到", () => {
   for (const name of toolNames) {
@@ -54,7 +61,7 @@ test("机械点 3 route 集完整：每条 route 在每个编排入口都有交�
 
 test("机械点 4 索引 token 预算：ceiling + floor，超预算必须明说（> WARNING:）", () => {
   for (const surface of SURFACES) {
-    const index = renderRouteIndex(surface, "docs/routes", true);
+    const index = renderRouteIndex(surface, REAL_DETAIL_BASE, true);
     const tokens = Math.ceil(index.length / 2); // 与 registry.ts estimateTokens 同式
     assert.ok(
       tokens <= ROUTE_INDEX_TOKEN_CEILING,
@@ -71,9 +78,8 @@ test("机械点 4 索引 token 预算：ceiling + floor，超预算必须明说�
   }
 });
 
-test("机械点 5 每行事实段非空：fact 与 how 每面都要能回答「是什么/怎么调」", () => {
+test("机械点 5 每行怎么调段非空：how 每面都要能回答「是什么/怎么调」", () => {
   for (const route of ROUTES) {
-    assert.ok(route.fact.trim().length > 0, `route ${route.id} 的 fact 为空`);
     for (const surface of SURFACES) {
       assert.ok(route.how[surface].trim().length > 0, `route ${route.id} 的 how.${surface} 为空`);
     }
@@ -128,7 +134,7 @@ test("机械点 6 工具 description 必须是 registry 的调用（行为断言
 
 test("机械点 7 索引每路一行 + detail 指针指向的文件真实存在且随包发布", () => {
   for (const surface of SURFACES) {
-    const index = renderRouteIndex(surface, "docs/routes", true);
+    const index = renderRouteIndex(surface, REAL_DETAIL_BASE, true);
     const routeLines = index.split("\n").filter((l) => l.startsWith("- "));
     assert.equal(routeLines.length, ROUTES.length, `${surface} 路由行数不对`);
   }
@@ -146,8 +152,8 @@ test("机械点 7 索引每路一行 + detail 指针指向的文件真实存在�
 test("机械点 8 索引每 turn 字节相同：同输入渲染两次逐字节一致（surface × 总则句开关矩阵）", () => {
   for (const surface of SURFACES) {
     for (const nudge of [true, false]) {
-      const a = renderRouteIndex(surface, "docs/routes", nudge);
-      const b = renderRouteIndex(surface, "docs/routes", nudge);
+      const a = renderRouteIndex(surface, REAL_DETAIL_BASE, nudge);
+      const b = renderRouteIndex(surface, REAL_DETAIL_BASE, nudge);
       assert.equal(a, b, `${surface}/nudge=${nudge} 渲染不确定——prompt cache 会废`);
     }
   }

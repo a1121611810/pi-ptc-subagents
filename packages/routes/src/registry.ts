@@ -36,6 +36,7 @@ export const TOOLS = {
               // 硬编码必错），让模型复用它已经见过的同名工具声明。
               "程序内可调本会话已启用的同名工具（read / write / edit / grep / find / ls；bash 默认不可用），参数与直接调用该工具完全一致；每次调用返回 Promise，要 await，返回文本结果，失败抛异常。",
               '程序内还可调 task_records({ scope: "all" }) 取任务记录（all 含压缩归档）——要挑很多条时在程序里筛完只 return 要的几条。',
+              "程序内还可调 task_output({ taskId }) 取孩子交回的正文——返回 {text}（孩子的散文，不是原始事件流）；text 空时看 status：还在跑就等一会儿再取，别当没产出；收多份正文时读完只 return 汇总。",
               '例：const files = await tools.find({ pattern: "*.py" }); for (const f of files) await tools.write({ path: f, content: body });',
             ].join(""),
       ].join(""),
@@ -135,13 +136,13 @@ export const KIMI_MCP_TOOLS = {
   web_ds_search: KIMI_MCP_WEB_DS_SEARCH,
 } as const;
 
+// 事实类内容不进常驻索引（2026-11-01 实测：状态类的会过期，且会诱导模型去改用户配置）⇒ 没有 fact 段
 export interface RouteEntry {
   id: string;
   name: string;
   when: string;
   /** 每个 surface 怎么走；「这一面不适用」也是答案（机械点 3：不留空洞） */
   how: Record<SurfaceMode, string>;
-  fact: string;
   /** 包内相对路径，必须真实存在（机械点 7） */
   detail: string;
 }
@@ -197,11 +198,10 @@ export const ROUTES = [
     when: "材料多、主题互不相干、每份都要读一堆材料时派——父一个人扛会算错（实测 92%→100%，n=3）；成本 10 倍上下，一件能算完的活别派",
     how: {
       full_ptc:
-        "tools.pi_task_ptc({ task, label? })（程序内）——task 是孩子的唯一规格（写死路径/命令/交付物格式）；要报告就点名 child report 的 JSON 块（summary/findings），别自创报告格式；汇总前核对孩子产出（delivery），零产出就重派别补数",
+        "tools.pi_task_ptc({ task, label? })（程序内）——task 是孩子的唯一规格（写死路径/命令/交付物格式）；要报告就点名 child report 的 JSON 块（summary/findings），别自创报告格式",
       codemode_ptc:
         "tools.pi_task_codemode({ task, label? })（脚本内）——task 是孩子的唯一规格（写死路径/命令/交付物格式）；要报告就点名 child report 的 JSON 块（summary/findings），别自创报告格式；汇总前核对孩子产出（delivery），零产出就重派别补数",
     },
-    fact: "默认不等，立刻返回 handle；任务在任务记录里排队，可经任务面三工具查/停",
     detail: "docs/routes/create-a-task.md",
   },
   {
@@ -213,7 +213,6 @@ export const ROUTES = [
       codemode_ptc:
         "不适用——写程序是 full_ptc 面的编排能力；本面用 codemode 编排、pi_task_codemode 派任务",
     },
-    fact: "程序内 tools.*；bash 当前不在程序绑定表里（旧 ADR-0040 的 opt-in 尚未接线）；只在本面（full_ptc）注册 PTC 工具",
     detail: "docs/routes/run-one-program.md",
   },
   {
@@ -224,7 +223,6 @@ export const ROUTES = [
       full_ptc: "ptc_workflow({ meta, script, args? })",
       codemode_ptc: "不适用——同 run-one-program：workflow 是 full_ptc 的编排能力",
     },
-    fact: "script 内可用 workflow.log/phase/parallel/pipeline；只在本面注册",
     detail: "docs/routes/run-a-phased-workflow.md",
   },
   {
@@ -232,10 +230,9 @@ export const ROUTES = [
     name: "直接用内置工具",
     when: "单次调用就够，或每步都要模型判断（写操作、审批敏感）",
     how: {
-      full_ptc: "程序内 tools.read/grep/find/ls/edit/write；逐个直调走 pi 自己的工具",
+      full_ptc: "程序内可调同名工具；逐个直调走 pi 自己的工具",
       codemode_ptc: "脚本内 tools.<内置名> 直接调",
     },
-    fact: "bash 当前不在程序绑定表里（旧 ADR-0040 的 opt-in 尚未接线）",
     detail: "docs/routes/use-the-built-in-tools.md",
   },
   {
@@ -247,7 +244,6 @@ export const ROUTES = [
         "孩子的契约：最终消息末尾 fenced JSON（summary/findings/files_touched/usage）；宿主自动解析",
       codemode_ptc: "同左——契约在孩子的追加提示词里，与 surface 无关",
     },
-    fact: "reportChannel 恒在四值：tool/prompt-json/none/opted-out；工具通道（ptc_child_report）已是首选",
     detail: "docs/routes/report-what-you-did.md",
   },
   {
@@ -255,10 +251,9 @@ export const ROUTES = [
     name: "上网查资料",
     when: "需要网页搜索、抓页面、页内找内容——判断力在干活的子代理侧",
     how: {
-      full_ptc: "派子代理（pi_task_ptc），孩子用 web_ds_search（search/open/find 三动作）",
+      full_ptc: "派子代理（pi_task_ptc），孩子用 web_ds_search",
       codemode_ptc: "同左——搜索只在子代理进程里注册，父会话没有这个工具",
     },
-    fact: "webDsSearch 开关默认关（fail-closed）；配额每进程计；概览走 snippet 超预算整条丢弃",
     detail: "docs/routes/reach-the-web.md",
   },
   {
@@ -270,7 +265,6 @@ export const ROUTES = [
         "ptc_task_list / ptc_task_output / ptc_task_stop（模型直调）——产出里的 delivery 是引擎实测轨迹",
       codemode_ptc: "同左（模型直调；脚本经结构化返回）——产出里的 delivery 是引擎实测轨迹",
     },
-    fact: "有任务记录这三个工具才出现在模型面前（ADR-0007）",
     detail: "docs/routes/manage-a-task.md",
   },
 ] satisfies RouteEntry[];
@@ -335,7 +329,7 @@ function estimateTokens(text: string): number {
 // 总则句（旧 ADR-0010 的「引导」一半：先给地图再收枪）——按面切换，随索引一起渲染
 const ROUTE_INDEX_LEAD: Record<SurfaceMode, string> = {
   full_ptc:
-    "批量调工具默认先写程序（ptc_run_code）；单次调用或要逐步判断、审批敏感的才直连。派不派子代理自己判断——路由表第一行写了代价。",
+    "批量调工具默认先写程序（ptc_run_code）；单次调用或逐步判断、审批敏感的才直连。派不派子代理自己判断——第一行写了代价。",
   codemode_ptc:
     "编排写 codemode 脚本；批量派活经脚本内的 pi_task_codemode；要查/停任务用任务面三工具。派不派自己判断——路由表第一行写了代价。",
 };

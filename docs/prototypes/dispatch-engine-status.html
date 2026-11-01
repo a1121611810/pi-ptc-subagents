@@ -168,8 +168,8 @@
       </tr>
       <tr>
         <td><b>在飞</b></td>
-        <td>list/output/stop 三工具；取消两级（排队抽掉/在跑 stopping）；终态竞态静默处理；<b>读法层（2026-11-01）</b>：<code>list</code> = 封顶 + 精简字段 + 四参数（<code>scope</code> recent/all · <code>limit</code> · <code>status</code> · <code>session</code>），<code>scope=all</code> 连压缩归档；<code>output</code> = 走归约层（给孩子的散文正文，报告只是摘要；没正文才退回原始尾部 + 分层引导）；<b>血缘</b>：记录带 <code>sessionId</code>（引擎侧写；entry 从 <code>ctx.sessionManager.getSessionId()</code> 取，floor 0.86.0 也有）</td>
-        <td>产出增量读</td>
+        <td>list/output/stop 三工具；取消两级（排队抽掉/在跑 stopping）；终态竞态静默处理；<b>读法层（2026-11-01）</b>：<code>list</code> = 封顶 + 精简字段 + 四参数（<code>scope</code> recent/all · <code>limit</code> · <code>status</code> · <code>session</code>），<code>scope=all</code> 连压缩归档；<code>output</code> = 走归约层（给孩子的散文正文，报告只是摘要；没正文才退回原始尾部 + 分层引导）；<b>程序内同读法</b>（<code>tools.task_output({taskId})</code>：程序内可取孩子正文——wait:false 派发后程序内取不回的那条补路）；<b>血缘</b>：记录带 <code>sessionId</code>（引擎侧写；entry 从 <code>ctx.sessionManager.getSessionId()</code> 取，floor 0.86.0 也有）</td>
+        <td>产出增量读 · task-output-binding 6/6</td>
       </tr>
       <tr>
         <td><b>交付</b></td>
@@ -184,7 +184,7 @@
       <tr>
         <td><b>子代理侧工具</b></td>
         <td>ptc_child_report（工具通道）+ web_ds_search（三动作，只在子代理进程注册）</td>
-        <td>—</td>
+        <td>开关面（2026-11-01 实测）：<code>searchEnabled</code> 由引擎传给孩子 argv ⇒ <b>开关关 ⇒ 孩子没有 web_ds_search</b>，父会话更是从来没有（ADR-0003）⇒「上网查资料」那条路只在开关开时走得通。四臂实测（真 pi 1.4.0）：开关开 ⇒ 父派子代理、孩子真调 19 次 search、父面拿到真实链接；开关关 ⇒ 父模型从自己的工具表推出搜不了，改用 curl/gh 自己顶</td>
       </tr>
     </tbody>
   </table>
