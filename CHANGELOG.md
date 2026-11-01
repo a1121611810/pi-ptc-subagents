@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.5.0] - 2026-11-01
+
+### Added
+
+- **Program-internal task output** (`tools.task_output({ taskId })`): a PTC program can now fetch
+  the prose answer a dispatched child wrote. Measured gap (real pi 1.4.0): a `wait:false`
+  dispatch returns only a handle, and the in-program task records carry metadata only
+  (`delivery,finishedAt,id,outputPath,outputTruncated,ownerBootMs,ownerPid,reportChannel,
+  startedAt,status,task,whySuppressed` — no `text`, no `output`), so the child's answer was
+  unreachable from a program. The new binding uses the same reduction layer as the model-facing
+  `ptc_task_output` (the child's prose, not the raw event stream), never throws (unknown id →
+  `{error}`), and returns `status` so a program can tell "not finished yet" from "finished
+  without an answer". It also finds records that were pushed out of memory into the compressed
+  archive (decision 29).
+
+### Changed
+
+- **The route-index token gate now measures the real install path.** It used a short relative
+  path, which was green at 555 tokens while the real installed index was 625–632 against a 560
+  ceiling — the model saw a `> WARNING: index over token budget` line on every turn. The gate now
+  uses a 100-character path (the longest realistic install), route prose was trimmed of text
+  duplicated at runtime, and an inaccurate tool list in the index was corrected
+  (`tools.read/grep/find/ls/edit/write` → "the same-named tools"; pi 1.4.0's active table has no
+  grep/find/ls). The index now measures 558 at the gate path, 552 for an nvm install, 541 in the
+  repo.
+- **`RouteEntry.fact` removed.** The field was never rendered (dead weight) and it contradicted
+  ADR-0015's own decision that the index carries no fact section; facts live in the detail files
+  now. ADR-0015's gate table was amended accordingly (gate 5 now guards the `how` section).
+- The web-search detail file now says plainly that the `webDsSearch` switch is the user's own
+  configuration — don't flip it, say that search is unavailable. Measured (real pi 1.4.0, four
+  arms): sessions that read "default off" and went hunting for the switch to change it were 4×
+  slower than sessions that simply said it could not be done.
+
+### Fixed
+
+- The program-internal binding accepted only `taskId`, while the model-facing tool spells it
+  `task_id`; a model copying the model-facing spelling got an error naming a parameter it never
+  used. Both spellings are accepted now.
+
 ## [7.4.0] - 2026-11-01
 
 ### Added
