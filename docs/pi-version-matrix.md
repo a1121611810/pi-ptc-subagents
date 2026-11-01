@@ -189,6 +189,22 @@ F3-3 = 330；按字面读是 3300 / 300）。**判分器零复制**：bench 加 
   **八版全过**——两轮差分（父显式 `minimax-cn/MiniMax-M3.1-Flash` vs 父用默认 `minimax-cn-512k/…`），
   孩子都跟着各自的父走；负向对照（撤掉 entry 的接线）如期变红——孩子落到 pi 默认模型。
 
+### 压缩事件与任务面血缘（2026-11-01 静态核验 + 1.4.0 真机）
+
+任务面要能跨上下文压缩找回旧任务，需要宿主侧两个 API：**会话 id** 与 **压缩事件**。
+
+- `ctx.sessionManager.getSessionId()`：floor **0.86.0 就有**（实测返回 UUIDv7）⇒ 任务记录盖 `sessionId` **无版本门**。
+- `session_compact` / `session_compact_failed` / `context` 三个事件：floor **0.86.0 全有**
+  （`dist/core/extensions/types.d.ts:515` 的 `ContextEvent = { type: "context"; messages: AgentMessage[] }`、
+  `ContextEventResult = { messages?: AgentMessage[] }` 与 **1.4.0 逐字同形**；
+  `agent-session.js:1666` / `:1933` 经扩展总线 emit `session_compact`）。
+  ⇒ 压缩后重注入**无版本门**。
+- **⚠️ 真机只验过 1.4.0**：1.4.0 上 `session_compact reason=manual` 触发、压缩后第一次 `context` 里
+  任务清单注入了且**只注一次**。floor 0.86 的真机探针**扩展事件总线收到了压缩事件**
+  （`ctx.compact()` ⇒ `session_compact_failed reason=manual` 到达 ⇒ 事件通道通），但**压缩本身每次都失败**
+  （`Nothing to compact (session too small)`——压缩阈值设置未按预期生效）⇒ **成功路径未验，不能算 floor 已验**。
+- **0.86–1.3 中间版本未逐版核**。
+
 ## 待测
 
 中间版本的**执行链冒烟**已覆盖（0.87 / 0.99 / 1.0 / 1.1 / 1.2 / 1.3，见上）；

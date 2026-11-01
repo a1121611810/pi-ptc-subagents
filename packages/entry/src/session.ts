@@ -10,7 +10,12 @@ import {
   type TaskHandle,
   type TaskRejection,
 } from "@pi-ptc/dispatch";
-import { faceVisible, listTasks } from "@pi-ptc/task";
+import {
+  faceVisible,
+  taskListSnapshot,
+  type TaskListQuery,
+  type TaskListSnapshot,
+} from "@pi-ptc/task";
 
 export type { DispatchOutcome, EngineContext, Gate, TaskHandle, TaskRejection };
 
@@ -25,7 +30,8 @@ export interface PtcSession {
     task: string,
     options?: Omit<DispatchInput, "task" | "signal">,
   ): Promise<CreateTaskResult>;
-  listTasks(recentCompletedLimit?: number): TaskRecord[];
+  /** 任务面列表（模型面形状：精简条目 + 候选总数 + 字节预算） */
+  taskListSnapshot(query?: TaskListQuery): TaskListSnapshot;
   stopTask(taskId: string, reason: string): Promise<void>;
   faceVisible(): boolean;
   shutdown(): Promise<void>;
@@ -37,6 +43,10 @@ export interface PtcSession {
   readOutputTail(taskId: string, maxBytes: number): Promise<string | undefined>;
   /** 决策 29：回落读者——精确 id 从压缩归档拉回（30 天窗口内可解）；miss = undefined */
   readArchivedRecord(taskId: string): Promise<(TaskRecord & { archived: true }) | undefined>;
+  /** 归档区的全部记录（scope=all 时一次列出） */
+  readArchivedRecords(): Promise<(TaskRecord & { archived: true })[]>;
+  /** 宿主会话 id（只做标签：告诉父「这条是哪个会话的」） */
+  readonly sessionId?: string;
 }
 
 import type { TaskRecord } from "@pi-ptc/dispatch";
@@ -67,7 +77,7 @@ export function assemblePtcSession(options: PtcSessionOptions = {}): PtcSession 
     registry,
     engine,
     createTask: (task, opts) => engine.dispatch({ ...opts, task }),
-    listTasks: (recentCompletedLimit) => listTasks(registry, recentCompletedLimit),
+    taskListSnapshot: (query) => taskListSnapshot(registry, query),
     stopTask: (taskId, reason) => engine.stop(taskId, reason),
     faceVisible: () => faceVisible(registry),
     shutdown: () => engine.shutdown(),
@@ -75,6 +85,10 @@ export function assemblePtcSession(options: PtcSessionOptions = {}): PtcSession 
     outputSize: (taskId) => engine.outputSize(taskId),
     readOutputTail: (taskId, maxBytes) => engine.readOutputTail(taskId, maxBytes),
     readArchivedRecord: (taskId) => engine.readArchivedRecord(taskId),
+    readArchivedRecords: () => engine.readArchivedRecords(),
+    get sessionId() {
+      return options.context?.sessionId;
+    },
   };
 }
 
@@ -93,6 +107,16 @@ export function buildEngineContext(ctx: ExtensionContext, piVersion?: string): E
       try {
         const model = ctx.model;
         return model ? `${model.provider}/${model.id}` : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    // 会话 id 只做标签（告诉父「这条是哪个会话的」）：floor 0.86 的
+    // sessionManager.getSessionId() 同样在（真机实测）→ 无版本门；
+    // 扩展被卸载后 getter 会抛（pi 的 assertActive）→ 吞掉退回旧行为（记录无此字段）。
+    get sessionId(): string | undefined {
+      try {
+        return ctx.sessionManager.getSessionId();
       } catch {
         return undefined;
       }

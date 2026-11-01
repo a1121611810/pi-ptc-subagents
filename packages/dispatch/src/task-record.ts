@@ -15,6 +15,17 @@ export const TERMINAL_STATUSES = [
   "lost",
 ] as const satisfies readonly TaskStatus[];
 
+// 全量状态清单（工具参数用；终态清单是它的子集）
+export const TASK_STATUSES = [
+  "queued",
+  "running",
+  "stopping",
+  "succeeded",
+  "failed",
+  "canceled",
+  "lost",
+] as const satisfies readonly TaskStatus[];
+
 export function isTerminal(status: TaskStatus): boolean {
   return (TERMINAL_STATUSES as readonly string[]).includes(status);
 }
@@ -46,6 +57,8 @@ export interface TaskRecord {
   label?: string;
   ownerPid?: number;
   ownerBootMs?: number;
+  /** 宿主会话 id（只做标签：告诉父「这条是哪个会话的」；pi 的 newSession/fork 会换 id，不当唯一归属键） */
+  sessionId?: string;
   startedAt?: number;
   finishedAt?: number;
   stopReason?: string;

@@ -15,6 +15,9 @@ agent 定义里的 `tools / model / thinkingLevel / childReport` 由 frontmatter
 任务建成后在任务记录里排队（满员排队不拒绝，ADR-0010），经
 `ptc_task_list / ptc_task_output / ptc_task_stop` 查/停。
 
+任务记录带宿主会话 id（`sessionId`）——按会话筛任务用 `ptc_task_list({ session: "current" })`，
+跨会话的旧记录用 `scope=all` 找。压缩归档（`scope=all`）里的条目也带 `archived: true`。
+
 ## 什么时候值得派（判据）
 
 - **值得**：主题多、彼此独立、每个都要读一堆材料——父一个人扛会算错，一份材料一个孩子最划算。

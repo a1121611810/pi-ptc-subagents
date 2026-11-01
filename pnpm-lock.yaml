@@ -278,6 +278,12 @@ importers:
       '@pi-ptc/dispatch':
         specifier: workspace:*
         version: link:../dispatch
+      '@pi-ptc/routes':
+        specifier: workspace:*
+        version: link:../routes
+      '@pi-ptc/tui':
+        specifier: workspace:*
+        version: link:../tui
 
   packages/tui: {}
 

@@ -12,7 +12,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { gunzipSync, gzip } from "node:zlib";
 import { promisify } from "node:util";
@@ -135,6 +135,8 @@ export interface EngineContext {
   sessionModel?: string;
   /** 宿主 pi 版本（entry 启动时解析一次）：孩子 argv 里 1.1.0 才有的旗标按它门控，缺省按 floor 不发 */
   piVersion?: string;
+  /** 宿主会话 id（只做标签；老记录没有 ⇒ 不排除、不当归属键） */
+  sessionId?: string;
 }
 
 const DEFAULT_STOP_GRACE_MS = 5_000;
@@ -260,6 +262,7 @@ export class TaskEngine {
           // 旧 ADR-0023 归属：记录盖 owner 戳，重启恢复按它判定「还在不在飞」
           ownerPid: this.#owner.pid,
           ownerBootMs: this.#owner.bootMs,
+          sessionId: this.#context.sessionId,
         },
       })
       .then(async () => {
@@ -573,6 +576,25 @@ export class TaskEngine {
     } catch {
       return Promise.resolve(undefined);
     }
+  }
+
+  /** 归档区的全部记录（冷存按 id 存 gz）——scope=all 时一次列出；异步读，不堵宿主事件循环 */
+  async readArchivedRecords(): Promise<(TaskRecord & { archived: true })[]> {
+    const dir = this.#storageDir ? join(this.#storageDir, "archive") : null;
+    if (!dir || !existsSync(dir)) return [];
+    const out: (TaskRecord & { archived: true })[] = [];
+    for (const file of await readdir(dir)) {
+      if (!file.endsWith(".json.gz")) continue;
+      try {
+        const parsed = JSON.parse(
+          gunzipSync(await readFile(join(dir, file))).toString("utf8"),
+        ) as TaskRecord;
+        if (parsed && typeof parsed.id === "string") out.push({ ...parsed, archived: true });
+      } catch {
+        // 单条坏档不拖垮整批
+      }
+    }
+    return out;
   }
 
   #readArchivedOutput(taskId: string): string | undefined {

@@ -56,12 +56,13 @@ export const TOOLS = {
   },
   ptc_task_list: {
     name: "ptc_task_list",
-    description: () => "列出在飞的任务与最近完成的任务（最近 10 条已完成）。",
+    description: () =>
+      "列出在飞的任务与最近完成的任务（默认最近 50 条已完成）。响应给精简条目（id/status/label/finishedAt/任务摘要）与候选总数——总数比返回条数大，说明还有更早的记录没列出来。scope=all 连压缩归档一起列（更全也更慢），status 与 session 可筛。",
   },
   ptc_task_output: {
     name: "ptc_task_output",
     description: () =>
-      "按 task_id 读一条任务记录：状态、报告、产出。产出超过截断阈值时给尾部与完整产出位置（outputPath）。",
+      "按 task_id 读一条任务记录：状态、报告、孩子的正文（text——那是交付物，报告只是摘要）与实测轨迹。正文超长时按截断契约给尾部与全文路径；记录里的 outputPath 指向原始事件流。",
   },
   ptc_task_stop: {
     name: "ptc_task_stop",
@@ -295,6 +296,20 @@ export function renderLongOutputGuidance(options: {
     );
   }
   return LONG_OUTPUT_GUIDANCE_NO_REPORT.replace("{bytes}", String(options.bytes));
+}
+
+// 压缩后重注入的口径（模型面散文住册子，ADR-0013）：压缩把「启动这些任务的消息」压掉了，
+// 但任务本身还在——父得知道有哪些、怎么把产出拉回来。
+export const COMPACTED_TASK_REMINDER_LEAD =
+  "对话刚被压缩——启动这些任务的消息已经不在上下文里了，但任务还在跑或已经跑完。用 ptc_task_list 看全部（scope=all 连压缩归档一起列），用 ptc_task_output 取产出（给的是孩子的正文，不是原始事件流）。";
+
+export function renderCompactedTaskReminder(
+  tasks: readonly { id: string; status: string; label?: string }[],
+): string {
+  const lines = tasks.map((t) => `- ${t.id}${t.label ? ` (${t.label})` : ""}: ${t.status}`);
+  return ["<compacted-tasks>", COMPACTED_TASK_REMINDER_LEAD, ...lines, "</compacted-tasks>"].join(
+    "\n",
+  );
 }
 
 // 旧 ADR-0022：后台任务通知的批渲染——模型面文案归本册子（结构化参数：routes 保持叶子，不依赖 dispatch）

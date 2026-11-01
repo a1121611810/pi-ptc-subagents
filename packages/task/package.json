@@ -19,6 +19,8 @@
     "check": "tsrs -p tsconfig.json"
   },
   "dependencies": {
-    "@pi-ptc/dispatch": "workspace:*"
+    "@pi-ptc/dispatch": "workspace:*",
+    "@pi-ptc/routes": "workspace:*",
+    "@pi-ptc/tui": "workspace:*"
   }
 }

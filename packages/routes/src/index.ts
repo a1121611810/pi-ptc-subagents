@@ -12,8 +12,10 @@ export {
   TASK_DOOR_PARAM_DESCRIPTIONS,
   TOOLS,
   renderDeliveryCheck,
+  renderCompactedTaskReminder,
   renderLongOutputGuidance,
   renderRouteIndex,
   renderTaskNotifications,
 } from "./registry.ts";
 export type { DeliveryFacts, RouteEntry, ToolEntry, ToolName } from "./registry.ts";
+export { COMPACTED_TASK_REMINDER_LEAD } from "./registry.ts";

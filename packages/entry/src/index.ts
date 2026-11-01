@@ -16,11 +16,13 @@ import {
   depthGate,
   dispatchEnabledGate,
   findAgent,
+  TASK_STATUSES,
   readOnlyGate,
   sessionEndingGate,
   taskTextGate,
 } from "@pi-ptc/dispatch";
 import { fileURLToPath } from "node:url";
+import { compactedTaskReminder, readTaskOutput, taskListSnapshot } from "@pi-ptc/task";
 import { createDeepSeekProvider, createSearchMemory, createSearchQuota } from "@pi-ptc/search";
 import { createWebDsSearchTool } from "./web-ds-search-tool.ts";
 import {
@@ -39,13 +41,11 @@ import {
   FALLBACK_SURFACE_MODE,
   TOOLS,
   renderDeliveryCheck,
-  renderLongOutputGuidance,
   renderRouteIndex,
   renderTaskNotifications,
   type DeliveryFacts,
   type SurfaceMode,
 } from "@pi-ptc/routes";
-import { TRUNCATION_MAX_BYTES, applyAdr0015Truncation } from "@pi-ptc/tui";
 import { assemblePtcSession, buildEngineContext, type PtcSession } from "./session.ts";
 
 export { assemblePtcSession, buildEngineContext } from "./session.ts";
@@ -270,6 +270,26 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
     };
     registerTaskFace(registerTracked, session, surface);
     applyTaskFaceVisibility();
+    // 压缩后重注入在飞任务清单：压缩事件置标志，下一次 LLM 调用前把清单塞回请求上下文。
+    // pi 的 context 事件在每次 LLM 调用前触发，handler 返回的 messages **替换**本次请求的可见消息
+    // （不累积、不进会话记录）——所以要连 event.messages 一起返回。
+    // floor 0.86 同样有 session_compact 与 context 两个事件（真机实测）→ 无版本门。
+    let compactReminderPending = false;
+    pi.on("session_compact", () => {
+      compactReminderPending = true;
+    });
+    pi.on("context", (event) => {
+      if (!compactReminderPending) return undefined;
+      compactReminderPending = false;
+      const reminder = compactedTaskReminder(session.registry);
+      if (!reminder) return undefined;
+      return {
+        messages: [
+          ...event.messages,
+          { role: "user", content: [{ type: "text", text: reminder }], timestamp: Date.now() },
+        ],
+      };
+    });
     // 工具执行上下文：程序内 tools.* 的通道（pi 1.4.0 把 executeTool 放在 ExtensionToolContext 上）
     let toolContext: ExtensionToolContext | undefined;
     // 绑定表按每次程序运行时重建：老版本（0.86/0.87）在 session_start 时活跃表还没成型，
@@ -530,9 +550,36 @@ function registerTaskFace(
     name: "ptc_task_list",
     label: "任务列表",
     description: TOOLS.ptc_task_list.description(surface),
-    parameters: Type.Object({}),
+    parameters: Type.Object({
+      scope: Type.Optional(
+        Type.Union([Type.Literal("recent"), Type.Literal("all")], {
+          description: "recent = 只热存（默认）；all = 含压缩归档（更全但更慢）",
+        }),
+      ),
+      limit: Type.Optional(Type.Number({ description: "取多少条（默认 50，上限 200）" })),
+      status: Type.Optional(
+        Type.Union(
+          TASK_STATUSES.map((s) => Type.Literal(s)),
+          {
+            description: "只看某个状态",
+          },
+        ),
+      ),
+      session: Type.Optional(
+        Type.String({ description: "按会话筛：current = 本会话，或给一个会话 id" }),
+      ),
+    }),
     defaultActive: false,
-    execute: async () => textResult(session.listTasks()),
+    execute: async (_id, args) => {
+      const query = {
+        scope: args.scope,
+        limit: args.limit,
+        status: args.status,
+        session: args.session === "current" ? session.sessionId : args.session,
+      };
+      const archived = query.scope === "all" ? await session.readArchivedRecords() : [];
+      return textResult(taskListSnapshot(session.registry, query, archived));
+    },
   });
   registerTool({
     name: "ptc_task_output",
@@ -545,27 +592,10 @@ function registerTaskFace(
       const record =
         session.registry.get(args.task_id) ?? (await session.readArchivedRecord(args.task_id));
       if (!record) return textResult({ error: `unknown task id ${args.task_id}` });
-      const outputBytes = await session.outputSize(args.task_id);
-      if (outputBytes === undefined) return textResult(withDeliveryNote(record));
-      // 分层读取：报告是归约层，响应里的 output 是尾部原始层（完整原文在 outputPath）
-      if (outputBytes > TRUNCATION_MAX_BYTES) {
-        const tail = (await session.readOutputTail(args.task_id, TRUNCATION_MAX_BYTES)) ?? "";
-        const { text } = applyAdr0015Truncation(tail);
-        return textResult(
-          withDeliveryNote({
-            ...record,
-            output: text,
-            guidance: renderLongOutputGuidance({
-              bytes: outputBytes,
-              report: record.report,
-              reportChannel: record.reportChannel ?? "none",
-            }),
-          }),
-        );
-      }
-      const output = (await session.readOutputTail(args.task_id, TRUNCATION_MAX_BYTES)) ?? "";
-      const { text } = applyAdr0015Truncation(output);
-      return textResult(withDeliveryNote({ ...record, output: text }));
+      // 归约层：孩子的散文答案（报告是摘要，交付物是这段正文）——从事件流现算，不另存
+      return textResult(
+        withDeliveryNote({ ...record, ...(await readTaskOutput(session, record)) }),
+      );
     },
   });
   registerTool({

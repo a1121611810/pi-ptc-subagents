@@ -9,7 +9,7 @@ pi 的扩展：PTC（模型写 TypeScript 程序批量调工具）+ 子代理派
 | `entry`    | pi extension 装配：session_start 注册、surface 检测、PTC 模式（程序优先引导层）、/ptc off 截断、通知投递           | → 全部                             |
 | `ptc`      | 程序运行时：worker 池、dispatcher、严格模式编译、工具工厂、renderResult                                            | → sub→dispatch、tui、routes        |
 | `dispatch` | 任务引擎：六道闸、DispatchSlotCounter（libuv 队列）、spawn/pump、registry（落盘+重启恢复）、child report、通知中心 | 无（叶子）                         |
-| `task`     | 任务面：list/output/stop 的读/停语义（分层读取：超阈值引导读报告）                                                 | → dispatch                         |
+| `task`     | 任务面：list/output/stop 的读/停语义（列表封顶 + 精简字段；产出走归约层：孩子的散文正文）                          | → dispatch、tui、routes            |
 | `tui`      | 渲染原语叶子：文本卫生、截断契约、渲染预算                                                                         | 无                                 |
 | `output`   | 输出核（P0 拆分）：renderToolResult（结果→模型可见文本）、ResultTextOutcome 结构切片；Kimi 面（MCP）与 pi 面共用   | → tui（叶子）                      |
 | `kimi-mcp` | Kimi 面（MCP，ADR-0020）：双工具——ptc_run_code（运行格 + fs 四件套，workdir 锁）/ web_ds_search（宿主中立搜索核）  | → output、ptc 核心、routes、search |
@@ -70,6 +70,8 @@ pi 的扩展：PTC（模型写 TypeScript 程序批量调工具）+ 子代理派
 - 模型面散文（工具描述、通知文案、引导语）一律进 `routes`，工具/引擎文件里不许字面量。
   例外：子代理进程侧工具（`web_ds_search` / `ptc_child_report`）的描述留在各自包——它们只在 `PI_PTC_DEPTH>0` 注册，不进宿主路由册
 - pi 接入事实：注册只发生在 `session_start`（factory 阶段 getActiveTools 是 throw 的桩）；动态可见性走 `defaultActive:false` + `setActiveTools`（exposure getter 在 1.4.0 实测不支持）
+- **任务面响应一律是对象，不是数组**（2026-11-01 起）：`ptc_task_list` 给 `{ scope, total, tasks[] }`（`total` 是候选总数，比返回条数大说明还有更早的记录没列出来）；`ptc_task_output` 给记录 + 归约层（`text` = 孩子的散文正文，报告只是摘要）。列表**只能做条目级裁剪**——文本级截断会把 JSON 砍成半截，`JSON.parse` 直接抛
+- 压缩后重注入：pi 的 `context` 事件的 handler 返回值**替换**本次请求的可见消息（不累积、不进会话记录）⇒ 要连 `event.messages` 一起返回；`session_compact` 置标志、下一次 LLM 调用前注入一次即清标志。事件形状在 floor 0.86 与 1.4.0 同形（无版本门），但**真机只验过 1.4.0**
 
 ## 已知未做（按价值）
 
