@@ -5,6 +5,54 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.4.0] - 2026-11-01
+
+### Added
+
+- **PTC as a standalone, host-neutral package** (`packages/ptc`): the engine — run cell, wire
+  protocol, worker pool, compiler, file bindings — now depends on nothing and imports no host.
+  The model-facing surface moved out to `packages/entry`, so `packages/ptc` is the engine alone
+  (zero dependencies, no `peerDependencies`). It ships as a subpath of the existing root package
+  (`pi-ptc-subagents/ptc`) and as a `ptc` binary, so installing it needs no second package and no
+  extra dependency — verified by a real `npm pack` into a clean directory: one package, zero
+  transitive dependencies, both the subpath import and the binary work.
+- **`ptc <program.ts>` CLI**: runs a program file without a model and without pi. The program's
+  tool surface is the file four (`read` / `write` / `grep` / `glob` / `edit`), confined to the
+  work directory. The published `dist/index.js` stays one self-contained 244 KB file — the
+  published shape did not change.
+- **Program tools on pi 0.86 / 0.87** (entry): the nested call channel (`ctx.executeTool`) only
+  exists from 0.99. On the floor versions the extension now builds pi's own tool definitions
+  (its public `create*ToolDefinition` factories) and calls them directly, so the program tool
+  set and parameter shapes are byte-identical to 0.99 — including `edit`'s
+  `{path, edits:[{oldText,newText}]}`. That path is gated on the pi version: on 0.99+ a missing
+  channel is an error, never a silent bypass of pi's tool pipeline (which would hide the call
+  from other extensions' `tool_call` hooks and from usage accounting).
+
+### Changed
+
+- **Package layout**: `packages/ptc/src/{tools,render,bindings,task-binding}.ts` moved to
+  `packages/entry/src/{ptc-tools,ptc-render,ptc-bindings,task-binding}.ts`; the file bindings
+  moved the other way (`packages/kimi-mcp/src/fs-tools.ts` → `packages/ptc/src/fs-bindings.ts`),
+  because they are host-neutral. The engine's zero-host-dependency rule is now a test
+  (`tests/standalone/standalone-engine.test.mjs`).
+- **Kimi bundle**: 785 KB → 592 KB after pi-tui left the engine.
+
+### Fixed
+
+- The floor versions' file-binding fallback was unreachable — all four of them ship the tool
+  factories — and its `edit` shape (`{path, old_string, new_string}`) differed from pi's, so a
+  program written for 0.99+ would break on the floor. It is gone.
+- Two dead exports (`HostToWorkerFrame`, `WorkerToHostFrame`) and a stale
+  `external: [/^@earendil-works\//]` in the engine's rolldown config (the engine has no
+  dependencies any more).
+
+### Verification
+
+- 16-version real-machine smoke (`scripts/version-smoke.sh`): **16/16, fails=0** — 0.86.0 /
+  0.86.1 / 0.87.0 / 0.87.1 / 0.99.0 / 0.99.1 / 0.99.2 / 1.0.0–1.0.4 / 1.1.0 / 1.2.0 / 1.3.0 plus
+  1.4.0 on PATH. The floor versions and 0.99+ return the same `READ=2216`.
+- Repository tests: **144 pass, 0 fail** (111 pi / 6 output / 17 Kimi / 10 standalone).
+
 ## [7.3.0] - 2026-11-01
 
 ### Added
