@@ -98,6 +98,7 @@ packages/tui/
 - **`packages/tui` 从「零依赖」变成「根零依赖 + `/pi` 带宿主 peer」**。peer 声明是**包级**的，故 `pi-coding-agent` 声明为 optional peer（`peerDependenciesMeta.optional`），免得 `output` / `search` / `task` 间接背上 pi 依赖；`pi-tui` 是 `/pi` 的真实依赖。
 - **旧 ADR-0022 §11 的五条上限继续只管旧面板**（工具结果里的那一块）；本面板另立两条并在本 ADR 注册。旧仓的教训是「数字没有声明来源」——这次两条都有出处。
 - **旧 ADR-0022 §2 是六态无 `queued`**，本仓实现是七态；面板状态表按现在的七态写。
-- **真机已验**（2026-11-01，pi 1.4.0 的真 TUI 跑在真 pty 上，120×40）：面板画在**编辑器正上方**（working 条之下、状态行之上），逐条列出进行中的子代理，状态随任务完成实时更新（`Tasks · 2 running · 0 succeeded · 0 failed` → `Tasks · 1 running · 1 succeeded · 0 failed`）；全部跑完即消失。真机同时暴露了一个缺陷：标题一度把历史会话的恢复记录算进来（写「succeeded 180」），已按 `record.sessionId` 修掉并补了单测。
+- **真机已验**（2026-11-01/02，pi 1.4.0 与 floor 0.86.0 的真 TUI 跑在真 pty 上，120×40）：面板画在**编辑器正上方**（working 条之下、状态行之上），逐条列出进行中的子代理，状态随任务完成实时更新（`Tasks · 2 running · 0 succeeded · 0 failed` → `Tasks · 1 running · 1 succeeded · 0 failed`）；全部跑完即消失；**floor 0.86.0 同样渲染出来**（`setWidget` 在两版签名逐字同形 ⇒ 无版本门）。真机同时暴露了一个缺陷：标题一度把历史会话的恢复记录算进来（写「succeeded 180」），已按 `record.sessionId` 修掉并补了单测。
+- **全版本冒烟**（2026-11-02）：`scripts/version-smoke.sh` 16/16 全过（0.86.0/0.86.1/0.87.0/0.87.1/0.99.0/0.99.1/0.99.2/1.0.0–1.0.4/1.1.0/1.2.0/1.3.0 + PATH 1.4.0，四腿 run_code·程序内 read·workflow parallel·任务面 list·output，isError 0，fails=0）——「tui 拆子路径 + entry 瘦身」没有打断任何既有面的行为。
 - **接线归位**：面板接线抽成 `packages/tui/pi` 的 `createTaskPanel({ ui, source, sessionId })`——它自己订阅 registry 的变迁，entry 只剩「建 + 卸载」两处。好处有两个：entry 少七八行；面板的**活行为**（只在 TUI 画、记录一变就重画、退出即卸载）有了可测的地方（此前只有纯函数被测到）。
-- **仍未验**：`/reload` 后是否残留死面板；floor 0.86 的真机渲染；窄终端下 `Text` 按宽度折行会多吃行预算（label 截断 48 + 宿主 10 行上限兜底）。
+- **仍未验**：窄终端下 `Text` 按宽度折行会多吃行预算（label 截断 48 + 宿主 10 行上限兜底）。

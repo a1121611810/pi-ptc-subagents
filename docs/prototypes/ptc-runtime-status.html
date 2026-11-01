@@ -136,7 +136,7 @@
         <div class="arr">→</div>
         <div class="node partial"><div class="t"><span class="mark">◐</span>TUI 行渲染</div><div class="d">ptc 两工具 renderResult 已挂（折叠/展开/运行中）；shimmer 与各包 renderer 未写</div></div>
         <div class="arr">→</div>
-        <div class="node done"><div class="t"><span class="mark">✓</span>常驻状态面板</div><div class="d">2026-11-02（ADR-0022）：<b>编辑器上方常驻</b>（<code>packages/tui/pi</code> 的 pi 画面层）——逐条列进行中的子代理（字形 + 状态色 + 起始时刻），标题给「Tasks · N running · M succeeded · K failed」（<b>面板文案默认英文</b>，跟 pi 宿主界面同一语言），只算本会话的记录；没有进行中的任务即消失。<b>真机已验</b>：pi 1.4.0 的真 TUI 跑在真 pty（120×40）——画在编辑器正上方、随任务完成实时更新、全部跑完即消失；真机暴露的「标题把历史会话记录算进来（成功 180）」已按 <code>record.sessionId</code> 修掉；<b>正文先清洗再上屏</b>（ANSI 不进终端、换行不拆行）；接线归位到 <code>packages/tui/pi</code> 的 <code>createTaskPanel</code>，面板的活行为也有了探针（12/12）</div></div>
+        <div class="node done"><div class="t"><span class="mark">✓</span>常驻状态面板</div><div class="d">2026-11-02（ADR-0022）：<b>编辑器上方常驻</b>（<code>packages/tui/pi</code> 的 pi 画面层）——逐条列进行中的子代理（字形 + 状态色 + 起始时刻），标题给「Tasks · N running · M succeeded · K failed」（<b>面板文案默认英文</b>，跟 pi 宿主界面同一语言），只算本会话的记录；没有进行中的任务即消失。<b>真机已验</b>：pi 1.4.0 的真 TUI 跑在真 pty（120×40）——画在编辑器正上方、随任务完成实时更新、全部跑完即消失；<b>floor 0.86.0 同样渲染出来</b>（setWidget 在两版签名逐字同形 ⇒ 无版本门）；<b>全版本冒烟 16/16 全过</b>（scripts/version-smoke.sh，fails=0）；真机暴露的「标题把历史会话记录算进来（成功 180）」已按 <code>record.sessionId</code> 修掉；<b>正文先清洗再上屏</b>（ANSI 不进终端、换行不拆行）；接线归位到 <code>packages/tui/pi</code> 的 <code>createTaskPanel</code>，面板的活行为也有了探针（12/12）</div></div>
       </div>
     </div>
   </div>
