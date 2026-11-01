@@ -10,15 +10,15 @@ pi 的扩展：PTC（模型写 TypeScript 程序批量调工具）+ 子代理派
 | `ptc`      | PTC 引擎（产品）：运行格、worker 池、dispatcher、严格模式编译、文件四件套绑定——零依赖零宿主，可脱离 pi 单独安装                                     | 无（叶子）                    |
 | `dispatch` | 任务引擎：六道闸、DispatchSlotCounter（libuv 队列）、spawn/pump、registry（落盘+重启恢复）、child report、通知中心                                  | 无（叶子）                    |
 | `task`     | 任务面：list/output/stop 的读/停语义（列表封顶 + 精简字段；产出走归约层：孩子的散文正文）                                                           | → dispatch、tui、routes       |
-| `tui`      | 渲染原语叶子：文本卫生、截断契约、渲染预算                                                                                                          | 无                            |
+| `tui`      | 显示层（ADR-0022）：根 = 共享文本零件（文本卫生、截断契约、渲染预算，零依赖）；`/pi` 子路径 = pi 画面（折叠渲染 + 常驻子代理状态面板）              | 根 → 无；`/pi` → pi-tui       |
 | `output`   | 输出核（P0 拆分）：renderToolResult（结果→模型可见文本）、ResultTextOutcome 结构切片；Kimi 面（MCP）与 pi 面共用                                    | → tui（叶子）                 |
 | `kimi-mcp` | Kimi 面（MCP，ADR-0020）：双工具——ptc_run_code（运行格 + fs 四件套，workdir 锁）/ web_ds_search（宿主中立搜索核）                                   | → output、ptc、routes、search |
 | `routes`   | 模型面散文唯一出处（ADR-0013）：7 条路的册子 + 渲染器（索引/通知/引导语）+ Kimi 面 KIMI_MCP_RUN_CODE 块                                             | 无（叶子）                    |
 | `search`   | 搜索 provider 抽象（DeepSeek 首家）：三动作工具、配额、记忆、预算                                                                                   | → tui                         |
 
-依赖铁律：**tui / routes / output / ptc 是叶子**（不感知领域概念；`ptc` 更是零依赖零宿主——引擎可脱离 pi 单独安装）；`dispatch` 持全部任务状态，其余只是调用方；宿主依赖单向——pi-tui 只出现在 entry（`ptc-render.ts` 折叠渲染），`output` 与 `ptc` 零宿主依赖。
+依赖铁律：**tui 的根入口 / routes / output / ptc 是叶子**（不感知领域概念；`ptc` 更是零依赖零宿主——引擎可脱离 pi 单独安装）；`dispatch` 持全部任务状态，其余只是调用方；宿主依赖单向——pi-tui 只出现在 `packages/tui/pi`（pi 画面层，ADR-0022），`output` 与 `ptc` 零宿主依赖。
 
-**引擎单独使用（2026-11-01）**：`packages/ptc` 是零依赖零宿主的 PTC 引擎——装根包后 `import { runPtcProgram, createFsBindings } from "pi-ptc-subagents/ptc"` 即可脱离 pi 与模型跑程序（绑定契约见 GLOSSARY.md），命令行 `ptc <program.ts> --workdir .`。模型面（工具工厂 / pi 折叠渲染 / 绑定表 / 任务门）在 `packages/entry`，只有 pi 面用；Kimi 面直接用引擎 + `createFsBindings`，不经模型面。
+**引擎单独使用（2026-11-01）**：`packages/ptc` 是零依赖零宿主的 PTC 引擎——装根包后 `import { runPtcProgram, createFsBindings } from "pi-ptc-subagents/ptc"` 即可脱离 pi 与模型跑程序（绑定契约见 GLOSSARY.md），命令行 `ptc <program.ts> --workdir .`。模型面（工具工厂 / 绑定表 / 任务门）在 `packages/entry`，pi 画面（折叠渲染 / 常驻子代理状态面板）在 `packages/tui/pi`——只有 pi 面用；Kimi 面直接用引擎 + `createFsBindings`，不经模型面。
 
 ## 工具链（根目录）
 

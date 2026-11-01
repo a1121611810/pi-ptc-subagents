@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **常驻子代理状态面板**（pi TUI 编辑器上方）：把「派出去的子代理现在什么状态」从模型上下文搬到人的视线里。
+  面板逐条列出在飞任务（字形 + 状态色 + 起始时刻），标题给「在飞 N · 成功 M · 失败 K」；没有在飞任务时面板自动消失。
+  刷新挂在 registry 既有的变迁回调上，记录怎么变面板就怎么变。守卫是 `ctx.mode === "tui"`（`hasUI` 在 RPC 模式也是
+  true，不能当守卫）；字符串数组形态即可——宿主自带 10 行 widget 上限，pi-tui 的 `Text` 保留 ANSI，颜色直接由主题上。
+  两条冻结上限（ADR-0022 §8）：面板行数派生自宿主上限，label 截断沿用旧 ADR-0022 §11 的 48。
+
+### Changed
+
+- **`packages/tui` 升格为显示层**（ADR-0022）：根入口仍是零依赖的共享文本零件（`output` / `search` / `task` 四个消费方零改动），
+  pi 画面（折叠渲染 + 上面那块面板）走 `./pi` 子路径；`entry` 回归装配，去掉了全仓唯一那处 pi-tui 依赖。
+  根入口**不得** re-export pi 分面——`kimi-mcp` 的构建 alias 指向 `src/index.ts`，带出去就会把 pi 宿主代码打进 Kimi 产物；
+  `build:kimi` 装配因此加了门禁：产物里出现 `@earendil-works` 即抛。发布物形态不变（仍只有 pi-coding-agent 与 pi-tui
+  两个外部 import），Kimi 产物逐字未变。
+
 ## [7.5.0] - 2026-11-01
 
 ### Added
