@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   刷新挂在 registry 既有的变迁回调上，记录怎么变面板就怎么变。守卫是 `ctx.mode === "tui"`（`hasUI` 在 RPC 模式也是
   true，不能当守卫）；字符串数组形态即可——宿主自带 10 行 widget 上限，pi-tui 的 `Text` 保留 ANSI，颜色直接由主题上。
   两条冻结上限（ADR-0022 §8）：面板行数派生自宿主上限，label 截断沿用旧 ADR-0022 §11 的 48。
+  面板正文（模型写的、常照抄用户的话）先剥 ANSI 与控制符、再把空白压成空格、最后才截断——
+  不然转义序列会被终端执行、换行会把一条任务拆成两行。面板接线住在 `packages/tui/pi` 的
+  `createTaskPanel`，它自己订阅 registry 的变迁，entry 只管建与卸载。
 
 ### Changed
 
