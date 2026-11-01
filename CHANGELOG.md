@@ -5,6 +5,68 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.3.0] - 2026-11-01
+
+### Added
+
+- **Task-surface recall** (task + entry + dispatch + routes): the parent can find its old
+  tasks again and read what the child actually said. `ptc_task_list` takes `scope`
+  (recent / all — "all" lists the compaction archive too), `limit` (default 50, max 200),
+  `status` and `session`, and answers `{scope, total, tasks[]}` — `total` is the candidate
+  count, so a `total` larger than `tasks.length` means older records exist that were not
+  listed. Every field is capped (task 80 chars, summary 100, label 120) and the response is
+  trimmed entry by entry against a byte budget, so it is always valid JSON (text-level
+  truncation would cut JSON in half and `JSON.parse` would throw). Measured: 520 records
+  were 104,781 tokens in the old shape; the capped shape stays under 48 KB. Reading the
+  whole archive is not the bottleneck either — 3,000 archived records scan in 57 ms (their
+  bulk, 1,137 KB ≈ 291k tokens, is what costs).
+- **The child's prose is the deliverable** (`ptc_task_output`): the response now carries
+  `text` — the child's own answer, computed from the event stream on the fly — while the
+  report is only a summary. With no prose, the raw tail and the layered guidance are
+  returned as before, and the full stream stays reachable through `outputPath`.
+- **Task blood-line** (dispatch + entry): every task record carries the host session id
+  (`TaskRecord.sessionId`, taken from `ctx.sessionManager.getSessionId()` — present since
+  floor 0.86.0, so no version gate), so the parent can filter its own tasks by session.
+- **Re-injection after compaction** (entry + routes): a compaction drops the messages that
+  started the tasks, but the tasks keep running. On `session_compact` the host re-injects the
+  in-flight tasks and the five most recently completed ones as a `<compacted-tasks>` block on
+  the next LLM call. Verified on real pi at both ends — floor 0.86.0 and 1.4.0 both compact
+  successfully and inject the list (28→7 and 13→6 messages). No version gate: the `context`
+  event payload is byte-identical on 0.86.0.
+- **Stall guard** (dispatch): a child that has produced nothing for the threshold and has
+  no tool call in flight is reaped by the host (default 5 minutes — an engine-side constant,
+  not a model-facing knob; `timeoutMs` keeps its wall-clock meaning). `stopReason` records
+  `stalled: no activity for Nms`, so the parent can see that the child was killed rather
+  than finished.
+- **`tools.task_records` in-program binding** (ptc + entry): a program can pull the task
+  records itself (`{scope: "all"}` includes the compaction archive) — the mechanical scan
+  stays on the host, filtering and reduction happen in the program, and only the few
+  records the program returns enter the context. Regular expressions run inside the worker
+  cell, which terminates a runaway one: a pathological `(a+)+$` really hangs Node v24 for
+  over 120 s, but inside a program it is reaped (`canceled: timeout after 1000ms`) while the
+  host keeps running and can start another program afterwards.
+- **`scripts/compact-inject-smoke.mjs`**: real-machine probe for the compaction
+  re-injection. Assertions need no model cooperation — the compaction is triggered by the
+  rpc `compact` command while the agent is idle, and the injection is checked by a second
+  extension reading the request context. Passes on floor 0.86.0 and 1.4.0.
+
+### Changed
+
+- **Task-surface responses are objects, not arrays**: `ptc_task_list` answers
+  `{scope, total, tasks[]}` and `ptc_task_output` answers the record plus the reduced
+  `text`. Nothing in this repository parsed the old array shape, and the version smoke's
+  task-face leg stays green on 1.4.0, 0.86.0 and the current PATH (`task_face=OK`, no
+  `isError`).
+
+### Fixed
+
+- **The child now inherits the parent session's model** (entry): `buildPiArgv` already
+  resolved `input.model ?? input.agentModel ?? context.sessionModel`, but the entry never
+  passed `sessionModel` — children ran pi's default model instead of the parent's. The
+  model is now read at dispatch time through a live getter, so switching models mid
+  session switches the child's model too. Verified on eight pi versions 0.86.0–1.4.0, with
+  a negative control that goes red when the wiring is removed.
+
 ## [7.2.0] - 2026-10-31
 
 ### Added
