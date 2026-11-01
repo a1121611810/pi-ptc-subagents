@@ -27,6 +27,7 @@ import { fileURLToPath } from "node:url";
 import { compactedTaskReminder, readTaskOutput, taskListSnapshot } from "@pi-ptc/task";
 import { createDeepSeekProvider, createSearchMemory, createSearchQuota } from "@pi-ptc/search";
 import { createWebDsSearchTool } from "./web-ds-search-tool.ts";
+import { showUpgradeNotice } from "./upgrade-notice.ts";
 import { WorkerPool, spawnPtcWorker, type BindingTable } from "@pi-ptc/ptc";
 import { createPtcRunCodeTool, createPtcWorkflowTool } from "./ptc-tools.ts";
 import { KNOWN_BINDING_NAMES, resolveBindingNames } from "./ptc-bindings.ts";
@@ -51,6 +52,14 @@ import { assemblePtcSession, buildEngineContext, type PtcSession } from "./sessi
 
 export { assemblePtcSession, buildEngineContext } from "./session.ts";
 export { createTaskOutputBinding } from "./task-binding.ts";
+export {
+  findInstalledPackage,
+  parseChangelog,
+  pickBullets,
+  showUpgradeNotice,
+  summarize,
+  versionNumber,
+} from "./upgrade-notice.ts";
 export type {
   CreateTaskResult,
   DispatchOutcome,
@@ -111,6 +120,12 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
     if (Number(process.env.PI_PTC_DEPTH ?? 0) > 0) {
       registerChildToolsOnly(pi);
       return;
+    }
+    // 升级提示：版本变了才显示一次（首装不打扰）——失败绝不阻断启动
+    try {
+      showUpgradeNotice(ctx);
+    } catch {
+      // 提示是 best-effort
     }
     // 旧 ADR-0035/0051：surface 直接问 pi——codemode 进了模型活跃表 = codemode_ptc；否则 full_ptc
     const surface: SurfaceMode = pi.getActiveTools().includes("codemode")

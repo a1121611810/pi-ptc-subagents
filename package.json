@@ -24,6 +24,7 @@
   "files": [
     "dist/**/*.js",
     "docs/routes/**/*.md",
+    "CHANGELOG.md",
     "README.md",
     "LICENSE"
   ],
