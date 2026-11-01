@@ -1,0 +1,14 @@
+{
+  "version": "2",
+  "plugins": [
+    {
+      "id": "ptc-tools",
+      "displayName": "PTC Tools（程序批量调工具）",
+      "description": "写程序批量调工具：一次调用跑完整个循环，模型只看归约结果",
+      "source": "https://github.com/a1121611810/pi-ptc-subagents",
+      "homepage": "https://github.com/a1121611810/pi-ptc-subagents",
+      "keywords": ["ptc", "batch", "tools", "mcp"],
+      "tier": "third-party"
+    }
+  ]
+}

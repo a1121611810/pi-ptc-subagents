@@ -14,6 +14,14 @@ if (manifest.version !== pkg.version) {
   );
 }
 
+// 市场条目靠 id 匹配已装插件才出更新徽标——id 不符是静默失效（装得上、没有徽标）
+const marketplace = JSON.parse(readFileSync(join(root, "plugin-marketplace.json"), "utf8"));
+if (!marketplace.plugins?.some((p) => p.id === manifest.name)) {
+  throw new Error(
+    `plugin-marketplace.json 缺 id=${manifest.name} 的条目——Kimi Code 的更新徽标靠 id 匹配已装插件，id 不符就没有徽标`,
+  );
+}
+
 const distDir = join(root, "packages/kimi-mcp/dist");
 const out = join(root, "release/kimi");
 rmSync(out, { recursive: true, force: true });

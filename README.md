@@ -81,6 +81,26 @@ URL tracks the latest GitHub Release (pinned URLs get no update checks); run `/r
 activate. A bundled `ptc` skill teaches the model when to write a program instead of
 fanning out tool calls one by one.
 
+**Update badges need a marketplace entry.** Kimi Code only offers "update 7.1.0 → 7.5.0" in
+`/plugins` for plugins the marketplace catalog can match by id — a bare GitHub install is
+installed but never listed, so it never gets a badge. This repo ships the catalog; point
+Kimi Code at it:
+
+```bash
+/plugins marketplace https://raw.githubusercontent.com/a1121611810/pi-ptc-subagents/main/plugin-marketplace.json
+```
+
+or keep it for every session (desktop app included):
+
+```bash
+export KIMI_CODE_PLUGIN_MARKETPLACE_URL=https://raw.githubusercontent.com/a1121611810/pi-ptc-subagents/main/plugin-marketplace.json
+```
+
+The entry deliberately omits `version`: Kimi Code resolves it from the latest GitHub
+Release, so the catalog never goes stale. A custom catalog **replaces** the official one
+rather than adding to it, and updates stay one keystroke (`Enter` in `/plugins`) — Kimi
+Code has no auto-download path.
+
 ## The engine on its own (no model, no pi)
 
 The PTC runtime is a zero-dependency engine inside this package. Install it and run programs

@@ -1,10 +1,10 @@
-# 文档索引：88 份 docs 的压缩视图
+# 文档索引：90 份 docs 的压缩视图
 
 **这张表把 `docs/` 下的文件压成一行一条**：每份文档是什么、**验证状态**（能信到什么程度）、以及一个处置候选。**本表生成时没有删任何文件**——删哪些等你在这张表上拍板。
 
 ## 口径（先读这一段）
 
-**语料**：`docs/` 下 **80 份 git 跟踪文件**。磁盘上 `docs/` 有 88 个文件，多出的 8 个不是文档（发布副本 + 系统垃圾），见末节。
+**语料**：`docs/` 下 **81 份 git 跟踪文件**。磁盘上 `docs/` 有 90 个文件，多出的 8 个不是文档（发布副本 + 系统垃圾），见末节。
 
 **验证状态** —— 一份文档能信到什么程度：
 
@@ -55,6 +55,7 @@
 | [adr/0018-restore-project-site.md](adr/0018-restore-project-site.md)                                     | 恢复项目站点为第二个 workspace 成员                   | 权威（accepted 2026-10-27）                | 留                               |
 | [adr/0019-programs-run-in-a-vm-cell.md](adr/0019-programs-run-in-a-vm-cell.md)                           | PTC 程序在专属运行格（vm context）内执行              | 权威（accepted 2026-10-28）                | 留                               |
 | [adr/0020-kimi-mcp-face.md](adr/0020-kimi-mcp-face.md)                                                   | Kimi 面：MCP 形态 `ptc_run_code` + 宿主中立输出核     | 权威（accepted 2026-10-28）                | 留                               |
+| [adr/0021-plugin-marketplace-catalog.md](adr/0021-plugin-marketplace-catalog.md)                         | 插件更新徽标来自市场目录条目：分发物带一份市场 JSON   | 权威（accepted 2026-11-01）                | 留                               |
 | [prototypes/dispatch-doors-flow.html](prototypes/dispatch-doors-flow.html)                               | 派发与路由全景 = **spec**，决策的唯一出处             | 权威（现行；改语义前先对质它）             | 留（AGENTS.md 硬规矩）           |
 | [prototypes/ptc-runtime-status.html](prototypes/ptc-runtime-status.html)                                 | ptc 运行时现状全景：运行链路 / 已做 / 未做            | 已实测（随 PTC 改动同步维护）              | 留（站点 `public/status/`）      |
 | [prototypes/dispatch-engine-status.html](prototypes/dispatch-engine-status.html)                         | 子代理派发现状全景                                    | 已实测（随 dispatch 改动同步维护）         | 留（站点 `public/status/`）      |
@@ -148,11 +149,11 @@
 
 | 处置候选 | 份数   | 字节        | 占语料   |
 | -------- | ------ | ----------- | -------- |
-| 留       | 29     | 503 KB      | 31.3%    |
-| 留·压    | 4      | 278 KB      | 17.3%    |
+| 留       | 30     | 507 KB      | 31.4%    |
+| 留·压    | 4      | 278 KB      | 17.2%    |
 | 合并候选 | 15     | 117 KB      | 7.3%     |
-| 删候选   | 32     | 710 KB      | 44.1%    |
-| **合计** | **80** | **1.61 MB** | **100%** |
+| 删候选   | 32     | 710 KB      | 44.0%    |
+| **合计** | **81** | **1.61 MB** | **100%** |
 
 **「删候选 + 合并候选」= 47 份 = 827 KB ≈ 语料的一半。** 其中 455KB 集中在 `research/upstream-20260930/` 那 6 份上游快照（占语料 28%）——它们的价值是「别处没有的一手引用」，而不是「读起来像文档」。
 

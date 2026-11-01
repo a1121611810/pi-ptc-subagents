@@ -1,6 +1,8 @@
 # Kimi 面：MCP 形态的 ptc_run_code + 宿主中立输出核
 
-Status: accepted (2026-10-28)。P0（output 拆分，commit 8961bf5）+ P1（kimi-mcp）。分析依据：Kimi Code 插件清单（manifest 无 JS 运行时扩展点）+ 官方仓 MoonshotAI/kimi-code 源码（更新检测只认 github 来源，见「发布物形态」）。
+Status: accepted (2026-10-28)。P0（output 拆分，commit 8961bf5）+ P1（kimi-mcp）。分析依据：Kimi Code 插件清单（manifest 无 JS 运行时扩展点）+ 官方仓 MoonshotAI/kimi-code 源码（更新检测只认 github 来源，见「发布物形态」）。修订：[ADR-0021](./0021-plugin-marketplace-catalog.md)（2026-11-01，§5 的理由句）。
+
+> **Amended by [ADR-0021](./0021-plugin-marketplace-catalog.md) (2026-11-01): §5 的发布物形态不变（每版 `gh release create`、`release/kimi/` 入库、裸仓库 URL 装），但它给的理由是错的——Kimi Code 的更新徽标不来自 `manager.ts checkGithubUpdate`（那个函数没有调用方），而来自**市场目录条目**。因此分发物多了一份市场 JSON（`plugin-marketplace.json`），Consequences 里的「marketplace JSON（不上）」已关闭。**
 
 ## Context
 
@@ -24,4 +26,4 @@ pi 面之外要一张 Kimi 面：Kimi Code 插件能带的六种载荷（skills/
 
 - 测试三制：tests/pi（61）/ tests/output（5）/ tests/kimi（9）= 80 用例；假 pi harness 与假 MCP 客户端互不过河；`scripts/kimi-smoke.sh` 三腿（布局版本 / bundle 自包含 / 真 spawn 协议探针）。
 - 已知边界：fs 四件套语义对齐 pi 常用子集但非逐字节等价（read 无行号区间参数、grep 无 pi 的全部开关）——程序跨宿主移植时以册子契约为准；grep 二进制嗅探靠 U+FFFD + 后缀黑名单，不保证全覆盖。
-- 已知未做新增：Kimi 面八条门禁扩展、web_ds_search 过河（P2）、真 Kimi Code /plugins 面板安装冒烟（需 TUI，手工）、marketplace JSON（不上）。
+- 已知未做新增：Kimi 面八条门禁扩展、web_ds_search 过河（P2）、真 Kimi Code /plugins 面板安装冒烟（需 TUI，手工）。marketplace JSON 已由 [ADR-0021](./0021-plugin-marketplace-catalog.md) 落地。
