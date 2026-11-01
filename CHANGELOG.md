@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Artifact import gate** (`scripts/check-artifact-imports.mjs`, wired into `pnpm test`): a
+  built artifact's bare imports must be declared by the package that produced them. The rule is
+  "the declaration follows the artifact, not just the source" — moving code between packages used
+  to carry the dependency declaration along with the source, while the built `dist/index.js` kept
+  importing the package: on a clean install the extension could not resolve it (7 probes red, CI
+  red too; the local tree only stayed green because a months-old symlink in the root
+  `node_modules` happened to cover it). `dependencies` / `peerDependencies` /
+  `optionalDependencies` count, `devDependencies` does not (they do not ship), and imports shown
+  inside comments or strings are not imports.
+
 ## [7.6.0] - 2026-11-02
 
 ### Added

@@ -93,7 +93,7 @@ packages/tui/
 ## Consequences
 
 - **AGENTS.md 的包表与铁律句要改**：tui 从「渲染原语叶子」改为「显示层：根=共享文本零件，`/pi`=pi 画面」；「pi-tui 只出现在 entry」改为「pi-tui 只出现在 `tui/pi`」。
-- **`entry` 的 `@earendil-works/pi-tui` 依赖保留**——**导入点**搬进了 `packages/tui/pi`（源码里 entry 不再 import 它），但 **`entry` 打包出的 `dist/index.js` 仍 import 它**（rolldown 把它 external 掉）⇒ 声明跟着**产物**走，不能只跟着源码走。发版前在干净 worktree 里 `pnpm install` 才暴露：entry 少了这条声明 ⇒ `packages/entry/dist/index.js` 解析不到 pi-tui ⇒ 7 条探针红（本地开发树靠一个 10 月留下的根 `node_modules` 软链侥幸能解析，CI 的 `--frozen-lockfile` 干净树没有 ⇒ **CI 会红**）。修法：entry 与 tui **各声明各的**（tui 声明于源码、entry 声明于产物），根包 `dependencies` 仍为空 ⇒ 发布物与消费者解析不变。
+- **`entry` 的 `@earendil-works/pi-tui` 依赖保留**——**导入点**搬进了 `packages/tui/pi`（源码里 entry 不再 import 它），但 **`entry` 打包出的 `dist/index.js` 仍 import 它**（rolldown 把它 external 掉）⇒ 声明跟着**产物**走，不能只跟着源码走。发版前在干净 worktree 里 `pnpm install` 才暴露：entry 少了这条声明 ⇒ `packages/entry/dist/index.js` 解析不到 pi-tui ⇒ 7 条探针红（本地开发树靠一个 10 月留下的根 `node_modules` 软链侥幸能解析，CI 的 `--frozen-lockfile` 干净树没有 ⇒ **CI 会红**）。修法：entry 与 tui **各声明各的**（tui 声明于源码、entry 声明于产物），根包 `dependencies` 仍为空 ⇒ 发布物与消费者解析不变。**门禁**：`scripts/check-artifact-imports.mjs`——扫 `packages/*/dist/**/*.js` 的裸 import，逐条核对「产出它的那个包」的 manifest 是否声明了它（`devDependencies` 不算：它不随包安装），挂在 `pnpm test` 最前面 ⇒ 下次再把代码搬包而漏了声明，**当场红**，不必等发版前。
 - **发布物不变**：`dist/index.js` 仍只有 `pi-coding-agent` 与 `pi-tui` 两个外部 import（宿主运行时提供），根包 `dependencies` 仍为空。**Kimi 产物不变**：仍 0 个 `@earendil-works` 引用，且从此有门禁。
 - **`packages/tui` 从「零依赖」变成「根零依赖 + `/pi` 带宿主 peer」**。peer 声明是**包级**的，故 `pi-coding-agent` 声明为 optional peer（`peerDependenciesMeta.optional`），免得 `output` / `search` / `task` 间接背上 pi 依赖；`pi-tui` 是 `/pi` 的真实依赖。
 - **旧 ADR-0022 §11 的五条上限继续只管旧面板**（工具结果里的那一块）；本面板另立两条并在本 ADR 注册。旧仓的教训是「数字没有声明来源」——这次两条都有出处。

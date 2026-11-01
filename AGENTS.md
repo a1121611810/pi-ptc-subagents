@@ -22,11 +22,12 @@ pi 的扩展：PTC（模型写 TypeScript 程序批量调工具）+ 子代理派
 
 ## 工具链（根目录）
 
-`pnpm run check`（tsrs 类型检查）· `build`（rolldown）· `build:kimi`（kimi-mcp bundle → `release/kimi/` 装配 + 版本自检，ADR-0020）· `lint`（oxlint）· `fmt` / `fmt:check`（oxfmt）——改动后四件套全绿才算完。改文件用 Edit 工具；**不要用脚本做整段文本替换**（oxfmt 折行会让锚点失配，本仓已踩六次）。
+`pnpm run check`（tsrs 类型检查）· `build`（rolldown）· `build:kimi`（kimi-mcp bundle → `release/kimi/` 装配 + 版本自检，ADR-0020）· `lint`（oxlint）· `fmt` / `fmt:check`（oxfmt）——改动后四件套全绿才算完。改文件用 Edit 工具；**不要用脚本做整段文本替换**（oxfmt 折行会让锚点失配，本仓已踩六次）。另有 `check:imports`（产物外部 import 门禁，`scripts/check-artifact-imports.mjs`）——**已挂在 `pnpm test` 的最前面**，CI 与发版流水线自动带上。
 
 ## 验证纪律
 
 - 探针直接跑 `node` 打 `packages/*/dist/index.js`（假 spawn/fake pi harness）；引擎类逻辑必须探针覆盖
+- **产物外部 import 门禁**（`scripts/check-artifact-imports.mjs`，挂在 `pnpm test` 最前面）：扫 `packages/*/dist/**/*.js` 的裸 import，逐条核对「产出它的那个包」的 manifest 是否声明了它——**依赖声明跟产物走，不只跟源码走**（2026-11-02 发版前实测：pi 画面渲染搬进 `packages/tui/pi` 时声明跟着源码搬走，但 `packages/entry/dist/index.js` 仍 import pi-tui ⇒ 干净安装解析不到 ⇒ 7 条探针红、CI 也红；本地全绿只是根 `node_modules` 有一条陈旧软链侥幸兜住）。`devDependencies` 不算（不随包安装）；注释与字符串里的示例 import 不算（只认行首的 import/export 语句）
 - **仓库测试四制**：`test:pi`（`tests/pi/`，假 pi harness）/ `test:output`（`tests/output/`，宿主中立输出核）/ `test:kimi`（`tests/kimi/`，假 MCP 客户端 stdio 打 server bundle）/ `test:standalone`（`tests/standalone/`，引擎脱离 pi 与模型自跑）；`pnpm test` 串跑（改代码后先 `build` 再 `test`）——各面的探针资产互不过河
 - **真 pi 冒烟必须隔离**：`pi -ne -e <entry/dist/index.js>`——本机全局装有旧版 `npm:pi-ptc-subagents`，不加 `-ne` 会同名互踩
 - **真 TUI 可脚本化验证（2026-11-02 新路，不必等图形界面）**：真 pi 的 TUI 模式能跑在真 pty 上——`(cat prompt.txt; sleep 4; printf "\r"; sleep 100) | script -q /tmp/tui.log sh -c 'stty rows 40 cols 120; pi -ne -e <entry/dist/index.js>'`（`script` 造 pty 并定死 120×40；⚠️ **管道里的换行不会提交提示词**，必须补一个显式 `\r`；捕获是字节流，要用 `pyte` 重建屏幕帧再断言）⇒ 比 kimi-cu 驱动真终端更可复现，也更严（窄屏更容易折行/撞上限）。2026-11-02 用它验了常驻子代理状态面板：画在编辑器正上方、随任务完成实时更新、全部跑完即消失——并抓到「标题把历史会话的恢复记录算进来（succeeded 180）」这个真缺陷
