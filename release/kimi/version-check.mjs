@@ -72,6 +72,7 @@ async function main() {
     const latest = await fetchLatestVersion().catch(() => undefined);
     state.checkedAt = now; // 查失败也记时间：离线时不每条消息都卡一次超时
     if (latest !== undefined) state.latest = latest;
+    writeState(state); // 已是最新也要落盘——否则每条消息都去问一次 GitHub
   }
 
   const latest = parseVersion(state.latest);

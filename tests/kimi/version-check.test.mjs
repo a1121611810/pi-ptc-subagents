@@ -104,6 +104,27 @@ test("拉到 latest release：解析 tag 并出声", async () => {
   assert.ok(state.checkedAt > 0);
 });
 
+test("已是最新时也落缓存（不每条消息都去问 GitHub）", async () => {
+  const server = createServer((_req, res) => {
+    res.writeHead(302, { location: "https://example.test/releases/tag/v7.7.0" });
+    res.end();
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const { port } = server.address();
+  const fx = fixture("7.7.0");
+  try {
+    const out = await check(fx, `http://127.0.0.1:${port}/releases/latest`);
+    assert.equal(out, "", "已是最新就不该出声");
+  } finally {
+    server.close();
+  }
+  const state = JSON.parse(
+    readFileSync(join(fx.home, "cache", "ptc-tools-update-check.json"), "utf8"),
+  );
+  assert.ok(state.checkedAt > 0, "checkedAt 没落盘 ⇒ TTL 失效，每条消息都重新拉");
+  assert.equal(state.latest, "7.7.0");
+});
+
 test("插件根没有 manifest：静默退出", async () => {
   const home = mkdtempSync(join(tmpdir(), "ptc-upd-home-"));
   const root = mkdtempSync(join(tmpdir(), "ptc-upd-"));
