@@ -6,7 +6,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { renderModelValue } from "../../packages/tui/dist/index.js";
-import { WorkerPool, runPtcProgram, spawnPtcWorker } from "../../packages/ptc/dist/index.js";
+import { WorkerPool, runPtcProgram, spawnPtcWorker } from "../../packages/entry/dist/ptc/index.js";
 import entryDefault from "../../packages/entry/dist/index.js";
 
 test("F7 值树契约（ADR-0016）：每层子项截 6 + 余量标记；行宽 120；小值形态不变", () => {

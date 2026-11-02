@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { createFsBindings, runPtcProgram } from "../../packages/ptc/dist/index.js";
+import { createFsBindings, runPtcProgram } from "../../packages/entry/dist/ptc/index.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -95,7 +95,7 @@ test("CLI 端到端：ptc <program.ts> 不经模型跑出结果", async () => {
   );
   const { stdout } = await execFileAsync(
     process.execPath,
-    [join(repoRoot, "packages", "ptc", "dist", "cli.js"), program, "--workdir", dir],
+    [join(repoRoot, "packages", "entry", "dist", "ptc", "cli.js"), program, "--workdir", dir],
     { cwd: dir },
   );
   assert.deepEqual(JSON.parse(stdout), { files: ["a.txt"] });

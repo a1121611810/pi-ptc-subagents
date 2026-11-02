@@ -5,5 +5,8 @@ import { existsSync } from "node:fs";
 export function buildWorkerUrl(from: string | URL): URL {
   const built = new URL("./worker.js", from);
   if (existsSync(built)) return built;
-  return new URL("../src/worker-entry.ts", from);
+  // 只在源码直跑时兜底：构建产物里没有 src/，退回去只会报一个从没存在过的路径
+  const source = new URL("../src/worker-entry.ts", from);
+  if (existsSync(source)) return source;
+  throw new Error(`PTC worker 缺失：期望 ${built.pathname}`);
 }

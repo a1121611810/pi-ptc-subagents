@@ -10,7 +10,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const cli = join(repoRoot, "packages", "ptc", "dist", "cli.js");
+const cli = join(repoRoot, "packages", "entry", "dist", "ptc", "cli.js");
 
 function program() {
   const dir = mkdtempSync(join(tmpdir(), "ptc-cli-args-"));

@@ -22,8 +22,10 @@ export class WorkerPool {
     // drain 只退役「当代」worker，不封池：下一次 acquire 起新的一代（否则 turn_end 之后再也无法取到 worker）
     if (this.#spawned < this.#capacity) {
       this.#draining = false;
+      // 先起再记账：spawn 抛错（worker 产物缺失）时不白扣一个名额
+      const worker = this.#spawn();
       this.#spawned++;
-      return Promise.resolve(this.#track(this.#spawn()));
+      return Promise.resolve(this.#track(worker));
     }
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {

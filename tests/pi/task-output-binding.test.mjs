@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runPtcProgram } from "../../packages/ptc/dist/index.js";
+import { runPtcProgram } from "../../packages/entry/dist/ptc/index.js";
 import {
   TaskEngine,
   TaskRegistry,

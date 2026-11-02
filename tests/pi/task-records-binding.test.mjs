@@ -2,7 +2,7 @@
 // 性质（真机实测 2026-10-31）：正则跑在 worker（有 terminate 兜底），宿主没有隔离
 import test from "node:test";
 import assert from "node:assert/strict";
-import { runPtcProgram } from "../../packages/ptc/dist/index.js";
+import { runPtcProgram } from "../../packages/entry/dist/ptc/index.js";
 
 const RECORDS = [
   { id: "a", task: "读 AGENTS.md 汇总口径", status: "succeeded" },

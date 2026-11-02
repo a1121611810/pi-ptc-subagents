@@ -13,9 +13,13 @@ export default defineConfig({
     // worker 与 index 同目录出包：pi 加载的是 dist/index.js，而 worker 线程按
     // buildWorkerUrl(import.meta.url) 找同目录的 worker.js——worker 不在 index 旁边就起不来
     worker: "../ptc/src/worker-entry.ts",
+    // 独立引擎面 + ptc 命令行：与 index 同一次构建出包（ADR-0024）——
+    // 此前 ptc 包单建一次、prepack 再把两份 dist 拼起来 ⇒ 发布物里引擎本体与 worker 各有两份
+    "ptc/index": "../ptc/src/index.ts",
+    "ptc/cli": "../ptc/src/cli.ts",
   },
   platform: "node",
-  // 发布形态：根包只发一份自包含产物——workspace 包（@pi-ptc/*）打进 bundle，只外置 pi 本身
+  // 发布形态：根包只发一次构建的产物——workspace 包（@pi-ptc/*）打进 bundle，只外置 pi 本身
   external: [/^@earendil-works\//],
   resolve: {
     alias: {
@@ -32,6 +36,21 @@ export default defineConfig({
   output: {
     dir: "dist",
     entryFileNames: "[name].js",
+    // 共享块留在输出根（不能进 chunks/ 子目录）：worker 线程按 buildWorkerUrl(import.meta.url)
+    // 找同目录的 worker.js，而 buildWorkerUrl 在共享块里 ⇒ 共享块挪进子目录就找不到 worker
+    chunkFileNames: "[name].js",
     format: "esm",
+    // 引擎本体归到一个具名共享块：index.js 与 ptc/index.js 指向同一份引擎（ADR-0024）
+    codeSplitting: {
+      groups: [
+        {
+          name: "ptc-engine",
+          // 正面名单：只收引擎的运行时模块。新增引擎文件忘了加进来 ⇒ 它落到自己的自动块（无害）；
+          // 用「排除名单」的话，将来的入口模块会被扫进共享块——入口模块有顶层副作用，
+          // 后果是「只要 import entry 就执行它」（rolldown 文档：manual chunking 会改副作用时机）
+          test: /packages\/ptc\/src\/(dispatcher|pool|limits|sub-calls|fs-bindings|worker-source)\.ts$/,
+        },
+      ],
+    },
   },
 });
