@@ -1,6 +1,6 @@
 {
   "name": "pi-ptc-subagents",
-  "version": "7.7.1",
+  "version": "7.8.0",
   "description": "Programmable tool calling (PTC) and subagent fan-out for pi",
   "keywords": [
     "pi",
@@ -42,10 +42,10 @@
     "check:imports": "node scripts/check-artifact-imports.mjs",
     "lint": "oxlint",
     "test": "pnpm run check:imports && pnpm run test:pi && pnpm run test:output && pnpm run test:kimi && pnpm run test:standalone",
-    "test:pi": "node --test tests/pi/*.test.mjs",
-    "test:output": "node --test tests/output/*.test.mjs",
-    "test:kimi": "node --test tests/kimi/*.test.mjs",
-    "test:standalone": "node --test tests/standalone/*.test.mjs",
+    "test:pi": "node --enable-source-maps --test tests/pi/*.test.mjs",
+    "test:output": "node --enable-source-maps --test tests/output/*.test.mjs",
+    "test:kimi": "node --enable-source-maps --test tests/kimi/*.test.mjs",
+    "test:standalone": "node --enable-source-maps --test tests/standalone/*.test.mjs",
     "pretest": "pnpm run build",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check"

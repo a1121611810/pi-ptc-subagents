@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.8.0] - 2026-11-02
+
+### Changed
+
+- **Published artifacts are minified again** (ADR-0025): the clean-room rewrite had
+  dropped the `minify` flag, so the npm package shipped readable source.
+  `dist/index.js` went from 245,612 B to 101,999 B and the tarball from 94.1 kB to
+  71.8 kB (unpacked 341.5 kB → 188.7 kB, −44.8%). Minification uses rolldown's
+  built-in oxc minifier — no new dependency. Source maps are still written next to
+  the code for local stack traces, and are not published.
+
+### Fixed
+
+- **The artifact import gate no longer misses imports in minified bundles**
+  (ADR-0025): it anchors on statement boundaries instead of line starts, because a
+  minified bundle is a single line — with the old anchor the gate saw 1 of the 3 bare
+  imports in the published artifact, and could pass a package whose dependency was
+  never declared.
+
 ## [7.7.1] - 2026-11-02
 
 ### Fixed
