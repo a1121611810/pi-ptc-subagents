@@ -46,6 +46,13 @@ jobs:
       - run: pnpm run fmt:check
       - run: pnpm run build
       - run: pnpm run test
+      # Build the published layout BEFORE `npm publish`: npm validates the `bin`
+      # field against the filesystem while reading the manifest — before any
+      # lifecycle script runs — so a fresh checkout (no dist/ yet) makes it warn
+      # "No bin file found at dist/ptc/cli.js" even though the tarball ships it.
+      # Running prepack first makes the file exist, and prepack is idempotent
+      # (npm publish runs it again).
+      - run: npm run prepack
       # No `--provenance` flag: under trusted publishing npm generates the attestation
       # automatically once the source repository is public. Verbose is the level at
       # which npm reports the OIDC exchange, so the release log records it.
