@@ -236,7 +236,10 @@ test("TUI 模式：升级提示走 widget 区，不走共享状态槽", () => {
     widgets[0].content.some((line) => line.includes("Changelog: https://")),
     "Changelog 链接要在（截断就丢了）",
   );
-  assert.ok(widgets[0].content.length <= 10, "widget 行数上限 10（pi 的 MAX_WIDGET_LINES），超了被截");
+  assert.ok(
+    widgets[0].content.length <= 10,
+    "widget 行数上限 10（pi 的 MAX_WIDGET_LINES），超了被截",
+  );
   assert.ok(
     widgets[0].content.every((line) => line.length > 0),
     "空行在 widget 里不占位，送之前先去掉",
@@ -249,8 +252,9 @@ async function runSessionStart(ctx) {
   const agentDir = mkdtempSync(join(tmpdir(), "ptc-upgrade-agent-"));
   const stateDir = join(agentDir, "pi-ptc-subagents");
   mkdirSync(stateDir, { recursive: true });
-  const previous = parseChangelog(readFileSync(new URL("../../CHANGELOG.md", import.meta.url), "utf8"))[1]
-    ?.version;
+  const previous = parseChangelog(
+    readFileSync(new URL("../../CHANGELOG.md", import.meta.url), "utf8"),
+  )[1]?.version;
   writeFileSync(join(stateDir, "last-seen-version.json"), JSON.stringify({ version: previous }));
   const savedAgentDir = process.env.PI_CODING_AGENT_DIR;
   const savedCwd = process.cwd();
