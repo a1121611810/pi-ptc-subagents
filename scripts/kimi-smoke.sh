@@ -18,6 +18,7 @@ if (manifest.version !== pkg.version) throw new Error(`version 不一致: ${mani
 if (!existsSync(join(root, "release/kimi/server.js"))) throw new Error("缺 release/kimi/server.js——先 pnpm run build:kimi");
 if (!existsSync(join(root, "release/kimi/worker.js"))) throw new Error("缺 release/kimi/worker.js");
 if (!existsSync(join(root, "release/kimi/skills/ptc/SKILL.md"))) throw new Error("缺 skills/ptc/SKILL.md");
+if (!existsSync(join(root, "release/kimi/version-check.mjs"))) throw new Error("缺 release/kimi/version-check.mjs——hook 静默失效＝「有新版」永不提示（ADR-0023）");
 console.log(`  version ${manifest.version} 一致，js chunks: ${readdirSync(join(root, "release/kimi")).filter((f) => f.endsWith(".js")).join(", ")}`);
 ' "$REPO" || fails=$((fails + 1))
 
