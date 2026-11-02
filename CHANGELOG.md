@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.9.0] - 2026-11-02
+
+### Changed
+
+- **The published package no longer bundles typebox** (ADR-0026): the extension
+  builds its tool schemas with typebox, which dragged 245 typebox modules into the
+  bundle. pi's extension loader resolves `typebox` to its own copy (the same
+  version, 1.3.27), so the bundler now treats it as external: `dist/index.js` went
+  from 101,999 B to 61,052 B and the tarball from 72.2 kB to 60.2 kB — no new
+  dependency, nothing extra to install.
+
+### Fixed
+
+- **The upgrade notice is no longer swallowed by the surface breadcrumb** (pi
+  extension): pi's TUI has a single status slot, so a later notification replaces
+  an earlier one — the upgrade reminder was pushed out by the `surface=…` line.
+  It now goes out as the last notification of `session_start`.
+- **A version with nothing to say no longer burns its own reminder**: the seen
+  version was written before checking whether there was a section to show, so the
+  reminder for that version was lost for good.
+- The display layer's build now clears its output directory first (rolldown never
+  does), so a renamed chunk can no longer linger as a dead file in the tree.
+
 ## [7.8.0] - 2026-11-02
 
 ### Changed
