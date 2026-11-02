@@ -86,7 +86,7 @@ pi 的扩展：PTC（模型写 TypeScript 程序批量调工具）+ 子代理派
 - 模型面散文（工具描述、通知文案、引导语）一律进 `routes`，工具/引擎文件里不许字面量。
   例外：子代理进程侧工具（`web_ds_search` / `ptc_child_report`）的描述留在各自包——它们只在 `PI_PTC_DEPTH>0` 注册，不进宿主路由册
 - pi 接入事实：注册只发生在 `session_start`（factory 阶段 getActiveTools 是 throw 的桩）；动态可见性走 `defaultActive:false` + `setActiveTools`（exposure getter 在 1.4.0 实测不支持）
-- **pi 的 TUI 只有一个状态槽**：`ctx.ui.notify(msg,"info")` → `showStatus` **原地替换**上一条（上一条还在尾巴上就复用同一块）⇒ 同一段启动流程里发多条通知，**只有最后一条活下来**（2026-11-02 实测：升级提醒被后发的 surface 面包屑顶掉，用户看不到，而哨兵照写 ⇒ 这一版的提醒被永久烧掉）。入口要发多条通知时，**重要的那条必须最后发**；pi 自己的更新通知走 `addChild`（不抢这个槽）
+- **pi 的 TUI 通知槽是全局共享的，别用它发「要给人看的内容」**：`ctx.ui.notify(msg,"info")` → `showStatus`，① **原地替换**上一条状态；② 更狠的是所有状态文本组件都**动态读同一个 `lastStatusMessage` 字段** ⇒ **任何**扩展（ponytail / session-title / tok-speed…）在之后调一次 `showStatus`，我们的文案就被改成别人的，**连一次都没被画出来**（2026-11-02 真机复现：升级提醒与 surface 面包屑双双消失，字节流里搜不到我们的字，而哨兵照写 ⇒ 这一版的提醒被永久烧掉）。⇒ **TUI 里要送达的内容走按 key 隔离的 `ctx.ui.setWidget(key, lines)`**（独立容器，编辑器上方；本仓任务面板已在用）；`notify` 只留给 rpc/print 模式（那边是 `extension_ui_request` 事件）。**排序救不了它**——顺序只能赢过*自己*的通知，赢不过别的扩展
 - **任务面响应一律是对象，不是数组**（2026-11-01 起）：`ptc_task_list` 给 `{ scope, total, tasks[] }`（`total` 是候选总数，比返回条数大说明还有更早的记录没列出来）；`ptc_task_output` 给记录 + 归约层（`text` = 孩子的散文正文，报告只是摘要）。列表**只能做条目级裁剪**——文本级截断会把 JSON 砍成半截，`JSON.parse` 直接抛
 - 压缩后重注入：pi 的 `context` 事件的 handler 返回值**替换**本次请求的可见消息（不累积、不进会话记录）⇒ 要连 `event.messages` 一起返回；`session_compact` 置标志、下一次 LLM 调用前注入一次即清标志。事件形状在 floor 0.86 与 1.4.0 同形（无版本门），但**真机只验过 1.4.0**
 

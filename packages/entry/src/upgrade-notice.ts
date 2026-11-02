@@ -16,12 +16,18 @@ export interface ChangelogSection {
 
 export interface NoticeUi {
   notify?: (message: string, type?: "info" | "warning" | "error") => void;
+  setWidget?: (key: string, content: string[] | undefined) => void;
 }
 
 export interface NoticeContext {
   hasUI?: boolean;
+  /** pi 的运行模式（"tui" | "rpc" | "json" | "print"）——TUI 有独立的 widget 区可用 */
+  mode?: string;
   ui?: NoticeUi;
 }
+
+/** TUI 里升级提示的落点：按 key 隔离的 widget 区（编辑器上方），不与别的扩展抢 */
+const UPGRADE_WIDGET_KEY = "ptc-upgrade";
 
 /** 已装包的事实——测试注入用，默认从 import.meta.url 定位已安装目录 */
 export interface NoticeEnvironment {
@@ -124,15 +130,32 @@ export function showUpgradeNotice(ctx: NoticeContext, environment?: NoticeEnviro
   // 先落状态再通知：写不进去就直接不显示——否则只读安装每次启动都刷同一条
   if (!writeSeenVersion(env.statePath, env.version)) return;
   const bullets = pickBullets(sections, baseline, env.version);
-  ctx.ui.notify(
+  deliver(
+    ctx,
     compose(
       previousNumber === undefined ? undefined : previous,
       env.version,
       bullets,
       changelogUrl(env.repository),
     ),
-    "info",
   );
+}
+
+/**
+ * 送达：TUI 走按 key 隔离的 widget 区，其它模式走 notify。
+ * ⚠️ TUI 里不能用 notify：那个状态槽全局共享，而且每个状态文本都动态读同一个 lastStatusMessage
+ * ——任何扩展（ponytail / session-title / tok-speed…）后调一次 showStatus，我们的文案就被改成别人的，
+ * 连一次都没被画出来（2026-11-02 真机复现：字节流里搜不到我们的字）。
+ */
+function deliver(ctx: NoticeContext, text: string): void {
+  if (ctx.mode === "tui" && typeof ctx.ui?.setWidget === "function") {
+    ctx.ui.setWidget(
+      UPGRADE_WIDGET_KEY,
+      text.split("\n").filter((line) => line.length > 0),
+    );
+    return;
+  }
+  ctx.ui?.notify?.(text, "info");
 }
 
 export interface InstalledPackage {

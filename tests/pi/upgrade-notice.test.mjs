@@ -211,16 +211,46 @@ test("没话说就不占状态：没有可显示的版本段时，状态不写�
   assert.equal(existsSync(env.statePath), false, "没显示就别占状态——否则这一版的提醒被永久烧掉");
 });
 
-test("entry 层：升级提示必须是 session_start 的最后一条通知（TUI 只有一个状态槽）", async () => {
-  const { default: entryDefault } = await import("../../packages/entry/dist/index.js");
-  const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
-  const sections = parseChangelog(
-    readFileSync(new URL("../../CHANGELOG.md", import.meta.url), "utf8"),
+test("TUI 模式：升级提示走 widget 区，不走共享状态槽", () => {
+  const env = environment();
+  writeFileSync(env.statePath, JSON.stringify({ version: "7.4.0" }), "utf8");
+  const widgets = [];
+  const messages = [];
+  showUpgradeNotice(
+    {
+      hasUI: true,
+      mode: "tui",
+      ui: {
+        setWidget: (key, content) => widgets.push({ key, content }),
+        notify: (m) => messages.push(m),
+      },
+    },
+    env,
   );
-  const previous = sections[1]?.version ?? "0.0.0"; // 上一版发布（比当前低 ⇒ 触发提醒）
+  assert.equal(messages.length, 0, "TUI 里不能走 notify——那个状态槽全局共享，后调者会把文案改掉");
+  assert.equal(widgets.length, 1);
+  assert.equal(widgets[0].key, "ptc-upgrade");
+  assert.ok(widgets[0].content[0].startsWith("pi-ptc-subagents 7.5.0"));
+  assert.ok(widgets[0].content.includes("Updated from 7.4.0."));
+  assert.ok(
+    widgets[0].content.some((line) => line.includes("Changelog: https://")),
+    "Changelog 链接要在（截断就丢了）",
+  );
+  assert.ok(widgets[0].content.length <= 10, "widget 行数上限 10（pi 的 MAX_WIDGET_LINES），超了被截");
+  assert.ok(
+    widgets[0].content.every((line) => line.length > 0),
+    "空行在 widget 里不占位，送之前先去掉",
+  );
+});
+
+/** 隔离地跑一次 entry 的 session_start：状态哨兵放 tmp，cwd 放 tmp，返回它发出的通知与 widget */
+async function runSessionStart(ctx) {
+  const { default: entryDefault } = await import("../../packages/entry/dist/index.js");
   const agentDir = mkdtempSync(join(tmpdir(), "ptc-upgrade-agent-"));
   const stateDir = join(agentDir, "pi-ptc-subagents");
   mkdirSync(stateDir, { recursive: true });
+  const previous = parseChangelog(readFileSync(new URL("../../CHANGELOG.md", import.meta.url), "utf8"))[1]
+    ?.version;
   writeFileSync(join(stateDir, "last-seen-version.json"), JSON.stringify({ version: previous }));
   const savedAgentDir = process.env.PI_CODING_AGENT_DIR;
   const savedCwd = process.cwd();
@@ -240,23 +270,54 @@ test("entry 层：升级提示必须是 session_start 的最后一条通知（TU
       sendMessage: () => {},
     };
     entryDefault(fakePi);
-    const messages = [];
-    await handlers.session_start[0]({}, { hasUI: true, ui: { notify: (m) => messages.push(m) } });
-    const last = messages.at(-1) ?? "";
-    assert.ok(
-      last.startsWith(`pi-ptc-subagents ${pkg.version}`),
-      `升级提示必须是最后一条通知——pi 的 TUI 只有一个状态槽，后发的会顶掉先发的（实得：${last.slice(0, 60)}）`,
-    );
-    assert.ok(last.includes(`Updated from ${previous}.`), "显示从哪版升上来的");
-    assert.ok(
-      messages.some((m) => m.startsWith("pi-ptc-subagents: surface=")),
-      "surface 面包屑仍然要发",
-    );
+    await handlers.session_start[0]({}, ctx);
+    return { previous };
   } finally {
     process.chdir(savedCwd);
     if (savedAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = savedAgentDir;
   }
+}
+
+test("entry 层：TUI 模式下升级提示进 widget 区，不进共享状态槽", async () => {
+  const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
+  const widgets = [];
+  const messages = [];
+  const { previous } = await runSessionStart({
+    hasUI: true,
+    mode: "tui",
+    ui: {
+      setWidget: (key, content) => widgets.push({ key, content }),
+      notify: (m) => messages.push(m),
+    },
+  });
+  const upgrade = widgets.find((w) => w.key === "ptc-upgrade");
+  assert.ok(upgrade, "升级提示没进 widget 区");
+  assert.ok(upgrade.content[0].startsWith(`pi-ptc-subagents ${pkg.version}`));
+  assert.ok(upgrade.content.includes(`Updated from ${previous}.`), "显示从哪版升上来的");
+  assert.ok(
+    messages.every((m) => m.startsWith("pi-ptc-subagents: surface=")),
+    "共享状态槽里只该剩 surface 面包屑",
+  );
+});
+
+test("entry 层：没有 widget 通道时（老 pi）退回 notify，且必须是最后一条", async () => {
+  const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
+  const messages = [];
+  const { previous } = await runSessionStart({
+    hasUI: true,
+    ui: { notify: (m) => messages.push(m) },
+  });
+  const last = messages.at(-1) ?? "";
+  assert.ok(
+    last.startsWith(`pi-ptc-subagents ${pkg.version}`),
+    `退回 notify 时升级提示必须排最后——共享状态槽里后发的会顶掉先发的（实得：${last.slice(0, 60)}）`,
+  );
+  assert.ok(last.includes(`Updated from ${previous}.`), "显示从哪版升上来的");
+  assert.ok(
+    messages.some((m) => m.startsWith("pi-ptc-subagents: surface=")),
+    "surface 面包屑仍然要发",
+  );
 });
 
 test("格式漂移守卫：本仓真实 CHANGELOG 的顶节版本 == package.json 版本", () => {
