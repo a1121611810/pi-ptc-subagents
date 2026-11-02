@@ -1,6 +1,6 @@
 # 发布物压缩：minify 开，sourcemap 留盘不发布
 
-Status: accepted (2026-11-02)。修订：发布形态那段的「产物即源码可读」。
+Status: accepted (2026-11-02)。修订：发布形态那段的「产物即源码可读」、[ADR-0026](./0026-typebox-comes-from-pi.md)（产物里不再带 typebox）。
 
 ## Context
 
@@ -22,7 +22,7 @@ Status: accepted (2026-11-02)。修订：发布形态那段的「产物即源码
 
 ## Consequences
 
-- **发布物**：npm 包 JS 合计 268,491 B → **115,637 B（−56.9%）**；`dist/index.js` 245,612 → 101,999 B、`ptc-engine.js` 14,141 → 7,269 B、`worker.js` 6,332 → 4,667 B。Kimi `release/kimi/server.js` 592,267 → 288,454 B。
+- **发布物**：npm 包 JS 合计 268,491 B → **115,637 B（−56.9%）**；`dist/index.js` 245,612 → 101,999 B、`ptc-engine.js` 14,141 → 7,269 B、`worker.js` 6,332 → 4,667 B。Kimi `release/kimi/server.js` 592,267 → 288,454 B。（随后 [ADR-0026](./0026-typebox-comes-from-pi.md) 再把 typebox 外置 ⇒ 74,690 B。）
 - **堆栈里的函数名变短**（sourcemap 能把位置映回源码，函数名本身是压缩后的）——本地调试靠 `node --enable-source-maps`。
 - **两处门禁改动都有探针钉住**：`tests/pi/artifact-import-gate.test.mjs` 加两条压缩形态用例（单行里的第二个 import 也要被抓到）；`tests/pi/artifact-shape.test.mjs` 换标记 + `from\s*"`（压缩后 `from"x"` 没有空格）。
 - **没做的**：entry 里那 245 个 typebox 模块是**真需要的**（用 `Type.Object` 等生成 pi 工具的 JSON Schema），不是误打包；要再瘦只能换成手写 JSON Schema 对象——一次有行为风险的独立重构，不在本次范围。
@@ -37,4 +37,5 @@ Status: accepted (2026-11-02)。修订：发布形态那段的「产物即源码
 ## See also
 
 - [ADR-0024](./0024-one-build-multi-entry-artifact.md) —— 发布形态（一次构建、多入口、共享块）；本篇只管「压不压」。
+- [ADR-0026](./0026-typebox-comes-from-pi.md) —— 压缩之后还剩什么：typebox 由 pi 提供，不进产物。
 - 旧 ADR-0019《minify 与 source map 排除》（归档在 `backup/main-legacy-20261026`）—— 本篇是它在干净室重写后的再生。

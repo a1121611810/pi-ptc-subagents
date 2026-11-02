@@ -20,7 +20,9 @@ export default defineConfig({
   },
   platform: "node",
   // 发布形态：根包只发一次构建的产物——workspace 包（@pi-ptc/*）打进 bundle，只外置 pi 本身
-  external: [/^@earendil-works\//],
+  // typebox 也外置：pi 的扩展加载器带 alias 表（typebox → pi 自己那份 1.3.27，与本仓同版本），
+  // 扩展 import "typebox" 由 pi 解析 ⇒ 产物里少 245 个模块，不新增任何依赖、不多装一个字节
+  external: [/^@earendil-works\//, "typebox"],
   resolve: {
     alias: {
       "@pi-ptc/dispatch": src("dispatch"),
