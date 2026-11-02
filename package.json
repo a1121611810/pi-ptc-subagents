@@ -1,6 +1,6 @@
 {
   "name": "pi-ptc-subagents",
-  "version": "7.7.0",
+  "version": "7.7.1",
   "description": "Programmable tool calling (PTC) and subagent fan-out for pi",
   "keywords": [
     "pi",

@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.7.1] - 2026-11-02
+
+### Fixed
+
+- **The new-version check now caches what it learned** (Kimi face, ADR-0023): the probe
+  state was written only when a newer release was found, so in the common case — the plugin
+  being up to date — `checkedAt` never landed on disk and the 6-hour TTL never took effect:
+  every single user message re-queried GitHub's `/releases/latest`. It now persists the
+  state as soon as it has fetched. Measured on the installed 7.7.0: the cache file was empty
+  after a run; it now holds `checkedAt` and `latest`.
+
 ## [7.7.0] - 2026-11-02
 
 ### Added
