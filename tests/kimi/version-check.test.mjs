@@ -125,6 +125,48 @@ test("已是最新时也落缓存（不每条消息都去问 GitHub）", async (
   assert.equal(state.latest, "7.7.0");
 });
 
+test("TTL 窗口内不再问 GitHub（用缓存里的 latest 出声）", async () => {
+  let hits = 0;
+  const server = createServer((_req, res) => {
+    hits++;
+    res.writeHead(302, { location: "https://example.test/releases/tag/v9.9.9" });
+    res.end();
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const { port } = server.address();
+  try {
+    const out = await check(
+      fixture("7.6.0", { checkedAt: NOW - 5 * 60 * 1000, latest: "7.7.0" }),
+      `http://127.0.0.1:${port}/releases/latest`,
+    );
+    assert.equal(hits, 0, "TTL 窗口内不该再走网络");
+    assert.match(out, /7\.7\.0/, "窗口内仍要用缓存里的 latest 出声");
+  } finally {
+    server.close();
+  }
+});
+
+test("TTL 过期就重新问 GitHub（发布后最迟一个窗口就知道）", async () => {
+  let hits = 0;
+  const server = createServer((_req, res) => {
+    hits++;
+    res.writeHead(302, { location: "https://example.test/releases/tag/v9.9.9" });
+    res.end();
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const { port } = server.address();
+  try {
+    const out = await check(
+      fixture("7.6.0", { checkedAt: NOW - 20 * 60 * 1000, latest: "7.6.0" }),
+      `http://127.0.0.1:${port}/releases/latest`,
+    );
+    assert.equal(hits, 1, "TTL 过期就该重新拉");
+    assert.match(out, /9\.9\.9/);
+  } finally {
+    server.close();
+  }
+});
+
 test("插件根没有 manifest：静默退出", async () => {
   const home = mkdtempSync(join(tmpdir(), "ptc-upd-home-"));
   const root = mkdtempSync(join(tmpdir(), "ptc-upd-"));

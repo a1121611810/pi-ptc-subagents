@@ -9,7 +9,9 @@ const REPO = "a1121611810/pi-ptc-subagents";
 // 测试缝：指向别处的 latest-release 端点（默认走 GitHub 的 /releases/latest 重定向，不打 api.github.com）
 const RELEASES_URL =
   process.env["PTC_UPDATE_CHECK_URL"] ?? `https://github.com/${REPO}/releases/latest`;
-const TTL_MS = 6 * 60 * 60 * 1000; // 多久查一次 GitHub
+// 多久查一次 GitHub——发布到「用户知道」的上限。6h 那版把 7.8.0/7.9.0 两次发布全吞了：
+// 装好即查一次（那时确实已是最新）⇒ 盲区从那一刻起算 6h，用户全程没听见任何动静
+const TTL_MS = 15 * 60 * 1000;
 const REMIND_MS = 7 * 24 * 60 * 60 * 1000; // 同一版本过这么久再提一次（用户可能无视了上一轮）
 const FETCH_TIMEOUT_MS = 3000;
 

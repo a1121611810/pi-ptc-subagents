@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.9.1] - 2026-11-02
+
+### Fixed
+
+- **The plugin now hears about a new release within minutes, not hours**
+  (ADR-0023): the version check cached GitHub's "latest release" for 6 hours, and
+  the first check after installing the plugin is the one that opens that window —
+  so every release published inside it was silently swallowed (measured on
+  2026-11-02: 7.8.0 and 7.9.0 were both missed, the user saw the releases on
+  GitHub and heard nothing from the plugin). The cache window is now 15 minutes,
+  and two new probes pin it: no request to GitHub inside the window, a fresh
+  request once it expires.
+
 ## [7.9.0] - 2026-11-02
 
 ### Changed
