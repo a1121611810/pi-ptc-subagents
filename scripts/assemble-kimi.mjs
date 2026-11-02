@@ -40,6 +40,7 @@ cpSync(
   join(root, "packages/routes/docs/kimi-ptc/SKILL.md"),
   join(out, "skills", "ptc", "SKILL.md"),
 );
+cpSync(join(root, "scripts", "kimi-version-check.mjs"), join(out, "version-check.mjs"));
 
 // Kimi 面是 MCP，产物里不许带 pi 宿主代码（ADR-0022 §5）：根入口一旦 re-export 了 pi 分面就破
 for (const f of readdirSync(out).filter((f) => f.endsWith(".js"))) {
@@ -61,8 +62,17 @@ for (const server of Object.values(manifest.mcpServers ?? {})) {
     }
   }
 }
+// hook 指的路径必须存在：hook 静默失效＝「有新版」这句话永远不出现（ADR-0023）
+for (const hook of manifest.hooks ?? []) {
+  for (const m of hook.command.matchAll(/\.\/[^\s"']+/g)) {
+    if (!existsSync(join(root, m[0]))) {
+      throw new Error(`kimi.plugin.json 的 hook 指的路径不存在: ${m[0]}`);
+    }
+  }
+}
 if (!existsSync(join(out, "skills", "ptc", "SKILL.md"))) throw new Error("SKILL.md 拷贝失败");
+if (!existsSync(join(out, "version-check.mjs"))) throw new Error("version-check.mjs 拷贝失败");
 
 console.log(
-  `release/kimi 装配完成：${chunks.length} 个 js（含 worker 与共享 chunk）+ skills/ptc/SKILL.md，version ${manifest.version}`,
+  `release/kimi 装配完成：${chunks.length} 个 js（含 worker 与共享 chunk）+ skills/ptc/SKILL.md + version-check.mjs，version ${manifest.version}`,
 );

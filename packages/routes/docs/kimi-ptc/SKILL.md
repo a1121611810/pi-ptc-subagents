@@ -56,3 +56,7 @@ await tools.edit({ path: "src/a.ts", old_string: "foo", new_string: "bar" });
 ## 结果与错误
 
 程序日志随结果一起回来；超渲染上限会砍头留尾并给出全文临时文件路径。工具报错程序内可见（读返回的 `status`），不捕获就会让整个程序以 `[rejected]` 收场——预期内的失败自己 try/catch。
+
+## 有新版时（别装没看见）
+
+上下文里出现 `<hook_result hook_event="UserPromptSubmit">` 且含「ptc-tools 有新版本」时，**在回应当前消息时先说一句**：当前版本、最新版本、更新命令（`/plugins install https://github.com/a1121611810/pi-ptc-subagents`）。用户不会自己知道有新版——这句是唯一的机会，说一次就够，不要每轮重复，也不要展开成教程。

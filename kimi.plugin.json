@@ -15,5 +15,12 @@
       "command": "node",
       "args": ["./release/kimi/server.js"]
     }
-  }
+  },
+  "hooks": [
+    {
+      "event": "UserPromptSubmit",
+      "command": "node ./release/kimi/version-check.mjs",
+      "timeout": 10
+    }
+  ]
 }

@@ -81,25 +81,18 @@ URL tracks the latest GitHub Release (pinned URLs get no update checks); run `/r
 activate. A bundled `ptc` skill teaches the model when to write a program instead of
 fanning out tool calls one by one.
 
-**Update badges need a marketplace entry.** Kimi Code only offers "update 7.1.0 → 7.5.0" in
-`/plugins` for plugins the marketplace catalog can match by id — a bare GitHub install is
-installed but never listed, so it never gets a badge. This repo ships the catalog; point
-Kimi Code at it:
+**You get told when a new version lands.** The plugin ships a `UserPromptSubmit` hook that
+compares its own version against the latest GitHub Release; when they differ, the notice is
+attached to your next message and the agent says so in its reply. No marketplace setup, no
+config, nothing to click. Update with
+`/plugins install https://github.com/a1121611810/pi-ptc-subagents` — the bare repo URL
+installs the latest release.
 
-```bash
-/plugins marketplace https://raw.githubusercontent.com/a1121611810/pi-ptc-subagents/main/plugin-marketplace.json
-```
-
-or keep it for every session (desktop app included):
-
-```bash
-export KIMI_CODE_PLUGIN_MARKETPLACE_URL=https://raw.githubusercontent.com/a1121611810/pi-ptc-subagents/main/plugin-marketplace.json
-```
-
-The entry deliberately omits `version`: Kimi Code resolves it from the latest GitHub
-Release, so the catalog never goes stale. A custom catalog **replaces** the official one
-rather than adding to it, and updates stay one keystroke (`Enter` in `/plugins`) — Kimi
-Code has no auto-download path.
+**Optional: the marketplace badge.** Kimi Code also shows "update 7.1.0 → 7.5.0" in `/plugins`
+for plugins a marketplace catalog can match by id, and this repo ships such a catalog
+(`plugin-marketplace.json`). But pointing Kimi Code at it _replaces_ the default catalog, so
+the official plugins drop out of the panel and lose their update notifications. Treat it as
+opt-in, not as a setup step.
 
 ## The engine on its own (no model, no pi)
 

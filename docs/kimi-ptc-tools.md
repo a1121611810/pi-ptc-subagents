@@ -10,26 +10,20 @@ Kimi 面：`ptc-tools` 插件给 Kimi Code 两件 MCP 工具，宿主自己的�
 
 裸仓库 URL 跟踪最新 GitHub Release（钉 tag 的 URL 没有更新检测）；装完 `/reload` 生效。
 
-## 更新徽标要靠市场目录条目
+## 有新版本时你会知道
 
-Kimi Code 只对**市场目录能按 id 匹配上**的已装插件给更新徽标（`update 7.1.0 → 7.5.0`）。
-裸仓库 URL 装得上、但目录里查不到它 ⇒ 永远没有徽标、也不会提示有新版。
+插件自带一个 `UserPromptSubmit` hook：它拿自己的版本（manifest 的 `version`）比 GitHub 最新
+Release，不一致就把提示挂到你**下一条消息**上，模型会在回复里顺带告诉你「有新版 X（当前 Y）」
+和更新命令。**不用配市场目录、不用改任何配置、不用点任何东西。**
 
-本仓自带一份市场目录（`plugin-marketplace.json`，仓库根、入库）。指一次即可：
+更新：`/plugins install https://github.com/a1121611810/pi-ptc-subagents`（裸仓库 URL 装最新
+Release）。
 
-```text
-/plugins marketplace https://raw.githubusercontent.com/a1121611810/pi-ptc-subagents/main/plugin-marketplace.json
-```
+## 想要面板里的更新徽标（可选）
 
-想每个会话都带着（含桌面端）：
-
-```bash
-export KIMI_CODE_PLUGIN_MARKETPLACE_URL=https://raw.githubusercontent.com/a1121611810/pi-ptc-subagents/main/plugin-marketplace.json
-```
-
-条目**故意不写 `version`**：Kimi Code 载入目录时会自己去 GitHub 查 latest release tag 补上，
-目录不会过期。两个坑：自定义目录是**整体替换**默认目录（官方条目会消失，除非一并列进去）；
-更新仍是一次按键（`/plugins` 里按 `Enter`）——Kimi Code 没有自动下载路径。
+Kimi Code 也会对**市场目录能按 id 匹配上**的插件在 `/plugins` 里显示 `update 7.1.0 → 7.5.0`，
+本仓也带了这样一份目录（`plugin-marketplace.json`）。但把 Kimi Code 指过去是**整体替换**默认
+目录——官方插件会从面板里消失，连它们的更新通知也没了。**当可选项，别当配置步骤。**
 
 ## ptc_run_code({ code, description, workdir, timeoutMs? })
 
