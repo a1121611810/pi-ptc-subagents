@@ -136,7 +136,7 @@ test("TTL 窗口内不再问 GitHub（用缓存里的 latest 出声）", async (
   const { port } = server.address();
   try {
     const out = await check(
-      fixture("7.6.0", { checkedAt: NOW - 5 * 60 * 1000, latest: "7.7.0" }),
+      fixture("7.6.0", { checkedAt: NOW - 30 * 1000, latest: "7.7.0" }),
       `http://127.0.0.1:${port}/releases/latest`,
     );
     assert.equal(hits, 0, "TTL 窗口内不该再走网络");
@@ -157,7 +157,7 @@ test("TTL 过期就重新问 GitHub（发布后最迟一个窗口就知道）", 
   const { port } = server.address();
   try {
     const out = await check(
-      fixture("7.6.0", { checkedAt: NOW - 20 * 60 * 1000, latest: "7.6.0" }),
+      fixture("7.6.0", { checkedAt: NOW - 90 * 1000, latest: "7.6.0" }),
       `http://127.0.0.1:${port}/releases/latest`,
     );
     assert.equal(hits, 1, "TTL 过期就该重新拉");
