@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.9.2] - 2026-11-02
+
+### Fixed
+
+- **The upgrade notice now reaches the screen in the TUI** (pi extension): pi's
+  status slot is global, and every status line renders the same
+  `lastStatusMessage` field, so any extension that notifies afterwards — the
+  ponytail, session-title and tok-speed extensions all do — overwrote the
+  notice before it was ever drawn. In a captured terminal byte stream the
+  notice text appeared 0 times, while the sentinel recorded the version as
+  "seen". The TUI now delivers the notice through the keyed widget area above
+  the editor (`ctx.ui.setWidget("ptc-upgrade", …)`, at most 10 lines, pi's
+  `MAX_WIDGET_LINES`), which no other extension can overwrite; `notify` is
+  kept for the rpc and print modes, where the host renders the event itself.
+  Measured on a real pi 1.4.0 TUI: a later notification takes the status slot
+  while the widget lines stay on screen.
+
 ## [7.9.1] - 2026-11-02
 
 ### Fixed
