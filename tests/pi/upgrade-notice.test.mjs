@@ -4,7 +4,7 @@
 // ⑦格式漂移守卫：本仓真实 CHANGELOG 的顶节版本必须等于 package.json 版本
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -196,6 +196,67 @@ test("没有 UI 不通知；通知文案是苹果风格", () => {
   assert.ok(text.includes("\n\nChangelog: https://"));
   assert.ok(!text.includes("!"), "苹果风格：不用感叹号");
   assert.ok(!/We're|excited|Amazing/i.test(text), "苹果风格：不喊口号");
+});
+
+test("没话说就不占状态：没有可显示的版本段时，状态不写（这一版的提醒不能被烧掉）", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ptc-upgrade-"));
+  const env = {
+    version: "7.5.0",
+    changelogPath: join(dir, "CHANGELOG.md"), // 文件不存在 ⇒ 解析不出段 ⇒ 没话说
+    statePath: join(dir, "state", "last-seen-version.json"),
+  };
+  const messages = [];
+  showUpgradeNotice({ hasUI: true, ui: { notify: (m) => messages.push(m) } }, env);
+  assert.equal(messages.length, 0, "没 CHANGELOG 段就没话说");
+  assert.equal(existsSync(env.statePath), false, "没显示就别占状态——否则这一版的提醒被永久烧掉");
+});
+
+test("entry 层：升级提示必须是 session_start 的最后一条通知（TUI 只有一个状态槽）", async () => {
+  const { default: entryDefault } = await import("../../packages/entry/dist/index.js");
+  const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
+  const sections = parseChangelog(
+    readFileSync(new URL("../../CHANGELOG.md", import.meta.url), "utf8"),
+  );
+  const previous = sections[1]?.version ?? "0.0.0"; // 上一版发布（比当前低 ⇒ 触发提醒）
+  const agentDir = mkdtempSync(join(tmpdir(), "ptc-upgrade-agent-"));
+  const stateDir = join(agentDir, "pi-ptc-subagents");
+  mkdirSync(stateDir, { recursive: true });
+  writeFileSync(join(stateDir, "last-seen-version.json"), JSON.stringify({ version: previous }));
+  const savedAgentDir = process.env.PI_CODING_AGENT_DIR;
+  const savedCwd = process.cwd();
+  process.env.PI_CODING_AGENT_DIR = agentDir; // 状态哨兵隔离到 tmp，别碰用户真目录
+  process.chdir(mkdtempSync(join(tmpdir(), "ptc-upgrade-cwd-")));
+  try {
+    const handlers = {};
+    const fakePi = {
+      on: (ev, cb) => {
+        (handlers[ev] ??= []).push(cb);
+      },
+      registerTool: () => {},
+      registerCommand: () => {},
+      getActiveTools: () => [],
+      setActiveTools: () => {},
+      getAllTools: () => [],
+      sendMessage: () => {},
+    };
+    entryDefault(fakePi);
+    const messages = [];
+    await handlers.session_start[0]({}, { hasUI: true, ui: { notify: (m) => messages.push(m) } });
+    const last = messages.at(-1) ?? "";
+    assert.ok(
+      last.startsWith(`pi-ptc-subagents ${pkg.version}`),
+      `升级提示必须是最后一条通知——pi 的 TUI 只有一个状态槽，后发的会顶掉先发的（实得：${last.slice(0, 60)}）`,
+    );
+    assert.ok(last.includes(`Updated from ${previous}.`), "显示从哪版升上来的");
+    assert.ok(
+      messages.some((m) => m.startsWith("pi-ptc-subagents: surface=")),
+      "surface 面包屑仍然要发",
+    );
+  } finally {
+    process.chdir(savedCwd);
+    if (savedAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = savedAgentDir;
+  }
 });
 
 test("格式漂移守卫：本仓真实 CHANGELOG 的顶节版本 == package.json 版本", () => {

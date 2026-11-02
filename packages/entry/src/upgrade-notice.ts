@@ -115,13 +115,14 @@ export function showUpgradeNotice(ctx: NoticeContext, environment?: NoticeEnviro
   if (previousNumber === current) return;
   // 降级：不显示也不改状态——状态记「见过的最高版本」，否则两份副本互相顶、每轮都提示
   if (previousNumber !== undefined && previousNumber > current) return;
-  // 先落状态再通知：写不进去就直接不显示——否则只读安装每次启动都刷同一条
-  if (!writeSeenVersion(env.statePath, env.version)) return;
   const sections = parseChangelog(readText(env.changelogPath));
   // 没有历史记录（第一次见到这套提示）：基线取 CHANGELOG 里比当前版本小的最新一节 ⇒ 显示当前版本这一节
   const baseline =
     previousNumber === undefined ? newestOlderVersion(sections, env.version) : previous;
+  // 没话说就不占状态：否则这一版的提醒被永久烧掉（下一版也补不回来）
   if (baseline === undefined) return;
+  // 先落状态再通知：写不进去就直接不显示——否则只读安装每次启动都刷同一条
+  if (!writeSeenVersion(env.statePath, env.version)) return;
   const bullets = pickBullets(sections, baseline, env.version);
   ctx.ui.notify(
     compose(

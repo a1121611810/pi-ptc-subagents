@@ -122,12 +122,6 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
       registerChildToolsOnly(pi);
       return;
     }
-    // 升级提示：版本变了才显示一次（首装不打扰）——失败绝不阻断启动
-    try {
-      showUpgradeNotice(ctx);
-    } catch {
-      // 提示是 best-effort
-    }
     // 旧 ADR-0035/0051：surface 直接问 pi——codemode 进了模型活跃表 = codemode_ptc；否则 full_ptc
     const surface: SurfaceMode = pi.getActiveTools().includes("codemode")
       ? "codemode_ptc"
@@ -338,6 +332,14 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
     if (surface === "codemode_ptc") registerTaskDoor(registerTracked, session, surface);
     pi.on("turn_end", () => pool.drain());
     ctx.ui.notify(`pi-ptc-subagents: surface=${surface}，任务面 3 工具 + PTC 工具对已注册`, "info");
+    // 升级提示：版本变了才显示一次（首装不打扰）——失败绝不阻断启动
+    // 必须排在 session_start 的最后：pi 的 TUI 只有一个状态槽（showStatus 复用同一块），
+    // 后发的那条通知会把先发的那条顶掉（2026-11-02 真机复现：提醒被上面那条 surface 吞了）
+    try {
+      showUpgradeNotice(ctx);
+    } catch {
+      // 提示是 best-effort
+    }
   });
 }
 
