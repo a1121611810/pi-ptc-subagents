@@ -21,6 +21,12 @@ if (!marketplace.plugins?.some((p) => p.id === manifest.name)) {
     `plugin-marketplace.json 缺 id=${manifest.name} 的条目——Kimi Code 的更新徽标靠 id 匹配已装插件，id 不符就没有徽标`,
   );
 }
+// tier 的白名单只有 official/curated——写了别的值整份目录都加载失败（官方条目一起消失）；不写就落在第三方标签页
+if (marketplace.plugins?.some((p) => p.tier !== undefined)) {
+  throw new Error(
+    `plugin-marketplace.json 的条目不要写 tier——Kimi Code 解析器只认 official/curated，写错值会让整份目录加载失败`,
+  );
+}
 
 const distDir = join(root, "packages/kimi-mcp/dist");
 const out = join(root, "release/kimi");

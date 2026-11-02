@@ -26,7 +26,9 @@ Kimi Code 的市场目录默认由服务端下发（`GET /plugins/marketplace` �
 
 **3. `build:kimi` 加一条自检：市场条目 id 与 manifest `name` 一致。** 与既有的「manifest version 必须与根 package.json 同号」同一道闸——id 不符的后果是静默的（装得上、没有徽标），所以在发版机上钉住。
 
-**4. 不冒充 official。** 条目标 `tier: "third-party"`。官方市场（Kimi CDN 那份）仍需 Kimi 收录，无自助入口——本 JSON 是**自助市场**，用户显式指一次即可。
+**4. 条目不写 `tier`。** 解析器的白名单只有 `official` / `curated`（`PLUGIN_MARKETPLACE_TIERS`）——写 `third-party` 会让**整份目录**加载失败（官方条目一起消失），不是只坏一条：不写 tier 时条目落在第三方标签页（UI 按 `tier === "official"` 分流），也不冒充 Kimi 的「curated 伙伴插件」。`build:kimi` 把这条钉住：条目写了 tier 就报错。官方市场（Kimi CDN 那份）仍需 Kimi 收录、无自助入口——本 JSON 是**自助市场**，用户显式指一次（或设 env 常驻）即可。
+
+> ⚠️ 2026-11-02 实测订正：本条最初写的是「条目标 `tier: "third-party"`」——那是照着**响应 schema** 的枚举（`pluginMarketplaceEntrySchema`，输出契约、宽松）推的，**没核对解析器的白名单**（输入契约、严格）。真发出去后客户端报 `Plugin marketplace entry ptc-tools "tier" must be one of: official, curated.`。**响应 schema 宽 ≠ 解析器宽**：目录是自己喂进去的输入，只能按解析器算。
 
 **5. 更新仍是一次按键，不是自动。** Kimi Code 没有自动下载路径（无调度器）。市场 JSON 解决的是「徽标 + `Enter` 一键更新」，不是「自动更新」——别把两者混为一谈。
 
