@@ -5,9 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [7.7.0] - 2026-11-02
 
 ### Added
+
+- **The plugin now says so when a newer release exists** (Kimi face, ADR-0023): a
+  `UserPromptSubmit` hook compares the plugin's own manifest version against the latest
+  GitHub Release and, when they differ, attaches the notice to your next message — the
+  agent then says so in its reply, with the update command. Nothing to configure, no
+  marketplace to point at. Kimi Code has no plugin auto-update path: the update badge
+  only exists for plugins a marketplace catalog can match by id, and pointing Kimi Code
+  at a custom catalog _replaces_ the default one (measured: the default catalog has 7
+  entries — 3 official, 4 curated — a custom one has 1; the official plugins drop out of
+  the panel and lose their "update detected" notification, which requires the default
+  CDN catalog). The badge is also only visible when you open `/plugins`: the desktop
+  "installed" row shows version, toggle and delete, and no update button.
+  The check reads the latest release through `/releases/latest` (a redirect, so
+  `api.github.com` is never called), accepts plain `x.y.z` only, caches for 6 hours,
+  speaks once per version (again after 7 ignored days), and stays silent offline —
+  fail-open, it never blocks a turn. Probes: `tests/kimi/version-check.test.mjs`, 7/7 —
+  one of them caught a real bug while it was being written (the cache stored a parsed
+  array and re-parsed it as a string, so the check exited silently — exactly the failure
+  this feature exists to prevent).
 
 - **Artifact import gate** (`scripts/check-artifact-imports.mjs`, wired into `pnpm test`): a
   built artifact's bare imports must be declared by the package that produced them. The rule is
@@ -18,6 +37,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `node_modules` happened to cover it). `dependencies` / `peerDependencies` /
   `optionalDependencies` count, `devDependencies` does not (they do not ship), and imports shown
   inside comments or strings are not imports.
+
+### Fixed
+
+- **Marketplace catalog entry** (`plugin-marketplace.json`, ADR-0021): the entry's `tier`
+  must be `official` or `curated` — that is the parser's whitelist, which is stricter than
+  the response schema's enum. Writing `third-party` (read off the response schema) made the
+  whole catalog fail to load, taking the official entries with it. The entry now omits
+  `tier`, and `build:kimi` fails the build if a `tier` ever shows up.
 
 ## [7.6.0] - 2026-11-02
 
