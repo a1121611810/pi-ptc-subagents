@@ -29,12 +29,21 @@ const bareImportsOf = (text) => {
     .replace(/(^|[^:"'`])\/\/[^\n]*/g, "$1"); // 行注释（// 前不是 : 免得吃掉 https://）
   const specs = new Set();
   const patterns = [
-    /(^|\n)[ \t]*(?:import|export)\b[^;]*?\bfrom\s*["']([^"']+)["']/g, // import/export ... from "x"
-    /(^|\n)[ \t]*import\s*["']([^"']+)["']/g, // import "x"（无 from 的副作用导入）
-    /(^|\n)[ \t]*import\s*\(\s*["']([^"']+)["']\s*\)/g, // 动态 import("x")
+    // 起点是「语句边界」（行首、分号后、右花括号后），不是纯行首：压缩产物整个文件一行，
+    // 只认行首会漏掉后面所有 import ⇒ 门禁在最该盯的发布产物上静默失效
+    // （实测：压缩前认出 3 处裸 import，压缩后只认出 1 处）
+    // ⚠️ 右花括号也在边界里：JS 允许在 `}` 后省掉分号（ASI），压缩器就这么干——实测产物里
+    // 就是 `}export{...}` 的形状。漏了它，`export ... from "未声明包"` 会让门禁判绿。
+    /(?:^|[;}\n])[ \t]*(?:import|export)\b[^;]*?\bfrom\s*["']([^"']+)["']/g, // import/export ... from "x"
+    /(?:^|[;}\n])[ \t]*import\s*["']([^"']+)["']/g, // import "x"（无 from 的副作用导入）
+    /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g, // 动态 import("x")——表达式位置，不锚语句边界
   ];
   for (const pattern of patterns) {
-    for (const match of code.matchAll(pattern)) specs.add(match[2]);
+    // spec 永远是最后一个捕获组（前面的边界组都改成了非捕获）
+    for (const match of code.matchAll(pattern)) {
+      const spec = match.at(-1);
+      if (spec) specs.add(spec);
+    }
   }
   return [...specs].filter((s) => !s.startsWith(".") && !s.startsWith("node:"));
 };

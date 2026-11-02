@@ -26,5 +26,8 @@ export default defineConfig({
     dir: "dist",
     entryFileNames: "[name].js",
     format: "esm",
+    // 发布物压缩（旧 ADR-0019 的形状，2026-11-02 补回）：零新依赖，rolldown 自带 oxc 压缩器
+    minify: true,
+    sourcemap: true,
   },
 });

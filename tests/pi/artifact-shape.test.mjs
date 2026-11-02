@@ -26,7 +26,7 @@ const jsFiles = (dir) => {
 
 const relativeImports = (file) => {
   const text = readFileSync(file, "utf8");
-  return [...text.matchAll(/from\s+"(\.[^"]+)"/g)].map((m) => resolve(dirname(file), m[1]));
+  return [...text.matchAll(/from\s*"(\.[^"]+)"/g)].map((m) => resolve(dirname(file), m[1]));
 };
 
 test("发布形态：四个入口都在（index / worker / ptc:index / ptc:cli）", () => {
@@ -46,9 +46,11 @@ test("发布形态：worker 只有一份（输出根有，ptc/ 下没有）", ()
 test("摇树结果：引擎与序言各只在一份产物里", () => {
   const files = jsFiles(dist);
   const withMarker = (marker) => files.filter((f) => readFileSync(f, "utf8").includes(marker));
-  const engine = withMarker("buildWorkerUrl");
+  // 标记必须是字符串字面量：压缩器会改模块级标识符的名字（buildWorkerUrl / CELL_PREAMBLE 都被改名了）。
+  // 也别挑用户可见的报错文案当标记——改一次文案这个探针就断（且报错指向错方向）：用引擎自己的配置键
+  const engine = withMarker("maxPendingCalls");
   assert.equal(engine.length, 1, `引擎应只有一份，实际 ${engine.length}：${engine.join(", ")}`);
-  const preamble = withMarker("CELL_PREAMBLE");
+  const preamble = withMarker("__PTC_NAMES__");
   assert.equal(preamble.length, 1, `CELL_PREAMBLE 应只在一份产物里，实际 ${preamble.length}`);
 });
 

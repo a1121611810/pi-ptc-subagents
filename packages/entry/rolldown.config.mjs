@@ -40,6 +40,10 @@ export default defineConfig({
     // 找同目录的 worker.js，而 buildWorkerUrl 在共享块里 ⇒ 共享块挪进子目录就找不到 worker
     chunkFileNames: "[name].js",
     format: "esm",
+    // 发布物压缩（旧 ADR-0019 的形状，2026-11-02 补回）：minify 走 rolldown 自带的 oxc 压缩器，零新依赖。
+    // sourcemap 留在盘上供本地看栈——tarball 的 files 白名单只收 *.js，map 不发布（Node 缺 map 静默忽略）
+    minify: true,
+    sourcemap: true,
     // 引擎本体归到一个具名共享块：index.js 与 ptc/index.js 指向同一份引擎（ADR-0024）
     codeSplitting: {
       groups: [

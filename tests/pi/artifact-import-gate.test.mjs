@@ -89,6 +89,34 @@ test("注释与字符串里的示例 import 不算真 import", () => {
   assert.equal(runGate(root).code, 0, "注释与模板字符串里的 import 不该被判红");
 });
 
+test("压缩产物（整个文件一行）里第二个 import 也算数——只认行首会漏", () => {
+  const root = makeRoot({
+    manifest: { name: "@pi-ptc/fake" },
+    source: 'import{a as b}from"./x.js";import{c}from"some-pkg";export{b};',
+  });
+  const { code, err } = runGate(root);
+  assert.notEqual(code, 0, "压缩产物里的未声明 import 必须判红");
+  assert.match(err, /some-pkg/);
+});
+
+test("压缩产物里声明过的 import ⇒ 绿", () => {
+  const root = makeRoot({
+    manifest: { name: "@pi-ptc/fake", dependencies: { "some-pkg": "1.0.0" } },
+    source: 'import{a as b}from"./x.js";import{c}from"some-pkg";export{b};',
+  });
+  assert.equal(runGate(root).code, 0);
+});
+
+test("压缩产物里 `}export{...}from` 的形状也算数——压缩器在 } 后会省掉分号", () => {
+  const root = makeRoot({
+    manifest: { name: "@pi-ptc/fake" },
+    source: 'const a=()=>{};a()}export{x as y}from"some-pkg";',
+  });
+  const { code, err } = runGate(root);
+  assert.notEqual(code, 0, "} 之后的 export-from 必须判红");
+  assert.match(err, /some-pkg/);
+});
+
 test("本仓当前是绿的（真产物全过）", () => {
   const { code, out } = runGate(repoRoot);
   assert.equal(code, 0, out);
