@@ -22,6 +22,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `@earendil-works/pi-coding-agent@^1.5.0`, the pinned
   `@earendil-works/pi-tui` moves to 1.5.0, and the version smoke script
   lists 1.5.0.
+- **Readable folded rendering in the pi TUI.** Tool results now carry state
+  colors and a static running marker, and the task face gets its own folded
+  view:
+  - `ptc_run_code` / `ptc_workflow`: the status word is colored
+    (`fulfilled` → `success`, `rejected` → `error`, `canceled` →
+    `warning`, the same token table the subagent panel uses) and a running
+    program shows `● ` in `accent` before its title.
+  - `ptc_task_list` / `ptc_task_output`: folded view instead of raw JSON —
+    the list shows `N 条 · M 在飞` (+ `还有 K 条未列` when the candidates
+    exceed the returned entries), the output shows the task id with its state;
+    expanding renders one row per task or the child's prose excerpt. Both are
+    bounded by the frozen `RENDER_BOUNDS.MAX_LOG_LINES_EXPANDED`, so no new
+    limit and no new ADR.
+  - `ptc_task_stop` keeps pi's default fallback on purpose: its result is
+    three lines of JSON.
+  - No shimmer animation: pi's `Loader` needs a `TUI` instance that the
+    renderer context does not provide, the host rebuilds the renderer
+    component on every update, and `Component` has no dispose hook — a
+    self-scheduled timer would leak. Running state is already carried by the
+    host's `toolPendingBg` background plus the title marker.
 
 ### Changed
 

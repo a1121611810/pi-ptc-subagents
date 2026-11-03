@@ -12,7 +12,8 @@ export const MAX_PANEL_ROWS = 6;
 export const MAX_PANEL_LABEL_CHARS = 48;
 
 // 状态 → 字形/颜色（ADR-0022 §8 冻结表）：旧仓只把它写在实现里，从未落纸
-const STATUS_STYLE: Record<TaskStatus, { glyph: string; color: ThemeColor }> = {
+// 导出给任务面折叠渲染复用（task-face.ts）——同一张表，不造第二张
+export const STATUS_STYLE: Record<TaskStatus, { glyph: string; color: ThemeColor }> = {
   queued: { glyph: "○", color: "muted" },
   running: { glyph: "●", color: "accent" },
   stopping: { glyph: "◐", color: "warning" },

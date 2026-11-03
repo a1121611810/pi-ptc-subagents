@@ -18,6 +18,7 @@ import {
   depthGate,
   dispatchEnabledGate,
   findAgent,
+  isTerminal,
   TASK_STATUSES,
   readOnlyGate,
   sessionEndingGate,
@@ -25,7 +26,14 @@ import {
 } from "@pi-ptc/dispatch";
 import { fileURLToPath } from "node:url";
 import { compactedTaskReminder, readTaskOutput, taskListSnapshot } from "@pi-ptc/task";
-import { createTaskPanel, createNoSkimpBanner } from "@pi-ptc/tui/pi";
+import {
+  createTaskPanel,
+  createNoSkimpBanner,
+  excerptForDisplay,
+  renderTaskFaceResult,
+  type TaskFaceDetails,
+} from "@pi-ptc/tui/pi";
+import { RENDER_BOUNDS } from "@pi-ptc/tui";
 import { createDeepSeekProvider, createSearchMemory, createSearchQuota } from "@pi-ptc/search";
 import { createWebDsSearchTool } from "./web-ds-search-tool.ts";
 import { showUpgradeNotice } from "./upgrade-notice.ts";
@@ -73,9 +81,10 @@ export type {
 
 // text 必须是字符串：JSON.stringify(undefined) 是 undefined ⇒ pi 拼下一轮请求时读 .length 直接崩
 // （2026-11-02 真机抓到：模型调一次 ptc_task_stop，下一轮整个 turn 挂掉、父面交白卷）
-export const textResult = (value: unknown): AgentToolResult => ({
+export const textResult = <T = unknown>(value: unknown, details?: T): AgentToolResult<T> => ({
   content: [{ type: "text", text: JSON.stringify(value ?? null, null, 2) ?? "null" }],
-  details: undefined,
+  // pi 的 details 是必填字段（类型 T 不含 undefined）⇒ 这里显式收窄
+  details: details as T,
 });
 
 // 交付核对：孩子**实际**干了什么（引擎从事件流抽）+ 它声称交了几条（报告）——父据此判断该不该信
@@ -735,6 +744,7 @@ function registerTaskFace(
       ),
     }),
     defaultActive: false,
+    renderResult: renderTaskFaceResult,
     execute: async (_id, args) => {
       const query = {
         scope: args.scope,
@@ -743,7 +753,21 @@ function registerTaskFace(
         session: args.session === "current" ? session.sessionId : args.session,
       };
       const archived = query.scope === "all" ? await session.readArchivedRecords() : [];
-      return textResult(taskListSnapshot(session.registry, query, archived));
+      const snapshot = taskListSnapshot(session.registry, query, archived);
+      // 折叠渲染要的行（details 只带展示用的小字段：行数吃冻结上限，正文不带全文）
+      const details: TaskFaceDetails = {
+        kind: "list",
+        scope: snapshot.scope,
+        total: snapshot.total,
+        listed: snapshot.tasks.length,
+        inFlight: snapshot.tasks.filter((task) => !isTerminal(task.status)).length,
+        rows: snapshot.tasks.slice(0, RENDER_BOUNDS.MAX_LOG_LINES_EXPANDED).map((task) => ({
+          id: task.id,
+          status: task.status,
+          ...(task.label ? { label: task.label } : {}),
+        })),
+      };
+      return textResult(snapshot, details);
     },
   });
   registerTool({
@@ -752,15 +776,21 @@ function registerTaskFace(
     description: TOOLS.ptc_task_output.description(surface),
     parameters: Type.Object({ task_id: Type.String() }),
     defaultActive: false,
+    renderResult: renderTaskFaceResult,
     execute: async (_id, args) => {
       // 决策 29：registry miss 回落压缩归档——记住的 id 在 TTL 窗口内仍可解（标 archived: true）
       const record =
         session.registry.get(args.task_id) ?? (await session.readArchivedRecord(args.task_id));
-      if (!record) return textResult({ error: `unknown task id ${args.task_id}` });
+      if (!record) return textResult<TaskFaceDetails>({ error: `unknown task id ${args.task_id}` });
       // 归约层：孩子的散文答案（报告是摘要，交付物是这段正文）——从事件流现算，不另存
-      return textResult(
-        withDeliveryNote({ ...record, ...(await readTaskOutput(session, record)) }),
-      );
+      const view = await readTaskOutput(session, record);
+      const details: TaskFaceDetails = {
+        kind: "output",
+        id: record.id,
+        status: record.status,
+        ...excerptForDisplay(view.text ?? view.guidance ?? ""),
+      };
+      return textResult(withDeliveryNote({ ...record, ...view }), details);
     },
   });
   registerTool({

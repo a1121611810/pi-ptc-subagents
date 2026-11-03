@@ -1,6 +1,7 @@
 import type {
   AgentToolResult,
   Theme,
+  ThemeColor,
   ToolRenderResultOptions,
 } from "@earendil-works/pi-coding-agent";
 
@@ -23,27 +24,35 @@ export interface PtcToolArgs {
   meta?: { name: string; description: string };
 }
 
+// 状态色沿用常驻面板的 token 口径（task-panel.ts 的 STATUS_STYLE）：成功 success / 失败 error / 取消 warning
+const STATUS_COLOR: Record<PtcToolDetails["status"], ThemeColor> = {
+  fulfilled: "success",
+  rejected: "error",
+  canceled: "warning",
+};
+
 // 旧 ADR-0013：折叠 = 标题 + 状态一行；展开 = 代码/日志/结果，上限吃 RENDER_BOUNDS 冻结表
-// shortcut: shimmer 动画（旧 ADR-0020）与五态颜色未做——等真实使用中对「运行中辨识度」有诉求再加
+// shortcut: 不做 shimmer 动画——pi 的 Loader 组件要 TUI 实例（渲染上下文不给 ui），宿主每次更新都重建渲染组件（Component 无 dispose 钩子），自建计时器会泄漏；运行中辨识度靠宿主的 toolPendingBg 底色 + 标题的 ●
+// upgrade: 真有人抱怨「看不出在跑」时先加静态字形/文字；真动画须先按 ADR-0016 §3 增补 RENDER_BOUNDS
 export function renderPtcResult(surface: "run_code" | "workflow") {
   return (
     result: AgentToolResult<PtcToolDetails>,
     options: ToolRenderResultOptions,
-    _theme: Theme,
+    theme: Theme,
     context: ToolRenderContextLike,
   ): Component => {
     const args = context.args as PtcToolArgs;
     const box = new Box();
     const title =
       surface === "workflow" ? `workflow · ${args.meta?.name ?? ""}` : (args.description ?? "程序");
-    box.addChild(new Text(options.isPartial ? `${title} …` : title));
+    box.addChild(new Text(options.isPartial ? theme.fg("accent", "● ") + `${title} …` : title));
 
     const details = result.details as PtcToolDetails | undefined;
     if (!options.isPartial && details) {
       const flags = [
-        details.status,
-        details.truncated ? "已截断" : "",
-        details.fullOutputPath ? `全文在 ${details.fullOutputPath}` : "",
+        theme.fg(STATUS_COLOR[details.status], details.status),
+        details.truncated ? theme.fg("muted", "已截断") : "",
+        details.fullOutputPath ? theme.fg("muted", `全文在 ${details.fullOutputPath}`) : "",
       ]
         .filter(Boolean)
         .join(" · ");
