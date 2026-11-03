@@ -155,6 +155,33 @@ Requires Node ≥ 22.19.
   terminal records kept in the hot store (default 500); evicted traces go to a compressed
   archive unless `archiveEnabled: false` (immediate delete); archive lives `archiveTtlDays`
   days (default 30) and stays retrievable by exact id via `ptc_task_output`.
+- `noSkimpPtc` / `noSkimpSub` — "no skimped runs" mode, both default `false` (only an
+  explicit `true` turns one on). When on, one extra paragraph goes into the parent's prompt
+  (`noSkimpPtc`) and into every child's system prompt (`noSkimpSub`): run the real thing —
+  make real calls, run the end-to-end checks, don't substitute mocks, don't skip a
+  slow-but-real check because it is slow. It is a double-edged sword: slower, costlier
+  runs. Nothing else changes — no gate, no tool narrowing, and **no budget is actually
+  raised**: it is a prompt instruction, not a capacity switch (the name says what it does,
+  not what it promises). In a pi session you can flip either switch without editing the
+  file: `/ptc noskimp on|off|reset` and `/ptc noskimp-sub on|off|reset` (`reset` falls back
+  to the file value). The pi TUI shows a standing banner while a switch is on. The Kimi
+  edition has `noSkimpPtc` only, in `~/.kimi-code/ptc.json` (no command, no banner).
+  Provenance: the wording comes from DeepSeek Harness's `docs/testing.zh.md`
+  §带密钥策略 — "不要吝惜真实 API 测试；无密钥测试只能证明底层通路" — i.e. don't skimp on
+  _real_ (with-credentials) runs, because mock-level green proves the wiring, not the
+  product. It used to be called `maxTokenToPTC` / `maxTokenToSub` and say "your token
+  budget is unlimited"; that name claimed a cap was lifted (none was) and the wording named
+  an amount instead of an action.
+  **No measured benefit — keep both off by default.** Attempts to measure one on this
+  repo's own harnesses (closed-book fact extraction, multi-industry web research, and
+  real-issue SWE-bench fixing; two models) found **no quality difference** — the only
+  consistent effect was more output tokens and more spend. Those attempts were also not
+  rigorous enough to publish an effect size from (small samples, grader bugs found
+  mid-flight, part of the sample destroyed by provider rate limits), so treat this as
+  "no evidence of benefit", not as a measured zero. If you need a number, build your own
+  harness — the paragraph is one prompt section and changes nothing else.
+  Use them as a one-shot switch for a task where mocked runs have actually misled you,
+  and watch the token bill rather than expecting a quality jump.
 
 ## Trust posture
 

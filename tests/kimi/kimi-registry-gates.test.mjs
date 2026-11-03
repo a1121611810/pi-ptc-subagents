@@ -62,7 +62,12 @@ test("门禁 K1 册子自检：每条 Kimi 工具描述非空且在 token 预算
 });
 
 test("门禁 K2 双向覆盖：server tools/list 与册子 KIMI_MCP_TOOLS 完全一致（两向都不许多/少）", async (t) => {
-  const srv = startServer();
+  // 隔离 Kimi 配置目录：server 从 ~/.kimi-code/ptc.json 读 no-skimp 开关——用户真开着时描述会多一段，
+  // 与册子的默认渲染不再逐字相等 ⇒ 这条门禁必须在自己的空目录里跑
+  const srv = startServer({
+    ...process.env,
+    KIMI_CODE_HOME: mkdtempSync(join(tmpdir(), "ptc-kimi-home-")),
+  });
   t.after(() => srv.child.kill());
   await srv.request("initialize", {
     protocolVersion: "2024-11-05",
@@ -140,4 +145,27 @@ test("门禁 K3 web_ds_search 参数校验：缺 query/url、count 越界都拒�
   });
   assert.equal(commented.isError, true, "注释掉的 api_key 必须视为停用");
   commentedSrv.child.kill();
+});
+
+test("门禁 K4 别省真跑开关：Kimi 配置目录里 noSkimpPtc=true ⇒ 工具描述多一段", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "ptc-kimi-token-home-"));
+  writeFileSync(join(home, "ptc.json"), JSON.stringify({ noSkimpPtc: true }));
+  const srv = startServer({ ...process.env, KIMI_CODE_HOME: home });
+  t.after(() => srv.child.kill());
+  await srv.request("initialize", {
+    protocolVersion: "2024-11-05",
+    capabilities: {},
+    clientInfo: { name: "gate", version: "0" },
+  });
+  const { tools } = await srv.request("tools/list");
+  const runCode = tools.find((tool) => tool.name === "ptc_run_code");
+  assert.ok(
+    runCode.description.includes("Do not skimp on the real run"),
+    "开关开着 ⇒ 描述里应有 no-skimp 段",
+  );
+  // 那一段是必须进描述的指令，不是「详情」⇒ 照样吃描述预算
+  assert.ok(
+    Math.ceil(runCode.description.length / 2) <= DESCRIPTION_TOKEN_BUDGET,
+    `开启后描述超预算 ${DESCRIPTION_TOKEN_BUDGET}`,
+  );
 });

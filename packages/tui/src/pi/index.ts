@@ -3,6 +3,12 @@
 export { renderPtcResult, type PtcToolArgs, type PtcToolDetails } from "./render.ts";
 export { createTaskPanel, type TaskPanelSource } from "./panel-widget.ts";
 export {
+  createNoSkimpBanner,
+  renderNoSkimpBanner,
+  NO_SKIMP_BANNER_KEY,
+  type NoSkimpState,
+} from "./no-skimp-banner.ts";
+export {
   MAX_PANEL_LABEL_CHARS,
   MAX_PANEL_ROWS,
   renderTaskPanel,

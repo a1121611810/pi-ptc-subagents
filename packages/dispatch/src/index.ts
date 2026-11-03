@@ -18,7 +18,7 @@ export {
 export type { AgentResolver, DispatchInput, Gate, TaskRejection } from "./gates.ts";
 export { FileOutputStorage, InMemoryOutputStorage } from "./output-storage.ts";
 export type { OutputStorage } from "./output-storage.ts";
-export { buildPiArgv, spawnChild } from "./child-process.ts";
+export { buildPiArgv, NO_SKIMP_SUB_NOTE, spawnChild } from "./child-process.ts";
 export { findAgent, parseAgentMarkdown } from "./agent-discovery.ts";
 export type { AgentDefinition } from "./agent-discovery.ts";
 export { parseChildStream } from "./jsonl.ts";

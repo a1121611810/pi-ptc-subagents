@@ -60,3 +60,7 @@ await tools.edit({ path: "src/a.ts", old_string: "foo", new_string: "bar" });
 ## 有新版时（别装没看见）
 
 上下文里出现 `<hook_result hook_event="UserPromptSubmit">` 且含「ptc-tools 有新版本」时，**在回应当前消息时先说一句**：当前版本、最新版本、更新命令（`/plugins install https://github.com/a1121611810/pi-ptc-subagents`）。用户不会自己知道有新版——这句是唯一的机会，说一次就够，不要每轮重复，也不要展开成教程。
+
+## Unlimited token budget (a double-edged sword)
+
+This face has one switch: `noSkimpPtc` in `~/.kimi-code/ptc.json` (off by default; only an explicit `true` turns it on). With it on, the `ptc_run_code` tool description gains one paragraph: run the real thing — real calls, end-to-end checks, no mock substitutes, no skipping a slow-but-real check. Measured on this repo's harness: it does **not** improve answer quality, it only spends more tokens — so leave it off unless you have a task where mocked runs have actually misled you. There is no `/ptc` command on this face: edit the file and restart the MCP server.

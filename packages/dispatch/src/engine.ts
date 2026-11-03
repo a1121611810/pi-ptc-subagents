@@ -96,6 +96,7 @@ export type BuildArgvInput = DispatchInput & {
   searchEnabled?: boolean;
   agentModel?: string;
   agentThinkingLevel?: string;
+  noSkimpSub?: boolean;
 };
 
 export interface EngineOptions {
@@ -128,6 +129,9 @@ export interface EngineOptions {
   /** 停滞护栏阈值（毫秒）：孩子既没有新动静、又没在飞的工具调用，超过它就收尸；0 = 关掉。
    * 与 timeoutMs 并行——墙钟管预算与 straggler 摘除，护栏只管「孩子什么都没在做」。默认 5 分钟 */
   stallMs?: number;
+  /** 别省真跑：孩子的追加提示词加一段「跑真的、别用 mock、别跳过慢检查」（默认关）。
+   * 谓词非值：/ptc noskimp-sub 的会话级覆盖要热生效，值会在装配时被冻住（同 whyEnabled 的教训） */
+  noSkimpSub?: boolean | (() => boolean);
 }
 
 export interface EngineContext {
@@ -188,6 +192,7 @@ export class TaskEngine {
   readonly #owner: { pid: number; bootMs: number };
   readonly #stopGraceMs: number;
   readonly #whyEnabled: () => boolean;
+  readonly #noSkimpSub: () => boolean;
   readonly #notifications?: { markAwaited(taskId: string): void };
   readonly #context: EngineContext;
   readonly #storageDir?: string;
@@ -222,6 +227,8 @@ export class TaskEngine {
     const whyOpt = options.whyEnabled;
     this.#whyEnabled =
       typeof whyOpt === "function" ? whyOpt : whyOpt === false ? () => false : () => true;
+    const tokenOpt = options.noSkimpSub;
+    this.#noSkimpSub = typeof tokenOpt === "function" ? tokenOpt : () => tokenOpt === true;
     this.#notifications = options.notifications;
     this.#context = options.context ?? { depth: 0 };
   }
@@ -364,7 +371,13 @@ export class TaskEngine {
       );
     }
     const argv = this.#buildArgv(
-      { ...input, taskId, searchEnabled: this.#searchEnabled, ...extras },
+      {
+        ...input,
+        taskId,
+        searchEnabled: this.#searchEnabled,
+        noSkimpSub: this.#noSkimpSub(),
+        ...extras,
+      },
       this.#context,
     );
     if (this.#childExtensionPath) argv.push("-e", this.#childExtensionPath);

@@ -72,6 +72,14 @@ export const TOOLS = {
   },
 } as Record<ToolName, ToolEntry>;
 
+// 「别省真跑」模式的 PTC 段落（默认关，由 ptc.json 的 noSkimpPtc 打开）。
+// 出处：DeepSeek Harness 的 docs/testing.zh.md「带密钥策略：推理（inference）在这里很便宜」——
+// 「不要吝惜真实 API 测试。无密钥测试只能证明底层通路；只有带密钥运行才能证明 agent 能对接真实模型正常工作」。
+// 落成**可执行指令**而不是「预算无上限」：跑真的、别用 mock 顶替、别因为慢就跳过。
+// 文案用英文——与 dispatch 侧既有的英文模型散文同族（child report 契约）。
+export const NO_SKIMP_PTC_NOTE =
+  "Do not skimp on the real run: make the real calls, run the end-to-end checks, and verify against the outside world. Don't substitute mocks for the real dependency, and don't skip a slow-but-real check because it is slow — mock-level green proves the wiring, not the product. In a program: read every file that matters, run every check that matters, parallelize what can be parallelized.";
+
 // 派发参数说明（ADR-0008：两扇门共用一份参数表）——文案住本册子，ptc 的 schema 从这里取
 // 每个参数都写清代价：宿主不写死默认，用不用由模型自己判断
 export const TASK_DOOR_PARAM_DESCRIPTIONS = {
@@ -94,12 +102,15 @@ export const TASK_DOOR_PARAM_DESCRIPTIONS = {
 // 门禁（双向覆盖/token 预算）扩展随 P2 落地，本块由 tests/kimi 的协议探针守存在性
 export const KIMI_MCP_RUN_CODE = {
   name: "ptc_run_code",
-  description: () =>
+  description: (opts?: { noSkimp?: boolean }) =>
     [
       "写一段 TypeScript 程序批量调用工具：tools.<name>(args)。支持顶层 await、Promise.all 并行、循环与条件；程序返回值是归约后的结果，中间产物不进上下文。",
       "同一形态的读写预计重复 5 次以上时，写程序一次跑完比逐个调更省。",
       "本会话的 tools 是固定文件五件套：read / write / grep / glob / edit（只作用于 workdir 之内，越界即报错）；没有 bash，也没有 pi_task_ptc——要跑 shell 或派子代理，用宿主自己的工具。",
-    ].join(""),
+      opts?.noSkimp ? NO_SKIMP_PTC_NOTE : "",
+    ]
+      .filter(Boolean)
+      .join(""),
   inputSchemaDescriptions: {
     code: "要执行的 TypeScript 程序体，可用顶层 await 和 return",
     description: "这段程序要干什么（给人看的一行）",

@@ -72,6 +72,26 @@ const ARM_SPECS = {
     argv: ["-e", ENTRY],
     probeTool: "codemode",
   },
+  // no-skimp 三臂：与 ptc 档**同配置**，只多一份 ptc.json（宿主从隔离的 agent 目录读开关）。
+  // 只切「提示词里有没有那段」一个变量——题面/工作区/模型/判分器全同，才可比。
+  "mt-ptc": {
+    settings: { extensions: ["-builtin:codemode"] },
+    argv: ["-e", ENTRY],
+    probeTool: "ptc_run_code",
+    tokenBudget: { noSkimpPtc: true },
+  },
+  "mt-sub": {
+    settings: { extensions: ["-builtin:codemode"] },
+    argv: ["-e", ENTRY],
+    probeTool: "ptc_run_code",
+    tokenBudget: { noSkimpSub: true },
+  },
+  "mt-both": {
+    settings: { extensions: ["-builtin:codemode"] },
+    argv: ["-e", ENTRY],
+    probeTool: "ptc_run_code",
+    tokenBudget: { noSkimpPtc: true, noSkimpSub: true },
+  },
 };
 
 // 工具面自检题：让模型必须用该臂的主工具跑一次——「模型真调通了」才算该臂工具可用。
@@ -85,6 +105,13 @@ const PROBE_PROMPTS = {
     "必须使用 codemode 工具（写一段 JavaScript 脚本），在脚本里调用 tools.read 读 README.md 的第一行，然后只输出这一行。",
   ptc: "必须使用 ptc_run_code 工具（写一段 TypeScript 程序），在程序里调用 tools.read 读 README.md 的第一行，然后只输出这一行。",
   both: "必须使用 codemode 工具（写一段 JavaScript 脚本），在脚本里调用 tools.read 读 README.md 的第一行，然后只输出这一行。",
+  // no-skimp 三臂与 ptc 档同工具面 ⇒ 探针题同款（不能引用 PROBE_PROMPTS.ptc：对象自引用是 TDZ）
+  "mt-ptc":
+    "必须使用 ptc_run_code 工具（写一段 TypeScript 程序），在程序里调用 tools.read 读 README.md 的第一行，然后只输出这一行。",
+  "mt-sub":
+    "必须使用 ptc_run_code 工具（写一段 TypeScript 程序），在程序里调用 tools.read 读 README.md 的第一行，然后只输出这一行。",
+  "mt-both":
+    "必须使用 ptc_run_code 工具（写一段 TypeScript 程序），在程序里调用 tools.read 读 README.md 的第一行，然后只输出这一行。",
 };
 
 /* ---------- 题面专属 checklist（SP / Tool schema 取 pi 版公共档，这里只补题面相关的） ---------- */
@@ -336,6 +363,10 @@ async function runArm(arm, prompt, args, dir, taskDir = args.task) {
   const agentDir = mkdtempSync(join(tmpdir(), `piab-${arm}-`));
   cpSync(join(homedir(), ".pi/agent/auth.json"), join(agentDir, "auth.json"));
   writeFileSync(join(agentDir, "settings.json"), JSON.stringify(spec.settings, null, 2));
+  // no-skimp 三臂：宿主从 <agent dir>/ptc.json 读开关（pi 的 getAgentDir() 认 PI_CODING_AGENT_DIR）
+  if (spec.tokenBudget) {
+    writeFileSync(join(agentDir, "ptc.json"), JSON.stringify(spec.tokenBudget, null, 2));
+  }
 
   const argv = [
     "-p",
@@ -1004,22 +1035,23 @@ function printTable(arms, report, args) {
     const cat = data.judged?.byCategory ?? {};
     const row = {
       arm,
-      轮次: data.metrics.turns,
-      工具调用: data.metrics.toolCalls,
+      // --judge-only 且没有历史 report 时 report.arms[arm] 只有 judged、没有 metrics ⇒ 取值要兜底
+      轮次: data.metrics?.turns ?? 0,
+      工具调用: data.metrics?.toolCalls ?? 0,
       ptc程序调用: data.ptcRunCodeCalls ?? 0,
       codemode调用: data.codemodeCalls ?? 0,
-      输出token: data.metrics.outputTokens,
-      缓存读token: data.metrics.cacheReadTokens,
-      用时秒: Number((data.wallMs / 1000).toFixed(1)),
-      客观判分: `${data.objective.passedMedian} passed`,
-      全过: data.objective.allPassed ? "是" : "否",
+      输出token: data.metrics?.outputTokens ?? 0,
+      缓存读token: data.metrics?.cacheReadTokens ?? 0,
+      用时秒: Number(((data.wallMs ?? 0) / 1000).toFixed(1)),
+      客观判分: data.objective ? `${data.objective.passedMedian} passed` : "n/a",
+      全过: data.objective?.allPassed ? "是" : "否",
       成本$: data.cost?.totalUsd?.toFixed(5) ?? "n/a",
       每命中$: data.cost?.perPassedUsd?.toFixed(6) ?? "n/a",
       效率: data.cost?.efficiency?.toFixed(2) ?? "n/a",
       子会话: data.dispatch?.childSessions?.join("/") ?? "0",
-      派发子代理: data.dispatch.records.join("/") || "0",
-      并行度: data.dispatch.parallelMax.join("/") || "0",
-      派发门: `codemode ${data.dispatch.codemodeDoor.join("/")} · ptc ${data.dispatch.ptcDoor.join("/")}`,
+      派发子代理: data.dispatch?.records?.join("/") || "0",
+      并行度: data.dispatch?.parallelMax?.join("/") || "0",
+      派发门: `codemode ${data.dispatch?.codemodeDoor?.join("/") ?? 0} · ptc ${data.dispatch?.ptcDoor?.join("/") ?? 0}`,
       judge分: data.judged?.reward ?? "n/a",
       SP: cat.SP ? `${cat.SP.success}/${cat.SP.total}` : "-",
       工具纪律: cat["Tool schema"]

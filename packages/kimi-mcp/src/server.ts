@@ -90,6 +90,19 @@ function createSearchContext(): SearchRunContext {
   };
 }
 
+// Kimi 面的别省真跑开关（~/.kimi-code/ptc.json 的 noSkimpPtc）：fail-closed——只有显式 true 才开
+function readNoSkimpConfig(): boolean {
+  try {
+    const home = process.env.KIMI_CODE_HOME ?? join(process.env.HOME ?? "", ".kimi-code");
+    const parsed = JSON.parse(readFileSync(join(home, "ptc.json"), "utf8")) as {
+      noSkimpPtc?: unknown;
+    };
+    return parsed.noSkimpPtc === true;
+  } catch {
+    return false;
+  }
+}
+
 function strField(args: unknown, key: string): string {
   const value = (args as Record<string, unknown>)?.[key];
   if (typeof value !== "string" || value.length === 0) {
@@ -167,12 +180,14 @@ async function webDsSearchTool(args: unknown, context: SearchRunContext) {
 export function createKimiMcpServer(version: string): Server {
   const server = new Server({ name: "ptc-tools", version }, { capabilities: { tools: {} } });
   const searchContext = createSearchContext();
+  // 别省真跑开关读一次（MCP server 是长驻进程；该面没有会话级切换，改配置后重启 server 生效）
+  const noSkimp = readNoSkimpConfig();
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [
       {
         name: KIMI_MCP_TOOLS.ptc_run_code.name,
-        description: KIMI_MCP_TOOLS.ptc_run_code.description(),
+        description: KIMI_MCP_TOOLS.ptc_run_code.description({ noSkimp }),
         inputSchema: RUN_CODE_SCHEMA,
       },
       {

@@ -25,7 +25,7 @@ import {
 } from "@pi-ptc/dispatch";
 import { fileURLToPath } from "node:url";
 import { compactedTaskReminder, readTaskOutput, taskListSnapshot } from "@pi-ptc/task";
-import { createTaskPanel } from "@pi-ptc/tui/pi";
+import { createTaskPanel, createNoSkimpBanner } from "@pi-ptc/tui/pi";
 import { createDeepSeekProvider, createSearchMemory, createSearchQuota } from "@pi-ptc/search";
 import { createWebDsSearchTool } from "./web-ds-search-tool.ts";
 import { showUpgradeNotice } from "./upgrade-notice.ts";
@@ -42,6 +42,7 @@ import {
 } from "./task-binding.ts";
 import {
   FALLBACK_SURFACE_MODE,
+  NO_SKIMP_PTC_NOTE,
   TOOLS,
   renderDeliveryCheck,
   renderRouteIndex,
@@ -70,8 +71,10 @@ export type {
   TaskRejection,
 } from "./session.ts";
 
-const textResult = (value: unknown): AgentToolResult => ({
-  content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
+// text 必须是字符串：JSON.stringify(undefined) 是 undefined ⇒ pi 拼下一轮请求时读 .length 直接崩
+// （2026-11-02 真机抓到：模型调一次 ptc_task_stop，下一轮整个 turn 挂掉、父面交白卷）
+export const textResult = (value: unknown): AgentToolResult => ({
+  content: [{ type: "text", text: JSON.stringify(value ?? null, null, 2) ?? "null" }],
   details: undefined,
 });
 
@@ -137,13 +140,24 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
       modeActive = surface === "full_ptc" && modeEnabled;
     };
     applyMode();
+    // 「别省真跑」模式（noSkimpPtc / noSkimpSub）：默认关；语义 = 提示词里加「跑真的、别用 mock、别跳过慢检查」
+    // 会话级覆盖优先于配置文件（/ptc noskimp|noskimp-sub on|off|reset）——谓词形态：装配时的值会被冻住
+    const noSkimp = readNoSkimpConfig(getAgentDir());
+    let noSkimpPtcOverride: boolean | null = null;
+    let noSkimpSubOverride: boolean | null = null;
+    const noSkimpPtc = (): boolean => noSkimpPtcOverride ?? noSkimp.noSkimpPtc;
+    const noSkimpSub = (): boolean => noSkimpSubOverride ?? noSkimp.noSkimpSub;
     // ADR-0015：<ptc> 常驻索引进系统提示词；渲染输入 = 册子 + surface + 详情目录 + 总则句开关——中途 /ptc mode 会废一次提示词缓存（决策 5 例外，见 ADR-0015 修订）
     pi.on("before_agent_start", (event) => {
       applyMode();
       applyTaskFaceVisibility(); // resume 重置后任务面可见性再对齐（幂等）
       // floor 版本事件形状未实测：缺 sections 就跳过注入，别让每个 turn 抛 TypeError
       const sections = event.systemPromptOptions?.sections;
-      if (sections) sections["ptc"] = renderRouteIndex(surface, detailDir, modeActive);
+      if (sections) {
+        sections["ptc"] = renderRouteIndex(surface, detailDir, modeActive);
+        // 「别省真跑」段独立成节：<ptc> 索引有 token 预算硬顶（560），塞进去会顶穿并冒 > WARNING
+        if (noSkimpPtc()) sections["no_skimp"] = NO_SKIMP_PTC_NOTE;
+      }
     });
     const pool = new WorkerPool(spawnPtcWorker);
     const notifications = new NotificationCenter();
@@ -204,6 +218,8 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
         childExtensionPath: fileURLToPath(import.meta.url),
         // ADR-0003：搜索开关传给引擎（strict 白名单保留 web_ds_search）
         searchEnabled: readWebSearchConfig(getAgentDir()).enabled,
+        // 别省真跑：孩子提示词加「跑真的、别用 mock、别跳过慢检查」段（谓词 ⇒ /ptc noskimp-sub 热生效）
+        noSkimpSub: noSkimpSub,
         // BG-01：记录与产出一同落盘（项目级 .pi 目录；pi 的 sessionDir 不在扩展 API 上，此处取项目本地态）
         storageDir: join(process.cwd(), ".pi", "ptc-tasks"),
         output: new FileOutputStorage(join(process.cwd(), ".pi", "ptc-tasks")),
@@ -222,9 +238,15 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
         agentResolveGate((name, scope) => findAgent(name, agentDirs, scope) !== null),
       ],
     });
+    // no-skimp 横幅（TUI）：开着时常驻；关掉即卸载。
+    // 走 setWidget 而不是 notify——pi 的通知槽全局共享，别的扩展一调就把我们的文案顶掉（真机复现过）
+    const noSkimpBanner = createNoSkimpBanner({
+      ui: ctx.mode === "tui" ? ctx.ui : undefined,
+      getState: () => ({ noSkimpPtc: noSkimpPtc(), noSkimpSub: noSkimpSub() }),
+    });
     pi.registerCommand("ptc", {
       description:
-        "/ptc off|on：派发开关 · /ptc why on|off：理由开关 · /ptc mode on|off：PTC 模式（程序优先的引导层）",
+        "/ptc off|on：派发开关 · /ptc why on|off：理由开关 · /ptc mode on|off：PTC 模式（程序优先的引导层） · /ptc noskimp on|off|reset：别省真跑（父面） · /ptc noskimp-sub on|off|reset：别省真跑（子代理）",
       handler: async (args, cmdCtx) => {
         const [sub, rest] = args.trim().split(/\s+/);
         if (sub === "off") {
@@ -243,9 +265,14 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
         else if (sub === "mode") {
           modeEnabled = rest !== "off";
           applyMode();
+        } else if (sub === "noskimp") {
+          noSkimpPtcOverride = rest === "reset" ? null : rest !== "off";
+        } else if (sub === "noskimp-sub") {
+          noSkimpSubOverride = rest === "reset" ? null : rest !== "off";
         }
+        noSkimpBanner.refresh(); // 横幅跟着会话级切换走（配置文件的值在会话开始时已定）
         cmdCtx.ui.notify(
-          `/ptc：dispatchEnabled=${dispatchEnabled}，mode=${modeActive ? "on（引导层）" : "off"}，whyEnabled=${whyEnabledOverride ?? whyEnabledPersisted}（在飞任务不受影响）`,
+          `/ptc：dispatchEnabled=${dispatchEnabled}，mode=${modeActive ? "on（引导层）" : "off"}，whyEnabled=${whyEnabledOverride ?? whyEnabledPersisted}，noSkimp(PTC)=${noSkimpPtc()}，noSkimp(Sub)=${noSkimpSub()}（在飞任务不受影响）`,
           "info",
         );
       },
@@ -259,6 +286,7 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
     pi.on("session_shutdown", () => {
       sessionEnding = true;
       taskPanel.dispose(); // 面板不留残影
+      noSkimpBanner.dispose(); // 横幅同理
       pool.drain(); // 退役空闲 worker：特定关闭时序下别让 ref 着的线程拖住退出
       void session.shutdown();
     });
@@ -409,6 +437,26 @@ function readTraceRetentionConfig(agentDir: string): {
     };
   } catch {
     return defaults;
+  }
+}
+
+// 别省真跑开关（noSkimpPtc / noSkimpSub）：fail-closed——只有显式 true 才开
+// （同 webDsSearch；whyEnabled 那类「剥夺」开关才 fail-open）
+function readNoSkimpConfig(agentDir: string): {
+  noSkimpPtc: boolean;
+  noSkimpSub: boolean;
+} {
+  try {
+    const parsed = JSON.parse(readFileSync(join(agentDir, "ptc.json"), "utf8")) as {
+      noSkimpPtc?: unknown;
+      noSkimpSub?: unknown;
+    };
+    return {
+      noSkimpPtc: parsed.noSkimpPtc === true,
+      noSkimpSub: parsed.noSkimpSub === true,
+    };
+  } catch {
+    return { noSkimpPtc: false, noSkimpSub: false };
   }
 }
 
@@ -721,8 +769,16 @@ function registerTaskFace(
     description: TOOLS.ptc_task_stop.description(surface),
     parameters: Type.Object({ task_id: Type.String(), reason: Type.Optional(Type.String()) }),
     defaultActive: false,
-    execute: async (_id, args) =>
-      textResult(await session.stopTask(args.task_id, args.reason ?? "user stop")),
+    execute: async (_id, args) => {
+      const reason = args.reason ?? "user stop";
+      await session.stopTask(args.task_id, reason);
+      // 停完要回一句话：stopTask 是 void ⇒ 直接包 undefined ⇒ text 变 undefined ⇒ pi 下一轮崩
+      return textResult({
+        task_id: args.task_id,
+        reason,
+        status: session.registry.get(args.task_id)?.status,
+      });
+    },
   });
 }
 

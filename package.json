@@ -24,6 +24,7 @@
   "files": [
     "dist/**/*.js",
     "docs/routes/**/*.md",
+    "skills/**/*.md",
     "CHANGELOG.md",
     "README.md",
     "LICENSE"
@@ -73,6 +74,9 @@
   "pi": {
     "extensions": [
       "./dist/index.js"
+    ],
+    "skills": [
+      "./skills"
     ]
   }
 }

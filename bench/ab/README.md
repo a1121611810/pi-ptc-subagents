@@ -2,12 +2,17 @@
 
 同一题、同一模型、同一工作区副本，比质量分与行为指标。
 
-| 臂         | 宿主配置                                                                              | PTC 能力来源                                                   |
-| ---------- | ------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| `bare`     | `-ne`（不加载任何扩展）                                                               | 无                                                             |
-| `codemode` | 隔离 settings `extensions: ["+builtin:codemode"]` + `defaultTools: ["+codemode"]`     | pi 自带 codemode（JavaScript，**≥0.99 才有**）                 |
-| `ptc`      | 隔离 settings `extensions: ["-builtin:codemode"]` + `-e packages/entry/dist/index.js` | 本仓自研（TypeScript 严格模式），**自带 PTC 被显式关掉**       |
-| `both`     | 同 codemode 的 settings + `-e` 本仓                                                   | 两者同时 = **pi 的默认部署形态**；本仓退让成 `codemode_ptc` 面 |
+| 臂                              | 宿主配置                                                                              | PTC 能力来源                                                                                                                        |
+| ------------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `bare`                          | `-ne`（不加载任何扩展）                                                               | 无                                                                                                                                  |
+| `codemode`                      | 隔离 settings `extensions: ["+builtin:codemode"]` + `defaultTools: ["+codemode"]`     | pi 自带 codemode（JavaScript，**≥0.99 才有**）                                                                                      |
+| `ptc`                           | 隔离 settings `extensions: ["-builtin:codemode"]` + `-e packages/entry/dist/index.js` | 本仓自研（TypeScript 严格模式），**自带 PTC 被显式关掉**                                                                            |
+| `both`                          | 同 codemode 的 settings + `-e` 本仓                                                   | 两者同时 = **pi 的默认部署形态**；本仓退让成 `codemode_ptc` 面                                                                      |
+| `mt-ptc` / `mt-sub` / `mt-both` | 同 `ptc` 档，隔离 agent 目录里多一份 `ptc.json`（`noSkimpPtc` / `noSkimpSub`）        | no-skimp 三臂：**只切「提示词里有没有那段」一个变量**，其余全同。⚠️ 臂名保留 `mt-*`（历史数据路径），配置键已随 2026-11-03 改名更新 |
+
+**子代理侧检索指标**（`report.json` 的 `dispatch.childUsage`）：`searchCalls` / `searchActions`（search·open·find）/
+`searchQueries` / `searchDomains`（SERP 里出现过的不同域名）。`tool_execution_end` 不带 args，动作类型按
+`toolCallId` 从 start 事件关联（踩过：直接读 `event.args.action` 恒为 undefined，域名永远统计不到）。
 
 **两个必须知道的事实**（实测 2026-10-30）：
 
@@ -732,6 +737,25 @@ node bench/ab/run-ab.mjs --task bench/ab/task-facts-ctxneed --prompt bench/ab/ta
   --grader bench/ab/grader-facts --truth bench/ab/truth-ctxneed.json \
   --out bench/ab/out-facts-ctxneed-mx-1.4.0 --repeat 3 --skip-judge --arms both
 ```
+
+## 第十二轮：联网检索多行业题（2026-11-02）——**未得出可信效应量，台架已撤**
+
+换过维度：闭卷算术没有「搜得更深」的空间，所以建了多行业（云存储 / 支付合规 / 危险品物流）×
+多角度（每题 4 个）的联网检索题，判 20 分制（角度成节 / 正文够长 / 来源数 / 关键词 + 题级 4 分：
+域名多样性 / 官方源 / 引用溯源率 / 官方源深度）。
+
+**结论：不记录成绩。** 判据在基线臂上就接近顶满，而台架自身还有三个天花板
+（子代理搜索配额默认 30 是成功调用计数、15 分钟墙钟对联网题太短、`open` 抓取 404/超时率约 40%）
+⇒ 样本不足以给效应量；部分轮次还被 provider 限流打断。
+
+**留下两条与开关无关的事实**：
+
+1. 父面能用 `bash` + `curl` 绕过子代理自己检索（甚至读 `~/.pi/agent` 里用户装的 `pi-web-access`）
+   ⇒ 「搜索只活在子代理进程」在 bash 可用时不成立。
+2. 引用溯源只能量「引用是否来自正规通道」，不能当「有没有真的去查」——模型可以不检索也写出正确 URL。
+
+台架代码与题面（`task-ws/`、`grader-ws/`、`truth-ws-*.json`、`run-ws-matrix.sh`、`summarize-ws.mjs`）
+**不随仓库发布**。要测请自己重建——题面/判据的设计如上，剩下的都是实现细节。
 
 ## 边界
 

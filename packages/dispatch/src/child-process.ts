@@ -4,6 +4,11 @@ import { REPORT_CONTRACT_BLOCK } from "./report.ts";
 
 const STDERR_KEEP_CHARS = 64 * 1024; // 只留尾部：stopReason 素材够用，防喷涌撑爆宿主内存
 
+// 「别省真跑」模式的子代理段落（默认关，由 ptc.json 的 noSkimpSub 打开）。
+// 与 PTC 侧同一出处（DeepSeek Harness docs/testing.zh.md「带密钥策略」）：跑真的、别用 mock 顶替、别因为慢就跳过。
+export const NO_SKIMP_SUB_NOTE =
+  "Do not skimp on the real run: make the real calls, run the end-to-end checks, and verify against the outside world. Don't substitute mocks for the real dependency, and don't skip a slow-but-real check because it is slow — mock-level green proves the wiring, not the product. Gather the evidence fully, cross-check it, and don't soften your conclusions.";
+
 // 子进程以用户身份跑（旧 ADR-0007：信任姿态与所有 pi 扩展一致，无 OS 沙箱）
 export function spawnChild(argv: string[], env: NodeJS.ProcessEnv = process.env): ChildHandle {
   const child = spawn(argv[0]!, argv.slice(1), { env, stdio: ["ignore", "pipe", "pipe"] });
@@ -72,12 +77,15 @@ export function buildPiArgv(
     agentThinkingLevel?: string;
     /** projectContext:"none" = 孩子不加载 AGENTS.md/CLAUDE.md（省固定税；旗标 0.86.1 起就有） */
     projectContext?: "auto" | "none";
+    /** 别省真跑：孩子的追加提示词里加一段「跑真的、别用 mock、别跳过慢检查」（默认关） */
+    noSkimpSub?: boolean;
   },
   context: { depth: number; sessionModel?: string; piVersion?: string },
 ): string[] {
   const block = [
     "<pi-ptc-context>",
     `你是被派发的子代理：看不到父会话，你的最终消息就是交付物（depth ${context.depth}）。`,
+    input.noSkimpSub ? NO_SKIMP_SUB_NOTE : "",
     input.why ? `<pi-ptc-why>${escapeXmlText(input.why)}</pi-ptc-why>` : "",
     input.childReport === false ? "" : REPORT_CONTRACT_BLOCK,
     "</pi-ptc-context>",
