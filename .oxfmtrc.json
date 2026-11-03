@@ -2,6 +2,7 @@
   "ignorePatterns": [
     "**/dist/**",
     "release/**",
+    ".agents/**",
     "docs/prototypes/**/*.html",
     "packages/website/**",
     ".scratch/**"
