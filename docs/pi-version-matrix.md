@@ -1,7 +1,7 @@
 # pi 版本兼容矩阵（重写版）
 
-floor = **0.86.0**（`peerDependencies: ">=0.86.0"`），ceiling = 跟踪最新（当前 1.4.0，类型固定在 devDependencies）。
-本文件是旧仓 `docs/agents/pi-compat-matrix.md` 实测结论（15 版本逐一安装探针，2026-10-14/20 两次测量）的继承 + 1.4.0 增补。**断言 pi 行为前先看本机 `pi --version`**——node_modules 里的版本、PATH 上的版本、声明的 floor 是三个不同的数。
+floor = **0.86.0**（`peerDependencies: ">=0.86.0"`），ceiling = 跟踪最新（当前 1.5.0，类型固定在 devDependencies）。
+本文件是旧仓 `docs/agents/pi-compat-matrix.md` 实测结论（15 版本逐一安装探针，2026-10-14/20 两次测量）的继承 + 1.4.0 / 1.5.0 增补。**断言 pi 行为前先看本机 `pi --version`**——node_modules 里的版本、PATH 上的版本、声明的 floor 是三个不同的数。
 
 ## 能力分水岭：0.99.0
 
@@ -34,6 +34,18 @@ floor = **0.86.0**（`peerDependencies: ">=0.86.0"`），ceiling = 跟踪最新�
   - **message_end usage 带 `cacheRead` / `cacheWrite` / `cacheWrite1h`**（jsonl 观测面已接；旧版缺省 undefined，floor 安全）
     —— ⚠️ **2026-10-31 更正**：这不是 1.4.0 新增，**floor 0.86.0 的 usage 就已带 `cacheRead`/`cacheWrite`**
     （floor 实测 `usage={input,output,cacheRead,cacheWrite,totalTokens,cost{…total},cacheWrite1h}`）
+- **1.5.0（2026-11-02，本矩阵新增）**：**扩展 API 面无破坏**（`types.d.ts` 只加不改）——详见下面「pi 1.5.0 适配」一节
+  - **唯一的 Breaking**：工具参数校验改走 `@earendil-works/pi-schema`——TypeBox 里 JSON Schema 之外的东西
+    （`Type.Refine()` / `Type.BigInt()` / `Type.Undefined()` / codec / `Format.Set()`）**不再作用于工具参数**
+    ⇒ **我们的工具 schema 全是纯 JSON Schema**（`Type.Object`/`String`/`Number`/`Boolean`/`Optional`/`Union`/
+    `Literal`/`Array`/`Record`/`Integer`）**⇒ 零影响**；反过来纯 JSON Schema 的工具（含 MCP 工具）现在也吃
+    同一套强制转换（数字字符串 → 数字、单值 → 数组）⇒ 只赚不亏
+  - 扩展包可以自带 changelog：pi 读包 `package.json` 的 `pi.changelogPath` 或包根的 `CHANGELOG.md`，
+    更新后下次冷启动在「Extension Updates」里显示——**与我们自己的升级提示（widget 区）并行，不冲突**
+  - 其它新增（keybinding 提示函数、`ctx.ui.custom` 的 `blocked`、`Usage.cost.totalFromProvider`、
+    `pi.exec()` 的 `maxBuffer`、自更新命令、GPT-6.1、渲染提速）**都不碰我们的面**
+  - **系统提示词收紧**（pi 自称）⇒ 孩子系统提示词实测变短：1.4.0 是 4600 字符，1.5.0 是 4141 字符
+    （我们注入的那节长度不变，仍省 744）
 
 ## 硬约束（重写仍然成立的事实）
 
@@ -71,10 +83,11 @@ floor = **0.86.0**（`peerDependencies: ">=0.86.0"`），ceiling = 跟踪最新�
 > 评审修复后（2026-10-26 晚）同口径复跑一遍：**16/16 与上表逐字一致**——floor 四版仍是明确的
 > 版本错误，其余 12 版仍是 `OK:295`。
 
-| pi 版本                                                                                          | 程序内 `tools.read`                                   |
-| ------------------------------------------------------------------------------------------------ | ----------------------------------------------------- |
-| 0.86.0 · 0.86.1 · 0.87.0 · 0.87.1                                                                | ✗ 平台没有嵌套调用通道 → 明确报错「需 pi ≥ 0.99」     |
-| 0.99.0 · 0.99.1 · 0.99.2 · 1.0.0 · 1.0.1 · 1.0.2 · 1.0.3 · 1.0.4 · 1.1.0 · 1.2.0 · 1.3.0 · 1.4.0 | ✓ 程序读 `/etc/hosts` 拿到 295 字符（结果统一成文本） |
+| pi 版本                                                                                          | 程序内 `tools.read`                                                                                                                                                          |
+| ------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0.86.0 · 0.86.1 · 0.87.0 · 0.87.1                                                                | ✗ 平台没有嵌套调用通道 → 明确报错「需 pi ≥ 0.99」                                                                                                                            |
+| 0.99.0 · 0.99.1 · 0.99.2 · 1.0.0 · 1.0.1 · 1.0.2 · 1.0.3 · 1.0.4 · 1.1.0 · 1.2.0 · 1.3.0 · 1.4.0 | ✓ 程序读 `/etc/hosts` 拿到 295 字符（结果统一成文本）                                                                                                                        |
+| 1.5.0（2026-11-03）                                                                              | ✓ 程序内 read 走会话工具仍通（真机 `READ=2436`，读 `package.json` 的长度）；`/etc/hosts` 越界读取**静态同构**（`dist/core/tools/path-utils.js` 与 1.4.0 逐字相同）⇒ 行为不变 |
 
 ### 引擎抽出后复跑（2026-11-01）
 
@@ -204,7 +217,8 @@ floor = **0.86.0**（`peerDependencies: ">=0.86.0"`），ceiling = 跟踪最新�
 | 1.1.0           | ✓              | ✓             | ✓               | ✓                     | ✓        | 4558 → 3814（省 744）      |
 | 1.2.0           | ✓              | ✓             | ✓               | ✓                     | ✓        | 4558 → 3814（省 744）      |
 | 1.3.0           | ✓              | ✓             | ✓               | ✓                     | ✓        | 4558 → 3814（省 744）      |
-| 1.4.0（现行）   | ✓              | ✓             | ✓               | ✓                     | ✓        | 4600 → 3856（省 744）      |
+| 1.4.0           | ✓              | ✓             | ✓               | ✓                     | ✓        | 4600 → 3856（省 744）      |
+| 1.5.0（现行）   | ✓              | ✓             | ✓               | ✓                     | ✓        | 4141 → 3397（省 744）      |
 
 - **省的是系统提示词的固定字节**（本探针的 AGENTS.md 是 744 字符，含新增的口径节）；`usage.input` 受缓存冷热影响，
   **跨版本/跨轮不可横比**（缓存命中时几乎为 0）——比大小要看节长，不看 input。
@@ -215,7 +229,7 @@ floor = **0.86.0**（`peerDependencies: ">=0.86.0"`），ceiling = 跟踪最新�
   不是这个旋钮。
 - **口径事实检查用不可猜倍率（×1.2）**：模型自带中国劳动法「加班费 1.5 倍」的常识 ⇒ 口径若写 ×1.5，
   模型不读上下文也能答对，信号不唯一。×1.2 下「带上下文必为 3432」才是可断言的确定结论。
-- **`--no-context-files` 在 0.86.0/0.87.1/0.99.0/1.0.0/1.1.0/1.2.0/1.3.0/1.4.0 全有**
+- **`--no-context-files` 在 0.86.0/0.87.1/0.99.0/1.0.0/1.1.0/1.2.0/1.3.0/1.4.0/1.5.0 全有**
   （`npm pack` 静态核验 + floor 真机）→ `projectContext` **无需版本门**；`--no-mcp` 确证 1.1.0 起才有。
 - 顺带一条行为差异：**floor 的孩子更可能不按契约交报告**（任务只写「只回答 OK」时 floor 的
   `reportChannel=none`，1.4.0 照交）→ 父面**点名 child report 的 JSON 块形状**在老版本上更必要
@@ -248,8 +262,8 @@ F3-3 = 330；按字面读是 3300 / 300）。**判分器零复制**：bench 加 
 - 模型引用格式两版都是 `${model.provider}/${model.id}`（0.86.0 `dist/core/model-resolver.js:75`；
   1.4.0 同）；`--model` 的接受格式两版都是 `provider/id` + 可选 `:<thinking>`（`cli/args.js` help 同文）。
 - ⇒ **floor 上孩子同样继承父会话模型**；不发 `--model` 的唯一情形是「会话本身没有模型」。
-- **真机矩阵**：`scripts/session-model-smoke.mjs` 在 0.86.0/0.87.1/0.99.0/1.0.0/1.1.0/1.2.0/1.3.0/1.4.0
-  **八版全过**——两轮差分（父显式 `minimax-cn/MiniMax-M3.1-Flash` vs 父用默认 `minimax-cn-512k/…`），
+- **真机矩阵**：`scripts/session-model-smoke.mjs` 在 0.86.0/0.87.1/0.99.0/1.0.0/1.1.0/1.2.0/1.3.0/1.4.0/1.5.0
+  **九版全过**（1.5.0 于 2026-11-03 补测）——两轮差分（父显式 `minimax-cn/MiniMax-M3.1-Flash` vs 父用默认 `minimax-cn-512k/…`），
   孩子都跟着各自的父走；负向对照（撤掉 entry 的接线）如期变红——孩子落到 pi 默认模型。
 
 ### 压缩事件与任务面血缘（2026-11-01 静态核验 + 1.4.0 真机）
@@ -278,10 +292,59 @@ F3-3 = 330；按字面读是 3300 / 300）。**判分器零复制**：bench 加 
   脚本自建隔离配置目录并把阈值压到 1000）。
 - **0.86–1.3 中间版本未逐版核**。
 
+## pi 1.5.0 适配（2026-11-03 实测）
+
+pi 1.5.0 于 2026-11-02 发布（npm `@earendil-works/pi-coding-agent@1.5.0`）。本轮按老规矩走：
+**静态比对 → 真机探针 → 升钉子 → 更新文档**，代码一行没改（比对面无破坏）。
+
+### 静态比对（1.4.0 vs 1.5.0 的包内 diff）
+
+- **扩展类型面无破坏**：`dist/core/extensions/types.d.ts` **只加不改**——新增 `KeybindingHints`
+  （`keyText()` / `keyHint()`）、`ctx.ui.custom()` 的 `blocked` 选项、消息的 `messageId` / `timestamp`；
+  `ExtensionContext` / `ExtensionToolContext` / `ToolDefinition`（`exposure` / `defaultActive` /
+  `outputSchema`）/ `setWidget` 的签名**逐字未变**。
+- **CLI 旗标逐字未变**：`--no-mcp` / `--no-context-files` / `--mode json|rpc` / `-ne` / `-e` / `-p` /
+  `--model provider/id` / `--tools` / `-builtin:` 全在（两版 `dist/cli` 的旗标集合相同）。
+- **运行时导出齐备**：`getAgentDir` / `loadSkills` / `formatSkillsForPrompt` /
+  `create{Read,Write,Edit,Grep,Ls,Find}ToolDefinition` / `defineTool` 全在 ⇒ floor 自造工具那条路不受影响。
+- **json 事件集未变**：`dist/core/agent-session.js` 里的事件类型集合（`agent_*` / `turn_*` / `message_*` /
+  `tool_execution_*`）与 1.4.0 相同 ⇒ `packages/dispatch` 的 `parseChildStream` 假设仍成立。
+- **rpc 层逐字未变**：`dist/modes/rpc/**` 与 1.4.0 **无差异**（`compact` / `prompt` 等命令形状不变）。
+- **内置工具的路径处理逐字相同**：`dist/core/tools/path-utils.js` 与 1.4.0 相同 ⇒ pi 内置工具仍无 cwd 囚禁。
+- **alias 表不变**：pi 的扩展加载器仍把 `typebox` 指向自己那份（1.3.27）、`@earendil-works/pi-tui` 指向宿主那份
+  ⇒ 我们把 typebox / pi-tui 外置（ADR-0026 / ADR-0022）照旧成立。
+- **唯一的 Breaking**（工具参数校验换 `@earendil-works/pi-schema`）的结论见上面「1.x 增量」一节：
+  我们的 schema 全是纯 JSON Schema ⇒ **零影响**。
+
+### 真机探针（pi 1.5.0，2026-11-03）
+
+| 探针                                                                                               | 1.5.0 结果                                                          |
+| -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `scripts/version-smoke.sh`（四腿：run_code 求值 / 程序内 tools.read / workflow parallel / 任务面） | **全过**：`RUN=42` / `READ=2436` / `PAR=2` / HND 非空 / `isError` 0 |
+| `scripts/knobs-smoke.mjs`（timeoutMs 收尸 / projectContext / 报告通道 + usage 兜底 / 停滞护栏）    | **PASS**：孩子系统提示词 4141 → 3397（省 744，与各版一致）          |
+| `scripts/session-model-smoke.mjs`（两轮差分：父显式模型 vs 父默认模型）                            | **PASS**：孩子都跟着各自的父走                                      |
+| `scripts/compact-inject-smoke.mjs`（压缩后重注入）                                                 | **PASS**（见下节：先修了一处探针自己的坑）                          |
+
+### 压缩后重注入：先修了探针自己的坑，再拿到 1.5.0 的正例
+
+- **探针的坑（不是版本问题）**：端到端探针在 **1.5.0** 与**对照的 1.4.0** 上**同样跑不出正例**——
+  英文长 prompt「Count the words in the following text」实测会让模型去翻会话记录找词（不停工具调用
+  ⇒ 迟迟不 settle ⇒ 压缩压根没触发）。**失败形态两版逐字相同 ⇒ 与 pi 版本无关。**
+  ⇒ 修法：长 prompt 改成中文 + 明说「不要调用任何工具，不要读文件」（写进脚本头的坑 5）。
+- **宿主压缩路径两版同构**（同口径 A/B，rpc 层逐字未变 + 事件逐条同形）：`compact` 命令 →
+  `compaction_start` → `session_compact_failed` → `compaction_end`（`errorMessage="Compaction failed:
+  Nothing to compact (session too small)"`）→ rpc 响应
+  `{"command":"compact","success":false,"error":"Nothing to compact (session too small)"}`——两版逐字相同。
+- **1.5.0 上的正例**（修完探针）：`session_compact reason=manual` → `compaction_end` 带摘要 →
+  rpc `success=true` → **压缩后的下一次 `context` 事件里任务清单在（清单=有）** ⇒ 压缩后重注入在 1.5.0 上成立。
+  **同口径在 1.4.0 上复跑同样全过**（压缩成功=是 / 压缩事件=有 / 清单注入=有）⇒ 探针这一改与 pi 版本无关。
+- ⇒ **压缩后重注入仍无版本门**（`ContextEventResult = { messages?: AgentMessage[] }` 与 `session_compact`
+  的形状在 1.5.0 仍逐字同形，见上）。
+
 ## 待测
 
 中间版本的**执行链冒烟**已覆盖（0.87 / 0.99 / 1.0 / 1.1 / 1.2 / 1.3，见上）；
-**旋钮探针覆盖 8 个版本**（每个 minor 一版：0.86.0 / 0.87.1 / 0.99.0 / 1.0.0 / 1.1.0 / 1.2.0 / 1.3.0 / 1.4.0）；
+**旋钮探针覆盖 9 个版本**（每个 minor 一版：0.86.0 / 0.87.1 / 0.99.0 / 1.0.0 / 1.1.0 / 1.2.0 / 1.3.0 / 1.4.0 / 1.5.0）；
 **floor 的 codemode/exposure 行为已于 2026-10-31 查清**（见上）。仍未做的：同一 minor 的补丁版逐版安装
 （按 minor 分水岭取样）、`1.x` 能力表里未直接观测的 codemode 差分（依赖旧仓 16 项探针结论）。下次 pi 发版
 或动了门/可见性/codemode 探测相关代码时补测。

@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.10.0] - 2026-11-03
+
+### Added
+
+- **Support for pi 1.5.0** (released 2026-11-02). The extension API surface is
+  unchanged — `ExtensionContext`, `ExtensionToolContext`, `ToolDefinition`
+  (`exposure` / `defaultActive` / `outputSchema`), `setWidget`, the nested
+  `ctx.executeTool` channel, the JSON event stream and the RPC command shapes
+  are byte-identical to 1.4.0 — so **no runtime code changed**. Measured on a
+  real pi 1.5.0: the four-leg smoke (`RUN=42` / `READ=2436` / `PAR=2` /
+  non-empty task handle, zero `isError`), the knob probe (`timeoutMs`
+  reaping, `projectContext` auto-vs-none, report channel and usage fallback,
+  project-convention facts, stall guard) and the session-model-inheritance
+  probe (both differential rounds) all pass. The dev dependency now tracks
+  `@earendil-works/pi-coding-agent@^1.5.0`, the pinned
+  `@earendil-works/pi-tui` moves to 1.5.0, and the version smoke script
+  lists 1.5.0.
+
+### Changed
+
+- pi 1.5.0 validates tool arguments with `@earendil-works/pi-schema`, so
+  TypeBox features outside JSON Schema (`Type.Refine()`, `Type.BigInt()`,
+  codecs, …) no longer apply to tool arguments. Every schema this package
+  registers is plain JSON Schema, so nothing changes for us; plain JSON
+  Schema tools (including the MCP edition) now get the same coercion the
+  TypeBox tools had.
+- The version matrix, AGENTS.md and the two status pages record the 1.5.0
+  measurements. The end-to-end compaction-injection probe needed a fix of its
+  own first: its English long prompt ("count the words in the following
+  text") makes the model go looking through the session instead of
+  answering, so it never settles and the compaction never starts — on
+  **both** 1.4.0 and 1.5.0, which looks like a version regression but is not
+  (the host-side compaction path is identical between the two versions: same
+  `compaction_start` / `session_compact_failed` / `compaction_end` events,
+  same RPC response). With a Chinese prompt that says "do not use any tool",
+  the probe passes on 1.5.0: compaction happened and the task list was
+  injected into the next request.
+
 ## [7.9.3] - 2026-11-02
 
 ### Fixed

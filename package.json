@@ -1,6 +1,6 @@
 {
   "name": "pi-ptc-subagents",
-  "version": "7.9.3",
+  "version": "7.10.0",
   "description": "Programmable tool calling (PTC) and subagent fan-out for pi",
   "keywords": [
     "pi",
@@ -52,7 +52,7 @@
     "fmt:check": "oxfmt --check"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^1.4.0",
+    "@earendil-works/pi-coding-agent": "^1.5.0",
     "@types/node": "^26.6.5",
     "oxfmt": "^0.74.0",
     "oxlint": "^1.89.0",

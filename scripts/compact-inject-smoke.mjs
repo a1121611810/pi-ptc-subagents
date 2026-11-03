@@ -72,8 +72,11 @@ writeFileSync(
 
 const DISPATCH =
   '调用 ptc_run_code，程序体为：const r = await tools.pi_task_ptc({ task: "只回答 OK", wait: true }); return r.status;';
+// ⚠️ 坑 5（2026-11-03）：长 prompt 的措辞决定模型会不会收尾——英文「Count the words in the
+// following text」实测会让模型去翻会话记录找词（不停工具调用 ⇒ 迟迟不 settle ⇒ 压缩压根没触发，
+// 1.4.0 与 1.5.0 两版同样跑不出正例，看着像版本回归）。中文 + 明说「不要调用任何工具」⇒ 秒回。
 const LONG =
-  "Count the words in the following text and reply with ONLY the number:\n\n" +
+  "下面这段文字是同一句话重复 320 次。只回复重复次数这一个数字，不要调用任何工具，不要读文件：\n\n" +
   "The printing press was invented in the fifteenth century by Johannes Gutenberg. ".repeat(320);
 
 const proc = spawn("pi", ["-ne", "-e", entry, "-e", probePath, "--mode", "rpc", "--model", model], {
