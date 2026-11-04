@@ -72,7 +72,11 @@ function hangingSpawn(kills) {
   };
 }
 
-test("②：完全没动静的孩子被护栏收尸（stopReason 写明 stalled）", async () => {
+test("②：完全没动静的孩子被护栏收尸（stopReason 写明 stalled）", async (t) => {
+  // 真实挂死的孩子靠 stdio 管道拽住事件循环；假 spawn 没有管道——补一个 ref 定时器。
+  // 否则护栏的 unref 定时器是唯一句柄，循环先 drain（node:test 报「event loop has already resolved」，CI 22 腿实测踩到）
+  const keepAlive = setInterval(() => {}, 60_000);
+  t.after(() => clearInterval(keepAlive));
   const registry = new TaskRegistry();
   const kills = [];
   const engine = new TaskEngine({
