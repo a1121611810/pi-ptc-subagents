@@ -352,7 +352,7 @@ CI 守 22/24/26 三腿（ci.yml 矩阵）；publish 仍钉 24（trusted publishi
 | Node 版本                             | 证据                                                                                                                                                                                  |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 22.22.1（engines 下限 ≥22.19 的代表） | `process.features.typescript="strip"`；`node:module.stripTypeScriptTypes` API 在；`.ts` 直跑与 worker_threads `.ts` 入口均通——compile.ts 与 worker 源码回退两条 TS 依赖路径在下限可用 |
-| 26.13.0（Active LTS，2026-10-28 起）  | `pnpm test` 四件套全绿（含 `.ts` worker 源码直跑回退腿）；`pnpm run check`（tsrs）通过；真机冒烟 floor 0.86.0 与 PATH 1.4.0 四腿全过（1.5.0 于 11-03 同 Node 全过）                   |
+| 26.13.0（Active LTS，2026-10-28 起）  | `pnpm test` 四件套全绿（含 `.ts` worker 源码直跑回退腿）；`pnpm run check`（tsrs）通过；**全量真机冒烟 17 腿全过**（16 个 pi 版本 + PATH 1.4.0，fails=0，2026-11-04）                 |
 
 ### Node 26 的 TS 硬事实
 
