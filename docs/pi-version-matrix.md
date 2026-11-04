@@ -341,6 +341,33 @@ pi 1.5.0 于 2026-11-02 发布（npm `@earendil-works/pi-coding-agent@1.5.0`）�
 - ⇒ **压缩后重注入仍无版本门**（`ContextEventResult = { messages?: AgentMessage[] }` 与 `session_compact`
   的形状在 1.5.0 仍逐字同形，见上）。
 
+## Node 运行时（2026-11-04 实测）
+
+pi 矩阵与 Node 运行时解耦（分水岭全是 pi 侧 API 面）；本节是 Node 侧的实测基线，防「原生 TS」误导。
+CI 守 22/24/26 三腿（ci.yml 矩阵）；publish 仍钉 24（trusted publishing 需 npm ≥ 11.5.1，产物是
+与 Node 版本无关的普通 JS）。
+
+### 实测基线
+
+| Node 版本                             | 证据                                                                                                                                                                                  |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 22.22.1（engines 下限 ≥22.19 的代表） | `process.features.typescript="strip"`；`node:module.stripTypeScriptTypes` API 在；`.ts` 直跑与 worker_threads `.ts` 入口均通——compile.ts 与 worker 源码回退两条 TS 依赖路径在下限可用 |
+| 26.13.0（Active LTS，2026-10-28 起）  | `pnpm test` 四件套全绿（含 `.ts` worker 源码直跑回退腿）；`pnpm run check`（tsrs）通过；真机冒烟 floor 0.86.0 与 PATH 1.4.0 四腿全过（1.5.0 于 11-03 同 Node 全过）                   |
+
+### Node 26 的 TS 硬事实
+
+- 类型剥离**不是 26 的新功能**：23.6/24 起默认开，22.18+ 同样默认（`--experimental-strip-types` 仍可关）。
+- 26 **移除了 transform**（nodejs/node#61803）：`--experimental-transform-types` 旗标与
+  `stripTypeScriptTypes(mode:"transform")` 双双不存在——**strip-only**；enum/namespace/param-props
+  从「旗标可解」变成「彻底不能跑」。本仓 `packages/ptc/src/compile.ts` 只用 `mode:"strip"`，无影响。
+- **node_modules 内 `.ts` 仍拒绝剥离**（`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`，26.13.0 实测）——
+  `@pi-ptc/ptc` 源码包与「发布包不带 d.ts」的**不做决定不受 26 影响**（rolldown alias 照旧）。
+- `process.features.typescript`（`"strip"`/`"transform"`/`false`）可作运行时的 TS 能力探测；
+  `stripTypeScriptTypes` 仍是 experimental（stderr 有 ExperimentalWarning，CLI 噪音，不动）。
+- 26 的其余 notable changes（Temporal 默认、V8 14.6、Undici 8；`_stream_*` EOL、`writeHeader` 移除、
+  DEP0182 EOL、`module.register()` runtime-deprecation）在 `packages/**` **零命中**（grep 实测）——
+  无一可让本仓代码变少，不追。
+
 ## 待测
 
 中间版本的**执行链冒烟**已覆盖（0.87 / 0.99 / 1.0 / 1.1 / 1.2 / 1.3，见上）；
