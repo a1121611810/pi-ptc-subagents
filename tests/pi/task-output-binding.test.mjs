@@ -24,11 +24,15 @@ import { createTaskOutputBinding } from "../../packages/entry/dist/index.js";
 function fakeSpawn({ autoExitMs = 10, stdout = "" } = {}) {
   const spawn = () => {
     let outCb, exitCb;
-    const timer = setTimeout(() => {
+    let timer;
+    const finish = (code) => {
+      clearTimeout(timer);
       outCb?.(stdout);
-      exitCb?.(0, "");
-    }, autoExitMs);
-    timer.unref();
+      exitCb?.(code, "");
+    };
+    // ref 定时器：真孩子的 stdio 管道会拽住事件循环，假孩子也要——否则 await 窗口里只剩引擎的
+    // unref 定时器，node:test 判「event loop has already resolved」（22.23.4 实测踩到）
+    if (autoExitMs !== null) timer = setTimeout(() => finish(0), autoExitMs);
     return {
       pid: 4242,
       onOutput: (cb) => {
@@ -37,7 +41,7 @@ function fakeSpawn({ autoExitMs = 10, stdout = "" } = {}) {
       onExit: (cb) => {
         exitCb = cb;
       },
-      kill: () => exitCb?.(-1, ""),
+      kill: () => finish(-1),
     };
   };
   return { spawn };
@@ -138,7 +142,7 @@ test("① 没正文时退回原始尾部 + 分层引导（与模型面 ptc_task_
   assert.ok(view.guidance, "应给分层引导");
 });
 
-test("① 还在跑：归约层是空的，靠 status 分辨「没跑完」与「跑完但没交正文」", async () => {
+test("① 还在跑：归约层是空的，靠 status 分辨「没跑完」与「跑完但没交正文」", async (t) => {
   const registry = new TaskRegistry();
   // 孩子不退出 ⇒ 一直在跑（产出未落盘 ⇒ 归约层算不出正文）
   const engine = new TaskEngine({
@@ -156,6 +160,8 @@ test("① 还在跑：归约层是空的，靠 status 分辨「没跑完」与�
   const binding = createTaskOutputBinding(source);
 
   const handle = await engine.dispatch({ task: "读档案" });
+  // ref 的 60s 定时器会拽住进程——测试收尾必须停掉孩子（顺带验证 stop 路径清理）
+  t.after(() => engine.stop(handle.taskId, "test cleanup"));
   for (let i = 0; i < 200; i++) {
     if (registry.get(handle.taskId)?.status === "running") break;
     await new Promise((r) => setTimeout(r, 10));

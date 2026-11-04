@@ -15,11 +15,15 @@ import { renderDeliveryCheck } from "../../packages/routes/dist/index.js";
 function fakeSpawn({ autoExitMs = 10, stdout = "" } = {}) {
   const spawn = () => {
     let outCb, exitCb;
-    const timer = setTimeout(() => {
+    let timer;
+    const finish = (code) => {
+      clearTimeout(timer);
       outCb?.(stdout);
-      exitCb?.(0, "");
-    }, autoExitMs);
-    timer.unref();
+      exitCb?.(code, "");
+    };
+    // ref 定时器：真孩子的 stdio 管道会拽住事件循环，假孩子也要——否则 await 窗口里只剩引擎的
+    // unref 定时器，node:test 判「event loop has already resolved」（22.23.4 实测踩到）
+    if (autoExitMs !== null) timer = setTimeout(() => finish(0), autoExitMs);
     return {
       pid: 4242,
       onOutput: (cb) => {
@@ -28,7 +32,7 @@ function fakeSpawn({ autoExitMs = 10, stdout = "" } = {}) {
       onExit: (cb) => {
         exitCb = cb;
       },
-      kill: () => exitCb?.(-1, ""),
+      kill: () => finish(-1),
     };
   };
   return { spawn };
