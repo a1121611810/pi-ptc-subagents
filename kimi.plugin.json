@@ -7,6 +7,7 @@
     "shortDescription": "写程序批量调工具：一次调用跑完整个循环，模型只看归约结果"
   },
   "skills": "./release/kimi/skills/",
+  "commands": "./release/kimi/commands/",
   "sessionStart": {
     "skill": "ptc"
   },
@@ -21,6 +22,11 @@
       "event": "UserPromptSubmit",
       "command": "node ./release/kimi/version-check.mjs",
       "timeout": 10
+    },
+    {
+      "event": "PreToolUse",
+      "command": "node ./release/kimi/nudge.mjs",
+      "timeout": 5
     }
   ]
 }

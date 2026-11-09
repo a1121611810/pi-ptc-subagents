@@ -40,7 +40,15 @@ cpSync(
   join(root, "packages/routes/docs/kimi-ptc/SKILL.md"),
   join(out, "skills", "ptc", "SKILL.md"),
 );
+// slash 命令（Desktop/TUI 的 / 菜单入口）：commands/ 整目录拷，名字取相对路径（batch.md → /ptc-tools:batch）
+cpSync(join(root, "packages/routes/docs/kimi-ptc/commands"), join(out, "commands"), {
+  recursive: true,
+});
 cpSync(join(root, "scripts", "kimi-version-check.mjs"), join(out, "version-check.mjs"));
+// 采用率闸门（PreToolUse 拦截，探针实测阻断理由可达模型上下文）：脚本 + 共享形态库一起拷
+cpSync(join(root, "scripts", "kimi-nudge.mjs"), join(out, "nudge.mjs"));
+mkdirSync(join(out, "lib"), { recursive: true });
+cpSync(join(root, "scripts", "lib", "tool-shape.mjs"), join(out, "lib", "tool-shape.mjs"));
 
 // Kimi 面是 MCP，产物里不许带 pi 宿主代码（ADR-0022 §5）：根入口一旦 re-export 了 pi 分面就破
 for (const f of readdirSync(out).filter((f) => f.endsWith(".js"))) {
@@ -71,8 +79,12 @@ for (const hook of manifest.hooks ?? []) {
   }
 }
 if (!existsSync(join(out, "skills", "ptc", "SKILL.md"))) throw new Error("SKILL.md 拷贝失败");
+if (!existsSync(join(out, "commands", "batch.md")))
+  throw new Error("commands/batch.md 拷贝失败——slash 命令不在发布物里 = / 菜单看不到入口");
 if (!existsSync(join(out, "version-check.mjs"))) throw new Error("version-check.mjs 拷贝失败");
+if (!existsSync(join(out, "nudge.mjs"))) throw new Error("nudge.mjs 拷贝失败");
+if (!existsSync(join(out, "lib", "tool-shape.mjs"))) throw new Error("lib/tool-shape.mjs 拷贝失败");
 
 console.log(
-  `release/kimi 装配完成：${chunks.length} 个 js（含 worker 与共享 chunk）+ skills/ptc/SKILL.md + version-check.mjs，version ${manifest.version}`,
+  `release/kimi 装配完成：${chunks.length} 个 js（含 worker 与共享 chunk）+ skills/ptc/SKILL.md + version-check.mjs + nudge.mjs（含 lib/tool-shape.mjs），version ${manifest.version}`,
 );

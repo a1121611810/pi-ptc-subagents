@@ -1,8 +1,10 @@
 // 采用率基线挖掘：扫 ~/.kimi-code/server/events/*.jsonl，统计 ptc 插件工具采用与「错过的批量机会」
 // 用法: node scripts/adoption-mining.mjs [eventsDir] [--since ISO]
 // shortcut: 「错过机会」是同形态连续调用的启发式（≥5 记一次），探索式探针会误报，数字只当量级看
+// 形态分类与当场闸门（kimi-nudge.mjs）共用 scripts/lib/tool-shape.mjs 单一事实源
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { classifyTool } from "./lib/tool-shape.mjs";
 
 const args = process.argv.slice(2);
 const dir =
@@ -11,21 +13,6 @@ const sinceIdx = args.indexOf("--since");
 const since = sinceIdx >= 0 ? Date.parse(args[sinceIdx + 1]) : 0;
 const PTC = /mcp__plugin-ptc-tools.*__ptc_run_code/;
 const WEBDS = /mcp__plugin-ptc-tools.*__web_ds_search/;
-
-const shapeOf = (name, cmd) => {
-  if (PTC.test(name)) return "ptc_run_code";
-  if (WEBDS.test(name)) return "web_ds_search";
-  if (name === "Bash") {
-    return /^\s*(grep|rg|find|cat|head|tail|ls|wc|sed -n)\b|\|\s*(grep|head|tail|wc)\b/.test(
-      cmd ?? "",
-    )
-      ? "Bash(shell-read)"
-      : "Bash(other)";
-  }
-  if (name === "Grep" || name === "Read" || name === "Edit" || name === "Write" || name === "Glob")
-    return name;
-  return null; // 其他工具不参与同形态统计
-};
 
 let totals = {
   sessions: 0,
@@ -59,7 +46,7 @@ for (const f of readdirSync(dir).filter((f) => f.endsWith(".jsonl"))) {
       if (e?.type !== "tool.call.started") continue;
       const name = e.payload?.name ?? "";
       counts[name] = (counts[name] ?? 0) + 1;
-      const shape = shapeOf(name, e.payload?.args?.command);
+      const shape = classifyTool(name, { command: e.payload?.args?.command });
       if (shape) seq.push(shape);
     }
   } catch {
@@ -74,7 +61,8 @@ for (const f of readdirSync(dir).filter((f) => f.endsWith(".jsonl"))) {
       let j = i;
       while (seq[j + 1] === seq[i]) j++;
       const len = j - i + 1;
-      if (len >= 5 && seq[i] !== "ptc_run_code") {
+      // seq 里只剩可折叠形态（ptc 调用对 run 透明，见 lib/tool-shape.mjs）——连打即错过
+      if (len >= 5) {
         runs++;
         excess += len - 1;
       }

@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Kimi face: adoption nudge gate + `/ptc-tools:batch` command + skill copy
+  tightening (Desktop visibility).** Mining 107 local sessions showed 6/101
+  adoption with 1402 missed same-shape runs, so the plugin now ships a
+  PreToolUse gate (`release/kimi/nudge.mjs` + shared `lib/tool-shape.mjs`,
+  imported by `adoption-mining.mjs` as the single source): the 5th
+  consecutive same-shape file-tool call (Read/Grep/Glob/Edit/Write or Bash
+  pure-read) is blocked with a reason that restates the loaded ptc skill's
+  routing rule and offers a retry out; 4 nudges per session; fail-open
+  (`PTC_NUDGE=0` disables). Probe-established facts baked in: PostToolUse
+  stdout never reaches model context (observation-only), only blockable
+  events do; block reasons must state standing rules, not new commands —
+  the probe model refused an embedded "output X" instruction while citing
+  the skill's own guidance as legitimate. Desktop has no plugin UI surface
+  (verified: hook stdout only reaches the model; MCP has no user-notification
+  channel), so visibility comes from a namespaced slash command
+  `/ptc-tools:batch <task>` (command prose lives in the routes booklet per
+  ADR-0013) and a one-line "tell the user what you batched" rule in the
+  sessionStart skill. Skill copy: Bash pure-read fan-out now counts as
+  "should program"; only true shell semantics stay direct. Mining drift
+  note: ptc calls are now transparent to runs, so baseline comparisons
+  against the old 1402 figure are approximate.
+  Probe: `tests/kimi/nudge-gate.test.mjs` 7/7 standalone; E2E against the
+  managed snapshot: explicit-sequential prompt → gate fired exactly at the
+  5th Grep, retry-out passed, the model surfaced the block to the user;
+  undirected fan-out prompt → the model wrote a ptc_run_code program
+  proactively and the gate never fired.
+
 ## [7.10.0] - 2026-11-03
 
 ### Added
