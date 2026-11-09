@@ -2,6 +2,7 @@
 // kimi-mcp 的构建 alias 指向 src/index.ts，根入口带出 pi 分面就会把 pi 宿主代码打进 Kimi 产物。
 export { renderPtcResult, type PtcToolArgs, type PtcToolDetails } from "./render.ts";
 export { excerptForDisplay, renderTaskFaceResult, type TaskFaceDetails } from "./task-face.ts";
+export { renderProgressFaceResult, type ProgressFaceDetails } from "./progress-face.ts";
 export { createTaskPanel, type TaskPanelSource } from "./panel-widget.ts";
 export {
   createNoSkimpBanner,

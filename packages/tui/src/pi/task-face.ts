@@ -48,6 +48,18 @@ export function excerptForDisplay(text: string): { excerpt: string; totalLines: 
   };
 }
 
+/** 没有 details 时的兜底：把结果原文逐行塞进盒子（别把人看到的字弄丢）——task/progress 两个 face 共用 */
+export function addRawContentFallback(
+  box: Box,
+  content: ReadonlyArray<{ type: string; text?: string }>,
+): void {
+  for (const block of content) {
+    if (block.type !== "text" || typeof block.text !== "string") continue;
+    const lines = block.text.split("\n").slice(0, RENDER_BOUNDS.MAX_LOG_LINES_EXPANDED);
+    for (const line of lines) box.addChild(new Text(line));
+  }
+}
+
 /** 任务面工具的折叠渲染：details 决定形状；没有 details 就显示原文（别把人看到的字弄丢） */
 export function renderTaskFaceResult(
   result: AgentToolResult<TaskFaceDetails | undefined>,
@@ -57,11 +69,7 @@ export function renderTaskFaceResult(
   const box = new Box();
   const details = result.details;
   if (!details) {
-    for (const block of result.content) {
-      if (block.type !== "text") continue;
-      const lines = block.text.split("\n").slice(0, RENDER_BOUNDS.MAX_LOG_LINES_EXPANDED);
-      for (const line of lines) box.addChild(new Text(line));
-    }
+    addRawContentFallback(box, result.content);
     return box;
   }
   if (details.kind === "list") {

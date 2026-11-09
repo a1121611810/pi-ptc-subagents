@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [7.11.0] - 2026-11-09
 
 ### Added
 
@@ -35,6 +35,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   5th Grep, retry-out passed, the model surfaced the block to the user;
   undirected fan-out prompt → the model wrote a ptc_run_code program
   proactively and the gate never fired.
+
+- **`ptc_progress_update` — progress updates in the conversation (pi port of
+  Kimi Code's experimental "进展更新" / NotifyUser).** pi's extension API has
+  no "inject into the conversation" surface, but tool-call entries natively
+  persist in the TUI scrollback — so one call is one progress card that stays
+  in the conversation after the turn. A custom `renderResult` draws the card
+  (folded = `▸ 进展更新 · ` + a **bold** one-line title — accent-bold chrome,
+  dim separator, three-level hierarchy; expanded flips the marker to `▾` and
+  renders the body excerpt indented with an omission note; bounded by the
+  frozen `RENDER_BOUNDS`). The model gets back a minimal
+  `"ok"`; the body travels only in `details` as a bounded excerpt, so no
+  double-billing if `details` ever reaches the context. Prose lives in the
+  routes registry, including restraint guidance ("post only stage-level
+  conclusions — spamming is a net loss"). Switch: `PI_PTC_PROGRESS`
+  (default **on**, fail-open); `off`/`0`/`false` unregisters the tool instead
+  of no-op'ing. Not part of the PTC orchestration layer: `/ptc off` leaves it
+  usable. rpc/json clients get machine-readable progress via the native
+  `tool_call` events; print mode sees nothing (it only prints the final
+  answer). Known gaps vs. the Kimi original: no rich text, cards sit in the
+  tool-call stream, calls do enter the model context.
+  Probe: `tests/pi/progress-face-render.test.mjs` 6/6 (fold/expand/omission/
+  empty fallbacks/wiring on both surfaces/switch states); route index stays
+  under the 560-token budget on both surfaces (553/536) after trimming
+  duplicated copy (evidence retained in the detail files).
+  Review round (same PR): with the switch off the route index no longer
+  mentions the tool (`renderRouteIndex` gains a session-constant
+  `progressEnabled` arg — the map doesn't lie about a tool that isn't
+  registered; verified zero mentions in the off system prompt on real pi);
+  `title` gains `maxLength: 200` (modern pi's pi-schema enforces it, so a
+  misposted wall of text can't be double-carried in `details`); the
+  no-details raw-content fallback is extracted into one shared
+  `addRawContentFallback` used by both card faces (−7 lines). Full-version
+  smoke: 17/17 legs green (0.86.0–1.5.0 + PATH 1.5.0), fails=0.
 
 ## [7.10.0] - 2026-11-03
 

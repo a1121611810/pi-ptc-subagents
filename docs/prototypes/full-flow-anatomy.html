@@ -153,7 +153,7 @@ applyTaskFaceVisibility() 幂等重放（resume 重置后对齐，见 ⑫）
         ▼
 ◇ event.systemPromptOptions.sections 存在 ?     <span class="dim">// floor 版本事件形状未实测：缺了跳过，不抛</span>
 ├─否─▶ 本 turn 不注入（索引缺失，功能不受影响）
-└─是─▶ sections["ptc"] = renderRouteIndex(surface, detailDir, modeActive)
+└─是─▶ sections["ptc"] = renderRouteIndex(surface, detailDir, modeActive, progressUpdatesEnabled()) <span class="dim">// off 时索引不提未注册的工具</span>
               │
               ▼
         渲染：总则句（按面）+ 详情目录 + 7 行路由（每行 = 名称—when—how[surface]—detail 文件名）

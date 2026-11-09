@@ -112,8 +112,21 @@ test("机械点 6 工具 description 必须是 registry 的调用（行为断言
     await handlers.session_start[0]({}, { ui: { notify: () => {} } });
     const expected =
       surface === "full_ptc"
-        ? ["ptc_run_code", "ptc_workflow", "ptc_task_list", "ptc_task_output", "ptc_task_stop"]
-        : ["pi_task_codemode", "ptc_task_list", "ptc_task_output", "ptc_task_stop"];
+        ? [
+            "ptc_run_code",
+            "ptc_workflow",
+            "ptc_task_list",
+            "ptc_task_output",
+            "ptc_task_stop",
+            "ptc_progress_update",
+          ]
+        : [
+            "pi_task_codemode",
+            "ptc_task_list",
+            "ptc_task_output",
+            "ptc_task_stop",
+            "ptc_progress_update",
+          ];
     for (const name of expected) {
       assert.ok(registered[name], `${surface} 未注册 ${name}`);
       assert.equal(
@@ -149,12 +162,18 @@ test("机械点 7 索引每路一行 + detail 指针指向的文件真实存在�
   );
 });
 
-test("机械点 8 索引每 turn 字节相同：同输入渲染两次逐字节一致（surface × 总则句开关矩阵）", () => {
+test("机械点 8 索引每 turn 字节相同：同输入渲染两次逐字节一致（surface × 总则句 × 进展开关矩阵）", () => {
   for (const surface of SURFACES) {
     for (const nudge of [true, false]) {
-      const a = renderRouteIndex(surface, REAL_DETAIL_BASE, nudge);
-      const b = renderRouteIndex(surface, REAL_DETAIL_BASE, nudge);
-      assert.equal(a, b, `${surface}/nudge=${nudge} 渲染不确定——prompt cache 会废`);
+      for (const progressEnabled of [true, false]) {
+        const a = renderRouteIndex(surface, REAL_DETAIL_BASE, nudge, progressEnabled);
+        const b = renderRouteIndex(surface, REAL_DETAIL_BASE, nudge, progressEnabled);
+        assert.equal(
+          a,
+          b,
+          `${surface}/nudge=${nudge}/progress=${progressEnabled} 渲染不确定——prompt cache 会废`,
+        );
+      }
     }
   }
   // 同待遇：通知批渲染与超长产出引导语也确定
@@ -162,4 +181,13 @@ test("机械点 8 索引每 turn 字节相同：同输入渲染两次逐字节�
   assert.equal(n1, renderTaskNotifications([{ taskId: "t1", status: "succeeded" }]));
   const g1 = renderLongOutputGuidance({ bytes: 99, reportChannel: "none" });
   assert.equal(g1, renderLongOutputGuidance({ bytes: 99, reportChannel: "none" }));
+});
+
+test("开关一致性：进展更新 off 时索引不提未注册的工具（地图不说假话）", () => {
+  for (const surface of SURFACES) {
+    const on = renderRouteIndex(surface, REAL_DETAIL_BASE, true, true);
+    const off = renderRouteIndex(surface, REAL_DETAIL_BASE, true, false);
+    assert.ok(on.includes("ptc_progress_update"), `${surface} on 态索引应提工具名`);
+    assert.ok(!off.includes("ptc_progress_update"), `${surface} off 态索引不应提工具名`);
+  }
 });

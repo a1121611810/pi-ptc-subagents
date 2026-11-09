@@ -10,7 +10,8 @@ export type ToolName =
   | "pi_task_codemode"
   | "ptc_task_list"
   | "ptc_task_output"
-  | "ptc_task_stop";
+  | "ptc_task_stop"
+  | "ptc_progress_update";
 
 export interface ToolEntry {
   name: ToolName;
@@ -70,7 +71,18 @@ export const TOOLS = {
     name: "ptc_task_stop",
     description: () => "按 task_id 叫停任务：排队中的直接抽掉（canceled），在跑的转 stopping。",
   },
+  ptc_progress_update: {
+    name: "ptc_progress_update",
+    description: () =>
+      "给人发一条进展更新：卡片留在对话里（折叠=标题，展开=正文），回合中不打断、跑完仍在。只在有阶段性结论时发——每次调用都留在对话历史和模型上下文里，刷屏是净亏；一句话说得清的进展直接写正文，别发卡片。",
+  },
 } as Record<ToolName, ToolEntry>;
+
+// 进展更新工具参数说明——文案住本册子（ADR-0013）
+export const PROGRESS_PARAM_DESCRIPTIONS = {
+  title: "卡片标题：一眼看完的一句话（吃单行截断）",
+  message: "展开看的细节：刚完成了什么、接下来干什么（吃行数与单行截断）",
+} as const;
 
 // 「别省真跑」模式的 PTC 段落（默认关，由 ptc.json 的 noSkimpPtc 打开）。
 // 出处：DeepSeek Harness 的 docs/testing.zh.md「带密钥策略：推理（inference）在这里很便宜」——
@@ -206,7 +218,7 @@ export const ROUTES = [
   {
     id: "create-a-task",
     name: "派一个子代理",
-    when: "材料多、主题互不相干、每份都要读一堆材料时派——父一个人扛会算错（实测 92%→100%，n=3）；成本 10 倍上下，一件能算完的活别派",
+    when: "材料多、主题互不相干、每份都要读一堆材料时派——父一个人扛会算错；成本 10 倍上下，一件能算完的活别派",
     how: {
       full_ptc:
         "tools.pi_task_ptc({ task, label? })（程序内）——task 是孩子的唯一规格（写死路径/命令/交付物格式）；要报告就点名 child report 的 JSON 块（summary/findings），别自创报告格式",
@@ -229,10 +241,10 @@ export const ROUTES = [
   {
     id: "run-a-phased-workflow",
     name: "分阶段 workflow",
-    when: "批处理有明确阶段，要阶段性可见进度",
+    when: "批处理有明确阶段",
     how: {
-      full_ptc: "ptc_workflow({ meta, script, args? })",
-      codemode_ptc: "不适用——同 run-one-program：workflow 是 full_ptc 的编排能力",
+      full_ptc: "ptc_workflow({ meta, script, args? })；阶段进展发 ptc_progress_update",
+      codemode_ptc: "不适用——同 run-one-program；阶段进展发 ptc_progress_update",
     },
     detail: "docs/routes/run-a-phased-workflow.md",
   },
@@ -340,19 +352,35 @@ function estimateTokens(text: string): number {
 // 总则句（旧 ADR-0010 的「引导」一半：先给地图再收枪）——按面切换，随索引一起渲染
 const ROUTE_INDEX_LEAD: Record<SurfaceMode, string> = {
   full_ptc:
-    "批量调工具默认先写程序（ptc_run_code）；单次调用或逐步判断、审批敏感的才直连。派不派子代理自己判断——第一行写了代价。",
+    "批量调工具默认先写程序（ptc_run_code）；单次调用或逐步判断、审批敏感的才直连。派不派子代理自己判断。",
   codemode_ptc:
-    "编排写 codemode 脚本；批量派活经脚本内的 pi_task_codemode；要查/停任务用任务面三工具。派不派自己判断——路由表第一行写了代价。",
+    "编排写 codemode 脚本；批量派活经脚本内的 pi_task_codemode；要查/停任务用任务面三工具。派不派自己判断。",
 };
 
-export function renderRouteIndex(surface: SurfaceMode, detailBase?: string, nudge = true): string {
-  const lines = ROUTES.map(
-    (route) =>
-      `- ${route.name} — ${route.when}。这面怎么走：${route.how[surface]}。细节：${
-        // 详情目录在索引里只给一次，每行只留文件名——每行再贴一遍绝对路径会把索引顶出 token 预算
-        detailBase ? route.detail.split("/").pop()! : route.detail
-      }`,
-  );
+// 分阶段 workflow 那一路在「进展更新开关 off」时的替代文案：地图不说假话——工具没注册，索引就不提它
+// （review finding 1：off 实例的模型照着索引调一个不存在的工具，白烧调用）
+const PHASED_PROGRESS_ROUTE_ID = "run-a-phased-workflow";
+const PHASED_HOW_PROGRESS_OFF: Record<SurfaceMode, string> = {
+  full_ptc: "ptc_workflow({ meta, script, args? })",
+  codemode_ptc: "不适用——同 run-one-program：workflow 是 full_ptc 的编排能力",
+};
+
+export function renderRouteIndex(
+  surface: SurfaceMode,
+  detailBase?: string,
+  nudge = true,
+  progressEnabled = true,
+): string {
+  const lines = ROUTES.map((route) => {
+    const how =
+      route.id === PHASED_PROGRESS_ROUTE_ID && !progressEnabled
+        ? PHASED_HOW_PROGRESS_OFF[surface]
+        : route.how[surface];
+    return `- ${route.name} — ${route.when}。这面怎么走：${how}。细节：${
+      // 详情目录在索引里只给一次，每行只留文件名——每行再贴一遍绝对路径会把索引顶出 token 预算
+      detailBase ? route.detail.split("/").pop()! : route.detail
+    }`;
+  });
   let index = [
     `<ptc>`,
     ...(nudge ? [ROUTE_INDEX_LEAD[surface]] : []),

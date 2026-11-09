@@ -30,10 +30,12 @@ import {
   createTaskPanel,
   createNoSkimpBanner,
   excerptForDisplay,
+  renderProgressFaceResult,
   renderTaskFaceResult,
+  type ProgressFaceDetails,
   type TaskFaceDetails,
 } from "@pi-ptc/tui/pi";
-import { RENDER_BOUNDS } from "@pi-ptc/tui";
+import { RENDER_BOUNDS, sanitizeText } from "@pi-ptc/tui";
 import { createDeepSeekProvider, createSearchMemory, createSearchQuota } from "@pi-ptc/search";
 import { createWebDsSearchTool } from "./web-ds-search-tool.ts";
 import { showUpgradeNotice } from "./upgrade-notice.ts";
@@ -51,6 +53,7 @@ import {
 import {
   FALLBACK_SURFACE_MODE,
   NO_SKIMP_PTC_NOTE,
+  PROGRESS_PARAM_DESCRIPTIONS,
   TOOLS,
   renderDeliveryCheck,
   renderRouteIndex,
@@ -163,7 +166,13 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
       // floor 版本事件形状未实测：缺 sections 就跳过注入，别让每个 turn 抛 TypeError
       const sections = event.systemPromptOptions?.sections;
       if (sections) {
-        sections["ptc"] = renderRouteIndex(surface, detailDir, modeActive);
+        // progressEnabled 会话级常量：开关 off 时索引不提未注册的工具（地图不说假话）
+        sections["ptc"] = renderRouteIndex(
+          surface,
+          detailDir,
+          modeActive,
+          progressUpdatesEnabled(),
+        );
         // 「别省真跑」段独立成节：<ptc> 索引有 token 预算硬顶（560），塞进去会顶穿并冒 > WARNING
         if (noSkimpPtc()) sections["no_skimp"] = NO_SKIMP_PTC_NOTE;
       }
@@ -326,6 +335,9 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
     };
     registerTaskFace(registerTracked, session, surface);
     applyTaskFaceVisibility();
+    // 进展更新（Kimi NotifyUser 的 pi 移植）：一次调用 = 一张留在会话滚动历史里的卡片。
+    // 直接走 pi.registerTool 不进 withdrawTools 集——它不是 PTC 编排层，/ptc off 后仍可用；开关默认开
+    if (progressUpdatesEnabled()) registerProgressUpdate(pi, surface);
     // 压缩后重注入在飞任务清单：压缩事件置标志，下一次 LLM 调用前把清单塞回请求上下文。
     // pi 的 context 事件在每次 LLM 调用前触发，handler 返回的 messages **替换**本次请求的可见消息
     // （不累积、不进会话记录）——所以要连 event.messages 一起返回。
@@ -447,6 +459,12 @@ function readTraceRetentionConfig(agentDir: string): {
   } catch {
     return defaults;
   }
+}
+
+// 进展更新开关（剥夺类 fail-open）：缺省/坏值一律开；PI_PTC_PROGRESS=off/0/false 才关
+function progressUpdatesEnabled(): boolean {
+  const v = process.env.PI_PTC_PROGRESS?.trim().toLowerCase();
+  return v !== "off" && v !== "0" && v !== "false";
 }
 
 // 别省真跑开关（noSkimpPtc / noSkimpSub）：fail-closed——只有显式 true 才开
@@ -711,6 +729,27 @@ function registerPtcTools(
   if (surface !== "full_ptc") return;
   registerTool(createPtcRunCodeTool(options));
   registerTool(createPtcWorkflowTool(options));
+}
+
+// 进展更新工具（Kimi NotifyUser 的 pi 移植）：工具调用条目长进会话滚动历史（TUI 持久可见），
+// renderResult 画卡片脸（折叠=标题，展开=正文摘录）；给模型只回 "ok"——正文走 details 摘录，不进上下文计费
+function registerProgressUpdate(pi: ExtensionAPI, surface: SurfaceMode): void {
+  pi.registerTool({
+    name: "ptc_progress_update",
+    label: "进展更新",
+    description: TOOLS.ptc_progress_update.description(surface),
+    parameters: Type.Object({
+      // 上限 200：details.title 会随结果留在会话里，模型失手塞长文时别双份背进上下文（现代 pi 的 schema 校验会真拦）
+      title: Type.String({ description: PROGRESS_PARAM_DESCRIPTIONS.title, maxLength: 200 }),
+      message: Type.String({ description: PROGRESS_PARAM_DESCRIPTIONS.message }),
+    }),
+    renderResult: renderProgressFaceResult,
+    execute: async (_id, args) => {
+      const title = sanitizeText(String(args.title ?? "")).trim();
+      const { excerpt, totalLines } = excerptForDisplay(String(args.message ?? ""));
+      return textResult<ProgressFaceDetails>("ok", { title, excerpt, totalLines });
+    },
+  });
 }
 
 // 任务链（lifecycle face，旧 ADR-0022 + 决策 5）：读/停同一个 registry；可见性 = 有任务记录才在模型面前

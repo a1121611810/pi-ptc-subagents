@@ -9,6 +9,7 @@
     "docs/prototypes/**",
     "docs/research/**",
     "packages/website/**",
-    ".scratch/**"
+    ".scratch/**",
+    ".agents/**"
   ]
 }
