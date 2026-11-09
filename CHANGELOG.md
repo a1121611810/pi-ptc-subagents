@@ -63,6 +63,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the probe passes on 1.5.0: compaction happened and the task list was
   injected into the next request.
 
+### Fixed
+
+- **The TUI upgrade notice now dismisses itself as soon as you start typing**
+  (pi extension, ADR-0023 widget zone). Since 7.9.2 the notice renders in the
+  key-isolated widget above the editor, but nothing ever cleared it, so it
+  stayed for the whole session once shown. It now subscribes once to the
+  host's raw terminal input and removes itself on the first printable input —
+  navigation keys that only emit escape sequences (arrows, Ctrl-chords) do not
+  dismiss it — then unsubscribes. Verified by probe: the upgrade-notice suite
+  pins show → dismiss-on-input → unsubscribe (15/15), full repo suite green.
+
 ## [7.9.3] - 2026-11-02
 
 ### Fixed
