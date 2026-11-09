@@ -1,7 +1,8 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, type TerminalInputHandler } from "@earendil-works/pi-coding-agent";
+import { stripAnsi } from "@pi-ptc/tui";
 
 const PACKAGE_NAME = "pi-ptc-subagents";
 const BULLET_LIMIT = 5;
@@ -17,6 +18,8 @@ export interface ChangelogSection {
 export interface NoticeUi {
   notify?: (message: string, type?: "info" | "warning" | "error") => void;
   setWidget?: (key: string, content: string[] | undefined) => void;
+  /** pi interactive 模式的原始键盘输入（TUI 才有）；老版本 pi 没有 ⇒ 提示不自动撤下 */
+  onTerminalInput?: (handler: TerminalInputHandler) => () => void;
 }
 
 export interface NoticeContext {
@@ -148,14 +151,24 @@ export function showUpgradeNotice(ctx: NoticeContext, environment?: NoticeEnviro
  * 连一次都没被画出来（2026-11-02 真机复现：字节流里搜不到我们的字）。
  */
 function deliver(ctx: NoticeContext, text: string): void {
-  if (ctx.mode === "tui" && typeof ctx.ui?.setWidget === "function") {
-    ctx.ui.setWidget(
+  const ui = ctx.ui;
+  if (ctx.mode === "tui" && typeof ui?.setWidget === "function") {
+    // widget 不自带关闭：用户一开始输入就撤下，不然常驻编辑器上方
+    const setWidget = ui.setWidget;
+    setWidget(
       UPGRADE_WIDGET_KEY,
       text.split("\n").filter((line) => line.length > 0),
     );
+    let off: (() => void) | undefined;
+    off = ui.onTerminalInput?.((data) => {
+      // 只认「真输入」：方向键等只产生转义序列，剥掉后没内容就不撤
+      if (stripAnsi(data).length === 0) return;
+      off?.();
+      setWidget(UPGRADE_WIDGET_KEY, undefined);
+    });
     return;
   }
-  ctx.ui?.notify?.(text, "info");
+  ui?.notify?.(text, "info");
 }
 
 export interface InstalledPackage {

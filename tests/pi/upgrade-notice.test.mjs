@@ -2,6 +2,7 @@
 // ①版本比较 ②CHANGELOG 解析（只取 Added/Changed/Fixed）③要点摘要 ④区间挑选
 // ⑤状态机（首装/同版/旧版/降级/状态写不进去）⑥通知文案
 // ⑦格式漂移守卫：本仓真实 CHANGELOG 的顶节版本必须等于 package.json 版本
+// ⑧TUI 行为：提示走 widget 区、用户一开始输入就撤下
 import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -244,6 +245,41 @@ test("TUI 模式：升级提示走 widget 区，不走共享状态槽", () => {
     widgets[0].content.every((line) => line.length > 0),
     "空行在 widget 里不占位，送之前先去掉",
   );
+});
+
+test("TUI 模式：用户一开始输入就撤下提示（widget 常驻不修）", () => {
+  const env = environment();
+  writeFileSync(env.statePath, JSON.stringify({ version: "7.4.0" }), "utf8");
+  const widgets = [];
+  let subscribed = false;
+  let handler;
+  showUpgradeNotice(
+    {
+      hasUI: true,
+      mode: "tui",
+      ui: {
+        setWidget: (key, content) => widgets.push({ key, content }),
+        onTerminalInput: (h) => {
+          subscribed = true;
+          handler = h;
+          return () => {
+            subscribed = false;
+          };
+        },
+        notify: () => {},
+      },
+    },
+    env,
+  );
+  assert.equal(widgets.length, 1, "提示先画出来");
+  if (subscribed) handler("\x1b[A");
+  assert.equal(widgets.length, 1, "方向键是纯导航，不撤——用户还没输入内容");
+  if (subscribed) handler("\x12");
+  assert.equal(widgets.length, 1, "Ctrl 组合键同理不撤");
+  if (subscribed) handler("x");
+  assert.deepEqual(widgets.at(-1), { key: "ptc-upgrade", content: undefined }, "一输入就撤下");
+  if (subscribed) handler("y");
+  assert.equal(widgets.length, 2, "撤一次就退订，之后每键不再白调 setWidget");
 });
 
 /** 隔离地跑一次 entry 的 session_start：状态哨兵放 tmp，cwd 放 tmp，返回它发出的通知与 widget */
