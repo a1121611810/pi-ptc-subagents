@@ -66,7 +66,7 @@ await tools.edit({ path: "src/a.ts", old_string: "foo", new_string: "bar" });
 
 ## 有新版时（别装没看见）
 
-上下文里出现 `<hook_result hook_event="UserPromptSubmit">` 且含「ptc-tools 有新版本」时，**在回应当前消息时先说一句**：当前版本、最新版本、更新命令（`/plugins install https://github.com/a1121611810/pi-ptc-subagents`）。用户不会自己知道有新版——这句是唯一的机会，说一次就够，不要每轮重复，也不要展开成教程。
+上下文里出现 `<hook_result hook_event="UserPromptSubmit">` 且含「ptc-tools 有新版本」时，**在这轮回复的结尾补一句**（照 KimiCU 的样式）：顺带一提：**ptc-tools 有新版 X**（当前 Y），想升级在 `/plugins` 面板选中 ptc-tools 按 Enter，或跑 `/plugins install https://github.com/a1121611810/pi-ptc-subagents`。用户不会自己知道有新版——这句是唯一的机会，每版只说一次，不要展开成教程。
 
 ## Unlimited token budget (a double-edged sword)
 

@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.11.1] - 2026-11-09
+
+### Changed
+
+- **The new-version line now lands at the end of the reply** (ADR-0023): the skill
+  contract used to ask the model to lead with the update notice; it now asks for a
+  trailing one-liner in the KimiCU style — "顺带一提：ptc-tools 有新版 X（当前 Y），
+  想升级在 /plugins 面板选中 ptc-tools 按 Enter，或跑 /plugins install
+  https://github.com/a1121611810/pi-ptc-subagents". Same trigger (the
+  UserPromptSubmit hook result), same once-per-version dedup; only the position
+  and phrasing changed, after the user confirmed the notice was reaching the model
+  context all along but was invisible in the chat UI.
+
 ## [7.11.0] - 2026-11-09
 
 ### Added
