@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.13.0] - 2026-11-10
+
+### Added
+
+- **Program-type subagents: `pi_task_ptc({ task, program })` dispatches a PTC
+  program instead of a pi session (issue #293).** When `program` carries PTC
+  source, the child process is `node dist/ptc/cli.js <program> --workdir .
+  --json` — no pi, no model, no tool table; the fs five-piece bindings jail
+  to the workdir; the single JSON envelope on stdout is the deliverable
+  (`reportChannel: "program"`, usage `turns: 0`). Same engine lifecycle as pi
+  children (six gates, slots, registry, notifications, capacity); delivery
+  trail is derived from the engine's own sub-call ledger
+  (`SubCallRecord` now carries structured args), not parsed back out of pi's
+  event stream. Pilot bench (3 mechanical tasks × 2 arms × 2 reps, pi 1.5.0):
+  wall 131–155ms vs 4.5–35s (30–270×), child tokens **0** vs 106–1176,
+  output trail 318–849B vs 46–267KB, accuracy tied 12/12 facts both arms.
+  Program children skip the stall guard by design (a silent program is a
+  computing one — the guard's in-flight-tool exemption can't see it; wall
+  clock stays covered by `timeoutMs`). Three gates reject before an id is
+  minted (empty program, `program` combined with `agent/model/thinkingLevel`,
+  CLI artifact missing — resolved from the entry's own directory with a
+  layout probe covering repo/published/src-run layouts). Tests:
+  `tests/pi/program-child.test.mjs` 8 cases + `program-carrier-path.test.mjs`
+  3 cases; real-machine end-to-end verified (envelope `value=2437`). Routing
+  rule for the model: dispatch `program` only when the solution can be fully
+  written down before dispatch (mechanical batch work); exploration and
+  bash-needing work stay on pi children.
+
 ## [7.12.0] - 2026-11-10
 
 ### Added
