@@ -12,7 +12,7 @@ one program tool over a fixed file-tool set.
 ```
 on pi
   full_ptc      model ──▶ ptc_run_code ──▶ program ──┬──▶ tools.read · grep · edit · …   (session tools)
-                                                     └──▶ pi_task_ptc ──▶ pi child ──▶ report
+                                                     └──▶ pi_task_ptc ──▶ pi child · program child ──▶ report · envelope
 
   codemode_ptc  model ──▶ codemode script ───────────┬──▶ tools.read · grep · edit · …   (session tools)
                                                      └──▶ pi_task_codemode ──▶ pi child ──▶ report
@@ -31,6 +31,9 @@ on kimi (MCP)
   own codemode runs the script; this package supplies the task door underneath it.
 - **Real subagents.** `pi_task_ptc` inside a program, `pi_task_codemode` inside a codemode
   script. Every task gets its own pi process and its own report. Busy means wait, not reject.
+  Pass `program` (PTC source) instead of a natural-language task and the child is the engine
+  CLI, not a pi session — no model, zero tokens, workdir-jailed; for mechanical work whose
+  solution can be fully written down before dispatch.
 - **Visibility.** `ptc_task_list`, `ptc_task_output`, `ptc_task_stop` appear when there is
   a task to look at.
 - **Search, where it belongs.** `web_ds_search` registers only inside dispatched children.
