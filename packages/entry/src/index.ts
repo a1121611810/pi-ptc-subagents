@@ -112,6 +112,16 @@ export function withDeliveryNote<T>(value: T): T {
   return (note ? { ...record, deliveryNote: note } : record) as unknown as T;
 }
 
+// 程序型子代理（issue #293）：ptc CLI 产物与 index.js 同一次构建（ADR-0024），恒在 <index 所在目录>/ptc/cli.js。
+// 纯函数便于布局探针。注意 URL 语义：「.」= index 所在目录（去文件名留目录），「..」= 它的上一级——
+// packageRoot（「..」）是 entry 包根，不是 dist；本函数要的是「.」。仓库 dist 布局与发布布局同形；
+// 文件不在（如 src 直跑）返回 undefined ⇒ 引擎闸前拒
+export function resolveProgramCliPath(indexUrl: string): string | undefined {
+  const dir = fileURLToPath(new URL(".", indexUrl));
+  const candidate = join(dir, "ptc", "cli.js");
+  return existsSync(candidate) ? candidate : undefined;
+}
+
 // 详情文件目录：发布包里是 <pkg>/docs/routes，开发态是 packages/routes/docs/routes
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const publishedDetailDir = join(packageRoot, "docs", "routes");
@@ -119,9 +129,10 @@ const detailDir = existsSync(publishedDetailDir)
   ? publishedDetailDir
   : join(packageRoot, "..", "routes", "docs", "routes");
 
-// ptc CLI 产物（ADR-0024：与 index 同一次构建出包）：在 entry 的 dist 下——
-// 仓库布局 packages/entry/dist/ptc/cli.js、发布布局 <pkg>/dist/ptc/cli.js（packageRoot 是 dist 的上一级，两边都成立）
-const programCliPath = join(packageRoot, "dist", "ptc", "cli.js");
+// ptc CLI 产物（ADR-0024：与 index 同一次构建出包）：resolveProgramCliPath 取 <index 所在目录>/ptc/cli.js——
+// 仓库布局 packages/entry/dist/ptc/cli.js、发布布局 <pkg>/dist/ptc/cli.js 同形；取不到 = undefined ⇒ 引擎闸前拒。
+// ⚠️ 别用 packageRoot（「..」语义 = entry 包根）拼这个路径——join(packageRoot,"ptc",...) 会差一节 dist
+const programCliPath = resolveProgramCliPath(import.meta.url);
 
 // 减量 argv 的版本门素材：孩子与宿主同 binary，启动时解析一次（~几十 ms；取不到返回 undefined，按 floor 处理）
 function resolvePiVersion(): string | undefined {
@@ -242,8 +253,8 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
         notifications,
         resolveAgent: (name, scope) => findAgent(name, agentDirs, scope),
         childExtensionPath: fileURLToPath(import.meta.url),
-        // 程序型子代理（issue #293）：ptc CLI 产物与 index 同一次构建（ADR-0024）；缺文件时不传——引擎闸前拒
-        ...(existsSync(programCliPath) ? { programCliPath } : {}),
+        // 程序型子代理（issue #293）：cli 产物缺失（如 src 直跑）时是 undefined——引擎闸前拒，不拖到 spawn 才败
+        ...(programCliPath ? { programCliPath } : {}),
         // ADR-0003：搜索开关传给引擎（strict 白名单保留 web_ds_search）
         searchEnabled: readWebSearchConfig(getAgentDir()).enabled,
         // 别省真跑：孩子提示词加「跑真的、别用 mock、别跳过慢检查」段（谓词 ⇒ /ptc noskimp-sub 热生效）
