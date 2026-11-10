@@ -96,7 +96,7 @@ export function withDeliveryNote<T>(value: T): T {
   if (!value || typeof value !== "object") return value;
   const record = value as {
     reportChannel?: string;
-    report?: { findings?: unknown[] };
+    report?: { findings?: unknown[]; files_touched?: unknown[] };
     delivery?: DeliveryFacts;
   };
   if (!("reportChannel" in record)) return value;
@@ -104,6 +104,9 @@ export function withDeliveryNote<T>(value: T): T {
     delivery: record.delivery,
     findings: Array.isArray(record.report?.findings) ? record.report.findings.length : 0,
     channel: record.reportChannel,
+    filesTouched: Array.isArray(record.report?.files_touched)
+      ? record.report.files_touched.filter((f): f is string => typeof f === "string")
+      : undefined,
   });
   return (note ? { ...record, deliveryNote: note } : record) as unknown as T;
 }

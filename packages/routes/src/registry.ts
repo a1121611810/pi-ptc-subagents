@@ -181,12 +181,21 @@ export interface DeliveryFacts {
 
 export const DELIVERY_CHECK_LEAD = "交付核对（引擎实测）";
 export const DELIVERY_CHECK_NOTHING = "这孩子的结论没有依据：重派它，或明说缺口，别替它补数。";
+export const DELIVERY_CHECK_UNSUPPORTED_FILES =
+  "声称的改动没有实测支撑——核对过再采信（孩子全程 bash 时轨迹不记文件，属盲区不是实锤）";
 
-/** 父面渲染一行交付核对：工具/路径（实测）· 报错 · 正文长度 · 报告条数（自述） */
+// 报告 files_touched 与实测 paths 的重叠：报告自报相对路径、实测是绝对路径，必须后缀匹配
+// （bench 重放实测：朴素精确匹配误伤 67%，后缀匹配 0 误伤——docs/prototypes 验证记录）
+function fileClaimHit(norm: string, paths: readonly string[]): boolean {
+  return paths.some((p) => p === norm || p.endsWith(`/${norm}`));
+}
+
+/** 父面渲染一行交付核对：工具/路径（实测）· 报错 · 正文长度 · 报告条数（自述）· 声称文件零命中警告 */
 export function renderDeliveryCheck(input: {
   delivery?: DeliveryFacts;
   findings?: number;
   channel?: string;
+  filesTouched?: string[];
 }): string {
   const d = input.delivery;
   if (!d) return "";
@@ -207,10 +216,21 @@ export function renderDeliveryCheck(input: {
   parts.push(`正文 ${d.textChars} 字`);
   const findings = input.findings ?? 0;
   parts.push(`报告 ${findings} 条（${input.channel ?? "none"}）`);
+  // 声称动了文件但实测轨迹零命中（完整 paths 上算，不按展示截断；partial 命中不警告）
+  // claimed 先 strip 再滤空：「./」strip 后是空串，endsWith("/") 会把目录尾斜杠误判为命中
+  const claimed = (input.filesTouched ?? [])
+    .filter((f): f is string => typeof f === "string")
+    .map((f) => f.replace(/^\.\//, ""))
+    .filter((n) => n.length > 0);
+  const unsupported =
+    claimed.length > 0 && claimed.every((n) => !fileClaimHit(n, d.paths))
+      ? `警告：报告声称动了 ${claimed.length} 个文件（${claimed.slice(0, 3).join("、")}${claimed.length > 3 ? " 等" : ""}），实测轨迹零命中——${DELIVERY_CHECK_UNSUPPORTED_FILES}`
+      : "";
   const nothing = totalCalls === 0 && findings === 0 && d.textChars === 0;
+  // 分隔符各分支自给：零产出分支前串以「。」收尾直接接；正常分支自己补「。」
   return nothing
-    ? `${DELIVERY_CHECK_LEAD}：零产出——${parts.join(" · ")}。${DELIVERY_CHECK_NOTHING}`
-    : `${DELIVERY_CHECK_LEAD}：${parts.join(" · ")}`;
+    ? `${DELIVERY_CHECK_LEAD}：零产出——${parts.join(" · ")}。${DELIVERY_CHECK_NOTHING}${unsupported}`
+    : `${DELIVERY_CHECK_LEAD}：${parts.join(" · ")}${unsupported ? `。${unsupported}` : ""}`;
 }
 
 // 路由集完整性（机械点 3）已全量：7 条路在每个 surface 都有交代

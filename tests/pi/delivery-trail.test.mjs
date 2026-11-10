@@ -110,10 +110,19 @@ test("③：零产出要说出口（重派 / 别替它补数），不能只给�
   const r = await engine.dispatch({ task: "x", wait: true });
   assert.equal(r.delivery.tools.read, undefined);
   assert.equal(r.delivery.textChars, 0);
-  const note = renderDeliveryCheck({ delivery: r.delivery, findings: 0, channel: "none" });
+  const note = renderDeliveryCheck({
+    delivery: r.delivery,
+    findings: 0,
+    channel: "none",
+    filesTouched: ["/tmp/claimed-only.pdf"],
+  });
   assert.match(note, /零产出/);
   assert.match(note, /重派/);
   assert.match(note, /别替它补数/);
+  // 零产出 + 声称文件：警告要有，且不许拼出双句号（regression：两串都以「。」收尾时直接拼接）
+  assert.match(note, /零命中/);
+  assert.doesNotMatch(note, /。。/);
+  assert.match(note, /别替它补数。警告：/);
 });
 
 test("③：有交付时渲染行给出实测轨迹 + 报告条数（父据此核对）", () => {
@@ -144,4 +153,72 @@ test("④：父面把核对行挂到任务结果/记录上（非记录形状原�
   // 任务 handle / 拒绝这类形状没有 reportChannel —— 不许被塞进核对行
   const handle = withDeliveryNote({ taskId: "t1", status: "queued" });
   assert.equal(handle.deliveryNote, undefined);
+});
+
+// ⑤ 声称文件核对（provenance Filter）：每条标注它钉死哪种假绿
+test("⑤：报告自报相对路径、轨迹是绝对路径 ⇒ 不警告（防朴素精确匹配回归——bench 实测误伤 67%）", () => {
+  const note = renderDeliveryCheck({
+    delivery: {
+      tools: { read: 1 },
+      paths: ["/tmp/piab-ws-x/materials/topic-1.md"],
+      errors: 0,
+      textChars: 42,
+    },
+    findings: 1,
+    channel: "prompt-json",
+    filesTouched: ["./materials/topic-1.md"],
+  });
+  assert.doesNotMatch(note, /零命中/);
+});
+
+test("⑤：声称动了文件但轨迹零命中 ⇒ 警告说没有实测支撑（防「警告永不渲染」假绿）", () => {
+  const note = renderDeliveryCheck({
+    delivery: { tools: { bash: 6 }, paths: [], errors: 0, textChars: 100 },
+    findings: 2,
+    channel: "tool",
+    filesTouched: ["/tmp/pci401.pdf", "/tmp/changes.pdf"],
+  });
+  assert.match(note, /声称动了 2 个文件/);
+  assert.match(note, /零命中/);
+  assert.match(note, /没有实测支撑/);
+});
+
+test("⑤：接线要通——withDeliveryNote 把 files_touched 喂进核对行（防「单元绿但 entry 漏传」假绿）", async () => {
+  const { withDeliveryNote } = await import("../../packages/entry/dist/index.js");
+  const record = {
+    status: "succeeded",
+    reportChannel: "tool",
+    report: {
+      summary: "s",
+      files_touched: ["src/never-touched.ts"],
+    },
+    delivery: { tools: { read: 1 }, paths: ["src/a.ts"], errors: 0, textChars: 42 },
+  };
+  const shaped = withDeliveryNote(record);
+  assert.match(shaped.deliveryNote, /零命中/);
+  // 文件声称与实测路径重合时（后缀匹配）警告不出——同一次接线反向验证
+  const hit = withDeliveryNote({
+    ...record,
+    report: { summary: "s", files_touched: ["src/a.ts"] },
+  });
+  assert.doesNotMatch(hit.deliveryNote, /零命中/);
+});
+
+test("⑤：files_touched 缺省/为空 ⇒ 无警告词，既有渲染不变（防「无条件追加」假绿）", () => {
+  const base = {
+    delivery: { tools: { read: 1 }, paths: ["a.md"], errors: 0, textChars: 42 },
+    findings: 1,
+    channel: "prompt-json",
+  };
+  assert.doesNotMatch(renderDeliveryCheck(base), /零命中/);
+  assert.doesNotMatch(renderDeliveryCheck({ ...base, filesTouched: [] }), /零命中/);
+  // "./" strip 后是空串，不能算作一次声称（否则 endsWith("/") 会被目录尾斜杠误判为命中、一票压掉整组警告）
+  assert.doesNotMatch(renderDeliveryCheck({ ...base, filesTouched: ["./"] }), /零命中/);
+  const mixed = renderDeliveryCheck({
+    ...base,
+    delivery: { tools: { ls: 1 }, paths: ["/tmp/dir/"], errors: 0, textChars: 42 },
+    filesTouched: ["./", "/tmp/fake.pdf"],
+  });
+  assert.match(mixed, /声称动了 1 个文件/);
+  assert.match(mixed, /零命中/);
 });
