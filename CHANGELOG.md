@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.12.0] - 2026-11-10
+
+### Added
+
+- **Delivery check now flags claimed-but-unobserved file edits (provenance
+  filter, inspired by Zero-Mem's pre-reader evidence calibration).** The
+  `deliveryNote` line attached to both task doors and `ptc_task_output` already
+  rendered the engine-observed trail (tools / paths / errors / textChars); it
+  now also receives `report.files_touched` and, when **every** claimed file
+  misses the observed paths, appends a deterministic warning: "claimed N files,
+  zero hits in the observed trail — no measured support; verify before trusting
+  (bash-only runs leave no file trail, so this is a blind spot, not proof of
+  lying)". Matching is **suffix-based** and runs on the full path list, not the
+  5-item display cap; partial hits stay silent. Verified against 781 real bench
+  child outputs: naive exact matching false-alarms on 14/21 reports with
+  `files_touched` (children self-report relative paths, the trail records
+  absolute ones — 67% false-positive rate); suffix matching drops that to 0
+  (19 full / 0 partial / 2 zero-hit), and both zero-hits were true signals
+  (bash-only children claiming `/tmp/*.pdf` they never touched). Review-fixed
+  before merge: a `"./"` entry stripped to an empty norm could one-vote-suppress
+  the whole warning via `endsWith("/")` on directory paths, and the zero-output
+  branch could emit a doubled period. Tests: `tests/pi/delivery-trail.test.mjs`
+  now pins 10 cases including 4 anti-fake-green ones (suffix-match regression,
+  warning-must-fire, entry-wiring integration, no-unconditional-append).
+
 ## [7.11.1] - 2026-11-09
 
 ### Changed
