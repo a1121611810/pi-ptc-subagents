@@ -82,3 +82,5 @@ agent 定义里的 `tools / model / thinkingLevel / childReport` 由 frontmatter
 要探索、要按中间发现改路线、要 bash（构建/测试/git）的活仍用 `task` 派 pi 孩子。写程序时若发现
 要很多 `if` 去猜情况 = 没理解透，先派 pi 孩子探，再派程序孩子批量执行。`program` 与
 `agent/model/thinkingLevel` 不并用（程序孩子不启动 pi，那些参数无受体，会直接被拒）。
+**program 孩子也不吃 `readOnly`/`projectContext`/`why`**：五件套绑定恒在、jail 锁 workdir 是唯一边界——
+要纯读就别在程序里调 write/edit；这四样参数给了会被静默忽略（结果里的 `readOnlyTier` 回显不代表生效）。

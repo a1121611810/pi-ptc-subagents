@@ -554,23 +554,13 @@ export class TaskEngine {
         }, timeoutMs)
       : undefined;
     timer?.unref();
-    const activity = new ChildActivityTracker();
-    const stallMs = this.#stallMs > 0 ? this.#stallMs : undefined;
-    const stallGuard = stallMs
-      ? setInterval(
-          () => {
-            if (activity.isStalled(Date.now(), stallMs)) {
-              void this.stop(taskId, `stalled: no activity for ${stallMs}ms`);
-            }
-          },
-          Math.min(STALL_CHECK_INTERVAL_MS, stallMs),
-        )
-      : undefined;
-    stallGuard?.unref();
+    // 程序孩子不装停滞护栏：pi 孩子的豁免靠 stdout 里的 tool_execution 事件在飞计数，
+    // 程序孩子的 stdout 只有结尾一封信封——一次长跑 binding / 纯计算全程无字节，
+    // 默认 5 分钟阈值会确定性误杀健康进程（pi 孩子在同一情形有 start 事件豁免，程序孩子没有）。
+    // 失控兜底 = timeoutMs（墙钟预算）与 shutdown；与 pi 孩子抓不到的工具循环同口径
     let text = "";
     let outputTruncated = false;
     child.onOutput((chunk) => {
-      activity.push(chunk);
       text += chunk;
       if (text.length > STDOUT_KEEP_CHARS) {
         text = text.slice(-STDOUT_KEEP_CHARS); // 信封超界：JSON.parse 会拒——可见失败，不静默损坏
@@ -581,7 +571,6 @@ export class TaskEngine {
       child.onExit((code) => resolveExit(code));
     });
     if (timer) clearTimeout(timer);
-    if (stallGuard) clearInterval(stallGuard);
     this.#children.delete(taskId);
     // 信封坏了/被截断 ⇒ 合成 rejected 信封：孩子非零退出的真实错误在 stderr（spawnChild 已留尾），随 stopReason 走
     let envelope: ProgramEnvelope;

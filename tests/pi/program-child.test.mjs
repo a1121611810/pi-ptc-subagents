@@ -17,17 +17,21 @@ import { readTaskOutput } from "../../packages/task/dist/index.js";
 
 const CLI_PATH = "/fake/dist/ptc/cli.js";
 
-// 假 CLI：把信封打到 stdout（真实 CLI --json 的 stdout 只有信封），exitCode 可配
-function fakeCli({ envelope, exitCode = 0, delayMs = 5 } = {}) {
+// 假 CLI：把信封打到 stdout（真实 CLI --json 的 stdout 只有信封），exitCode 可配。
+// hang = true 模拟不自己退出的孩子（stop 路径探针用）：kill 时以 -15 结算，像真 SIGTERM
+function fakeCli({ envelope, exitCode = 0, delayMs = 5, hang = false } = {}) {
   const calls = { argv: undefined, env: undefined };
   const spawn = (argv, env) => {
     calls.argv = argv;
     calls.env = env;
     let outCb, exitCb;
-    const timer = setTimeout(() => {
-      outCb?.(typeof envelope === "string" ? envelope : JSON.stringify(envelope));
-      exitCb?.(exitCode, "");
-    }, delayMs);
+    let timer;
+    if (!hang) {
+      timer = setTimeout(() => {
+        outCb?.(typeof envelope === "string" ? envelope : JSON.stringify(envelope));
+        exitCb?.(exitCode, "");
+      }, delayMs);
+    }
     return {
       pid: 4243,
       onOutput: (cb) => {
@@ -38,6 +42,7 @@ function fakeCli({ envelope, exitCode = 0, delayMs = 5 } = {}) {
       },
       kill: () => {
         clearTimeout(timer);
+        exitCb?.(-15, "");
       },
     };
   };
@@ -187,4 +192,18 @@ test("⑤：program-carrier 纯函数——解析校验与 delivery 推导的形
   assert.deepEqual(d.tools, { read: 2, grep: 1 });
   assert.equal(d.errors, 1);
   assert.deepEqual(deliveryFromSubCalls(undefined).tools, {});
+});
+
+test("⑥：stop 路径——挂起的孩子被 stop ⇒ canceled，stopReason 透传（pi 孩子共享链路的 program 侧钉）", async () => {
+  const { spawn } = fakeCli({ hang: true });
+  const { registry, engine } = makeEngine(spawn);
+  const pending = engine.dispatch({ task: "x", program: "while(true){}", wait: true });
+  // 等 transition 到 running（写 program 文件 + spawn 是同步链路，tick 即达）
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const taskId = registry.list()[0].id;
+  await engine.stop(taskId, "manual stop reason");
+  const r = await pending;
+  assert.equal(r.status, "canceled");
+  assert.match(r.errorMessage ?? "", /manual stop reason/);
+  assert.equal(registry.get(taskId).status, "canceled");
 });
