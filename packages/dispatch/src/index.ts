@@ -10,12 +10,15 @@ export {
   agentResolveGate,
   depthGate,
   dispatchEnabledGate,
+  programGate,
   readOnlyGate,
   rejection,
   sessionEndingGate,
   taskTextGate,
 } from "./gates.ts";
 export type { AgentResolver, DispatchInput, Gate, TaskRejection } from "./gates.ts";
+export { deliveryFromSubCalls, parseProgramEnvelope } from "./program-carrier.ts";
+export type { ProgramEnvelope } from "./program-carrier.ts";
 export { FileOutputStorage, InMemoryOutputStorage } from "./output-storage.ts";
 export type { OutputStorage } from "./output-storage.ts";
 export { buildPiArgv, NO_SKIMP_SUB_NOTE, spawnChild } from "./child-process.ts";

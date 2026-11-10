@@ -28,6 +28,18 @@ export async function readTaskOutput(
   const taskId = record.id;
   const outputBytes = await source.outputSize(taskId);
   if (outputBytes === undefined) return {};
+  // 程序型子代理（issue #293）：产出 = ptc CLI 信封 JSON，交付物是信封里的 value
+  if (record.reportChannel === "program") {
+    const envelopeText = (await source.readOutput(taskId)) ?? "";
+    try {
+      const parsed: unknown = JSON.parse(envelopeText);
+      const value = (parsed as { value?: unknown }).value;
+      const answer = JSON.stringify(value ?? null, null, 2);
+      return { text: applyAdr0015Truncation(answer).text };
+    } catch {
+      // 信封坏/缺：退回原始尾部 + 引导（与无正文同一路径）
+    }
+  }
   const tail = (await source.readOutputTail(taskId, TRUNCATION_MAX_BYTES)) ?? "";
   let answer = parseChildStream(tail).text;
   if (!answer && outputBytes > TRUNCATION_MAX_BYTES) {

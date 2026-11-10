@@ -24,7 +24,8 @@ export type ChildReport = {
 };
 
 // reportChannel 恒在（旧 ADR-0032 用户故事 4/6）：tool 通道缺席时 prompt 通道兜底，永不静默降级成散文
-export type ReportChannel = "tool" | "prompt-json" | "none" | "opted-out";
+// "program"（issue #293）= 程序型子代理：孩子不是 pi，产出 = ptc CLI 的信封，无报告块
+export type ReportChannel = "tool" | "prompt-json" | "none" | "opted-out" | "program";
 
 export const REPORT_CONTRACT_BLOCK = [
   "<child-report-contract>",

@@ -35,6 +35,8 @@ test("程序跑通：返回值与子调用记录都在（无模型、无 pi）",
   assert.equal(outcome.subCalls.length, 1);
   assert.equal(outcome.subCalls[0].name, "read");
   assert.equal(outcome.subCalls[0].status, "ok");
+  // 结构化 args（程序型子代理 delivery 轨迹的数据源，issue #293）：预览截断不影响原值
+  assert.deepEqual(outcome.subCalls[0].args, { path: "a.txt" });
 });
 
 test("文件四件套真操作：glob / read / grep / edit", async () => {

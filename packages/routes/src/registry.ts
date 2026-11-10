@@ -95,7 +95,9 @@ export const NO_SKIMP_PTC_NOTE =
 // 派发参数说明（ADR-0008：两扇门共用一份参数表）——文案住本册子，ptc 的 schema 从这里取
 // 每个参数都写清代价：宿主不写死默认，用不用由模型自己判断
 export const TASK_DOOR_PARAM_DESCRIPTIONS = {
-  task: "孩子要干的活",
+  task: "孩子要干的活（program 给定时退化为记录用描述）",
+  program:
+    "程序型子代理（issue #293）：给 PTC 程序源码则孩子不是 pi——子进程直接跑这段程序（零模型、零工具表、token 归零、四件套锁 workdir）。判据：解法能在派出前写死成程序才用（机械批量/对账/校验）；要探索或要 bash 的活仍用 task。与 agent/model/thinkingLevel 不并用",
   agent: "已注册的 agent 名字；省略 = 通用孩子",
   agentScope: "agent 定义的查找范围（user / project / both）",
   why: "这一刀为什么切出来（调用方自己的话）——它会进孩子的提示词、多花孩子的 token；孩子从 task 里已经能读懂就别传",

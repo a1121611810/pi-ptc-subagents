@@ -1,6 +1,11 @@
 import { spawnChild as defaultSpawn, buildPiArgv } from "./child-process.ts";
 import { extractReportFromText, type ChildReport, type ReportChannel } from "./report.ts";
 import { parseChildStream } from "./jsonl.ts";
+import {
+  deliveryFromSubCalls,
+  parseProgramEnvelope,
+  type ProgramEnvelope,
+} from "./program-carrier.ts";
 import { ChildActivityTracker, DEFAULT_STALL_MS, STALL_CHECK_INTERVAL_MS } from "./activity.ts";
 import {
   existsSync,
@@ -111,6 +116,8 @@ export interface EngineOptions {
   resolveAgent?: (name: string, scope?: "user" | "project" | "both") => AgentDefinition | null;
   /** 让子代理进程加载本扩展（-e 路径），工具通道的前提 */
   childExtensionPath?: string;
+  /** 程序型子代理（issue #293）：ptc CLI 产物路径（entry dist/ptc/cli.js）；缺省时 program 派发在闸前拒绝 */
+  programCliPath?: string;
   /** ADR-0003：搜索开关——strict 白名单据此保留 web_ds_search */
   searchEnabled?: boolean;
   /** BG-01：TaskRecord 落盘目录（<cwd>/.pi/ptc-tasks）；设了才有重启恢复 */
@@ -187,6 +194,7 @@ export class TaskEngine {
     scope?: "user" | "project" | "both",
   ) => AgentDefinition | null;
   readonly #childExtensionPath?: string;
+  readonly #programCliPath?: string;
   readonly #searchEnabled: boolean;
   readonly #ready: Promise<void>;
   readonly #owner: { pid: number; bootMs: number };
@@ -215,6 +223,7 @@ export class TaskEngine {
     this.#buildArgv = options.buildArgv ?? ((input, context) => buildPiArgv(input, context));
     this.#resolveAgent = options.resolveAgent ?? (() => null);
     this.#childExtensionPath = options.childExtensionPath;
+    this.#programCliPath = options.programCliPath;
     this.#searchEnabled = options.searchEnabled ?? false;
     this.#owner = { pid: process.pid, bootMs: Date.now() };
     this.#storageDir = options.storageDir;
@@ -242,6 +251,12 @@ export class TaskEngine {
     for (const gate of this.#gates) {
       const rejected = gate(rawInput);
       if (rejected) return Promise.resolve(rejected); // 闸在铸 id 前：不留记录不占槽
+    }
+    // 程序型子代理（issue #293）：载体可用性也是闸（铸 id 前拒，不留痕迹）
+    if (rawInput.program !== undefined && !this.#programCliPath) {
+      return Promise.resolve(
+        rejection("program 载体不可用：宿主没配 programCliPath（ptc CLI 产物缺失）"),
+      );
     }
     // 旧 ADR-0043：开关关掉时在这里丢 why——record/handle/result 都带 whySuppressed，argv 里不再出现
     const whyEnabled = this.#whyEnabled();
@@ -369,6 +384,10 @@ export class TaskEngine {
         "会话拆卸发生在启动前",
         "rejected",
       );
+    }
+    // 程序型子代理（issue #293）：换载体——子进程是 ptc CLI 不是 pi；下文是 pi 孩子的 argv/解析
+    if (input.program !== undefined) {
+      return this.#executeProgramRun(taskId, input, whySuppressed);
     }
     const argv = this.#buildArgv(
       {
@@ -499,6 +518,137 @@ export class TaskEngine {
       report: report ?? undefined,
       reportChannel: channel,
       delivery: parsed.delivery,
+      outputTruncated,
+    };
+  }
+
+  // 程序型子代理（issue #293）：子进程 = ptc CLI，stdout 只有一个 JSON 信封。
+  // 生命周期与 pi 孩子平行（timer/停滞护栏/resolve-exit/还槽/驱逐同一套策略）——改一处记得对查另一处
+  async #executeProgramRun(
+    taskId: string,
+    input: DispatchInput,
+    whySuppressed = false,
+  ): Promise<DispatchResult> {
+    const programPath = await this.#output.writeProgram(taskId, input.program!);
+    // execPath 与宿主同 node；workdir 跟宿主 cwd（任务材料相对项目根）——fs jail 由引擎绑定自带
+    const argv = [
+      process.execPath,
+      this.#programCliPath!,
+      programPath,
+      "--workdir",
+      process.cwd(),
+      "--json",
+    ];
+    const env = {
+      ...process.env,
+      PI_PTC_DEPTH: String(this.#context.depth + 1),
+      PI_PTC_TASK_ID: taskId,
+    };
+    const child = this.#spawn(argv, env);
+    this.#children.set(taskId, child);
+    const timeoutMs =
+      typeof input.timeoutMs === "number" && input.timeoutMs > 0 ? input.timeoutMs : undefined;
+    const timer = timeoutMs
+      ? setTimeout(() => {
+          void this.stop(taskId, `timeout after ${timeoutMs}ms`);
+        }, timeoutMs)
+      : undefined;
+    timer?.unref();
+    const activity = new ChildActivityTracker();
+    const stallMs = this.#stallMs > 0 ? this.#stallMs : undefined;
+    const stallGuard = stallMs
+      ? setInterval(
+          () => {
+            if (activity.isStalled(Date.now(), stallMs)) {
+              void this.stop(taskId, `stalled: no activity for ${stallMs}ms`);
+            }
+          },
+          Math.min(STALL_CHECK_INTERVAL_MS, stallMs),
+        )
+      : undefined;
+    stallGuard?.unref();
+    let text = "";
+    let outputTruncated = false;
+    child.onOutput((chunk) => {
+      activity.push(chunk);
+      text += chunk;
+      if (text.length > STDOUT_KEEP_CHARS) {
+        text = text.slice(-STDOUT_KEEP_CHARS); // 信封超界：JSON.parse 会拒——可见失败，不静默损坏
+        outputTruncated = true;
+      }
+    });
+    const exitCode = await new Promise<number>((resolveExit) => {
+      child.onExit((code) => resolveExit(code));
+    });
+    if (timer) clearTimeout(timer);
+    if (stallGuard) clearInterval(stallGuard);
+    this.#children.delete(taskId);
+    // 信封坏了/被截断 ⇒ 合成 rejected 信封：孩子非零退出的真实错误在 stderr（spawnChild 已留尾），随 stopReason 走
+    let envelope: ProgramEnvelope;
+    try {
+      envelope = parseProgramEnvelope(text);
+    } catch (error) {
+      envelope = {
+        status: "rejected",
+        error: error instanceof Error ? error.message : String(error),
+        logs: [],
+      };
+    }
+    const delivery = deliveryFromSubCalls(envelope.subCalls);
+    if (envelope.status === "fulfilled") {
+      delivery.textChars = JSON.stringify(envelope.value ?? null).length;
+    }
+    const outputPath = await this.#output.write(taskId, text);
+    await this.#registry.submit({
+      kind: "attach-report",
+      id: taskId,
+      report: undefined,
+      channel: "program",
+      delivery,
+    });
+    await this.#registry.submit({
+      kind: "attach-output",
+      id: taskId,
+      outputPath,
+      truncated: outputTruncated,
+    });
+    const result = await this.#registry.submit({ kind: "resolve-exit", id: taskId, exitCode });
+    this.#releaseSlot(taskId);
+    this.#evictAndPurge(this.#terminalRecordKeep, "runtime");
+    const status =
+      result.record.status === "succeeded"
+        ? "fulfilled"
+        : result.record.status === "canceled"
+          ? "canceled"
+          : "rejected";
+    const envelopeError =
+      envelope.status === "rejected"
+        ? envelope.error
+        : envelope.status === "canceled"
+          ? envelope.reason
+          : undefined;
+    const startedAt = result.record.startedAt ?? 0;
+    const finishedAt = result.record.finishedAt ?? 0;
+    return {
+      status,
+      taskId,
+      label: input.label,
+      text, // 整个信封 JSON：父程序解析它拿 value/subCalls/logs
+      exitCode,
+      started: true,
+      agentName: "program",
+      durationMs: startedAt && finishedAt ? finishedAt - startedAt : 0,
+      usage: { turns: 0 }, // 零模型：turns 恒 0 是诚实标注
+      errorMessage:
+        status === "fulfilled"
+          ? undefined
+          : (result.record.stopReason ?? envelopeError ?? `exit code ${exitCode}`),
+      readOnlyTier: input.readOnly ?? "lenient",
+      outputPath,
+      whySuppressed,
+      report: undefined,
+      reportChannel: "program",
+      delivery,
       outputTruncated,
     };
   }

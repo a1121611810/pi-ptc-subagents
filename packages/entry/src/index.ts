@@ -20,6 +20,7 @@ import {
   findAgent,
   isTerminal,
   TASK_STATUSES,
+  programGate,
   readOnlyGate,
   sessionEndingGate,
   taskTextGate,
@@ -117,6 +118,10 @@ const publishedDetailDir = join(packageRoot, "docs", "routes");
 const detailDir = existsSync(publishedDetailDir)
   ? publishedDetailDir
   : join(packageRoot, "..", "routes", "docs", "routes");
+
+// ptc CLI 产物（ADR-0024：与 index 同一次构建出包）：在 entry 的 dist 下——
+// 仓库布局 packages/entry/dist/ptc/cli.js、发布布局 <pkg>/dist/ptc/cli.js（packageRoot 是 dist 的上一级，两边都成立）
+const programCliPath = join(packageRoot, "dist", "ptc", "cli.js");
 
 // 减量 argv 的版本门素材：孩子与宿主同 binary，启动时解析一次（~几十 ms；取不到返回 undefined，按 floor 处理）
 function resolvePiVersion(): string | undefined {
@@ -237,6 +242,8 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
         notifications,
         resolveAgent: (name, scope) => findAgent(name, agentDirs, scope),
         childExtensionPath: fileURLToPath(import.meta.url),
+        // 程序型子代理（issue #293）：ptc CLI 产物与 index 同一次构建（ADR-0024）；缺文件时不传——引擎闸前拒
+        ...(existsSync(programCliPath) ? { programCliPath } : {}),
         // ADR-0003：搜索开关传给引擎（strict 白名单保留 web_ds_search）
         searchEnabled: readWebSearchConfig(getAgentDir()).enabled,
         // 别省真跑：孩子提示词加「跑真的、别用 mock、别跳过慢检查」段（谓词 ⇒ /ptc noskimp-sub 热生效）
@@ -252,6 +259,7 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
       gates: [
         readOnlyGate,
         taskTextGate,
+        programGate,
         dispatchEnabledGate(() => dispatchEnabled),
         sessionEndingGate(() => sessionEnding),
         depthGate(() => Number(process.env.PI_PTC_DEPTH ?? 0), 3),
@@ -868,6 +876,7 @@ function registerTaskDoor(
     exposure: "codemode",
     execute: async (_id, args) => {
       const result = await session.createTask(args.task, {
+        program: args.program,
         label: args.label,
         wait: args.wait,
         why: args.why,

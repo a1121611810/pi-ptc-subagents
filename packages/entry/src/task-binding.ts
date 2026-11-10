@@ -12,6 +12,7 @@ export const TASK_BINDING_NAME = "pi_task_ptc";
 // cwd 预埋过又删除（2026-10-27，审计 F1）：全链无消费者；pi CLI 无 --cwd，spawn cwd 只能改相对路径落点
 export const TASK_DOOR_PARAMETERS = Type.Object({
   task: Type.String({ minLength: 1, description: TASK_DOOR_PARAM_DESCRIPTIONS.task }),
+  program: Type.Optional(Type.String({ description: TASK_DOOR_PARAM_DESCRIPTIONS.program })),
   agent: Type.Optional(Type.String({ description: TASK_DOOR_PARAM_DESCRIPTIONS.agent })),
   why: Type.Optional(Type.String({ description: TASK_DOOR_PARAM_DESCRIPTIONS.why })),
   agentScope: Type.Optional(
@@ -40,6 +41,7 @@ export const TASK_DOOR_PARAMETERS = Type.Object({
 
 export interface TaskDoorOptions {
   task?: string;
+  program?: string;
   label?: string;
   wait?: boolean;
   why?: string;
@@ -71,6 +73,7 @@ export function createTaskBinding(door: TaskDoor): TaskBinding {
     execute(args) {
       const input = (args ?? {}) as TaskBindingArgs; // 程序里传 null/undefined 不该炸，交给 task 闸按拒绝处理
       return door.createTask(input.task, {
+        program: input.program,
         label: input.label,
         wait: input.wait,
         why: input.why,

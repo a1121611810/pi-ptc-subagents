@@ -2,6 +2,11 @@
 // 与 engine 的入参同形——entry 的 admissionGates 挂点直接收这组（类型从 sub 导出，entry 不再自定义）
 export type DispatchInput = {
   task: string;
+  /**
+   * 程序型子代理（issue #293）：给出时孩子不是 pi——子进程直接跑这段 PTC 程序（零模型、零工具表），
+   * task 退化为记录用描述文本。与 agent/model/thinkingLevel 互斥（那些只影响 pi argv）
+   */
+  program?: string;
   label?: string;
   agent?: string;
   /** 旧 ADR-0039：agent 定义的发现范围——层级覆盖语义：project 定义优先于 user；both=两层都搜（默认） */
@@ -76,6 +81,21 @@ export const taskTextGate: Gate = (input) =>
     : input.task.trimStart().startsWith("-")
       ? rejection("task 不能以 - 开头：pi 会把它当命令行选项")
       : null;
+
+// 程序型子代理（issue #293）：program 给了就必须非空白；它走 ptc CLI 载体，
+// agent/model/thinkingLevel 只影响 pi argv——并用了拒绝，不静默忽略（写错值拒绝是闸的哲学）
+export const programGate: Gate = (input) => {
+  if (input.program === undefined) return null;
+  if (typeof input.program !== "string" || input.program.trim() === "") {
+    return rejection("program 必须是非空字符串（PTC 程序源码）");
+  }
+  if (input.agent !== undefined || input.model !== undefined || input.thinkingLevel !== undefined) {
+    return rejection(
+      "program 与 agent/model/thinkingLevel 不并用（程序孩子不启动 pi，那些参数无受体）",
+    );
+  }
+  return null;
+};
 
 export type AgentResolver = (name: string, scope?: "user" | "project" | "both") => boolean;
 

@@ -9,6 +9,8 @@ function isSafeTaskId(taskId: string): boolean {
 }
 export interface OutputStorage {
   write(taskId: string, text: string): Promise<string>;
+  /** 程序型子代理（issue #293）：落 program 源码文件（File 适配落 tasks/<id>/program.ts，兼审计），返回给 spawn 的路径 */
+  writeProgram(taskId: string, source: string): Promise<string>;
   read(taskId: string): Promise<string | undefined>;
   /** 产出字节数（不读全文——超长产出先探长度再决定读不读） */
   size(taskId: string): Promise<number | undefined>;
@@ -38,6 +40,10 @@ export class InMemoryOutputStorage implements OutputStorage {
     this.#map.set(taskId, text);
     return `memory://${taskId}`;
   }
+  async writeProgram(taskId: string, source: string): Promise<string> {
+    this.#map.set(`${taskId}#program`, source);
+    return `memory://${taskId}/program.ts`; // 假路径：fake spawn 不真 exec，真载体请用 FileOutputStorage
+  }
   async read(taskId: string): Promise<string | undefined> {
     return this.#map.get(taskId);
   }
@@ -64,6 +70,15 @@ export class FileOutputStorage implements OutputStorage {
     mkdirSync(dir, { recursive: true });
     const path = join(dir, "output.log");
     writeFileSync(path, text, "utf8");
+    return path;
+  }
+
+  async writeProgram(taskId: string, source: string): Promise<string> {
+    if (!isSafeTaskId(taskId)) throw new Error(`invalid task id: ${taskId}`);
+    const dir = join(this.#base, "tasks", taskId);
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, "program.ts");
+    writeFileSync(path, source, "utf8");
     return path;
   }
 

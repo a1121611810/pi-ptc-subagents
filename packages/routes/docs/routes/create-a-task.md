@@ -71,3 +71,14 @@ agent 定义里的 `tools / model / thinkingLevel / childReport` 由 frontmatter
 台架口径（2026-10-30，pi 1.4.0，facts 题 n=3）：每个孩子付一份固定 harness 税 ≈ 1800 input token；
 端到端比不派发贵 9~12 倍（官方编排 + 本仓派发 8.7×、本仓编排 + 本仓派发 11.6×；env 修复前是 15~22 倍）。
 **派发值得的是准确性，不是省钱**：同样的题，派发档准确率 100%，不派发 92%（差值见上，与波动同量级）。
+
+## 程序型子代理（`program` 参数，issue #293）
+
+`pi_task_ptc({ task, program, ... })`——`program` 给 PTC 程序源码时，孩子**不是 pi**：子进程直接跑
+这段程序（ptc 引擎脱离模型自跑）。零模型、零工具表、token 归零，程序四件套锁在 workdir 内。
+产出 = 程序返回值（信封 JSON），`reportChannel: "program"`，usage `turns: 0`。
+
+**判据：解法能在派出前写死成程序才用**——机械批量（读多文件抽值、对账、校验、同形态改写）最合；
+要探索、要按中间发现改路线、要 bash（构建/测试/git）的活仍用 `task` 派 pi 孩子。写程序时若发现
+要很多 `if` 去猜情况 = 没理解透，先派 pi 孩子探，再派程序孩子批量执行。`program` 与
+`agent/model/thinkingLevel` 不并用（程序孩子不启动 pi，那些参数无受体，会直接被拒）。
