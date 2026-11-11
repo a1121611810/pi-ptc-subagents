@@ -1,6 +1,6 @@
 #!/bin/bash
-# 发版前手工全量冒烟：17 个 pi 版本 × 四腿契约（覆盖 0.99 分水岭两侧）。
-# 用法：bash scripts/version-smoke.sh；SMOKE_VERSIONS="1.5.0" 只跑指定版本（快查）。
+# 发版前手工全量冒烟：19 腿（18 个 pi 版本 + PATH）× 四腿契约（覆盖 0.99 分水岭两侧）。
+# 用法：bash scripts/version-smoke.sh；SMOKE_VERSIONS="1.5.2" 只跑指定版本（快查）。
 # 四腿：RUN=42（run_code 求值）· READ（程序内 tools.read——≥0.99 走 executeTool 通道返回数字，
 # floor 无通道 ⇒ 自己造出 pi 的真工具来调，同样返回数字）· 并行腿返回 2（ptc_workflow 的 parallel
 # allSettled；断言认「值=2」不认键名——模型给这一项的键名会漂，实测 0.87.0 那版写过 FLOW=2 / FOR=2）·
@@ -18,7 +18,7 @@ OUT="${TMPDIR:-/tmp}/ptc-version-smoke"
 SHIM_ROOT="${SHIM_ROOT:-/tmp}"
 mkdir -p "$OUT"; rm -f "$OUT"/*.log
 
-VERSIONS="${SMOKE_VERSIONS:-0.86.0 0.86.1 0.87.0 0.87.1 0.99.0 0.99.1 0.99.2 1.0.0 1.0.1 1.0.2 1.0.3 1.0.4 1.1.0 1.2.0 1.3.0 1.5.0}"
+VERSIONS="${SMOKE_VERSIONS:-0.86.0 0.86.1 0.87.0 0.87.1 0.99.0 0.99.1 0.99.2 1.0.0 1.0.1 1.0.2 1.0.3 1.0.4 1.1.0 1.2.0 1.3.0 1.5.0 1.5.1 1.5.2}"
 
 PROMPT='做四件事，最后严格只输出一行 RUN=<r> READ=<d> PAR=<p> HND=<h>：1) 调用 ptc_run_code 求值 6*7，作为 r；2) 调用 ptc_run_code，程序体为：let d; try { const t = await tools.read({ path: "package.json" }); d = typeof t === "string" ? t.length : -1; } catch (e) { d = "ERR:" + String((e && e.message) || e).slice(0, 24); } return d; 把程序返回值作为 d；3) 调用 ptc_workflow，meta 为 {name:"smoke",description:"smoke"}，script 为：const rs = await workflow.parallel([() => Promise.resolve(1), () => Promise.resolve(2)]); return rs.length; 把程序返回值作为 p；4) 先调用 tools.pi_task_ptc({ task: "只回答：1+1 等于几", wait: false }) 拿到 handle，随后调用 ptc_task_list 和 ptc_task_output（task_id 用 handle.taskId）确认任务面有记录，把 handle.taskId 作为 h。'
 

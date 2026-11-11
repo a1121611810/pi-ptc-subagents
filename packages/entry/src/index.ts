@@ -603,7 +603,7 @@ function normalizeToolValue(value: unknown): unknown {
 // ExtensionToolContext，它的 executeTool(name, args, options?) 才是程序内调用工具的入口
 // （session_start 的 ExtensionContext 上没有它——早期实现取错上下文，程序内 tools.* 全程是死的）
 // floor（0.86/0.87）没有 ctx.executeTool ⇒ 自己造出 pi 的真工具来调：
-// pi 的工具工厂是公开导出（create*ToolDefinition，0.86.0–1.4.0 全有），execute 独立于 agent
+// pi 的工具工厂是公开导出（create*ToolDefinition，0.86.0–1.5.2 全有），execute 独立于 agent
 // 循环（只用 ctx?.cwd || cwd）——所以老版本的程序工具与 ≥0.99 逐字同形（含 edit 的 {path, edits}
 // 形状与 ls/find 的存在）。用命名空间取工厂：某个版本缺了也不炸——那个工具就报「没有通道」。
 type PiToolDefinition = {

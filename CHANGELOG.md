@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Support for pi 1.5.1 and 1.5.2** (released 2026-11-09 / 2026-11-10). The
+  existing extension API, CLI flags, JSON event names, required runtime exports
+  and built-in tool path handling are unchanged, so **no runtime code changed**.
+  Pi 1.5.1's custom `GrepOperations.readFile` breaking change does not affect
+  this package: programs call pi's tool definitions or `ctx.executeTool`, never
+  a custom grep operations table. The dev dependency now tracks
+  `@earendil-works/pi-coding-agent@^1.5.2`, the pinned
+  `@earendil-works/pi-tui` moves to 1.5.2, and the version smoke script lists
+  both new versions. The four-leg smoke passes on 1.5.1, 1.5.2 and PATH 1.5.2
+  (`RUN=42` / `READ=2437` / `PAR=2` / non-empty task handle, zero `isError`).
+  The knob probe (timeout, projectContext, report/usage fallback, project facts
+  and stall guard), both differential session-model-inheritance rounds, and
+  compaction followed by task-list reinjection pass on both versions. Standard
+  checks and all 254 repository tests pass on 1.5.2.
+
 ## [7.13.0] - 2026-11-10
 
 ### Added

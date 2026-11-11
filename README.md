@@ -64,7 +64,7 @@ tool calls into one program. `/ptc off` drops the lead.
 
 It does not hide the built-in tools from the model. pi keeps a tool callable from a
 program only while it is active, so narrowing the loadout would take `tools.read` away
-from the program too — the two cannot both hold on pi 1.4.0/1.5.0.
+from the program too — the two cannot both hold on pi 1.4.0–1.5.2.
 
 ## The Kimi Code plugin (`ptc-tools`)
 
@@ -198,7 +198,7 @@ full pi process running as you. `bash` is not in the program binding table on ei
 
 ## Compatibility
 
-pi `>= 0.86.0`, tracked against latest (currently 1.5.0). Two version facts matter:
+pi `>= 0.86.0`, tracked against latest (currently 1.5.2). Two version facts matter:
 
 - **In-program session tools need pi ≥ 0.99 for the nested call channel.** On 0.86/0.87 a
   program still evaluates, still dispatches tasks, and still calls `read` / `write` / `edit` /
@@ -208,7 +208,7 @@ pi `>= 0.86.0`, tracked against latest (currently 1.5.0). Two version facts matt
   codemode surface itself still only exists from 0.99. That fallback is gated on the pi
   version: on 0.99+ a missing call channel is an error, not a silent bypass of pi's tool
   pipeline.
-- Everything else in the 0.86–1.4 range is covered by real-machine smoke tests, including
+- Everything else in the 0.86–1.5 range is covered by real-machine smoke tests, including
   a program that dispatches a real child process. Per-version details:
   [docs/pi-version-matrix.md](./docs/pi-version-matrix.md).
 

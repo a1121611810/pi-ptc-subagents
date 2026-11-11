@@ -1,7 +1,7 @@
 # pi 版本兼容矩阵（重写版）
 
-floor = **0.86.0**（`peerDependencies: ">=0.86.0"`），ceiling = 跟踪最新（当前 1.5.0，类型固定在 devDependencies）。
-本文件是旧仓 `docs/agents/pi-compat-matrix.md` 实测结论（15 版本逐一安装探针，2026-10-14/20 两次测量）的继承 + 1.4.0 / 1.5.0 增补。**断言 pi 行为前先看本机 `pi --version`**——node_modules 里的版本、PATH 上的版本、声明的 floor 是三个不同的数。
+floor = **0.86.0**（`peerDependencies: ">=0.86.0"`），ceiling = 跟踪最新（当前 1.5.2，类型固定在 devDependencies）。
+本文件是旧仓 `docs/agents/pi-compat-matrix.md` 实测结论（15 版本逐一安装探针，2026-10-14/20 两次测量）的继承 + 1.4.0 / 1.5.0 / 1.5.1 / 1.5.2 增补。**断言 pi 行为前先看本机 `pi --version`**——node_modules 里的版本、PATH 上的版本、声明的 floor 是三个不同的数。
 
 ## 能力分水岭：0.99.0
 
@@ -46,6 +46,11 @@ floor = **0.86.0**（`peerDependencies: ">=0.86.0"`），ceiling = 跟踪最新�
     `pi.exec()` 的 `maxBuffer`、自更新命令、GPT-6.1、渲染提速）**都不碰我们的面**
   - **系统提示词收紧**（pi 自称）⇒ 孩子系统提示词实测变短：1.4.0 是 4600 字符，1.5.0 是 4141 字符
     （我们注入的那节长度不变，仍省 744）
+- **1.5.1 / 1.5.2（2026-11-09 / 2026-11-10，本矩阵新增）**：现有扩展 API 面无破坏——详见下面「pi 1.5.1 / 1.5.2 适配」一节
+  - 1.5.1 的 Breaking 是自定义 `GrepOperations.readFile` 不再用于 context 行；本仓没有实现这个回调，
+    只经 `ctx.executeTool` 或 pi 工具工厂调用 ⇒ **零影响**。OpenAI 兼容请求的 `tools: []` 修正也不碰我们的面
+  - 新增的 Markdown transformer surface、auth shell 命令、缓存与 provider 变化均未接线，不追
+  - 1.5.2 只修「原工作目录已消失的会话」fork/import 与 Anthropic OAuth 版本头 ⇒ 与本包运行链路无关
 
 ## 硬约束（重写仍然成立的事实）
 
@@ -88,6 +93,7 @@ floor = **0.86.0**（`peerDependencies: ">=0.86.0"`），ceiling = 跟踪最新�
 | 0.86.0 · 0.86.1 · 0.87.0 · 0.87.1                                                                | ✗ 平台没有嵌套调用通道 → 明确报错「需 pi ≥ 0.99」                                                                                                                            |
 | 0.99.0 · 0.99.1 · 0.99.2 · 1.0.0 · 1.0.1 · 1.0.2 · 1.0.3 · 1.0.4 · 1.1.0 · 1.2.0 · 1.3.0 · 1.4.0 | ✓ 程序读 `/etc/hosts` 拿到 295 字符（结果统一成文本）                                                                                                                        |
 | 1.5.0（2026-11-03）                                                                              | ✓ 程序内 read 走会话工具仍通（真机 `READ=2436`，读 `package.json` 的长度）；`/etc/hosts` 越界读取**静态同构**（`dist/core/tools/path-utils.js` 与 1.4.0 逐字相同）⇒ 行为不变 |
+| 1.5.1 · 1.5.2（2026-11-11）                                                                      | ✓ 两版真机均为 `READ=2437`；`path-utils.js` 与 1.5.0 逐字相同 ⇒ 行为不变                                                                                                     |
 
 ### 引擎抽出后复跑（2026-11-01）
 
@@ -218,7 +224,9 @@ floor = **0.86.0**（`peerDependencies: ">=0.86.0"`），ceiling = 跟踪最新�
 | 1.2.0           | ✓              | ✓             | ✓               | ✓                     | ✓        | 4558 → 3814（省 744）      |
 | 1.3.0           | ✓              | ✓             | ✓               | ✓                     | ✓        | 4558 → 3814（省 744）      |
 | 1.4.0           | ✓              | ✓             | ✓               | ✓                     | ✓        | 4600 → 3856（省 744）      |
-| 1.5.0（现行）   | ✓              | ✓             | ✓               | ✓                     | ✓        | 4141 → 3397（省 744）      |
+| 1.5.0           | ✓              | ✓             | ✓               | ✓                     | ✓        | 4141 → 3397（省 744）      |
+| 1.5.1           | ✓              | ✓             | ✓               | ✓                     | ✓        | 4141 → 3397（省 744）      |
+| 1.5.2（现行）   | ✓              | ✓             | ✓               | ✓                     | ✓        | 4141 → 3397（省 744）      |
 
 - **省的是系统提示词的固定字节**（本探针的 AGENTS.md 是 744 字符，含新增的口径节）；`usage.input` 受缓存冷热影响，
   **跨版本/跨轮不可横比**（缓存命中时几乎为 0）——比大小要看节长，不看 input。
@@ -262,8 +270,8 @@ F3-3 = 330；按字面读是 3300 / 300）。**判分器零复制**：bench 加 
 - 模型引用格式两版都是 `${model.provider}/${model.id}`（0.86.0 `dist/core/model-resolver.js:75`；
   1.4.0 同）；`--model` 的接受格式两版都是 `provider/id` + 可选 `:<thinking>`（`cli/args.js` help 同文）。
 - ⇒ **floor 上孩子同样继承父会话模型**；不发 `--model` 的唯一情形是「会话本身没有模型」。
-- **真机矩阵**：`scripts/session-model-smoke.mjs` 在 0.86.0/0.87.1/0.99.0/1.0.0/1.1.0/1.2.0/1.3.0/1.4.0/1.5.0
-  **九版全过**（1.5.0 于 2026-11-03 补测）——两轮差分（父显式 `minimax-cn/MiniMax-M3.1-Flash` vs 父用默认 `minimax-cn-512k/…`），
+- **真机矩阵**：`scripts/session-model-smoke.mjs` 在 0.86.0/0.87.1/0.99.0/1.0.0/1.1.0/1.2.0/1.3.0/1.4.0/1.5.0/1.5.1/1.5.2
+  **十一版全过**（1.5.1 / 1.5.2 于 2026-11-11 补测）——两轮差分（父显式模型 vs 父默认模型），
   孩子都跟着各自的父走；负向对照（撤掉 entry 的接线）如期变红——孩子落到 pi 默认模型。
 
 ### 压缩事件与任务面血缘（2026-11-01 静态核验 + 1.4.0 真机）
@@ -341,6 +349,40 @@ pi 1.5.0 于 2026-11-02 发布（npm `@earendil-works/pi-coding-agent@1.5.0`）�
 - ⇒ **压缩后重注入仍无版本门**（`ContextEventResult = { messages?: AgentMessage[] }` 与 `session_compact`
   的形状在 1.5.0 仍逐字同形，见上）。
 
+## pi 1.5.1 / 1.5.2 适配（2026-11-11 实测）
+
+pi 1.5.1 于 2026-11-09 发布，1.5.2 于 2026-11-10 发布。本轮仍按
+**静态比对 → 真机探针 → 升钉子 → 更新文档**；比对结果不需要运行逻辑改动。
+
+### 静态比对（本机 1.5.0 vs 1.5.2 的包内 diff）
+
+- **现有扩展类型面无破坏**：`types.d.ts` 只新增可选的 Markdown transformer surface / options，
+  并修订 `ctx.ui.custom({ blocked })` 的注释；本仓未使用 Markdown transformer。既有
+  `ExtensionContext` / `ExtensionToolContext` / `ToolDefinition` / `setWidget` 签名未改。
+- **本仓使用的 CLI 旗标未变**：`dist/cli/args.js` 的唯一差异是 `auth` 帮助文案；
+  `--no-mcp` / `--no-context-files` / `--mode json|rpc` / `-ne` / `-e` / `-p` / `--model` / `--tools` 不受影响。
+- **json 事件名集合逐字相同**（`agent_*` / `turn_*` / `message_*` / `tool_execution_*`）；
+  `getAgentDir` / `loadSkills` / `formatSkillsForPrompt` / `create{Read,Write,Edit,Grep,Ls,Find}ToolDefinition` /
+  `defineTool` 两版全部可导入。
+- **内置工具路径处理逐字相同**：`dist/core/tools/path-utils.js` 无差异 ⇒ 仍无 cwd 囚禁。
+- **1.5.1 的 grep Breaking 不影响本仓**：没有自定义 `GrepOperations.readFile`；程序只走
+  `ctx.executeTool` 或 pi 的工具工厂。`GrepOperations.readFile` 在新类型里仍保留为 optional/deprecated。
+- **1.5.2 无本包相关 API 变化**：只修原工作目录消失的会话 fork/import 与 Anthropic OAuth 版本头。
+
+### 真机探针（pi 1.5.1 与 1.5.2）
+
+| 探针                               | 1.5.1 结果                                                                                         | 1.5.2 结果                            |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| `scripts/version-smoke.sh` 四腿    | **全过**：`RUN=42` / `READ=2437` / `PAR=2` / HND 非空 / `isError` 0                                | **全过**：同左；PATH 1.5.2 复跑也全过 |
+| `scripts/knobs-smoke.mjs`          | **PASS**：timeout / projectContext / 报告 + usage / 口径事实 / 停滞护栏全过；4141 → 3397（省 744） | **PASS**：同左，系统提示词长度也相同  |
+| `scripts/session-model-smoke.mjs`  | **PASS**：显式父模型与默认父模型两轮，孩子全部继承各自父模型                                       | **PASS**：同左                        |
+| `scripts/compact-inject-smoke.mjs` | **PASS**：压缩成功 / 压缩事件有 / 清单注入有                                                       | **PASS**：同左                        |
+
+- 标准门禁在本地依赖 1.5.2 下全绿：`check` / `build` / `lint` / `fmt:check`；
+  `pnpm test` = pi 200 + output 6 + kimi 35 + standalone 13，产物 import 门禁通过。
+- 版本钉子：根 devDependency 跟到 `@earendil-works/pi-coding-agent@^1.5.2`，entry/tui 的
+  `@earendil-works/pi-tui` 钉 1.5.2；默认版本冒烟加 1.5.1 与 1.5.2（18 个固定版本 + PATH = 19 腿）。
+
 ## Node 运行时（2026-11-04 实测）
 
 pi 矩阵与 Node 运行时解耦（分水岭全是 pi 侧 API 面）；本节是 Node 侧的实测基线，防「原生 TS」误导。
@@ -371,7 +413,7 @@ CI 守 22/24/26 三腿（ci.yml 矩阵）；publish 仍钉 24（trusted publishi
 ## 待测
 
 中间版本的**执行链冒烟**已覆盖（0.87 / 0.99 / 1.0 / 1.1 / 1.2 / 1.3，见上）；
-**旋钮探针覆盖 9 个版本**（每个 minor 一版：0.86.0 / 0.87.1 / 0.99.0 / 1.0.0 / 1.1.0 / 1.2.0 / 1.3.0 / 1.4.0 / 1.5.0）；
-**floor 的 codemode/exposure 行为已于 2026-10-31 查清**（见上）。仍未做的：同一 minor 的补丁版逐版安装
-（按 minor 分水岭取样）、`1.x` 能力表里未直接观测的 codemode 差分（依赖旧仓 16 项探针结论）。下次 pi 发版
-或动了门/可见性/codemode 探测相关代码时补测。
+**旋钮探针覆盖 11 个版本**（0.86.0 / 0.87.1 / 0.99.0 / 1.0.0 / 1.1.0 / 1.2.0 / 1.3.0 / 1.4.0 / 1.5.0 / 1.5.1 / 1.5.2）；
+**floor 的 codemode/exposure 行为已于 2026-10-31 查清**（见上）。1.5 的三个补丁版已逐版安装实测；
+其余 minor 仍按分水岭取样。仍未做的：`1.x` 能力表里未直接观测的 codemode 差分（依赖旧仓 16 项探针结论）。
+下次 pi 发版或动了门/可见性/codemode 探测相关代码时补测。

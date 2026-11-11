@@ -18,8 +18,8 @@
 
 ## pi 版本素材（冒烟/验证用）
 
-- shim 装在本机 `/tmp`：`/tmp/pi086`（0.86.0/0.86.1）、`/tmp/pi-<ver>`（0.87.0 … 1.3.0）、`/tmp/ptc-smoke-pi-<ver>`（版本冒烟脚本自愈装的，1.5.0 在 `/tmp/ptc-smoke-pi-1.5.0`）。PATH 上是本机全局 bun 装的 @earendil-works/pi-coding-agent 1.4.0（ceiling 1.5.0 走 shim）。
-- `scripts/version-smoke.sh`：默认 16 版全量（含 1.5.0）；`SMOKE_VERSIONS="x.y.z"` 单版快查；四腿契约（run_code / 程序内 tools.read【0.99 分水岭】/ ptc_workflow parallel / wait:false + 任务面）；shim 缺了自动 `npm install @earendil-works/pi-coding-agent@<ver>` 到 `$SHIM_ROOT`（默认 /tmp）。
+- shim 装在本机 `/tmp`：`/tmp/pi086`（0.86.0/0.86.1）、`/tmp/pi-<ver>`（0.87.0 … 1.3.0）、`/tmp/ptc-smoke-pi-<ver>`（版本冒烟脚本自愈装的，1.5.0–1.5.2 各在对应目录）。PATH 上是本机全局 bun 装的 @earendil-works/pi-coding-agent 1.5.2。
+- `scripts/version-smoke.sh`：默认 18 版全量（含 1.5.0–1.5.2），外加 PATH 共 19 腿；`SMOKE_VERSIONS="x.y.z"` 单版快查；四腿契约（run_code / 程序内 tools.read【0.99 分水岭】/ ptc_workflow parallel / wait:false + 任务面）；shim 缺了自动 `npm install @earendil-works/pi-coding-agent@<ver>` 到 `$SHIM_ROOT`（默认 /tmp）。
 - CLI 旗标版本考古（2026-10-28 实测）：`--no-extensions`/`--no-skills` floor 0.86 就有；`--no-mcp` **1.1.0 才出现**（0.86–1.0 无）。
 
 ## MiniMax CN（孩子的 provider）
