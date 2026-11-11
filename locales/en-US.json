@@ -1,0 +1,23 @@
+{
+  "displayName": "PTC Tools (programmable batch tool calling)",
+  "shortDescription": "Write a program to batch-call tools: the whole loop runs in one call, the model only sees the reduced result",
+  "longDescription": "PTC (Programmable Tool Calling) turns repetitive mechanical fan-out into a TypeScript program: the model calls ptc_run_code once, the program runs the whole batch in loops or parallel with the read/write/edit/grep/glob toolset, and only one reduced result comes back to the context - no more walls of raw tool output. Ships with web_ds_search (search/open/find) for web evidence gathering, which can also be batched inside a program. Includes a /batch slash command and the ptc skill loaded automatically at session start; a gate nudges you toward batching when the same tool shape is called repeatedly. Open source at https://github.com/a1121611810/pi-ptc-subagents, released continuously via GitHub Releases.",
+  "developerName": "a1121611810",
+  "tryPrompts": [
+    "Summarize all pending-marker comments under the src directory into one list",
+    "Batch-replace every console.log in the project with logger.debug",
+    "Search the web for Kimi's latest open-source news and summarize it for me"
+  ],
+  "mcpOverrides": {
+    "ptc": {
+      "displayName": "PTC Engine",
+      "description": "ptc_run_code: run a model-written TypeScript program that batch-calls tools; web_ds_search: web search with search/open/find actions"
+    }
+  },
+  "skillOverrides": {
+    "ptc": {
+      "displayName": "PTC batch-calling conventions",
+      "description": "When batch-reading, batch-editing or batch-verifying, write the loop into a ptc_run_code program instead of reading piles of raw tool output"
+    }
+  }
+}

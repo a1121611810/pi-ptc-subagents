@@ -4,7 +4,29 @@
   "description": "Programmable tool calling for Kimi Code：模型写 TypeScript 程序批量调工具（PTC），高扇出只回一份摘要",
   "interface": {
     "displayName": "PTC Tools（程序批量调工具）",
-    "shortDescription": "写程序批量调工具：一次调用跑完整个循环，模型只看归约结果"
+    "shortDescription": "写程序批量调工具：一次调用跑完整个循环，模型只看归约结果",
+    "longDescription": "PTC（Programmable Tool Calling）把重复性的机械扇出写进一段 TypeScript 程序：模型一次调用 ptc_run_code，程序内用 read/write/edit/grep/glob 五件套并行或循环跑完整个批次，上下文里只回一份归约结果，不再被几十个原始工具输出刷屏。附带 web_ds_search 联网搜索（search/open/find 三动作），需要批量取证时同样可写进程序归约。附带 /batch 斜杠命令与 ptc skill，session 开始自动加载使用约定；同一形态工具连打时插件会用闸门提醒批量化。开源地址 https://github.com/a1121611810/pi-ptc-subagents，按 GitHub Release 持续发版。",
+    "developerName": "a1121611810",
+    "category": "DEVELOPER",
+    "defaultLocale": "zh-CN",
+    "locales": "./locales/",
+    "tryPrompts": [
+      "把 src 目录下所有待办标记汇总成一份清单",
+      "批量把项目里所有 console.log 改成 logger.debug",
+      "搜一下 Kimi 最新的开源动态并汇总给我"
+    ],
+    "mcpOverrides": {
+      "ptc": {
+        "displayName": "PTC 引擎",
+        "description": "ptc_run_code：运行模型写的 TypeScript 程序批量调工具；web_ds_search：联网搜索 search/open/find 三动作"
+      }
+    },
+    "skillOverrides": {
+      "ptc": {
+        "displayName": "PTC 批量调工具约定",
+        "description": "批量读写、批量查证时把循环写进 ptc_run_code 程序，别看一堆原始工具输出"
+      }
+    }
   },
   "skills": "./release/kimi/skills/",
   "commands": "./release/kimi/commands/",

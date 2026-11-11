@@ -1,4 +1,5 @@
 ---
+name: batch
 description: 把这类重复活一次性批量干完（写进 ptc_run_code 程序，别看一堆原始工具输出）
 ---
 
