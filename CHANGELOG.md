@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.14.0] - 2026-11-11
+
 ### Added
 
 - **Support for pi 1.5.1 and 1.5.2** (released 2026-11-09 / 2026-11-10). The
@@ -23,6 +25,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and stall guard), both differential session-model-inheritance rounds, and
   compaction followed by task-list reinjection pass on both versions. Standard
   checks and all 254 repository tests pass on 1.5.2.
+
+### Changed
+
+- **Tool-result truncation keeps head and tail, eliding the middle
+  (ADR-0027).** When a `ptc_run_code` / `ptc_workflow` result exceeded
+  50 KB / 2000 lines, the old contract kept only the tail — the first hits of
+  a fan-in (batched grep/read) vanished, forcing the model to re-read the
+  full-text temp file. Now the 2000-line budget splits into a 500-line head
+  plus 1500-line tail, with a marker line between the windows reporting the
+  exact elided line range (`省略第 X–Y 行 / M 字节，全文在 PATH`), so the
+  model can Read back precisely the omitted slice. When bytes run out, the
+  windows shrink alternately (tail window first; its end stays anchored
+  because the program's return value is rendered last); giant single lines
+  split 25%/75% by byte with UTF-8 boundary-aligned cuts (fixes the U+FFFD
+  half-character the old tail byte-cut produced). The ceiling values — 50 KB /
+  2000 lines, pi's "Tools MUST truncate" contract — are unchanged. The same
+  function also serves `ptc_task_output` child text and program-type
+  envelopes, so all three surfaces improve at once. The recovery protocol is
+  written into both faces' tool descriptions and the Kimi skill (read the
+  head/tail first; re-read by line range; reduce inside the program).
+  Tests rewritten to a mutation standard: 7 mutation points each pinned by
+  content-level assertions, 3 manually injected mutations confirmed red.
+  257 tests pass (output 9); 19-leg version smoke fails=0; real-machine smoke
+  against the assembled Kimi bundle verified head/tail survival, the exact
+  line range, and range-based recovery of an elided probe line.
 
 ## [7.13.0] - 2026-11-10
 
