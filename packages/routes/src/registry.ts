@@ -25,6 +25,7 @@ export const TOOLS = {
     description: (s) =>
       [
         "写一段 TypeScript 程序批量调用工具：tools.<name>(args)。支持顶层 await、Promise.all 并行、循环与条件；程序返回值是归约后的结果，中间产物不进上下文。",
+        "结果超 50KB 或 2000 行会被截断：保留头尾、中间省略，文内标记行给省略行范围与全文临时文件路径；要中间段按行范围用 read 回读。",
         s === "codemode_ptc"
           ? "本会话里我从 codemode 脚本可达，模型直走 codemode。"
           : [
@@ -119,6 +120,7 @@ export const KIMI_MCP_RUN_CODE = {
   description: (opts?: { noSkimp?: boolean }) =>
     [
       "写一段 TypeScript 程序批量调用工具：tools.<name>(args)。支持顶层 await、Promise.all 并行、循环与条件；程序返回值是归约后的结果，中间产物不进上下文。",
+      "结果超 50KB 或 2000 行会被截断：保留头尾、中间省略，文内标记行给省略行范围与全文临时文件路径；要中间段按行范围用宿主 Read（line_offset/n_lines）回读。",
       "同一形态的读写预计重复 5 次以上时，写程序一次跑完比逐个调更省。",
       "本会话的 tools 是固定文件五件套：read / write / grep / glob / edit（只作用于 workdir 之内，越界即报错）；没有 bash，也没有 pi_task_ptc——要跑 shell 或派子代理，用宿主自己的工具。",
       opts?.noSkimp ? NO_SKIMP_PTC_NOTE : "",
@@ -314,11 +316,11 @@ export const ROUTES = [
   },
 ] satisfies RouteEntry[];
 
-// 超长产出的分层引导（ptc_task_output）：报告是归约层（旧 ADR-0032 本意），响应里的 output 是尾部原始层
+// 超长产出的分层引导（ptc_task_output）：报告是归约层（旧 ADR-0032 本意），响应里的 output 是保留头尾、省略中间的原始层（ADR-0027）
 export const LONG_OUTPUT_GUIDANCE_WITH_REPORT =
-  "产出超过截断阈值（{bytes} 字节）。先看孩子的报告（归约层）：{report}——响应里的 output 是截断后的尾部；报告没收录的完整原文用 read 读记录上的 outputPath。";
+  "产出超过截断阈值（{bytes} 字节）。先看孩子的报告（归约层）：{report}——响应里的 output 保留头尾、省略中间；报告没收录的完整原文用 read 读记录上的 outputPath。";
 export const LONG_OUTPUT_GUIDANCE_NO_REPORT =
-  "产出超过截断阈值（{bytes} 字节），且孩子未交报告（reportChannel=none，散文可信度存疑）。响应里的 output 是截断后的尾部；完整原文用 read 读记录上的 outputPath。";
+  "产出超过截断阈值（{bytes} 字节），且孩子未交报告（reportChannel=none，散文可信度存疑）。响应里的 output 保留头尾、省略中间；完整原文用 read 读记录上的 outputPath。";
 
 export function renderLongOutputGuidance(options: {
   bytes: number;
