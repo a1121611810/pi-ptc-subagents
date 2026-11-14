@@ -7,6 +7,8 @@ status: **withdrawn 2026-10-20** by
 改成**只活在被派出去的子代理里**，在子代理里由**子代理自己的模型**直接调用（`exposure: "direct"`），
 父会话里**完全不存在**（不注册，也不解析凭据）。
 
+> **事实更正（2026-11-14）**：本文 §Alternatives 里「走 provider 端 server tool（DeepSeek Responses API 的 `web_ds_search`）——**仅 deepseek-v4-pro**」这条前提**已过期**：官方 2026-11-13 开放全家桶应用 API 后，**deepseek-flash 也支持** `deepseek_web_search` / `deepseek_read_url`。本仓通道的不可替代性不在「官方没有」，在「**模型无关**」（本仓孩子跟随父模型，父可能是 minimax-cn ⇒ 官方那条路覆盖不了非 DeepSeek 用户）——结论不变，但「仅 v4-pro」这句话要读作「当时仅 v4-pro」。见 [ADR-0028](./0028-deepseek-ocr-tool.md)。
+
 > **修订：[ADR-0005](./0005-the-surface-names-the-orchestrator.md)（2026-10-21）：两个表面值改名——`full` → `full_ptc`、`subagents` → `codemode_ptc`——且「表面」现在指**哪个编排器对模型负责**。本记录的决定不变；读到它的 `full` / `subagents` 时，读作那两个新名字。**
 
 本记录的前提大体还在——「检索源固定、不做可插拔」、「名字里带 `ds`」、「错误文案一份共享常量」、

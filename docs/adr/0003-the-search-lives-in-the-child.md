@@ -8,6 +8,8 @@ status: accepted (2026-10-20). Ticket #227 (map #226) 的形状部分。配套�
 > **Amended by [ADR-0015](./0015-the-route-index-and-its-detail-files.md) (2026-10-21): the route to the web is now a row in the route table, and the resident index states it per surface. The shared web sentence is carried by the two PTC tool descriptions and the mode briefing; the reach note that used to ride in the `ptc_run_code` description retired, because the door is a codemode-reachable tool now. This record's decision stands unchanged: the parent has no web tool of its own, and the route to the web is a child.**
 > **Amended by [ADR-0013](./0013-route-registry.md) (2026-10-21): the web sentence's one home is now the route registry (`src/routes/registry.ts`), not the search module — the search module re-exports it. The decision is unchanged: one sentence, carried by every surface that names the route to the web, with a test asserting each one contains that constant.**
 
+> **事实更正（2026-11-14）**：本文 §Alternatives 里「provider 端 server tool——**仅 deepseek-v4-pro**」这条前提**已过期**：官方 2026-11-13 开放全家桶应用 API 后，**deepseek-flash 也支持** `deepseek_web_search` / `deepseek_read_url` ⇒ DeepSeek 模型的孩子可能同时有服务端搜索与本仓工具（重复检索 + 重复计费）。本篇决定不变（搜索仍只活在子代理里），但两件事要跟上：① 两个工具的描述里写清「模型自带联网搜索时别用它」；② 本仓通道的护城河是**模型无关**，不是「官方没有」。见 [ADR-0028](./0028-deepseek-ocr-tool.md)。
+
 ## Context
 
 ADR-0001 把搜索定成「程序内可达的能力，默认不面向模型」，具体形状是**一份实现、两个面**：pi 工具 `web_ds_search`（`exposure: "codemode"`）+ PTC binding `web.ds.search`。那条记录在同一天被实测修订过一次（见其 §修订），而**三件事把旧形状顶到了墙角**。

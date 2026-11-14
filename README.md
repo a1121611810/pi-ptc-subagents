@@ -9,6 +9,10 @@ pi calls tools one at a time. On pi, the model writes a program that calls them 
 go — and can spawn pi subagents from inside it. On Kimi Code, the plugin gives the model
 one program tool over a fixed file-tool set.
 
+**One program, fifty tool calls — your context sees only the result.**
+
+<video src="https://cdn.jsdelivr.net/gh/a1121611810/pi-ptc-subagents@main/docs/assets/ptc-demo.mp4" autoplay muted loop playsinline><img src="docs/assets/ptc-demo.gif" alt="pi-ptc-subagents: 16 read calls one by one vs one ptc_run_code call; a subagent dispatched from inside the program as a zero-model child process; and the engine running the same program with no pi and no model"/></video>
+
 ```
 on pi
   full_ptc      model ──▶ ptc_run_code ──▶ program ──┬──▶ tools.read · grep · edit · …   (session tools)
@@ -38,6 +42,9 @@ on kimi (MCP)
   a task to look at.
 - **Search, where it belongs.** `web_ds_search` registers only inside dispatched children.
   Off by default.
+- **Documents, same channel.** `doc_ds_ocr` turns local PDF / Word / PPT / images into
+  text. It also registers only inside dispatched children, behind its own `webDsOcr`
+  switch (off by default) — the file leaves your machine, so it can be closed on its own.
 
 ```ts
 // full_ptc, inside ptc_run_code
@@ -78,6 +85,9 @@ Kimi Code ships its own Agent tool, so this plugin doesn't duplicate one):
 - **`web_ds_search`** — search / open / find, callable directly (no child process needed).
   Quota is per MCP server process (default 30 calls, `0` = unlimited); the DeepSeek key
   resolves from env, then Kimi Code's `config.toml`.
+- **`doc_ds_ocr`** — local PDF / Word / PPT / image to text, callable directly. The file
+  is uploaded to DeepSeek for recognition, so only paths inside `workdir` are accepted.
+  Shares the quota above with `web_ds_search`.
 
 Install with `/plugins install https://github.com/a1121611810/pi-ptc-subagents` — the bare repo
 URL tracks the latest GitHub Release (pinned URLs get no update checks); run `/reload` to
