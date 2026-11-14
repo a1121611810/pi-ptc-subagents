@@ -7,10 +7,14 @@ import { KIMI_MCP_RESULT_FOOTER, KIMI_MCP_TOOLS } from "@pi-ptc/routes";
 import { renderToolResult } from "@pi-ptc/output";
 import { createFsBindings, runPtcProgram } from "@pi-ptc/ptc";
 import {
+  createDeepSeekOcrProvider,
   createDeepSeekProvider,
   createSearchMemory,
   createSearchQuota,
+  runOcr,
   runWebSearch,
+  type OcrRunContext,
+  type SearchQuota,
   type SearchRunContext,
 } from "@pi-ptc/search";
 
@@ -62,6 +66,21 @@ const WEB_DS_SEARCH_SCHEMA = {
   },
 } as const;
 
+const DOC_DS_OCR_SCHEMA = {
+  type: "object",
+  required: ["path", "workdir"],
+  properties: {
+    path: {
+      type: "string",
+      description: KIMI_MCP_TOOLS.doc_ds_ocr.inputSchemaDescriptions.path,
+    },
+    workdir: {
+      type: "string",
+      description: KIMI_MCP_TOOLS.doc_ds_ocr.inputSchemaDescriptions.workdir,
+    },
+  },
+} as const;
+
 // 搜索上下文：每 server 进程一份（记忆/配额都是 per-process 语义，与 pi 面孩子进程同款）
 // shortcut: 默认 30 次/进程沿用旧实现值，未实测校准；0 = 不限。缺 key 也注册——调用返回可读错误（fail-soft）
 
@@ -87,6 +106,16 @@ function createSearchContext(): SearchRunContext {
     provider: createDeepSeekProvider(resolveDeepSeekApiKey()),
     memory: createSearchMemory(),
     quota: createSearchQuota(30),
+  };
+}
+
+// 文档识别上下文（ADR-0028）：与搜索共用一份进程级配额（总护栏），记忆各自独立（网页正文与文档正文不混桶）
+function createOcrContext(quota: SearchQuota): OcrRunContext {
+  return {
+    provider: createDeepSeekOcrProvider(resolveDeepSeekApiKey()),
+    memory: createSearchMemory(),
+    quota,
+    root: process.cwd(),
   };
 }
 
@@ -177,9 +206,21 @@ async function webDsSearchTool(args: unknown, context: SearchRunContext) {
   };
 }
 
+// 文档识别（ADR-0028）：文件路径由模型给 ⇒ 只能读 workdir 内的文件（越界由 OCR 核的 jail 拒）
+async function docDsOcrTool(args: unknown, context: OcrRunContext) {
+  const path = strField(args, "path");
+  const workdir = strField(args, "workdir");
+  const result = await runOcr(path, { ...context, root: workdir });
+  return {
+    content: [{ type: "text", text: result.ok ? result.text : result.error }],
+    isError: !result.ok,
+  };
+}
+
 export function createKimiMcpServer(version: string): Server {
   const server = new Server({ name: "ptc-tools", version }, { capabilities: { tools: {} } });
   const searchContext = createSearchContext();
+  const ocrContext = createOcrContext(searchContext.quota);
   // 别省真跑开关读一次（MCP server 是长驻进程；该面没有会话级切换，改配置后重启 server 生效）
   const noSkimp = readNoSkimpConfig();
 
@@ -195,6 +236,11 @@ export function createKimiMcpServer(version: string): Server {
         description: KIMI_MCP_TOOLS.web_ds_search.description(),
         inputSchema: WEB_DS_SEARCH_SCHEMA,
       },
+      {
+        name: KIMI_MCP_TOOLS.doc_ds_ocr.name,
+        description: KIMI_MCP_TOOLS.doc_ds_ocr.description(),
+        inputSchema: DOC_DS_OCR_SCHEMA,
+      },
     ],
   }));
 
@@ -206,6 +252,9 @@ export function createKimiMcpServer(version: string): Server {
       }
       if (params.name === KIMI_MCP_TOOLS.web_ds_search.name) {
         return await webDsSearchTool(params.arguments, searchContext);
+      }
+      if (params.name === KIMI_MCP_TOOLS.doc_ds_ocr.name) {
+        return await docDsOcrTool(params.arguments, ocrContext);
       }
       return { isError: true, content: [{ type: "text", text: `unknown tool: ${params.name}` }] };
     } catch (error) {

@@ -72,6 +72,7 @@ export function buildPiArgv(
     agentTools?: string[];
     /** ADR-0003 修正：搜索开启时 strict 白名单保留 web_ds_search */
     searchEnabled?: boolean;
+    ocrEnabled?: boolean;
     /** 旧 ADR-0044：解析出的 agent 定义钉的模型/档位（调用参数优先于它们） */
     agentModel?: string;
     agentThinkingLevel?: string;
@@ -105,10 +106,16 @@ export function buildPiArgv(
   const model = input.model ?? input.agentModel ?? context.sessionModel;
   const thinking = input.thinkingLevel ?? input.agentThinkingLevel;
   if (model) argv.push("--model", thinking ? `${model}:${thinking}` : model);
-  // 工具表（旧 ADR-0039/0041/0049）：strict 压过一切 → 读集（搜索开启含 web_ds_search）；否则 agent 名单收窄
-  const READ_SET = input.searchEnabled
-    ? ["read", "grep", "find", "ls", "web_ds_search"]
-    : ["read", "grep", "find", "ls"];
+  // 工具表（旧 ADR-0039/0041/0049）：strict 压过一切 → 读集（搜索开启含 web_ds_search、文档识别开启含 doc_ds_ocr）；否则 agent 名单收窄
+  // 派生而非常量：能力开着就不许被 strict 悄悄滤掉（ADR-0003 实测坑：strict 名单是常量时能力静悄悄消失）
+  const READ_SET = [
+    "read",
+    "grep",
+    "find",
+    "ls",
+    ...(input.searchEnabled ? ["web_ds_search"] : []),
+    ...(input.ocrEnabled ? ["doc_ds_ocr"] : []),
+  ];
   if (input.readOnly === "strict") {
     argv.push("--tools", READ_SET.join(","));
   } else if (input.agentTools && input.agentTools.length > 0) {

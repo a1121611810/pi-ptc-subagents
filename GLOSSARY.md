@@ -106,7 +106,13 @@ _Avoid_: 「兼容 kimi 的 entry 分支」
 Kimi 面程序内唯一的 tools：read / grep / glob / edit，只在 `workdir` 内活动（realpath 锁，越界即拒）。与 pi 面「程序 tools = 会话工具全集」是两条契约，跨宿主移植以册子为准。
 _Avoid_: 说 Kimi 面程序能调 bash / 能发子代理
 
-**输出核（output）**:
+**DeepSeek 工具面（ds 工具）**：
+本仓对 DeepSeek 应用 API 的封装面：联网搜索（`web_ds_search`）与文档识别（`doc_ds_ocr`）。**模型无关**（官方那套是模型内 server tool，只对 DeepSeek 模型的孩子有效）、进程级配额、只活在子代理里。名字里的 `ds` 说明 provider 是契约的一部分，不是实现细节。
+
+**文档识别（doc_ds_ocr）**：
+把本地 PDF / Word / PPT / 图片转成文字。**文件会离开本机**（上传到 DeepSeek 侧处理）；只允许工作区内的文件（两层 jail：字面 + realpath）。同一份文件重复识别不重复计费（记忆命中）。
+
+**输出核（output）**：
 `packages/output`（P0 拆分）：运行结果 → 模型可见文本的宿主中立整形（旧 ADR-0012 排版 + 0015 截断），pi / Kimi 两面共用；pi-tui 折叠渲染不住这里（在 ptc/render.ts）。
 
 ## 验证与工程
@@ -122,3 +128,26 @@ _Avoid_: 说 Kimi 面程序能调 bash / 能发子代理
 
 **floor**:
 兼容的最低 pi 版本（0.86.0）。
+
+**载体（carrier）**:
+测试层本身——探针文件、运行器接线、变异驱动。载体可以删掉重写；判据不能。
+_Avoid_: 把判据脚本叫「载体」
+
+**判定者（judge）**:
+已经写对的业务判断：发布物 import 门禁、站点 6 gate 与反事实 harness、判分器自检、五条真机冒烟、Kimi 正确性矩阵。它们原地保留，由新测试层的薄适配探针 spawn 调用并断言退出码与输出。
+
+**被判定者（judged）**:
+判定者要读的东西：产品代码、站点源与产物、Python 判分器与 fixtures/题面/轨迹、随插件发布的产品运行时、装配脚本、研究工具。它们在测试层重写里不动。
+
+**刀口规则（blade rule）**:
+改测试层前先问：这份资产是载体、判定者、还是被判定者？载体 ⇒ 删并重写；判定者 ⇒ 原地保留、由新层调用；被判定者 ⇒ 不动。
+
+**能力矩阵（capability matrix）**:
+「能力 → 探针 → 变异清单」这张表，是测试覆盖的单一事实源（`tests/registry/<面>.mjs` 分片 + `tests/registry.mjs` 聚合）。探针文件**不反向声明**覆盖哪些能力——事实副本会烂，而且没人发现。
+_Avoid_: 「测试清单」（听不出是矩阵）
+
+**变异登记（mutant registry）**:
+能力矩阵里每条 mutant 的「锚点 → 缺陷 → 归属」对照表：`file` / `from`（在目标文件里恰好出现一次）/ `to`（缺陷版）/ `kills`（必须红的那条用例标题）/ `why`。
+
+**杀死归属（kill attribution）**:
+「红的是不是这条 mutant 该红的那条用例」。读 Vitest JSON 报告的 `fullName` 匹配 `kills`；对不上 = **假杀死**（探针因别的断言红）⇒ 不计杀、判红。

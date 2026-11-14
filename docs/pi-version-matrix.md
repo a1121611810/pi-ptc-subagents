@@ -152,7 +152,7 @@ floor = **0.86.0**（`peerDependencies: ">=0.86.0"`），ceiling = 跟踪最新�
 > 与 pi 的（`{path, edits:[{oldText,newText}]}`）不同，留着是雷。fs 绑定仍留在 `packages/ptc`，
 > 服务 Kimi 面与独立 CLI。
 >
-> 覆盖：`tests/pi/floor-file-fallback.test.mjs`（用 PATH 上的假 `pi` 脚本控版本，6 个用例：floor 读文件 /
+> 覆盖：`tests/pi/entry.test.ts`（用 PATH 上的假 `pi` 脚本控版本，6 个用例：floor 读文件 /
 > ls / edit 两种形状 / **现代 pi 缺通道必须报错** / 有通道时仍走会话工具）。
 >
 > **真机冒烟 16/16 全过**（`scripts/version-smoke.sh`，fails=0）：floor 四版与 ≥0.99 的 `READ=2216`

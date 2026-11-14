@@ -107,7 +107,7 @@ export const TASK_DOOR_PARAM_DESCRIPTIONS = {
   wait: "true = 等这个任务完成再返回结果；false = 立刻返回 handle，结果走任务面/通知",
   label: "后台任务给人看的标签",
   readOnly:
-    "strict = 孩子只有读工具（read/grep/find/ls，搜索开启时含 web_ds_search）；lenient = 默认全工具。只需要读的活别给写权限",
+    "strict = 孩子只有读工具（read/grep/find/ls，搜索开启时含 web_ds_search、文档识别开启时含 doc_ds_ocr）；lenient = 默认全工具。只需要读的活别给写权限",
   timeoutMs: "孩子的运行时长上限（毫秒）——超了按超时收尸；不传 = 不限（与不传时同）",
   projectContext:
     "孩子的项目上下文（AGENTS.md/CLAUDE.md）：auto = 照常加载；none = 不加载——注意 none 只关「注入」不关「知识」：文件还在工作目录里，孩子会自己去翻（实测输入只差约 15%，不是省一半）；这活不需要项目约定就传 none，要孩子遵守项目规矩就照常传（auto 也可能把项目里的写码规矩套进答案）",
@@ -142,6 +142,7 @@ export const KIMI_MCP_WEB_DS_SEARCH = {
     [
       "联网搜索三动作：search 概览（title/url/snippet，count 1–50 默认 10）· open 抓整页转 markdown · find 页内行匹配（正则）。单次搜索可直调本工具；要批量取证再写进 ptc_run_code 程序。",
       "配额按 MCP server 进程计（默认 30 次/进程，0 = 不限）——不是跨会话的全局限额；open/find 命中本会话记忆不重复消耗。",
+      "模型自带联网搜索（DeepSeek 服务端工具）时别用它——会重复检索并重复计费。",
     ].join(""),
   inputSchemaDescriptions: {
     action: "三动作之一：search（搜索）/ open（抓整页）/ find（页内行匹配）",
@@ -149,6 +150,21 @@ export const KIMI_MCP_WEB_DS_SEARCH = {
     url: "open/find 的目标页面 url",
     pattern: "find 的页内行匹配正则",
     count: "search 条数 1–50，默认 10",
+  },
+} as const;
+
+// Kimi 面第三件工具（ADR-0028）：本地文档识别。文件会上传到 DeepSeek 侧——文案必须写明
+export const KIMI_MCP_DOC_DS_OCR = {
+  name: "doc_ds_ocr",
+  description: () =>
+    [
+      "把本地 PDF / Word / PPT / 图片转成文字（DeepSeek OCR，逐页返回；文件会上传到 DeepSeek 侧处理，本机不留副本）。只允许 workdir 内的文件。",
+      "配额按 MCP server 进程计（默认 30 次/进程，0 = 不限），与 web_ds_search 共用一份；同一份文件重复识别不重复计费。",
+      "模型自带联网搜索（DeepSeek 服务端工具）时别用它——会重复检索并重复计费。",
+    ].join(""),
+  inputSchemaDescriptions: {
+    path: "要识别的文件路径（workdir 内的 PDF / Word / PPT / 图片）",
+    workdir: "文件所在目录（绝对路径）；只能读这个目录内的文件",
   },
 } as const;
 
@@ -161,6 +177,7 @@ export const KIMI_MCP_RESULT_FOOTER = (calls: number): string =>
 export const KIMI_MCP_TOOLS = {
   ptc_run_code: KIMI_MCP_RUN_CODE,
   web_ds_search: KIMI_MCP_WEB_DS_SEARCH,
+  doc_ds_ocr: KIMI_MCP_DOC_DS_OCR,
 } as const;
 
 // 事实类内容不进常驻索引（2026-11-01 实测：状态类的会过期，且会诱导模型去改用户配置）⇒ 没有 fact 段

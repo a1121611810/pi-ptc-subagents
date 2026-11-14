@@ -99,6 +99,7 @@ export type BuildArgvInput = DispatchInput & {
   childReport?: boolean;
   agentTools?: string[];
   searchEnabled?: boolean;
+  ocrEnabled?: boolean;
   agentModel?: string;
   agentThinkingLevel?: string;
   noSkimpSub?: boolean;
@@ -120,6 +121,8 @@ export interface EngineOptions {
   programCliPath?: string;
   /** ADR-0003：搜索开关——strict 白名单据此保留 web_ds_search */
   searchEnabled?: boolean;
+  /** ADR-0028：文档识别开关——strict 白名单据此保留 doc_ds_ocr */
+  ocrEnabled?: boolean;
   /** BG-01：TaskRecord 落盘目录（<cwd>/.pi/ptc-tasks）；设了才有重启恢复 */
   storageDir?: string;
   /** 旧 ADR-0022/0053：通知中心——wait 路径记 awaited，终态不重复通知 */
@@ -196,6 +199,7 @@ export class TaskEngine {
   readonly #childExtensionPath?: string;
   readonly #programCliPath?: string;
   readonly #searchEnabled: boolean;
+  readonly #ocrEnabled: boolean;
   readonly #ready: Promise<void>;
   readonly #owner: { pid: number; bootMs: number };
   readonly #stopGraceMs: number;
@@ -225,6 +229,7 @@ export class TaskEngine {
     this.#childExtensionPath = options.childExtensionPath;
     this.#programCliPath = options.programCliPath;
     this.#searchEnabled = options.searchEnabled ?? false;
+    this.#ocrEnabled = options.ocrEnabled ?? false;
     this.#owner = { pid: process.pid, bootMs: Date.now() };
     this.#storageDir = options.storageDir;
     this.#terminalRecordKeep = options.terminalRecordKeep ?? DEFAULT_TERMINAL_RECORD_KEEP;
@@ -394,6 +399,7 @@ export class TaskEngine {
         ...input,
         taskId,
         searchEnabled: this.#searchEnabled,
+        ocrEnabled: this.#ocrEnabled,
         noSkimpSub: this.#noSkimpSub(),
         ...extras,
       },

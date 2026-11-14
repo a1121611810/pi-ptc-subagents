@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The whole test layer was rebuilt on Vitest 5.1.0** (ADR-0029). The 38
+  `node:test` probes under `tests/` (5329 lines / 274 cases / 795 assertions)
+  were deleted and rewritten as `vitest` probes grouped by face
+  (`tests/<face>/*.test.ts`), and `scripts/mutation-check.mjs` became
+  `scripts/mutate.mjs`: a registry-driven mutation gate that requires every
+  mutant to be killed **by the case named in its `kills` entry** (a probe
+  going red for another reason is a false kill and does not count).
+- **The blade rule (user-approved `layer-only` scope)**: the _carrier_ (the
+  test layer) is rewritten; the _judges_ (2774 lines of hand-written
+  business checks — the artifact import gate, the six site gates and their
+  counterfactual harness, the grader self-check, five real-machine smoke
+  scripts, the Kimi correctness matrix) stay where they are and are called by
+  thin adapter probes that assert their exit codes; the _judged_ (product
+  code, site sources and artifacts, the Python grader and its fixtures, the
+  plugin runtime, assembly and research scripts) is untouched.
+- **Seven `vitest` projects** replace the old four-test-suite split: `pi`,
+  `output`, `kimi`, `standalone`, `website`, `bench`, `live`. Probes of
+  one face can no longer reach into another — that is now enforced by
+  configuration rather than by directory convention. `pnpm test` runs the
+  four fast faces plus the artifact import gate; `pnpm run test:site`,
+  `test:bench` and `test:live` are separate commands, and a missing
+  dependency fails loudly instead of skipping.
+- **CI**: the existing `check` job keeps its three Node legs (22 / 24 / 26)
+  and a new `mutations` job (Node 24) runs the mutation gate over the fast
+  faces. The `site`, `bench` and `live` faces stay out of CI — they were
+  never in CI — and move into the release checklist.
+
+### Added
+
+- `vitest@^5.1.0` as the only new direct dependency (its `vite@8` pulls
+  `rolldown ~1.2.18`, already in this repository's tree).
+- **Verified baseline (2026-11-14)**: `pnpm test` → 15 probe files / 341 cases
+  green (four fast faces plus the artifact import gate); the mutation gate
+  kills **96 / 96** fast-face mutants with **0** survivors (bench face 3 / 3
+  separately), each kill attributed to the exact case named in its `kills`
+  entry; the one-off byte-for-byte narrow-rebuild equivalence check passes for
+  7 packages. Two gaps are reported rather than fixed: the **site** face is
+  already red on `main` (the landing-page gate does not account for
+  `ptc_progress_update`; site sources and artifacts are outside this round's
+  blade), and the **live** face did not pass here (the real model did not
+  dispatch a child).
+
 ## [7.14.0] - 2026-11-11
 
 ### Added

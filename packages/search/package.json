@@ -2,7 +2,7 @@
   "name": "@pi-ptc/search",
   "version": "0.0.0",
   "private": true,
-  "description": "Search providers for child agents: DeepSeek first, more later (web_ds_search: search/open/find)",
+  "description": "DeepSeek-backed tools for child agents: web_ds_search (search/open/find) + doc_ds_ocr (local PDF/Word/PPT/image to text)",
   "license": "Apache-2.0",
   "files": [
     "dist"

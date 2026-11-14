@@ -42,11 +42,12 @@
     "check": "pnpm -r --filter=!@pi-ptc/website run check",
     "check:imports": "node scripts/check-artifact-imports.mjs",
     "lint": "oxlint",
-    "test": "pnpm run check:imports && pnpm run test:pi && pnpm run test:output && pnpm run test:kimi && pnpm run test:standalone",
-    "test:pi": "node --enable-source-maps --test tests/pi/*.test.mjs",
-    "test:output": "node --enable-source-maps --test tests/output/*.test.mjs",
-    "test:kimi": "node --enable-source-maps --test tests/kimi/*.test.mjs",
-    "test:standalone": "node --enable-source-maps --test tests/standalone/*.test.mjs",
+    "test": "pnpm run check:imports && vitest run --project pi --project output --project kimi --project standalone",
+    "test:site": "pnpm --filter @pi-ptc/website run build && vitest run --project website",
+    "test:bench": "vitest run --project bench",
+    "test:live": "vitest run --project live",
+    "test:mutations": "node scripts/mutate.mjs",
+    "test:mutations:full": "node scripts/mutate.mjs --all",
     "pretest": "pnpm run build",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check"
@@ -57,7 +58,8 @@
     "oxfmt": "^0.74.0",
     "oxlint": "^1.89.0",
     "rolldown": "^1.2.15",
-    "tsrs": "0.18.0-ts7.1.0-dev.20260929"
+    "tsrs": "0.18.0-ts7.1.0-dev.20260929",
+    "vitest": "^5.1.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.86.0"

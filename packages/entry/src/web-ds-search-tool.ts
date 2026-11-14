@@ -22,7 +22,7 @@ export function createWebDsSearchTool(context: SearchRunContext) {
     name: "web_ds_search",
     label: "联网搜索",
     description:
-      "联网能力（三动作）：search 概览（title/url/snippet）· open 抓整页 · find 页内行匹配。open/find 命中最近记忆则免费。配额按每进程计。",
+      "联网能力（三动作）：search 概览（title/url/snippet）· open 抓整页 · find 页内行匹配。open/find 命中最近记忆则免费。配额按每进程计。模型自带联网搜索（DeepSeek 服务端工具）时别用它——会重复检索并重复计费。",
     parameters: WEB_DS_SEARCH_PARAMETERS,
     execute: async (_id: string, args: WebDsSearchParams): Promise<AgentToolResult> => {
       const action =

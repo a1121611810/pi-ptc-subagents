@@ -37,8 +37,14 @@ import {
   type TaskFaceDetails,
 } from "@pi-ptc/tui/pi";
 import { RENDER_BOUNDS, sanitizeText } from "@pi-ptc/tui";
-import { createDeepSeekProvider, createSearchMemory, createSearchQuota } from "@pi-ptc/search";
+import {
+  createDeepSeekOcrProvider,
+  createDeepSeekProvider,
+  createSearchMemory,
+  createSearchQuota,
+} from "@pi-ptc/search";
 import { createWebDsSearchTool } from "./web-ds-search-tool.ts";
+import { createDocDsOcrTool } from "./doc-ds-ocr-tool.ts";
 import { showUpgradeNotice } from "./upgrade-notice.ts";
 import { WorkerPool, spawnPtcWorker, type BindingTable } from "@pi-ptc/ptc";
 import { createPtcRunCodeTool, createPtcWorkflowTool } from "./ptc-tools.ts";
@@ -255,8 +261,8 @@ export default function piPtcEntry(pi: ExtensionAPI): void {
         childExtensionPath: fileURLToPath(import.meta.url),
         // 程序型子代理（issue #293）：cli 产物缺失（如 src 直跑）时是 undefined——引擎闸前拒，不拖到 spawn 才败
         ...(programCliPath ? { programCliPath } : {}),
-        // ADR-0003：搜索开关传给引擎（strict 白名单保留 web_ds_search）
-        searchEnabled: readWebSearchConfig(getAgentDir()).enabled,
+        // ADR-0003/0028：DeepSeek 工具开关传给引擎（strict 白名单保留 web_ds_search / doc_ds_ocr）
+        ...deepSeekToolSwitches(),
         // 别省真跑：孩子提示词加「跑真的、别用 mock、别跳过慢检查」段（谓词 ⇒ /ptc noskimp-sub 热生效）
         noSkimpSub: noSkimpSub,
         // BG-01：记录与产出一同落盘（项目级 .pi 目录；pi 的 sessionDir 不在扩展 API 上，此处取项目本地态）
@@ -440,18 +446,29 @@ function readWhyEnabledConfig(agentDir: string): boolean {
   }
 }
 
-// ADR-0002：webDsSearch 开关 fail-closed（默认关）；凭据按 pi 同款语义三级解析（auth.json → models.json → env）
-function readWebSearchConfig(agentDir: string): { enabled: boolean; maxCalls: number } {
+// ADR-0002/0028：DeepSeek 工具开关 fail-closed（默认关）；凭据按 pi 同款语义三级解析（auth.json → models.json → env）
+// 两个能力各自一个独立键：webDsSearch（搜索）/ webDsOcr（文档识别）——「关掉」要说清关的是什么
+// 配额共用一份（进程级总护栏）：searchMaxCalls 同时管这两个工具
+function readDeepSeekToolsConfig(agentDir: string): {
+  searchEnabled: boolean;
+  ocrEnabled: boolean;
+  maxCalls: number;
+} {
   try {
     const parsed = JSON.parse(readFileSync(join(agentDir, "ptc.json"), "utf8")) as {
       webDsSearch?: unknown;
+      webDsOcr?: unknown;
       searchMaxCalls?: unknown;
     };
     // shortcut: 默认 30/进程沿用旧实现值，未实测校准；0 = 不限
     const maxCalls = typeof parsed.searchMaxCalls === "number" ? parsed.searchMaxCalls : 30;
-    return { enabled: parsed.webDsSearch === true, maxCalls };
+    return {
+      searchEnabled: parsed.webDsSearch === true,
+      ocrEnabled: parsed.webDsOcr === true,
+      maxCalls,
+    };
   } catch {
-    return { enabled: false, maxCalls: 30 };
+    return { searchEnabled: false, ocrEnabled: false, maxCalls: 30 };
   }
 }
 
@@ -531,20 +548,42 @@ function readDeepSeekCredential(agentDir: string): string | null {
   return process.env.DEEPSEEK_API_KEY ?? null;
 }
 
-// 旧 ADR-0032 工具通道 + ADR-0003 搜索：子代理进程里唯一的注册物集合——echo 式报告工具 + 门控的 web_ds_search
+/** 两个开关读一次配置（同一次读，别读两遍） */
+function deepSeekToolSwitches(): { searchEnabled: boolean; ocrEnabled: boolean } {
+  const config = readDeepSeekToolsConfig(getAgentDir());
+  return { searchEnabled: config.searchEnabled, ocrEnabled: config.ocrEnabled };
+}
+
+// 旧 ADR-0032 工具通道 + ADR-0003/0028 搜索与文档识别：子代理进程里唯一的注册物集合
+// ——echo 式报告工具 + 门控的 web_ds_search / doc_ds_ocr
 function registerChildToolsOnly(pi: ExtensionAPI): void {
   const agentDir = getAgentDir();
-  const searchConfig = readWebSearchConfig(agentDir);
+  const config = readDeepSeekToolsConfig(agentDir);
+  // 进程级总护栏：搜索与文档识别共用一份配额
+  const quota = createSearchQuota(config.maxCalls);
   // 注意：开关开但缺 key 时仍注册——调用返回可读错误（ADR-0002 方案 B），描述与启动告警省略
-  if (searchConfig.enabled) {
-    const apiKey = readDeepSeekCredential(agentDir);
-    pi.registerTool(
-      createWebDsSearchTool({
-        provider: createDeepSeekProvider(apiKey ?? "missing-key"),
-        memory: createSearchMemory(),
-        quota: createSearchQuota(searchConfig.maxCalls),
-      }),
-    );
+  // 开关全关时连凭据文件都不读（ADR-0002：父进程不持有一把能开网络出口的 key）
+  if (config.searchEnabled || config.ocrEnabled) {
+    const apiKey = readDeepSeekCredential(agentDir) ?? "missing-key";
+    if (config.searchEnabled) {
+      pi.registerTool(
+        createWebDsSearchTool({
+          provider: createDeepSeekProvider(apiKey),
+          memory: createSearchMemory(),
+          quota,
+        }),
+      );
+    }
+    if (config.ocrEnabled) {
+      pi.registerTool(
+        createDocDsOcrTool({
+          provider: createDeepSeekOcrProvider(apiKey),
+          memory: createSearchMemory(),
+          quota,
+          root: process.cwd(),
+        }),
+      );
+    }
   }
 
   pi.registerTool({

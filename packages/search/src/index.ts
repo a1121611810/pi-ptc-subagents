@@ -13,3 +13,11 @@ export { createSearchMemory, urlsLooselyEqual } from "./memory.ts";
 export type { SearchMemory } from "./memory.ts";
 export { renderSearchOverview, runWebSearch } from "./run.ts";
 export type { SearchAction, SearchRunContext, SearchRunResult } from "./run.ts";
+export {
+  createDeepSeekOcrProvider,
+  renderOcrText,
+  resolveJailed,
+  runOcr,
+  stripOcrMarkup,
+} from "./ocr.ts";
+export type { OcrPage, OcrProvider, OcrResult, OcrRunContext } from "./ocr.ts";
