@@ -7,6 +7,14 @@
 //   ② 锚点唯一性——旧脚本用 split/join 全量替换；这里要求 from 在目标文件里恰好出现一次。
 //   ③ 能力矩阵完整性——孤儿探针（不在登记表里）= 红；每条能力至少一条 mutant。
 //
+// 速度（2026-11-14 实测：快腿四面 96 条 326s → 74s，快 4.4 倍）——三处砍的都是「不碰判定」的开销：
+//   ④ 基线每份探针文件只跑一次（能力 56 条 ⇒ 文件只有 16 份；按能力跑会让同一份文件重复跑几十次）。
+//   ⑤ 每条变异只跑 kills 指定的那一条用例——归属判定只看「那条红没红」，与整文件跑等价；
+//      那条没红就回退整文件（「真存活」与「假杀死」的诊断需要别的用例的失败信息）。
+//      前提：探针的用例彼此独立（每条自己备料）⇒ 单跑与合跑同结果。
+//   ⑥ 不经 pnpm exec / pnpm --filter：bin 路径从包 manifest 解析；收窄重建跑包自己的 build 脚本
+//      （逐字节等价已由 --check-narrow 验过：7 个包通过）。
+//
 // 还原用内存里的原文写回——**不用 git checkout**：仓里有并行会话的未提交改动，不能误伤。
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -19,12 +27,19 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const { capabilitiesFor, problemsFor } = await import(join(ROOT, "tests", "registry.mjs"));
+
+// 直接调 bin，不经 pnpm exec：每条变异都要起一次探针进程，pnpm 的启动开销（≈0.2s）
+// × 100 多次就是半分钟。bin 路径从包自己的 manifest 解析，跟着版本走。
+const require = createRequire(import.meta.url);
+const vitestBin = join(dirname(require.resolve("vitest/package.json")), "vitest.mjs");
+const rootBin = join(ROOT, "node_modules", ".bin");
 
 const args = process.argv.slice(2);
 const only = args.find((a) => !a.startsWith("-"));
@@ -78,7 +93,17 @@ function narrowTargets(pkg) {
 
 function buildPackages(pkgs) {
   for (const pkg of pkgs) {
-    const r = run("pnpm", ["--filter", `@pi-ptc/${pkg}`, "run", "build"]);
+    // 跑包自己的 build 脚本（内容逐字照抄，含 tui/entry/kimi-mcp 的「先清 dist」那一步），
+    // 只把 pnpm 的启动开销省掉——脚本本身与 `pnpm --filter … run build` 完全一致。
+    const dir = join(ROOT, "packages", pkg);
+    const script = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")).scripts.build;
+    const r = run("sh", ["-c", script], {
+      cwd: dir,
+      env: {
+        ...process.env,
+        PATH: `${rootBin}:${join(dir, "node_modules", ".bin")}:${process.env.PATH}`,
+      },
+    });
     if (r.status !== 0) throw new Error(`构建 ${pkg} 失败：\n${r.stdout}\n${r.stderr}`);
   }
   if (pkgs.includes("kimi-mcp")) assembleKimi();
@@ -157,30 +182,37 @@ if (checkNarrow) {
   process.exit(0);
 }
 
-/** 跑一个探针文件，返回失败用例的 fullName 列表 */
-function runProbe(probe) {
+/** 跑一批探针文件，返回失败用例的 fullName 列表（+ 每份文件的失败清单，供诊断） */
+function runProbes(files, nameFilter) {
   const outDir = mkdtempSync(join(tmpdir(), "ptc-mutate-json-"));
   const report = join(outDir, "out.json");
-  const r = run("pnpm", [
-    "exec",
-    "vitest",
-    "run",
-    probe,
-    "--reporter=json",
-    `--outputFile=${report}`,
-  ]);
+  const argv = [vitestBin, "run", ...files, "--reporter=json", `--outputFile=${report}`];
+  if (nameFilter) argv.push("-t", nameFilter);
+  const r = run("node", argv);
   if (!existsSync(report)) {
-    throw new Error(`探针 ${probe} 没产出 JSON 报告：\n${r.stdout}\n${r.stderr}`);
+    // 过滤没命中任何用例时可能不写报告——当「没红」处理，调用方会回退整文件再判
+    if (nameFilter) return { failed: [], perFile: [] };
+    throw new Error(`探针 ${files.join(", ")} 没产出 JSON 报告：\n${r.stdout}\n${r.stderr}`);
   }
   const data = JSON.parse(readFileSync(report, "utf8"));
   const failed = [];
+  const perFile = [];
   for (const file of data.testResults ?? []) {
+    const names = [];
     for (const assertion of file.assertionResults ?? []) {
-      if (assertion.status === "failed") failed.push(assertion.fullName ?? assertion.title ?? "");
+      if (assertion.status === "failed") {
+        const name = assertion.fullName ?? assertion.title ?? "";
+        failed.push(name);
+        names.push(name);
+      }
     }
+    if (names.length > 0) perFile.push({ file: file.name, failed: names });
   }
-  return { failed, success: data.success };
+  return { failed, perFile };
 }
+
+/** kills 是字面子串（归属判定用 includes），vitest 的 -t 吃正则 ⇒ 转义后再传 */
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // 兜底还原：脚本中途崩了也不能把仓留在变异态
 const pending = new Map();
@@ -231,12 +263,13 @@ console.log(`变异清单 ${mutants.length} 条 · 能力 ${selected.length} 条
 
 console.log("基线：未变异时探针必须全绿（红的原因是变异还是本来就红，要分清）");
 buildAll();
-for (const capability of selected) {
-  const { failed } = runProbe(capability.probe);
-  if (failed.length > 0) {
-    console.error(`✗ 基线不绿：${capability.probe}\n  红了：${failed.join(" | ")}`);
-    process.exit(1);
-  }
+// 一份探针文件只跑一次（能力 56 条 ⇒ 探针文件 16 份；旧写法是每条能力跑一遍，同一份文件被重复跑了几十次）
+const probes = [...new Set(selected.map((c) => c.probe))];
+const baseline = runProbes(probes);
+if (baseline.failed.length > 0) {
+  console.error("✗ 基线不绿：");
+  for (const f of baseline.perFile) console.error(`  - ${f.file}：${f.failed.join(" | ")}`);
+  process.exit(1);
 }
 console.log("  基线全绿\n");
 
@@ -261,7 +294,15 @@ for (const m of mutants) {
   try {
     if (targets) buildPackages(targets);
     else buildAll();
-    const { failed } = runProbe(m.probe);
+    // 快路径：只跑 kills 指定的那条用例——归属判定只看「那条红没红」，与整文件跑等价，
+    // 而整文件跑要 0.2–4.6s、只跑一条恒定 0.18s。
+    const byKills = (names) => names.some((name) => name.includes(m.kills));
+    let probeResult = runProbes([m.probe], escapeRe(m.kills));
+    if (!byKills(probeResult.failed)) {
+      // 那条没红 ⇒ 回退整文件：区分「真存活」与「假杀死」的诊断需要别的用例的失败信息
+      probeResult = runProbes([m.probe]);
+    }
+    const { failed } = probeResult;
     if (failed.length === 0) {
       survived.push(m);
       console.log(`  ✗ ${m.id} 存活——探针没抓住这个缺陷：${m.why}`);
