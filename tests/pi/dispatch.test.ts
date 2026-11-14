@@ -10,6 +10,8 @@
 // 假时钟：timeout / stall 两组用 vi.useFakeTimers() 驱动（引擎的定时器在生产语义里是 unref 的，探针不改它）。
 // 假孩子：进程级替身（spawnChild 的 DI 注入点）——自己 ref 真实定时器拽住事件循环，否则 await 窗口里
 // 只剩引擎的 unref 定时器（node 22 判「event loop has already resolved」，CI 22 腿连红两轮的老坑）。
+// 副作用 import：装一份假 pi 到 PATH（见 helpers/pi-harness.ts 的说明）
+import "../helpers/pi-harness.ts";
 import {
   existsSync,
   mkdirSync,

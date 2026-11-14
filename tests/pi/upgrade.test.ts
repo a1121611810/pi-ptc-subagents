@@ -1,6 +1,8 @@
 // 升级提示面（pi）：版本比较 · CHANGELOG 解析 · 要点摘要 · 区间挑选 · 状态哨兵（见过哪一版）
 //                  · TUI 走 widget 区（共享状态槽会被别的扩展顶掉）· entry 层的落点。
 // 探针直接打产物（packages/entry/dist）——仓规：验的是发布物形态。
+// 副作用 import：装一份假 pi 到 PATH（见 helpers/pi-harness.ts 的说明）
+import "../helpers/pi-harness.ts";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";

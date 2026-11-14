@@ -3,6 +3,8 @@
 // 探针直接打产物（packages/search/dist）——仓规：验的是发布物形态。
 // 假绿纪律：每条断言都对着一个**具体行为**——「失败不耗配额」「空结果不耗配额」「记忆命中不重复计费」
 // 这三处是最容易写着写着就假绿的（第一次失败、第二次成功才证明失败没耗配额）。
+// 副作用 import：装一份假 pi 到 PATH（见 helpers/pi-harness.ts 的说明）
+import "../helpers/pi-harness.ts";
 import { createServer } from "node:http";
 import { mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

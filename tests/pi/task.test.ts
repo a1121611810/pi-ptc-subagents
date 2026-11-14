@@ -9,6 +9,8 @@
 // 探针打产物（仓规）：packages/{dispatch,task,entry}/dist/index.js；引擎本体是源码包 ⇒ packages/ptc/src/index.ts。
 // 假孩子：进程级替身（spawnChild 的 DI 注入点）——它没有 stdio 管道，自己 ref 真实定时器拽住事件循环，
 //         否则 await 窗口里只剩引擎的 unref 定时器（node 22 判「event loop has already resolved」）。
+// 副作用 import：装一份假 pi 到 PATH（见 helpers/pi-harness.ts 的说明）
+import "../helpers/pi-harness.ts";
 import { existsSync, mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

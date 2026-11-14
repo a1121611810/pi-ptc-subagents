@@ -82,6 +82,13 @@ export function fakePiOnPath(version: string, body = "exit 0"): () => void {
   };
 }
 
+// import 这个夹具 = PATH 最前放一份假 pi：pi 面探针起 session 时 entry 会问 `pi --version`，
+// 问到真 pi 要付一次真 pi 启动，还会把同一文件里后面的用例一起拖慢（实测：显示层面
+// 9.4s → 0.7s、产物形态面 10.6s → 2.1s）。探针要的是「版本号是多少」，不是「pi 真跑起来」。
+// 版本号 1.5.2 = 本机真 pi 同版本 ⇒ 行为等价；用例级 fakePiOnPath 仍可覆盖它
+// （floor 用例要控版本，自己装的那份更靠前，用例结束后回到这份）。
+fakePiOnPath("1.5.2");
+
 /** 临时工作区（文件四件套的根、jail 边界） */
 export function workDir(prefix = "ptc-work-"): string {
   return mkdtempSync(join(tmpdir(), prefix));
