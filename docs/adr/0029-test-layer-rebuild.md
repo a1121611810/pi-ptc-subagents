@@ -107,6 +107,6 @@ Status: accepted (2026-11-14)。取代「四制（test:pi / test:output / test:k
 
 如实报告（未覆盖）：
 
-- **站点面在 main 上本就红**：落地页门禁 `check-landing-tool-names.mjs` 因 `ptc_progress_update` 注册了却既不在 `MUST_APPEAR` 也不在 `DECLARED_ABSENT`（v7.11.0 / 2026-11-09 引入；站点构建不在 CI ⇒ 一直没被发现）⇒ `--project website` **5 通过 / 3 红**，3 红同源；反事实 harness 自己报「未变异副本上门禁本来就红 ⇒ 这条 case 证不了什么」。按本轮刀口（站点源与产物不动）**未修**，需产品侧二选一：进 `MUST_APPEAR` 并在落地页展示 / 进 `DECLARED_ABSENT` 并写理由。其余 3 条反事实（internal-links / style-scope / projection-coverage）均 ✓ caught。
+- **站点面在 main 上本就红**：落地页门禁 `check-landing-tool-names.mjs` 因 `ptc_progress_update` 注册了却既不在 `MUST_APPEAR` 也不在 `DECLARED_ABSENT`（v7.11.0 / 2026-11-09 引入；CI 的 `website.yml` 每个 PR 都跑这道检查 ⇒ 从 7.11.0 起它就一直红着没人接）⇒ `--project website` **5 通过 / 3 红**，3 红同源；反事实 harness 自己报「未变异副本上门禁本来就红 ⇒ 这条 case 证不了什么」。按本轮刀口（站点源与产物不动）**未修**，需产品侧二选一：进 `MUST_APPEAR` 并在落地页展示 / 进 `DECLARED_ABSENT` 并写理由。其余 3 条反事实（internal-links / style-scope / projection-coverage）均 ✓ caught。
 - **live 面未实跑通**：本机 pi 1.5.2 与扩展都能加载、真机脚本能启动，但 **provider 返回 429「已达到 Token Plan 用量上限」**，pi 自动重试 3 次后放弃 ⇒ 父会话零工具调用，模型继承根本没被测到（**不是模型不配合**）。判据脚本已加 provider 错误的显式归因：provider 不可用时先报它，不再误报成「父没有派发孩子」。按口径 live 不进 CI，进发版人工 checkpoint。
 - **真实 DeepSeek OCR 调用仍未用真 key 跑过**；`rich_layout_recognition` 不在本轮范围。
