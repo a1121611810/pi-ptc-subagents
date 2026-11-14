@@ -88,6 +88,12 @@ const DECLARED_ABSENT = new Map([
       "process, no reader of this package calls it, and the landing page advertises the " +
       "parent-side surface",
   ],
+  [
+    "ptc_progress_update",
+    "the auxiliary channel for reporting progress on a long-running task; the landing page " +
+      "covers ptc_run_code / ptc_workflow / the task surface, and this one is an " +
+      "implementation detail of those rather than a surface of its own",
+  ],
 ]);
 
 /** Recursively list .ts files under a directory. */

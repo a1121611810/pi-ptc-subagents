@@ -7,12 +7,13 @@ const faces = [
   { name: "output", include: ["tests/output/**/*.test.ts"] },
   { name: "kimi", include: ["tests/kimi/**/*.test.ts"] },
   { name: "standalone", include: ["tests/standalone/**/*.test.ts"] },
-  // 站点面要 spawn 反事实 harness（它把工作树整棵拷到临时目录再改）⇒ 单测就是分钟级
+  // 站点面要 spawn 反事实 harness（它把工作树整棵拷到临时目录再改）⇒ 单测就是分钟级。
+  // 「跑全部 4 个 case」那条要拷 8 份工作树 ⇒ 25 分钟上限，别按「一个 case」估。
   {
     name: "website",
     include: ["tests/website/**/*.test.ts"],
-    testTimeout: 900_000,
-    hookTimeout: 900_000,
+    testTimeout: 1_500_000,
+    hookTimeout: 1_500_000,
   },
   // bench 面要 uv run python 跑判分器自检（正例 + 负例各跑一遍）
   {

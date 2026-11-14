@@ -17,6 +17,7 @@ import {
   InMemoryOutputStorage,
   buildPiArgv,
 } from "../packages/dispatch/dist/index.js";
+import { providerFailureFromText } from "./provider-error.mjs";
 
 const MODEL = process.env.PI_SMOKE_MODEL ?? "minimax-cn/MiniMax-M3.1-Flash";
 const piVersion = execFileSync("pi", ["--version"], { encoding: "utf8" }).trim();
@@ -101,8 +102,12 @@ const engine = new TaskEngine({
 
 /** 孩子的原始 stdout（事件流）——产出正文与节表都要从这里读：
  *  DispatchResult.text 是「模型可见的正文」，解析不出正文时会回退成整份 stdout */
+const stdouts = []; // 各场景的孩子 stdout：失败时用来认出 provider 错误（429/限流）
+
 async function rawStdout(run) {
-  return (await output.read(run.taskId)) ?? "";
+  const text = (await output.read(run.taskId)) ?? "";
+  stdouts.push(text);
+  return text;
 }
 
 /** 孩子 stdout 里的 system 消息节表（谁在背什么） */
@@ -157,8 +162,12 @@ function check(name, fn) {
       results.push(`✓ ${name}`);
     })
     .catch((error) => {
-      results.push(`✗ ${name}：${error.message}`);
-      throw error;
+      const providerError = stdouts.map(providerFailureFromText).find(Boolean);
+      const message = providerError
+        ? `provider 不可用，本轮没测到旋钮行为（先解决这个再重跑）：\n  ${providerError.slice(0, 600)}`
+        : error.message;
+      results.push(`✗ ${name}：${message}`);
+      throw new Error(message);
     });
 }
 

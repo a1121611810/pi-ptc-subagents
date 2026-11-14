@@ -14,6 +14,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { providerFailureFromText } from "./provider-error.mjs";
 
 const REPO = fileURLToPath(new URL("..", import.meta.url));
 const EXT = join(REPO, "packages/entry/dist/index.js");
@@ -69,28 +70,6 @@ function childModels(workspace) {
   return out;
 }
 
-/**
- * 父会话是不是被 provider 挡下来了（429 配额 / 限流 / 认证）。
- *
- * 不把它和「模型没派发孩子」分开报，就会把配额问题当成行为问题去查——
- * 实测过：provider 报「已达到 Token Plan 用量上限」，pi 自动重试 3 次后放弃，
- * 父会话零工具调用，于是断言落到了「父没有派发孩子」上，指向了错的方向。
- */
-function providerFailure(events) {
-  for (const event of events) {
-    if (
-      event.type === "auto_retry_start" &&
-      /rate_limit|用量上限|429|quota/i.test(event.errorMessage ?? "")
-    ) {
-      return event.errorMessage;
-    }
-    if (event.type === "turn_end" && event.stopReason === "error") {
-      return event.errorMessage ?? "provider 报错（stopReason=error）";
-    }
-  }
-  return null;
-}
-
 /** 父写下的程序体（要确认里面没有 model 参数——否则测的不是继承） */
 function dispatchedPrograms(events) {
   return events
@@ -114,7 +93,7 @@ function runRound({ label, model }) {
   const children = childModels(workspace);
   const programs = dispatchedPrograms(events);
 
-  const providerError = providerFailure(events);
+  const providerError = providerFailureFromText(stdout);
   assert.ok(
     !providerError,
     `${label}：provider 不可用，本轮没测到模型继承（先解决这个再重跑）：\n  ${providerError.slice(0, 600)}`,

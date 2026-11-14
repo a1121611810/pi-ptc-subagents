@@ -107,6 +107,7 @@ Status: accepted (2026-11-14)。取代「四制（test:pi / test:output / test:k
 
 如实报告（未覆盖）：
 
-- **站点面在 main 上本就红**：落地页门禁 `check-landing-tool-names.mjs` 因 `ptc_progress_update` 注册了却既不在 `MUST_APPEAR` 也不在 `DECLARED_ABSENT`（v7.11.0 / 2026-11-09 引入；CI 的 `website.yml` 每个 PR 都跑这道检查 ⇒ 从 7.11.0 起它就一直红着没人接）⇒ `--project website` **5 通过 / 3 红**，3 红同源；反事实 harness 自己报「未变异副本上门禁本来就红 ⇒ 这条 case 证不了什么」。按本轮刀口（站点源与产物不动）**未修**，需产品侧二选一：进 `MUST_APPEAR` 并在落地页展示 / 进 `DECLARED_ABSENT` 并写理由。其余 3 条反事实（internal-links / style-scope / projection-coverage）均 ✓ caught。
+- **站点面已全绿**（2026-11-14 修）：落地页门禁 `check-landing-tool-names.mjs` 曾因 `ptc_progress_update`（v7.11.0 引入）既不在 `MUST_APPEAR` 也不在 `DECLARED_ABSENT` 而红——CI 的 `website.yml` 每个 PR 都跑这道检查，从 7.11.0 起一直红着没人接。**决定：进 `DECLARED_ABSENT` 并写理由**（它是长任务进展的辅助通道，落地页讲清 `ptc_run_code` / `ptc_workflow` / 任务面三件就够）⇒ 站点五道检查 **5/5 绿**，`--project website` **9 条用例全绿**（984s，分钟级：反事实 harness 每个 case 要整棵拷工作树）。
+- **顺带补上反事实 harness 自己报出的缺口**：第 5 个 gate `check-router-links.mjs` 没有反事实用例，harness 按它的 property 3 把它报成「unproven」——这正是那个 harness 存在的理由 ⇒ 补了 case 与对应探针用例。另修一处超时：探针里 `spawnSync` 自带 300s 上限，把「跑全部 case」那条用例砍在中间（断言收到 null 而不是退出码，看起来像门禁红了）⇒ 放宽到 900s / 1500s。
 - **live 面未实跑通**：本机 pi 1.5.2 与扩展都能加载、真机脚本能启动，但 **provider 返回 429「已达到 Token Plan 用量上限」**，pi 自动重试 3 次后放弃 ⇒ 父会话零工具调用，模型继承根本没被测到（**不是模型不配合**）。判据脚本已加 provider 错误的显式归因：provider 不可用时先报它，不再误报成「父没有派发孩子」。按口径 live 不进 CI，进发版人工 checkpoint。
 - **真实 DeepSeek OCR 调用仍未用真 key 跑过**；`rich_layout_recognition` 不在本轮范围。

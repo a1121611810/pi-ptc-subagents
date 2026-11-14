@@ -45,11 +45,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   kills **96 / 96** fast-face mutants with **0** survivors (bench face 3 / 3
   separately), each kill attributed to the exact case named in its `kills`
   entry; the one-off byte-for-byte narrow-rebuild equivalence check passes for
-  7 packages. Two gaps are reported rather than fixed: the **site** face is
-  already red on `main` (the landing-page gate does not account for
-  `ptc_progress_update`; site sources and artifacts are outside this round's
-  blade), and the **live** face did not pass here (the provider returned 429 —
-  quota exhausted — so the model-inheritance check was never reached).
+  7 packages.
+- **The landing-page gate is green again**: `ptc_progress_update` (registered in
+  v7.11.0, never added to either list) is now declared absent with a reason — it
+  is the auxiliary progress channel for long-running tasks, and the landing
+  page covers `ptc_run_code` / `ptc_workflow` / the task surface. The site's
+  five checks pass again; CI's `website.yml` had been failing on it since
+  v7.11.0.
+- **Real-machine smokes now tell provider errors apart from behaviour**: a new
+  `scripts/provider-error.mjs` recognises a 429 / quota / rate-limit refusal in
+  pi's event stream, so `session-model-smoke`, `knobs-smoke` and
+  `compact-inject-smoke` report "provider unavailable, this round did not
+  measure X" instead of blaming the model for not dispatching a child.
+- The site's counterfactual harness gained the missing case for
+  `check-router-links.mjs` (the fifth gate) — the harness was reporting it as
+  unproven, which is exactly what that harness is for.
 
 ## [7.14.0] - 2026-11-11
 

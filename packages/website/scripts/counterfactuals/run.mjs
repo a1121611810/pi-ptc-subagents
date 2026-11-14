@@ -37,7 +37,7 @@
  *   4. the repository must be unchanged when the run finishes — same paths, same kinds, same
  *      contents, same symlink targets.
  *
- * Property 3 currently has nothing to print: all four gates have a case. It was not written
+ * Property 3 currently has nothing to print: all five gates have a case. It was not written
  * speculatively — this file started with three cases, and the missing ones were what made property 3
  * worth having. Adding a fifth gate to `checks.mjs` by hand and re-running was how it was checked:
  * `no counterfactual yet for: check-fifth.mjs`, as it should be.
@@ -52,7 +52,7 @@
  *     node packages/website/scripts/counterfactuals/run.mjs            # all cases
  *     node packages/website/scripts/counterfactuals/run.mjs <gate>     # one gate
  *
- * The site must have been built — three of the four gates read the build output, and copying a
+ * The site must have been built — three of the five gates read the build output, and copying a
  * missing one would make every case fail for the wrong reason. That is checked up front, by name.
  */
 
@@ -113,6 +113,19 @@ const CASES = [
       const before = read(file);
       write(file, `${before}\n.VPNav { display: none !important; }\n`);
       return 'added an unscoped `.VPNav` override to the landing stylesheet';
+    },
+  },
+  {
+    gate: 'check-router-links.mjs',
+    name: 'an intercepted link resolves to no route',
+    mutate(dir) {
+      const file = join(dir, 'packages', 'website', '.vitepress', 'dist', 'index.html');
+      const before = read(file);
+      // Same-origin, no extension (so the router intercepts it), no bypass attribute
+      // (no target=, no download, no .vp-raw) and not in the route manifest — exactly
+      // the shape that renders a client-side 404 while every static signal stays green.
+      write(file, before.replace('</body>', '<a href="/pi-ptc-subagents/docs/no-such-route">x</a></body>'));
+      return 'added a router-intercepted link to a route that does not exist';
     },
   },
   {

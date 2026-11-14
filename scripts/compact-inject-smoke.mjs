@@ -19,6 +19,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { providerFailureFromEvent } from "./provider-error.mjs";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const REPO_ROOT = join(HERE, "..");
@@ -100,6 +101,7 @@ const send = (obj) => proc.stdin.write(JSON.stringify(obj) + "\n");
 let settled = 0;
 let compacted = false;
 let asked = false;
+let providerError = null;
 const steps = [];
 
 proc.stdout.on("data", (d) => {
@@ -111,6 +113,7 @@ proc.stdout.on("data", (d) => {
     } catch {
       continue;
     }
+    providerError = providerError ?? providerFailureFromEvent(msg);
     if (msg.type === "agent_settled") {
       settled += 1;
       steps.push(`settled#${settled}`);
@@ -151,6 +154,11 @@ setTimeout(() => {
   );
   if (!compacted || !compactEvent || !injected) {
     console.log(`失败细节：failed=${failed ? "有" : "无"} settled=${settled} asked=${asked}`);
+    if (providerError) {
+      console.log(
+        `provider 不可用，本轮没测到压缩重注入（先解决这个再重跑）：\n  ${providerError.slice(0, 600)}`,
+      );
+    }
     process.exit(1);
   }
   process.exit(0);

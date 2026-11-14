@@ -11,11 +11,16 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const GATE_DIR = join(ROOT, "packages", "website", "scripts");
 const SITE_DIST = join(ROOT, "packages", "website", ".vitepress", "dist");
 
+// 反事实 harness 每次把工作树整棵拷进临时目录（一份 3 GB 级拷贝要几十秒）⇒
+// 跑全部 4 个 case 远超 5 分钟。spawnSync 自带 300s 超时会把进程砍在中间，
+// 断言收到的是 null（不是退出码）——那是超时，不是门禁红了。
+const GATE_TIMEOUT_MS = 900_000;
+
 function gate(script: string, args: string[] = []) {
   const run = spawnSync(process.execPath, [join(GATE_DIR, script), ...args], {
     cwd: ROOT,
     encoding: "utf8",
-    timeout: 300_000,
+    timeout: GATE_TIMEOUT_MS,
   });
   return { code: run.status, out: ((run.stdout ?? "") + (run.stderr ?? "")).trim() };
 }
@@ -33,7 +38,7 @@ it("五个 gate 全绿：投影覆盖 / 落地页工具名 / 内部链接 / 样�
   const run = spawnSync(process.execPath, [join(GATE_DIR, "run-checks.mjs")], {
     cwd: ROOT,
     encoding: "utf8",
-    timeout: 300_000,
+    timeout: GATE_TIMEOUT_MS,
   });
   expect(run.status, "gate 红了：\n" + (run.stdout ?? "") + (run.stderr ?? "")).toBe(0);
 });
@@ -58,6 +63,11 @@ it("反事实·样式作用域：造一条越界的样式，门禁必须红", ()
   expect(run.code, "反事实没成立（门禁已经没牙了）：\n" + run.out).toBe(0);
 }, 900_000);
 
+it("反事实·路由链接：造一个不在路由表里的链接，门禁必须红", () => {
+  const run = gate("counterfactuals/run.mjs", ["check-router-links.mjs"]);
+  expect(run.code, "反事实没成立（门禁已经没牙了）：\n" + run.out).toBe(0);
+}, 900_000);
+
 it("反事实·投影覆盖：造一份没人投影的文档，门禁必须红", () => {
   const run = gate("counterfactuals/run.mjs", ["check-projection-coverage.mjs"]);
   expect(run.code, "反事实没成立（门禁已经没牙了）：\n" + run.out).toBe(0);
@@ -69,4 +79,4 @@ it("反事实清单全覆盖：没有哪个 gate 缺反事实用例", () => {
   expect(run.out, "有 gate 没有反事实用例（这是缺口，不是通过）：\n" + run.out).not.toContain(
     "no counterfactual yet for",
   );
-}, 900_000);
+}, 1_500_000);
