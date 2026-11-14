@@ -5,6 +5,9 @@ export default {
       id: "site.gates",
       face: "website",
       probe: "tests/website/site-gates.test.ts",
+      // 这份探针会调反事实 harness，它对**真实工作树**取摘要（性质 4：跑完必须与跑之前逐字节相同）
+      // ⇒ 别的探针并发写工作树就会让它红。标成 alone：基线里它必须单独跑（2026-11-14 踩到过）。
+      alone: true,
       mutants: [
         {
           id: "site.gates.invented-tool-allowed",

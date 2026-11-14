@@ -44,12 +44,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now its own probe file, so `vitest` runs it in parallel).
 - **The mutation gate is 4.4x faster** — the fast faces (96 mutants) went
   from 326s to 74s without weakening a single judgment: the baseline now
-  runs each probe file once instead of once per capability, each mutant
+  runs each probe file once instead of once per capability (probes marked
+  `alone` — the site counterfactual harness digests the real working tree —
+  still run on their own), each mutant
   runs only the case named in its `kills` entry (the attribution verdict is
   unchanged; the full file is still run when that case stays green), and the
   runner calls the `vitest` / `rolldown` binaries directly instead of going
   through `pnpm`. The old gate checked 21 mutants, all on two OCR/Kimi probes —
   the extra wall clock was four times as much work, not slower judging.
+- **The full mutation gate passes end to end**: `node scripts/mutate.mjs --all`
+  (102 mutants / 58 capabilities / all eight faces) kills **102 / 102** with
+  **0** survivors in 17m33s, including the three site-gate counterfactuals.
 - **CI**: the existing `check` job keeps its three Node legs (22 / 24 / 26)
   and a new `mutations` job (Node 24) runs the mutation gate over the fast
   faces. The `site`, `bench` and `live` faces stay out of CI — they were

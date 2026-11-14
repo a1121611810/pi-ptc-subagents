@@ -263,13 +263,22 @@ console.log(`变异清单 ${mutants.length} 条 · 能力 ${selected.length} 条
 
 console.log("基线：未变异时探针必须全绿（红的原因是变异还是本来就红，要分清）");
 buildAll();
-// 一份探针文件只跑一次（能力 56 条 ⇒ 探针文件 16 份；旧写法是每条能力跑一遍，同一份文件被重复跑了几十次）
-const probes = [...new Set(selected.map((c) => c.probe))];
-const baseline = runProbes(probes);
-if (baseline.failed.length > 0) {
-  console.error("✗ 基线不绿：");
-  for (const f of baseline.perFile) console.error(`  - ${f.file}：${f.failed.join(" | ")}`);
-  process.exit(1);
+// 一份探针文件只跑一次（能力 56 条 ⇒ 探针文件 16 份；旧写法是每条能力跑一遍，同一份文件被重复跑了几十次）。
+// ⚠️ 标了 alone 的探针必须**单独跑**：站点反事实 harness 会对真实工作树取摘要（性质 4：跑完必须与
+// 跑之前逐字节相同），别的探针并发写工作树就会让它红——并行跑过一次，基线就是这么红的（2026-11-14）。
+const aloneProbes = [...new Set(selected.filter((c) => c.alone).map((c) => c.probe))];
+const groupProbes = [...new Set(selected.filter((c) => !c.alone).map((c) => c.probe))];
+for (const [label, probes] of [
+  ["（并行）", groupProbes],
+  ...aloneProbes.map((p) => [`${p}（单独）`, [p]]),
+]) {
+  if (probes.length === 0) continue;
+  const { failed, perFile } = runProbes(probes);
+  if (failed.length > 0) {
+    console.error(`✗ 基线不绿：${label}`);
+    for (const f of perFile) console.error(`  - ${f.file}：${f.failed.join(" | ")}`);
+    process.exit(1);
+  }
 }
 console.log("  基线全绿\n");
 
