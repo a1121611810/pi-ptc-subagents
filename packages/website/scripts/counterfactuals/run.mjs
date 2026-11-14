@@ -218,8 +218,22 @@ function treeDigest(dir, ignore = new Set()) {
  * `.codegraph` holds the local codegraph index and a live daemon socket (`daemon.sock`); copying
  * a socket trips cpSync ("Unreachable code"), and its log/db files change while a run is in
  * progress, which would falsely trip property 4. None of it is source a gate could police.
+ * `bench/ab` is the same kind of thing with a bigger bill: it holds the grader's fixtures plus
+ * **untracked experiment data (3 GB)** that no site gate reads (the five gates read `packages/`
+ * and the built site only). Copying it cost 23.5s per copy and digesting it 6.4s — per case the
+ * harness makes two copies, so it was paying ~36s of pure I/O tax on data no gate could police
+ * (2026-11-15 实测：整棵拷贝 23.5s → 0.28s，摘要 6.4s → 0.27s）。Pruning it also stops a
+ * parallel session writing experiment data into `bench/ab` from falsely tripping property 4.
  */
 const SKIP_COPY = new Set(['.git', 'node_modules', 'coverage', '.pnpm-store', '.codegraph']);
+
+/**
+ * 路径前缀（不是目录名）：拷贝时整棵剪掉。`bench/ab` 里是判分器的 fixtures 加上
+ * **未跟踪的实验数据（3 GB）**，站点 gate 一个都不读（五个 gate 只读 `packages/` 与站点产物）
+ * ——拷贝它要 23.5s、摘要它要 6.4s，而每条 case 要拷两遍 ⇒ 纯 I/O 税 ~36s/条
+ * （2026-11-15 实测）。剪掉它还顺手断掉「并行会话往 bench/ab 写数据 ⇒ 性质 4 误报」这条路。
+ */
+const SKIP_COPY_PATHS = ['bench/ab'];
 
 /**
  * A throwaway copy of **your working tree**.
@@ -241,7 +255,11 @@ function makeWorkdir() {
     cpSync(REPO_ROOT, dir, {
       recursive: true,
       dereference: false,
-      filter: (src) => !SKIP_COPY.has(basename(src)),
+      filter: (src) => {
+        if (SKIP_COPY.has(basename(src))) return false;
+        const rel = relative(REPO_ROOT, src).split(sep).join('/');
+        return !SKIP_COPY_PATHS.some((p) => rel === p || rel.startsWith(`${p}/`));
+      },
     });
   } catch (error) {
     // A copy that half-succeeded is worse than none: it would look like a clean starting point.
@@ -300,8 +318,19 @@ if (missing.length > 0) {
   process.exit(1);
 }
 
-/** Pruned when hashing the real repository; see `treeDigest` for why `.git` is only half-pruned. */
-const REPO_SCAN_IGNORE = new Set(['node_modules', 'coverage', '.pnpm-store', '.codegraph', '.git/objects']);
+/**
+ * Pruned when hashing the real repository; see `treeDigest` for why `.git` is only half-pruned.
+ * `bench/ab` for the same reason as `SKIP_COPY`: untracked experiment data (3 GB) no site gate
+ * reads, and a parallel session writing into it would otherwise falsely trip property 4.
+ */
+const REPO_SCAN_IGNORE = new Set([
+  'node_modules',
+  'coverage',
+  '.pnpm-store',
+  '.codegraph',
+  '.git/objects',
+  'bench/ab',
+]);
 
 const before = treeDigest(REPO_ROOT, REPO_SCAN_IGNORE);
 let failed = 0;

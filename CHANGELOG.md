@@ -54,7 +54,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the extra wall clock was four times as much work, not slower judging.
 - **The full mutation gate passes end to end**: `node scripts/mutate.mjs --all`
   (102 mutants / 58 capabilities / all eight faces) kills **102 / 102** with
-  **0** survivors in 16m27s, including the three site-gate counterfactuals.
+  **0** survivors in 1m40s, including the three site-gate counterfactuals.
+- **The site counterfactual harness stopped copying 3 GB it never reads**: `bench/ab`
+  holds the grader's fixtures plus untracked experiment data that no site gate touches
+  (the five gates read `packages/` and the built site only), yet every counterfactual
+  case copied the whole tree twice and digested it three times. Pruning `bench/ab` from
+  the copy and the digest takes the tree copy from 23.5s to 0.28s and the digest from
+  6.4s to 0.27s: the harness's five cases go from ~12min to 5.25s, the site probe's nine
+  cases from 984s to 13.7s, and the full mutation gate from 16m26s to **1m40s** (still
+  102 / 102 killed, 0 survivors). No verdict changes — every gate still reports the same
+  thing, and the harness's own "the unmutated copy must be green" check would have
+  shouted if pruning had changed one.
 - **CI**: the existing `check` job keeps its three Node legs (22 / 24 / 26)
   and a new `mutations` job (Node 24) runs the mutation gate over the fast
   faces. The `site`, `bench` and `live` faces stay out of CI — they were
