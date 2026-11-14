@@ -109,7 +109,7 @@ Status: accepted (2026-11-14)。取代「四制（test:pi / test:output / test:k
   ③ **不经 `pnpm exec` / `pnpm --filter`**（bin 路径从包 manifest 解析；收窄重建改跑包自己的 build 脚本，与根构建逐字节等价已由 `--check-narrow` 验过：7 个包通过）
   ⚠️ **旧门禁只有 21 条 mutant**（全在 OCR/Kimi 两份探针上），新门禁 96 条 ⇒ 慢的主因是**活变多 4.6 倍**，不是判定变慢。
 - **能力矩阵自检**：`problemsFor("all")` 与 `problemsFor("fast")` 均 **0 条问题** ⇒ 58 能力 / 102 条 mutant / 17 份能力探针（另 5 份 live 额外探针，实测共 22 份探针文件，比 §5 预估的 12–15 份多——按面并行分工时拆得比预估细，能力覆盖与归属判据不受影响）。
-- **变异门禁全杀**：`node scripts/mutate.mjs`（快腿四面 96 条 mutant）⇒ **杀死 96 / 96、存活 0**，每条都由 `kills` 指定的那条用例杀死（无假杀死）。另单独验 `node scripts/mutate.mjs bench` ⇒ **3/3 全杀**。**全量 `node scripts/mutate.mjs --all`（102 条 / 58 能力 / 八面）⇒ 杀死 102 / 102、存活 0，17m33s**（含 website 面 3 条反事实：落地页工具名 / 内部链接 / 投影覆盖）。
+- **变异门禁全杀**：`node scripts/mutate.mjs`（快腿四面 96 条 mutant）⇒ **杀死 96 / 96、存活 0**，每条都由 `kills` 指定的那条用例杀死（无假杀死）。另单独验 `node scripts/mutate.mjs bench` ⇒ **3/3 全杀**。**全量 `node scripts/mutate.mjs --all`（102 条 / 58 能力 / 八面）⇒ 杀死 102 / 102、存活 0，16m27s**（含 website 面 3 条反事实：落地页工具名 / 内部链接 / 投影覆盖）。
 - **收窄重建等价**：一次性逐字节等价校验（完整 sha256 指纹 + 双向文件集比对）⇒ **7 个包通过**，§1.6 的安全阀成立，未触发退回全量根构建。
 - **负向自检**：把任一 mutant 的 `to` 改回 `from` ⇒ 报「变异无效」而不是「杀死」。行为等价的变异（把 `> 0` 改成 `>= 0` 而判定处本就用 `timeoutMs ?` ⇒ 0 早已 falsy）**已识别并换成真会改行为的锚点**，重跑 3/3 全杀。
 - **旧层清点**：37 份已跟踪旧探针 + 1 份未跟踪旧探针 + `scripts/mutation-check.mjs` 已删；判据脚本逐项仍在（import 门禁 / 站点 6 gate + 反事实 harness / 判分器自检 / 五条真机冒烟 / Kimi 正确性矩阵），且新层里有对应的调用型探针。

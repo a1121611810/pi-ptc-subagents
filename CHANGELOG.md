@@ -54,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the extra wall clock was four times as much work, not slower judging.
 - **The full mutation gate passes end to end**: `node scripts/mutate.mjs --all`
   (102 mutants / 58 capabilities / all eight faces) kills **102 / 102** with
-  **0** survivors in 17m33s, including the three site-gate counterfactuals.
+  **0** survivors in 16m27s, including the three site-gate counterfactuals.
 - **CI**: the existing `check` job keeps its three Node legs (22 / 24 / 26)
   and a new `mutations` job (Node 24) runs the mutation gate over the fast
   faces. The `site`, `bench` and `live` faces stay out of CI — they were
