@@ -1,7 +1,6 @@
 // Kimi 面的运行时三件事：采用率闸门（PreToolUse 拦截）/ 插件自带新版探测（UserPromptSubmit hook）/ server 正确性矩阵。
 // 前两件是插件自带的两个 hook 脚本（scripts/ 下，发布物里在 release/kimi/），第三件调用判据脚本本身——
 // 判据不重写：spawn 判据脚本，断言退出码与关键输出。
-import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,42 +13,12 @@ import {
   RunDetector,
   classifyTool,
 } from "../../scripts/lib/tool-shape.mjs";
+import { runScript } from "../helpers/run-script.ts";
 
 const NUDGE = fileURLToPath(new URL("../../scripts/kimi-nudge.mjs", import.meta.url));
 const VERSION_CHECK = fileURLToPath(
   new URL("../../scripts/kimi-version-check.mjs", import.meta.url),
 );
-const BENCH = fileURLToPath(new URL("../../scripts/kimi-bench.mjs", import.meta.url));
-
-interface Run {
-  code: number;
-  stdout: string;
-  stderr: string;
-}
-
-function runScript(script: string, env: Record<string, string>, stdin?: string): Promise<Run> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [script], {
-      stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, ...env },
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => {
-      stdout += String(chunk);
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += String(chunk);
-    });
-    child.on("error", reject);
-    child.on("close", (code) => resolve({ code: code ?? -1, stdout, stderr }));
-    if (stdin === undefined) child.stdin.end();
-    else {
-      child.stdin.write(stdin);
-      child.stdin.end();
-    }
-  });
-}
 
 // ---- 采用率闸门 ----
 
@@ -307,11 +276,3 @@ it("插件根没有 manifest：静默退出", async () => {
   const out = await runScript(VERSION_CHECK, { KIMI_PLUGIN_ROOT: root, KIMI_CODE_HOME: home });
   expect(out.stdout).toBe("");
 });
-
-// ---- server 正确性矩阵（判据脚本原地保留，这里只调用它） ----
-
-it("判据脚本：kimi-bench 正确性矩阵全过（退出码 0 + 0 硬失败）", async () => {
-  const out = await runScript(BENCH, {});
-  expect(out.code, `bench 退出码 ${out.code}；stderr：${out.stderr.slice(0, 800)}`).toBe(0);
-  expect(out.stdout).toMatch(/压测结论：\d+ 项通过，0 硬失败/);
-}, 300_000);

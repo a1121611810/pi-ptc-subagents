@@ -177,7 +177,7 @@ export default {
     {
       id: "kimi-server-correctness",
       face: "kimi",
-      probe: "tests/kimi/runtime.test.ts",
+      probe: "tests/kimi/server-correctness.test.ts",
       mutants: [
         {
           id: "kimi-server-correctness.jail-disabled",
