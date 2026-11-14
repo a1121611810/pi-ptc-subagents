@@ -31,6 +31,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   four fast faces plus the artifact import gate; `pnpm run test:site`,
   `test:bench` and `test:live` are separate commands, and a missing
   dependency fails loudly instead of skipping.
+- **The test suite is not slower than the layer it replaced** — measured
+  back-to-back on the same machine (the old `node:test` probes were restored
+  into a scratch directory for the comparison): **4.8s** for the old layer
+  (274 cases) vs **5.6s** for the Vitest layer (341 cases plus the artifact
+  import gate), i.e. `+0.8s` for `+25%` cases and the Kimi correctness matrix
+  the old layer never ran. Two real causes were found and fixed: the probes
+  used to spawn the **real `pi`** on `PATH` (the version probe pays for a real
+  `pi` startup and drags the rest of its file down — the shared fixture now
+  installs a fake `pi` at `1.5.2`, the same version as the local `pi`), and the
+  8-second Kimi matrix used to share a file with the rest of its face (it is
+  now its own probe file, so `vitest` runs it in parallel).
 - **CI**: the existing `check` job keeps its three Node legs (22 / 24 / 26)
   and a new `mutations` job (Node 24) runs the mutation gate over the fast
   faces. The `site`, `bench` and `live` faces stay out of CI — they were
@@ -40,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `vitest@^5.1.0` as the only new direct dependency (its `vite@8` pulls
   `rolldown ~1.2.18`, already in this repository's tree).
-- **Verified baseline (2026-11-14)**: `pnpm test` → 15 probe files / 341 cases
+- **Verified baseline (2026-11-14)**: `pnpm test` → 16 probe files / 341 cases
   green (four fast faces plus the artifact import gate); the mutation gate
   kills **96 / 96** fast-face mutants with **0** survivors (bench face 3 / 3
   separately), each kill attributed to the exact case named in its `kills`

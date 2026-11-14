@@ -1,6 +1,7 @@
-// Kimi 面的运行时三件事：采用率闸门（PreToolUse 拦截）/ 插件自带新版探测（UserPromptSubmit hook）/ server 正确性矩阵。
-// 前两件是插件自带的两个 hook 脚本（scripts/ 下，发布物里在 release/kimi/），第三件调用判据脚本本身——
-// 判据不重写：spawn 判据脚本，断言退出码与关键输出。
+// Kimi 面的运行时两件事：采用率闸门（PreToolUse 拦截）/ 插件自带新版探测（UserPromptSubmit hook）。
+// 两件都是插件自带的 hook 脚本（scripts/ 下，发布物里在 release/kimi/）。
+// server 正确性矩阵那条判据脚本已单独成文件（kimi/server-correctness.test.ts）——它自己 4.5 秒，
+// 与本文件的用例塞在一起会拖住整面墙钟。
 import { createServer } from "node:http";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
