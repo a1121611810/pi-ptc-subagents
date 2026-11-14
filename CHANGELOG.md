@@ -48,8 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   7 packages. Two gaps are reported rather than fixed: the **site** face is
   already red on `main` (the landing-page gate does not account for
   `ptc_progress_update`; site sources and artifacts are outside this round's
-  blade), and the **live** face did not pass here (the real model did not
-  dispatch a child).
+  blade), and the **live** face did not pass here (the provider returned 429 —
+  quota exhausted — so the model-inheritance check was never reached).
 
 ## [7.14.0] - 2026-11-11
 
