@@ -35,9 +35,9 @@ Status: accepted (2026-11-14)。沿用 [ADR-0003](./0003-the-search-lives-in-the
 
 **4. 路径必须 jail，两层判。** `file` 是本地文件、路径由模型给 ⇒ 先按字面判（`..` 越界立刻拒，即便文件不存在），再按 realpath 判（软链指向外部也拒）。**这一条不可砍**：它是「模型能让本机把任意文件发到外部」的那道门。
 
-**5. 归约口径。** 官方逐页识别会带版面标记 `<｜ref｜>`（包裹正文）与 `<｜box｜>[[…]]<｜box｜>`（坐标）⇒ **剥标记不剥字**（把 `<ref>` 连同它包的正文一起删掉 = 丢识别结果，探针抓过这个 bug）。逐页给正文；模型可见预算 12,000 字符（与搜索共用一个额度），超了**整页丢弃**并明说省略了哪些；官方 `finish_reason: "length"` 的页（该页被官方按页截断、文本不完整）**必须明说**。
+**5. 归约口径。** 官方逐页识别会带版面标记 `<｜ref｜>`（包裹正文）与 `<｜box｜>[[…]]<｜box｜>`（坐标）⇒ **剥标记不剥字**（把 `<ref>` 连同它包的正文一起删掉 = 丢识别结果，探针抓过这个 bug）。逐页给正文；模型可见预算 12,000 字符（与搜索共用一个额度），超了**整页丢弃**并明说省略了哪些；官方 `finish_reason: "length"` 的页（该页被官方按页截断、文本不完整）**必须明说**；官方**没识别出正文**（页在但正文空 / 一页没给）**同样必须明说**——不说，模型分不清「官方没识别出来」与「这份文档本来就是空白页」。机器可读通道（pi 面的 `outputSchema`/`structuredContent`）另带一个 `recognized` 布尔：**页数说不了「正文为空」这件事**——`pages: 1` 既可能是「识别了 1 页」，也可能是「官方返回了 1 个空页」。
 
-**6. 记忆：同一份文件不重复计费。** 按 realpath 做键存归约后的文本；命中即免费返回（并标 `cached`）。
+**6. 记忆：同一份文件不重复计费。** 按 realpath 做键存归约后的文本；命中即免费返回（并标 `cached`）。**没识别出正文的结果不入记忆**——一次失败不该被固化成「这份文件就是空的」；代价是同一份空白文档反复识别会反复请求官方、反复计费（代码里以 `shortcut:` 注释标了这个上限与升级条件）。
 
 **7. 双通道「二选一」写进工具描述。** 官方 2026-11-13 起 **deepseek-flash 也支持** `deepseek_web_search` / `deepseek_read_url`（旧 ADR-0001 Alternatives 表里写的「仅 deepseek-v4-pro」**已过期**）。孩子跑 DeepSeek 模型且开了服务端搜索时，再用本仓的 `web_ds_search` / `doc_ds_ocr` 就是重复检索 + 重复计费 ⇒ 两个工具的描述各带一句「模型自带联网搜索时别用它」。
 
@@ -71,7 +71,8 @@ Status: accepted (2026-11-14)。沿用 [ADR-0003](./0003-the-search-lives-in-the
 - Kimi 面：`tests/kimi/mcp-protocol.test.mjs` 工具表 2 → 3；`tests/kimi/kimi-registry-gates.test.mjs` 新增 K3b（缺 path/workdir 拒、越界路径在发请求前被拒）与 K5（工具名与事实钉死）。
 - **新框架下的归属（ADR-0029，2026-11-14）**：本篇的探针与变异随全仓测试层重写搬进 Vitest 5.1.0——OCR 能力（`ocr-core` / `entry-gates`）进能力矩阵 `tests/registry/`，探针打 `packages/search/dist` 与 `packages/entry/dist` 的**产物**；上面的 21 条变异并入登记表，判据从「红了就算杀死」升级为「**红的必须就是 `kills` 指定的那条用例**」（别的用例红 = 假杀死 = 不计杀、判红）。旧探针路径（`tests/kimi/mcp-protocol.test.mjs` 等）已随载体删除而失效，判据本身（工具表形状、jail 双层判、预算整页丢弃、记忆免重复计费）一条未丢。
 - 四件套（tsrs / rolldown / oxlint / oxfmt）全绿；产物 import 门禁绿。
-- **未验证**：未用真 DeepSeek key 跑过一次真实 OCR（接口契约全部来自官方文档）。
+- **官方链路实测（2026-11-15）**：用真 DeepSeek key 跑过真实 OCR——官方 `POST /v1/tools/ocr` 返回 200（2.3s），产品层 `runOcr` 与官方逐字一致；多模态模型对扫描件会主动调 `doc_ds_ocr`、有文本层时理性不调。
+- **空正文修复的验证（2026-11-15）**：产品改动在 `packages/search/src/ocr.ts`（一个私有谓词 `hasRecognizedText` 同时驱动「告不告知」「入不入记忆」「机器通道的 `recognized` 字段」）与 `packages/entry/src/doc-ds-ocr-tool.ts`（`outputSchema`/`structuredContent` 多一个布尔）。① 探针 `tests/pi/ocr.test.ts` 14/14（三条新用例：两种形态都要明说 + 正常正文不含告知语 + 记忆不命中 + 机器通道的 `recognized` 对不对）。② 变异门禁全量 **110 / 110 全杀、0 存活**（新增三条 mutant：记忆守卫退回旧口径「有没有页」、告知语被吞、`recognized` 恒为 true）。③ 真机两腿全绿（`scripts/ocr-smoke.mjs`：pi 1.5.2 真子代理腿 + Kimi 真 MCP 腿；官方端点换成本地假响应 ⇒ 假官方被命中 1 / 2 次，Kimi 第二次仍重新请求官方 ⇒ 该形态确实没入记忆）。
 
 ## See also
 

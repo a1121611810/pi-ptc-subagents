@@ -99,6 +99,24 @@ it("runOcr：同一份文件第二次走记忆（不再发请求、不再占配�
   expect(second.ok && second.text).toMatch(/记忆命中/);
 });
 
+it("机器通道要说清有没有识别出正文（recognized：页数说不了「正文为空」这件事）", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ptc-ocr-recognized-"));
+  writeFileSync(join(root, "a.pdf"), "x");
+  writeFileSync(join(root, "b.pdf"), "x");
+  const context = (provider: ReturnType<typeof fakeProvider>) => ({
+    provider,
+    memory: createSearchMemory(),
+    quota: createSearchQuota(5),
+    root,
+  });
+
+  const empty = await runOcr("a.pdf", context(fakeProvider([{ index: 0, text: "" }])));
+  expect(empty.ok && empty.recognized, "没识别出正文 ⇒ recognized 必须是 false").toBe(false);
+
+  const withText = await runOcr("b.pdf", context(fakeProvider([{ index: 0, text: "正文" }])));
+  expect(withText.ok && withText.recognized, "识别出正文 ⇒ recognized 必须是 true").toBe(true);
+});
+
 it("runOcr：配额用尽就拒（进程级总护栏），越界路径在发请求前就被拒", async () => {
   const root = mkdtempSync(join(tmpdir(), "ptc-ocr-quota-"));
   writeFileSync(join(root, "a.pdf"), "x");
@@ -257,4 +275,53 @@ it("provider：HTTP 200 但 body 是错误对象时，按失败返回（官方�
   } finally {
     server.close();
   }
+});
+
+it("官方没识别出正文时必须明说（页在正文空 / 一页没给）", () => {
+  // 形态一：页在但正文空（官方偶发的形态）
+  const emptyPage = renderOcrText(
+    { pageCount: 1, pages: [{ index: 0, text: "" }] },
+    SEARCH_TEXT_BUDGET_CHARS,
+    "a.pdf",
+  );
+  expect(emptyPage).toMatch(/没识别出正文/);
+  // 告知语独立成行、页标题仍在（告知语挤进标题行也算绿 ⇒ 两行都要钉）
+  const emptyLines = emptyPage.split("\n");
+  expect(emptyLines).toContain("--- 第 1 页 ---");
+  expect(emptyLines.filter((line) => line.includes("没识别出正文")).length).toBe(1);
+  // 形态二：一页没给（零页）同款告知
+  expect(renderOcrText({ pageCount: 0, pages: [] }, SEARCH_TEXT_BUDGET_CHARS, "b.pdf")).toMatch(
+    /没识别出正文/,
+  );
+  // 正常正文不得带这句（无脑告知语也绿 ⇒ 反向钉）
+  expect(
+    renderOcrText(
+      { pageCount: 1, pages: [{ index: 0, text: "正文" }] },
+      SEARCH_TEXT_BUDGET_CHARS,
+      "c.pdf",
+    ),
+  ).not.toMatch(/没识别出正文/);
+});
+
+it("没识别出正文不入记忆（一次失败不该被固化成永久结论）", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ptc-ocr-empty-text-"));
+  writeFileSync(join(root, "a.pdf"), "x");
+  const provider = fakeProvider([{ index: 0, text: "" }]);
+  const context = {
+    provider,
+    memory: createSearchMemory(),
+    quota: createSearchQuota(5),
+    root,
+  };
+
+  const first = await runOcr("a.pdf", context);
+  expect(first.ok).toBe(true);
+  expect(provider.calls, "第一次该真的请求了官方").toBe(1);
+  // runOcr 层也走了归约（只测 renderOcrText 的话改错层也绿）
+  expect(first.ok && first.text).toMatch(/没识别出正文/);
+
+  // 不入记忆 ⇒ 第二次仍请求官方。证据是 provider.calls：cached 默认就是 false，只断言它会假绿。
+  const second = await runOcr("a.pdf", context);
+  expect(provider.calls, "没识别出正文不该进记忆 ⇒ 第二次仍该请求官方").toBe(2);
+  expect(second.ok && second.cached, "第二次不该是记忆命中").toBe(false);
 });

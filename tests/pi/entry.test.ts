@@ -239,6 +239,7 @@ it("文档识别工具的成功结果兑现 structuredContent（outputSchema 说
     pages: 1,
     truncated: false,
     cached: false,
+    recognized: true,
   });
 });
 

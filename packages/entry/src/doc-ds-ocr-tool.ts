@@ -16,6 +16,7 @@ export const DOC_DS_OCR_OUTPUT = Type.Object({
   pages: Type.Integer(),
   truncated: Type.Boolean(),
   cached: Type.Boolean(),
+  recognized: Type.Boolean(),
 });
 
 export type DocDsOcrParams = Static<typeof DOC_DS_OCR_PARAMETERS>;
@@ -44,6 +45,7 @@ export function createDocDsOcrTool(context: OcrRunContext) {
         pages: result.pages,
         truncated: result.truncated,
         cached: result.cached,
+        recognized: result.recognized,
       };
       return {
         content: [{ type: "text", text: result.text }],

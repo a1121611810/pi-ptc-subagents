@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The official DeepSeek OCR tool no longer reports "nothing was recognised" as
+  a success.** The official endpoint sometimes answers HTTP 200 while
+  recognising no text at all (the page list comes back, but every page body is
+  empty — or no page comes back at all). The rendered result now says so
+  explicitly, with a trailing notice
+  (`（官方没识别出正文——可能是空白页、扫描件识别失败或格式不支持；可重试）`).
+  Before, the model only saw a bare page header with an empty body and could
+  not tell "the official did not recognise anything" apart from "this document
+  really is a blank page".
+- **A failed recognition is no longer memorised.** The OCR memory guard used
+  to key on "did the official return any page", so a page list with empty
+  bodies was cached: the next request for the same file hit the memory and
+  never asked the official again, turning one transient failure into a
+  permanent conclusion. The guard now uses the same predicate as the notice
+  (does any page carry recognised text), so such a result is neither cached
+  nor reported as recognised. The quota release is unchanged — the official did
+  bill that request.
+- **The OCR tool's machine-readable channel now says whether anything was
+  recognised.** `structuredContent` carries a `recognized` boolean next to the
+  page counts: `pages: 1` cannot tell "one page of text" apart from "the
+  official returned one empty page".
+
 ## [7.15.0] - 2026-11-15
 
 ### Changed

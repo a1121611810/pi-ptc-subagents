@@ -31,5 +31,11 @@ export default {
       probe: "tests/live/kimi-smoke.test.ts",
       exempt: "真机面：需要 release/kimi 装配产物 + 真机，没有确定性锚点可注入",
     },
+    {
+      id: "live.ocr-smoke",
+      face: "live",
+      probe: "tests/live/ocr-smoke.test.ts",
+      exempt: "真机面：需要真 pi + 真模型 + release/kimi 装配产物，没有确定性锚点可注入",
+    },
   ],
 };

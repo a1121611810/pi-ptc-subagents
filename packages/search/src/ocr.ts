@@ -22,6 +22,8 @@ export type OcrRunResult =
       truncated: boolean;
       /** 记忆命中（未发请求） */
       cached: boolean;
+      /** 官方是否真的识别出了正文（机器通道用：页数说不了「正文为空」这件事） */
+      recognized: boolean;
     }
   | { ok: false; error: string };
 
@@ -83,6 +85,11 @@ export function stripOcrMarkup(text: string): string {
   return text.replace(OCR_MARKUP, "");
 }
 
+/** 官方是否真的识别出了正文：页在但正文全空 = 没识别出来（官方偶发的形态），不是「这份文件就是空的」 */
+function hasRecognizedText(pages: OcrPage[]): boolean {
+  return pages.some((page) => stripOcrMarkup(page.text).trim().length > 0);
+}
+
 /** 归约：逐页给正文；超预算的页整页丢弃并明说省略了哪些；官方按页截断的页也要明说 */
 export function renderOcrText(result: OcrResult, budgetChars: number, label: string): string {
   const kept: string[] = [];
@@ -110,6 +117,11 @@ export function renderOcrText(result: OcrResult, budgetChars: number, label: str
     lines.push(
       `（预算内放不下的 ${dropped.length} 页已省略：${dropped.join("、")}——官方按整份文件解析，不支持只识别指定页）`,
     );
+  }
+  // 没识别出正文要明说：页在但正文空 / 一页没给，都是官方识别失败的形态——
+  // 不说，模型分不清「官方没识别出来」与「这份文档本来就是空白页」。
+  if (!hasRecognizedText(result.pages)) {
+    lines.push("（官方没识别出正文——可能是空白页、扫描件识别失败或格式不支持；可重试）");
   }
   return lines.join("\n");
 }
@@ -238,6 +250,8 @@ export async function runOcr(filePath: string, context: OcrRunContext): Promise<
       pages: 0,
       truncated: false,
       cached: true,
+      // 记忆里只存过「有正文」的识别结果（存储口有守卫）⇒ 命中即有正文
+      recognized: true,
     };
   }
 
@@ -251,9 +265,13 @@ export async function runOcr(filePath: string, context: OcrRunContext): Promise<
   }
   context.quota.release(outcome.value.pages.length > 0);
   const rendered = renderOcrText(outcome.value, budget, filePath);
-  // 空结果不入记忆：官方「200 但没有页」是识别失败的一种形态，不是「这份文件就是空的」。
-  // 入记忆的话，同一份文件第二次就命中缓存、永远不再请求官方——一次失败被固化成永久结论。
-  if (outcome.value.pages.length > 0) context.memory.storeText(real, rendered);
+  // 没识别出正文的结果不入记忆：官方「200 但没识别出正文」（页在正文空 / 一页没给）是识别失败的
+  // 一种形态，不是「这份文件就是空的」。入记忆的话，同一份文件第二次就命中缓存、永远不再请求
+  // 官方——一次失败被固化成永久结论。
+  // shortcut: 真·空白文档不入记忆 ⇒ 同一份文件反复识别会反复请求官方、反复计费。
+  //   何时该升级：官方若能可靠区分「确实无正文」与「没识别出来」，再把该形态单独放行缓存。
+  const recognized = hasRecognizedText(outcome.value.pages);
+  if (recognized) context.memory.storeText(real, rendered);
   return {
     ok: true,
     text: sanitizeText(rendered),
@@ -261,5 +279,6 @@ export async function runOcr(filePath: string, context: OcrRunContext): Promise<
     pages: outcome.value.pages.length,
     truncated: outcome.value.pages.some((p) => p.finishReason === "length"),
     cached: false,
+    recognized,
   };
 }
