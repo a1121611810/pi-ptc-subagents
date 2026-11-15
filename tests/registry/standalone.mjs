@@ -141,5 +141,28 @@ export default {
         },
       ],
     },
+    {
+      id: "provider-error",
+      face: "standalone",
+      probe: "tests/standalone/provider-error.test.ts",
+      mutants: [
+        {
+          id: "provider-error.behavior-error-mistaken-for-quota",
+          file: "scripts/provider-error.mjs",
+          from: "      /rate_limit|用量上限|429|quota|配额|上限|rate limit|insufficient|余额|欠费/i.test(message)",
+          to: "      true",
+          why: "任何 turn_end+error 都算 provider 挡的 ⇒ 工具报错这类行为错误被报成「配额用尽」，方向指错",
+          kills: "认不出行为错误",
+        },
+        {
+          id: "provider-error.quota-not-detected",
+          file: "scripts/provider-error.mjs",
+          from: '    /rate_limit|用量上限|429|quota/i.test(event.errorMessage ?? "")',
+          to: '    /never-matches-this/i.test(event.errorMessage ?? "")',
+          why: "auto_retry_start 里的配额特征认不出 ⇒ provider 挡的请求被报成「模型没派发」",
+          kills: "provider 错误：认得出配额与限流",
+        },
+      ],
+    },
   ],
 };

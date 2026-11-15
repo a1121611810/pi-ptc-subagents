@@ -120,6 +120,22 @@ function buildAll() {
   assembleKimi();
 }
 
+/**
+ * 站点产物：website 面的判据读的是**构建后**的站点（dist/index.html）⇒ 全量跑（--all）
+ * 必须先有它。根 build 脚本刻意排除了 website（`--filter=!@pi-ptc/website`）⇒ 这里补上。
+ */
+function buildSite() {
+  const dir = join(ROOT, "packages", "website");
+  const r = run("pnpm", ["run", "build"], {
+    cwd: dir,
+    env: {
+      ...process.env,
+      PATH: `${rootBin}:${join(dir, "node_modules", ".bin")}:${process.env.PATH}`,
+    },
+  });
+  if (r.status !== 0) throw new Error(`站点构建失败：\n${r.stdout}\n${r.stderr}`);
+}
+
 /** 产物指纹：目录 → 相对路径 → 内容哈希（收窄 vs 全量的逐字节等价校验用） */
 function fingerprint() {
   const out = new Map();
@@ -182,7 +198,13 @@ if (checkNarrow) {
   process.exit(0);
 }
 
-/** 跑一批探针文件，返回失败用例的 fullName 列表（+ 每份文件的失败清单，供诊断） */
+/**
+ * 跑一批探针文件，返回失败用例的 fullName 列表（+ 每份文件的失败清单，供诊断）。
+ *
+ * `crashed` 单列「文件级崩溃」：import 失败、语法错这类问题在 Vitest 报告里是
+ * `testResults[].status === "failed"` 且 `assertionResults` 为 0 条——一条断言都没跑。
+ * 不单列的话它会混进 `failed`（空数组）⇒ 门禁把「探针没跑起来」读成「探针没抓住缺陷」。
+ */
 function runProbes(files, nameFilter) {
   const outDir = mkdtempSync(join(tmpdir(), "ptc-mutate-json-"));
   const report = join(outDir, "out.json");
@@ -191,12 +213,13 @@ function runProbes(files, nameFilter) {
   const r = run("node", argv);
   if (!existsSync(report)) {
     // 过滤没命中任何用例时可能不写报告——当「没红」处理，调用方会回退整文件再判
-    if (nameFilter) return { failed: [], perFile: [] };
+    if (nameFilter) return { failed: [], perFile: [], crashed: [] };
     throw new Error(`探针 ${files.join(", ")} 没产出 JSON 报告：\n${r.stdout}\n${r.stderr}`);
   }
   const data = JSON.parse(readFileSync(report, "utf8"));
   const failed = [];
   const perFile = [];
+  const crashed = [];
   for (const file of data.testResults ?? []) {
     const names = [];
     for (const assertion of file.assertionResults ?? []) {
@@ -206,13 +229,29 @@ function runProbes(files, nameFilter) {
         names.push(name);
       }
     }
+    // 文件级崩溃：一条断言都没跑起来（import 失败 / 语法错）
+    if (names.length === 0 && file.status === "failed") {
+      crashed.push(file.name);
+      perFile.push({ file: file.name, failed: ["（文件级崩溃：一条用例都没跑起来）"] });
+      continue;
+    }
     if (names.length > 0) perFile.push({ file: file.name, failed: names });
   }
-  return { failed, perFile };
+  return { failed, perFile, crashed };
 }
 
-/** kills 是字面子串（归属判定用 includes），vitest 的 -t 吃正则 ⇒ 转义后再传 */
-const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/**
+ * kills 唯一性核对：归属判定用子串匹配（failed 名 includes kills）⇒ 若同文件里两条用例名
+ * 都含这个子串，「红的那条」未必是 kills 指的那条 ⇒ 归属判定会张冠李戴。
+ * 判据：kills 在它的探针文件里必须**恰好**匹配一条用例名。
+ */
+function killsMatches(m) {
+  const probe = join(ROOT, m.probe);
+  if (!existsSync(probe)) return [];
+  const src = readFileSync(probe, "utf8");
+  const titles = [...src.matchAll(/it\(\s*([\x60'"])([\s\S]*?)\1\s*,/g)].map((x) => x[2]);
+  return titles.filter((t) => t.includes(m.kills));
+}
 
 // 兜底还原：脚本中途崩了也不能把仓留在变异态
 const pending = new Map();
@@ -263,6 +302,8 @@ console.log(`变异清单 ${mutants.length} 条 · 能力 ${selected.length} 条
 
 console.log("基线：未变异时探针必须全绿（红的原因是变异还是本来就红，要分清）");
 buildAll();
+// website 面的判据读构建后的站点 ⇒ 选到它就得先有产物（根 build 刻意不含 website）
+if (selected.some((c) => c.face === "website")) buildSite();
 // 一份探针文件只跑一次（能力 56 条 ⇒ 探针文件 16 份；旧写法是每条能力跑一遍，同一份文件被重复跑了几十次）。
 // ⚠️ 标了 alone 的探针必须**单独跑**：站点反事实 harness 会对真实工作树取摘要（性质 4：跑完必须与
 // 跑之前逐字节相同），别的探针并发写工作树就会让它红——并行跑过一次，基线就是这么红的（2026-11-14）。
@@ -273,7 +314,13 @@ for (const [label, probes] of [
   ...aloneProbes.map((p) => [`${p}（单独）`, [p]]),
 ]) {
   if (probes.length === 0) continue;
-  const { failed, perFile } = runProbes(probes);
+  const { failed, perFile, crashed } = runProbes(probes);
+  if (crashed.length > 0) {
+    console.error(`✗ 基线里探针文件跑不起来：${label}`);
+    for (const f of crashed)
+      console.error(`  - ${f}（import 失败 / 语法错——不是「没红」，是探针没跑起来）`);
+    process.exit(1);
+  }
   if (failed.length > 0) {
     console.error(`✗ 基线不绿：${label}`);
     for (const f of perFile) console.error(`  - ${f.file}：${f.failed.join(" | ")}`);
@@ -296,6 +343,18 @@ for (const m of mutants) {
     console.log(`  ? ${m.id}（锚点失效）`);
     continue;
   }
+  // kills 唯一性：必须恰好匹配一条用例名——0 条（kills 写错）或多条（子串撞车）都判红
+  const matched = killsMatches(m);
+  if (matched.length !== 1) {
+    survived.push({
+      ...m,
+      why:
+        `kills「${m.kills}」在 ${m.probe} 里匹配 ${matched.length} 条用例名（必须恰好 1 条）` +
+        (matched.length === 0 ? "——kills 指定的用例不存在" : "——子串撞车，归属判定会张冠李戴"),
+    });
+    console.log(`  ? ${m.id}（kills 匹配 ${matched.length} 条用例名）`);
+    continue;
+  }
   const pkg = m.file.split("/")[1] ?? "";
   const targets = INLINERS[pkg] ? narrowTargets(pkg) : null;
   writeFileSync(abs, original.replace(m.from, m.to));
@@ -303,15 +362,21 @@ for (const m of mutants) {
   try {
     if (targets) buildPackages(targets);
     else buildAll();
-    // 快路径：只跑 kills 指定的那条用例——归属判定只看「那条红没红」，与整文件跑等价，
-    // 而整文件跑要 0.2–4.6s、只跑一条恒定 0.18s。
-    const byKills = (names) => names.some((name) => name.includes(m.kills));
-    let probeResult = runProbes([m.probe], escapeRe(m.kills));
-    if (!byKills(probeResult.failed)) {
-      // 那条没红 ⇒ 回退整文件：区分「真存活」与「假杀死」的诊断需要别的用例的失败信息
-      probeResult = runProbes([m.probe]);
+    // 判定用**整文件跑**的结果：单跑（-t 只跑 kills 那条）会让同文件其它用例不执行，
+    // 而本仓探针有共享状态（dispatch.test.ts 84 条共用假时钟与 keepAlives）⇒ 单跑时那条
+    // 用例可能红得「不是被这条变异杀死的」。整文件跑一次即可同时回答「红没红」与「红的
+    // 是不是 kills 指定的那条」，不必先单跑再回退（那会多付一次探针进程）。
+    const probeResult = runProbes([m.probe]);
+    const { failed, crashed } = probeResult;
+    if (crashed.length > 0) {
+      // 探针文件自己跑不起来（import 失败 / 语法错）⇒ 这条变异「杀不死」，但原因不是判据弱
+      survived.push({
+        ...m,
+        why: `探针文件跑不起来（${crashed.join(", ")}）——变异后探针崩了，不是判据没抓住`,
+      });
+      console.log(`  ✗ ${m.id} 探针崩溃——变异后探针没跑起来`);
+      continue;
     }
-    const { failed } = probeResult;
     if (failed.length === 0) {
       survived.push(m);
       console.log(`  ✗ ${m.id} 存活——探针没抓住这个缺陷：${m.why}`);

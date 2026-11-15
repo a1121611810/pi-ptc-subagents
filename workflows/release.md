@@ -43,7 +43,7 @@ git worktree add --detach ../<repo>-release R   # main 被主工作树占用，�
 cd ../<repo>-release
 pnpm install
 pnpm run check && pnpm run build && pnpm test && pnpm run lint && pnpm run fmt:check
-pnpm run test:mutations:full                    # 变异门禁（ADR-0029）：58 能力 / 102 条 mutant，0 存活
+pnpm run test:mutations:full                    # 变异门禁（ADR-0029）：60 能力 / 107 条 mutant，0 存活
 pnpm run test:site                              # 站点 6 gate + 反事实 harness（脚本内含站点构建）
 pnpm run test:bench                             # 判分器自检（需 uv + python；判分器坏掉不许开跑）
 scripts/version-smoke.sh                        # 全量：15 个 shim 版本 + PATH ceiling，fails 必须 = 0

@@ -227,6 +227,37 @@ export default {
           why: "超预算不丢整页 ⇒ 12k 预算被顶穿（模型上下文白烧）",
           kills: "归约：预算外整页丢弃",
         },
+        {
+          id: "ocr-core.empty-result-cached",
+          file: "packages/search/src/ocr.ts",
+          from: "  if (outcome.value.pages.length > 0) context.memory.storeText(real, rendered);",
+          to: "  context.memory.storeText(real, rendered);",
+          why: "空结果入记忆 ⇒ 一次识别失败被固化成「这份文件就是空的」，同一文件永远不再请求官方",
+          kills: "空结果不进记忆",
+        },
+      ],
+    },
+    {
+      id: "ocr-tool-shape",
+      face: "pi",
+      probe: "tests/pi/entry.test.ts",
+      mutants: [
+        {
+          id: "ocr-tool-shape.output-schema-dropped",
+          file: "packages/entry/src/doc-ds-ocr-tool.ts",
+          from: "    outputSchema: DOC_DS_OCR_OUTPUT,",
+          to: "",
+          why: "工具不声明 outputSchema ⇒ 模型侧拿不到结构化字段的契约（声明即契约）",
+          kills: "文档识别工具声明了 outputSchema",
+        },
+        {
+          id: "ocr-tool-shape.structured-content-missing",
+          file: "packages/entry/src/doc-ds-ocr-tool.ts",
+          from: "        structuredContent: structured,",
+          to: "",
+          why: "声明了 outputSchema 却不兑现 structuredContent ⇒ 契约不成立（pi 的机器可读结果通道空着）",
+          kills: "文档识别工具的成功结果兑现 structuredContent",
+        },
       ],
     },
     {

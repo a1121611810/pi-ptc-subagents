@@ -20,6 +20,12 @@
  *     the pipeline. Comments are stripped first, so prose that merely names a
  *     tool cannot make this pass.
  *
+ * The recognized families are `ptc_*`, `pi_task_*`, `web_ds_*` and `doc_ds_*`. A
+ * family outside that list is invisible to this gate in **both** directions: the
+ * page could advertise a tool nobody registers, and a registered tool could go
+ * undecided — which is exactly how `doc_ds_ocr` (ADR-0028) slipped through in
+ * the first place. Adding a tool with a new prefix means adding the prefix here.
+ *
  * It checks three directions, not one.
  *
  * 1. **Nothing invented.** Every `ptc_*` / `pi_task_*` / `web_ds_*` the page
@@ -89,6 +95,12 @@ const DECLARED_ABSENT = new Map([
       "parent-side surface",
   ],
   [
+    "doc_ds_ocr",
+    "the document-recognition tool (ADR-0028): it registers only inside a dispatched " +
+      "child process on pi and as a third MCP tool on the Kimi face, so the landing " +
+      "page advertises the parent-side surface instead",
+  ],
+  [
     "ptc_progress_update",
     "the auxiliary channel for reporting progress on a long-running task; the landing page " +
       "covers ptc_run_code / ptc_workflow / the task surface, and this one is an " +
@@ -122,7 +134,7 @@ function registeredToolNames() {
 
   // Style 1 — the name inline in the tool definition object:
   //   name: "ptc_run_code"
-  const inline = /\bname:\s*"((?:ptc|pi_task|web_ds)_[a-z0-9_]+)"/g;
+  const inline = /\bname:\s*"((?:ptc|pi_task|web_ds)_[a-z0-9_]+|doc_ds_[a-z0-9_]+)"/g;
 
   // Style 2 — the name behind a constant, which is how `pi_task_ptc` is
   // declared: `name: TASK_BINDING_NAME` over
@@ -134,7 +146,7 @@ function registeredToolNames() {
   // This widens the accepted set, which is the safe direction: a tool name
   // that is declared but not wired up would pass this gate, whereas a tool
   // that IS wired up but missed here would fail it and cry wolf.
-  const viaConstant = /\b[A-Z][A-Z0-9_]*\s*=\s*"((?:ptc|pi_task|web_ds)_[a-z0-9_]+)"/g;
+  const viaConstant = /\b[A-Z][A-Z0-9_]*\s*=\s*"((?:ptc|pi_task|web_ds)_[a-z0-9_]+|doc_ds_[a-z0-9_]+)"/g;
 
   for (const file of tsFiles(SRC_DIR)) {
     const source = stripComments(readFileSync(file, 'utf8'));
@@ -156,7 +168,7 @@ function registeredToolNames() {
 function claimedToolNames(html) {
   const text = html.replace(/<[^>]*>/g, ' ');
   const claims = new Set();
-  for (const match of text.matchAll(/\b((?:ptc|pi_task|web_ds)_[a-z0-9_]+\*?)(?![a-z0-9_])/g)) {
+  for (const match of text.matchAll(/\b((?:ptc|pi_task|web_ds)_[a-z0-9_]+\*?|doc_ds_[a-z0-9_]+\*?)(?![a-z0-9_])/g)) {
     claims.add(match[1]);
   }
   return claims;

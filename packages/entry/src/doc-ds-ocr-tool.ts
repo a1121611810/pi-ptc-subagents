@@ -37,15 +37,18 @@ export function createDocDsOcrTool(context: OcrRunContext) {
           isError: true,
         };
       }
+      // details 给渲染层，structuredContent 兑现 outputSchema（pi 的机器可读结果通道）——同一份数据
+      const structured = {
+        path: args.path,
+        pageCount: result.pageCount,
+        pages: result.pages,
+        truncated: result.truncated,
+        cached: result.cached,
+      };
       return {
         content: [{ type: "text", text: result.text }],
-        details: {
-          path: args.path,
-          pageCount: result.pageCount,
-          pages: result.pages,
-          truncated: result.truncated,
-          cached: result.cached,
-        },
+        details: structured,
+        structuredContent: structured,
         isError: false,
       };
     },

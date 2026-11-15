@@ -12,13 +12,18 @@ import {
   TaskRegistry,
   buildPiArgv,
 } from "../../packages/dispatch/dist/index.js";
-import entryDefault, { buildEngineContext } from "../../packages/entry/dist/index.js";
+import entryDefault, {
+  buildEngineContext,
+  createDocDsOcrTool,
+} from "../../packages/entry/dist/index.js";
+import { createSearchMemory, createSearchQuota } from "../../packages/search/dist/index.js";
 import { agentDir, createFakePi, type FakePi } from "../helpers/pi-harness.ts";
 
 type ToolDef = {
   name: string;
   description?: string;
   exposure?: string;
+  outputSchema?: unknown;
   execute?: (...a: never[]) => unknown;
 };
 
@@ -194,6 +199,47 @@ it("两个开关互相独立（显式 false 也不串台）", async () => {
   const onlyOcr = await childRegisteredTools({ webDsOcr: true, webDsSearch: false });
   expect(onlyOcr["doc_ds_ocr"], "文档识别开关开 ⇒ 该注册").toBeDefined();
   expect(onlyOcr["web_ds_search"], "文档识别开关开不该顺带开搜索").toBeUndefined();
+});
+
+it("文档识别工具声明了 outputSchema（机器可读结果的契约）", async () => {
+  const registered = await childRegisteredTools({ webDsOcr: true });
+  const tool = registered["doc_ds_ocr"];
+  expect(tool, "开关开了该注册文档识别").toBeDefined();
+  expect(tool!.outputSchema, "文档识别工具该声明 outputSchema").toBeDefined();
+});
+
+it("文档识别工具的成功结果兑现 structuredContent（outputSchema 说有就得给）", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ptc-ocr-tool-"));
+  writeFileSync(join(root, "a.pdf"), "x");
+  // 假 provider：不触网，只回一页正文
+  const provider = {
+    id: "fake",
+    async ocr() {
+      return { ok: true as const, value: { pageCount: 1, pages: [{ index: 0, text: "正文" }] } };
+    },
+  };
+  const tool = createDocDsOcrTool({
+    provider,
+    memory: createSearchMemory(),
+    quota: createSearchQuota(1),
+    root,
+  });
+  const result = (await tool.execute("id-1", { path: "a.pdf" })) as {
+    content: { type: string; text: string }[];
+    details?: Record<string, unknown>;
+    structuredContent?: Record<string, unknown>;
+    isError: boolean;
+  };
+  expect(result.isError, "识别不该失败").toBe(false);
+  // pi 的契约：声明了 outputSchema 的工具，结果里要有对应的 structuredContent——
+  // 只给 details 的话，声明的契约不成立（模型/程序侧拿不到结构化字段）。
+  expect(result.structuredContent, "声明了 outputSchema 就该兑现 structuredContent").toEqual({
+    path: "a.pdf",
+    pageCount: 1,
+    pages: 1,
+    truncated: false,
+    cached: false,
+  });
 });
 
 it("strict 读集随开关派生（不是常量）：开了才有 doc_ds_ocr", () => {

@@ -251,7 +251,9 @@ export async function runOcr(filePath: string, context: OcrRunContext): Promise<
   }
   context.quota.release(outcome.value.pages.length > 0);
   const rendered = renderOcrText(outcome.value, budget, filePath);
-  context.memory.storeText(real, rendered);
+  // 空结果不入记忆：官方「200 但没有页」是识别失败的一种形态，不是「这份文件就是空的」。
+  // 入记忆的话，同一份文件第二次就命中缓存、永远不再请求官方——一次失败被固化成永久结论。
+  if (outcome.value.pages.length > 0) context.memory.storeText(real, rendered);
   return {
     ok: true,
     text: sanitizeText(rendered),

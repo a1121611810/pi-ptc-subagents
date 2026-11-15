@@ -72,6 +72,10 @@ import { assemblePtcSession, buildEngineContext, type PtcSession } from "./sessi
 
 export { assemblePtcSession, buildEngineContext } from "./session.ts";
 export { createTaskOutputBinding } from "./task-binding.ts";
+// OCR 工具工厂也导出：探针要用假 provider 打它的成功路径（声明了 outputSchema 的工具
+// 该在结果里兑现 structuredContent——这条只能靠真跑一次成功路径验，静态读产物不可靠：
+// 压缩后属性名会变）
+export { createDocDsOcrTool } from "./doc-ds-ocr-tool.ts";
 export {
   findInstalledPackage,
   parseChangelog,

@@ -167,6 +167,28 @@ it("配额口径：HTTP 200 但无结果不耗配额（官方：200 且有结果
   expect(provider.calls).toBe(2);
 });
 
+it("空结果不进记忆：一次识别失败不该被固化成「这份文件就是空的」", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ptc-ocr-empty-cache-"));
+  writeFileSync(join(root, "a.pdf"), "x");
+  const provider = fakeProvider([]);
+  const context = {
+    provider,
+    memory: createSearchMemory(),
+    quota: createSearchQuota(5),
+    root,
+  };
+
+  const first = await runOcr("a.pdf", context);
+  expect(first.ok).toBe(true);
+  expect(provider.calls, "第一次该真的请求了官方").toBe(1);
+
+  // 空结果 ⇒ 不得进记忆（否则第二次命中缓存、永远不再请求官方——一次失败被永久固化）
+  const second = await runOcr("a.pdf", context);
+  expect(second.ok).toBe(true);
+  expect(provider.calls, "空结果不该进记忆 ⇒ 第二次仍该请求官方").toBe(2);
+  expect(second.ok && second.cached, "第二次不该是记忆命中").toBe(false);
+});
+
 it("provider：真发 multipart（官方要 file 与 purpose 两个字段），响应前的换行保活也能解析", async () => {
   let captured: { contentType: string; body: string } | undefined;
   const server = createServer((req, res) => {

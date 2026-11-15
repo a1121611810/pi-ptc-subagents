@@ -32,11 +32,14 @@ jobs:
       - run: pnpm run check
       - run: pnpm run lint
       - run: pnpm run fmt:check
-      - run: pnpm run build
+      # 不单独跑 build：`pnpm run test` 的 pretest 会先构建（pnpm 会跑 pre<script>）——
+      # 显式再跑一次就是同一份产物构建两遍。
       - run: pnpm run test
 
   # 变异门禁（ADR-0029）：每条 mutant 必须被杀死，且杀死它的用例就是登记表 kills 指定的那条。
   # 只跑快腿四面（pi/output/kimi/standalone）——site/bench 面要站点产物与 uv，本来就不在 CI 上。
+  # 依赖安装与 check job 重复是省不掉的（不同 runner）；但门禁自己会收窄重建产物，
+  # 所以这里不预构建——预构建反而会被门禁的第一轮收窄重建覆盖掉。
   mutations:
     runs-on: ubuntu-latest
     steps:

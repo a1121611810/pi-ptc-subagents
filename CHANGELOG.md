@@ -80,6 +80,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   separately), each kill attributed to the exact case named in its `kills`
   entry; the one-off byte-for-byte narrow-rebuild equivalence check passes for
   7 packages.
+- **Verified baseline (2026-11-15)**: `pnpm test` → 17 probe files / 348 cases
+  green (four fast faces plus the artifact import gate); the mutation gate kills
+  **101 / 101** fast-face mutants with **0** survivors in 190s, and the full gate
+  kills **107 / 107** (60 capabilities / all eight faces) in 261s.
 - **The landing-page gate is green again**: `ptc_progress_update` (registered in
   v7.11.0, never added to either list) is now declared absent with a reason — it
   is the auxiliary progress channel for long-running tasks, and the landing
@@ -94,6 +98,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The site's counterfactual harness gained the missing case for
   `check-router-links.mjs` (the fifth gate) — the harness was reporting it as
   unproven, which is exactly what that harness is for.
+
+### Fixed
+
+- **The OCR tool now delivers the structured result it promises**: the entry
+  tool declared an `outputSchema` but returned no `structuredContent`, so the
+  machine-readable channel pi exposes to the model stayed empty. Both now
+  carry the same payload.
+- **A failed OCR call is no longer cached as "this file is empty"**: an empty
+  result is not written into the search memory any more, so a transient
+  recognition failure does not permanently keep the same file from ever
+  reaching the official API again.
+- **The landing-page gate knows the `doc_ds_` tool family**: its tool-name
+  patterns only covered `ptc` / `pi_task` / `web_ds`, so the OCR tool slipped
+  through the check. `doc_ds_ocr` is now declared absent with a reason (it is
+  registered inside the child process and is the third MCP tool of the Kimi
+  face — the landing page does not expand on it).
+- **The mutation gate attributes a kill to the whole probe file**: it used to
+  run only the single case named in a mutant's `kills` entry, but probes share
+  state (the 84 cases of `dispatch.test.ts` share a fake clock), so the red
+  case was not always red _because of_ that mutant — a false kill. The gate now
+  runs the whole file and additionally requires `kills` to match exactly one
+  case name; a file-level crash is reported separately as `crashed` instead of
+  being mixed into `failed` (an empty array there would read as "the baseline
+  is green").
+- **Provider errors are told apart from behaviour errors**: `turn_end` with
+  `stopReason=error` only counts as a provider refusal when the message itself
+  carries a provider signature; otherwise the module returns `null` and the
+  caller reports the real error instead of "quota exhausted".
 
 ## [7.14.0] - 2026-11-11
 

@@ -7,15 +7,16 @@ const faces = [
   { name: "output", include: ["tests/output/**/*.test.ts"] },
   { name: "kimi", include: ["tests/kimi/**/*.test.ts"] },
   { name: "standalone", include: ["tests/standalone/**/*.test.ts"] },
-  // 站点面要 spawn 反事实 harness（它把工作树整棵拷到临时目录再改）⇒ 单测就是分钟级。
-  // 「跑全部 4 个 case」那条要拷 8 份工作树 ⇒ 25 分钟上限，别按「一个 case」估。
+  // 站点面要 spawn 反事实 harness（它把工作树整棵拷到临时目录再改）。
+  // 2026-11-15 实测：拷贝剪掉 bench/ab（3 GB 无人读的数据）后，5 条 case 合计 5.25s，
+  // 站点面 9 条用例 13.7s ⇒ 超时给 5 分钟足够（原 25 分钟是按拷贝 8 份工作树估的）。
   {
     name: "website",
     include: ["tests/website/**/*.test.ts"],
-    testTimeout: 1_500_000,
-    hookTimeout: 1_500_000,
+    testTimeout: 300_000,
+    hookTimeout: 300_000,
   },
-  // bench 面要 uv run python 跑判分器自检（正例 + 负例各跑一遍）
+  // bench 面要 uv run python 跑判分器自检（正例 + 负例各跑一遍）——uv 首次拉依赖可能很慢
   {
     name: "bench",
     include: ["tests/bench/**/*.test.ts"],
