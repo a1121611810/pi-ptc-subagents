@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.15.0] - 2026-11-15
+
 ### Changed
 
 - **The whole test layer was rebuilt on Vitest 5.1.0** (ADR-0029). The 38
