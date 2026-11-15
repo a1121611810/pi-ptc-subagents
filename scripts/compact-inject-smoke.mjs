@@ -25,7 +25,9 @@ const HERE = fileURLToPath(new URL(".", import.meta.url));
 const REPO_ROOT = join(HERE, "..");
 const binDir = process.argv[2] ?? join(REPO_ROOT, "node_modules", ".bin");
 const entry = process.argv[3] ?? join(REPO_ROOT, "packages", "entry", "dist", "index.js");
-const model = process.argv[4] ?? "minimax-cn/MiniMax-M3.1-Flash";
+// env 入口与其它冒烟脚本对齐（live 探针只透传 PI_SMOKE_MODEL，只认 argv ⇒ 换不了模型）
+// ⚠ 用 || 不用 ??：live 探针传的是空串（process.env.X ?? ""），?? 不会回落到默认（空串不是 null/undefined）
+const model = process.argv[4] || process.env.PI_SMOKE_MODEL || "magpie/deepseek/deepseek-flash";
 
 // 第二个扩展：读模型的请求上下文，看任务面清单在不在
 const PROBE_EXT = `

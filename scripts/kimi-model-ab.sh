@@ -5,7 +5,7 @@
 set -u
 KIMI=/Users/lilianda/.kimi-code/bin/kimi
 MODEL_A="kimi-code/kimi-for-coding"
-MODEL_B="MiniMax Token Plan/MiniMax-M3.1-Flash-512k"
+MODEL_B="magpie/deepseek/deepseek-flash"
 R2=/tmp/ptc-r2
 LOGS=/tmp/ptc-ab-logs
 CASES=/Users/lilianda/develop/pi-ptc-subagents/scripts/ab-cases

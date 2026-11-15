@@ -24,7 +24,10 @@ const PROMPT =
   '调用 ptc_run_code，程序体为：const r = await tools.pi_task_ptc({ task: "只回答 OK", wait: true }); return r.status; ' +
   "程序体里不要传 model 参数。";
 
-const EXPLICIT_MODEL = process.env.SMOKE_MODEL ?? "minimax-cn/MiniMax-M3.1-Flash";
+// 默认显式模型必须与 pi 的默认模型**不同**（脚本自检：两轮父模型相同 ⇒ 差分失效）。
+// pi 默认已切 DeepSeek（见 AGENTS.md），显式轮用 Pro ⇒ 同家族两个模型构成差分。
+// ⚠ 用 || 不用 ??：live 探针传的是空串（process.env.X ?? ""），?? 不会回落到默认（空串不是 null/undefined）
+const EXPLICIT_MODEL = process.env.SMOKE_MODEL || "magpie/deepseek/deepseek-v4-pro";
 
 function parseEvents(text) {
   const events = [];
@@ -94,9 +97,11 @@ function runRound({ label, model }) {
   const programs = dispatchedPrograms(events);
 
   const providerError = providerFailureFromText(stdout);
+  // ⚠ assert.ok 的消息参数是 **eager 求值** ⇒ 模板里直接 providerError.slice 会在 providerError
+  // 为 null（provider 健康）时先崩掉，把真正的断言盖掉（2026-11-15 实测踩到）。
   assert.ok(
     !providerError,
-    `${label}：provider 不可用，本轮没测到模型继承（先解决这个再重跑）：\n  ${providerError.slice(0, 600)}`,
+    `${label}：provider 不可用，本轮没测到模型继承（先解决这个再重跑）：\n  ${providerError?.slice(0, 600) ?? "(未识别)"}`,
   );
   assert.ok(parent, `${label}：父的事件流里没读到模型`);
   assert.ok(

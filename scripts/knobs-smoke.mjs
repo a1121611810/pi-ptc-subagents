@@ -19,7 +19,8 @@ import {
 } from "../packages/dispatch/dist/index.js";
 import { providerFailureFromText } from "./provider-error.mjs";
 
-const MODEL = process.env.PI_SMOKE_MODEL ?? "minimax-cn/MiniMax-M3.1-Flash";
+// ⚠ 用 || 不用 ??：live 探针传的是空串（process.env.X ?? ""），?? 不会回落到默认（空串不是 null/undefined）
+const MODEL = process.env.PI_SMOKE_MODEL || "magpie/deepseek/deepseek-flash";
 const piVersion = execFileSync("pi", ["--version"], { encoding: "utf8" }).trim();
 
 // 任务按真实用法写：父面点名 child report 的 JSON 块形状（实测：只写交付物格式时
@@ -30,8 +31,13 @@ const CHILD_TASK =
 // 隔离 agent 目录：只带凭据 + 空扩展。用户的全局 settings 里装着旧版 npm:pi-ptc-subagents，
 // 不隔离就会与本仓扩展同名互踩（registerTool 是 Map.set，后注册者覆盖）。
 const agentDir = mkdtempSync(join(tmpdir(), "knobs-smoke-agent-"));
-const auth = join(homedir(), ".pi/agent/auth.json");
-if (existsSync(auth)) cpSync(auth, join(agentDir, "auth.json"));
+// 凭据 + **模型目录**都要拷：magpie 这类自定义 provider 的定义在 models.json 里，
+// 只拷 auth.json ⇒ pi 认不出模型（"Model not found"）⇒ 孩子秒 rejected（2026-11-15 实测踩到）。
+// floor 0.86 读 models.json、1.4.0+ 读 models-store.json —— 两个都拷。
+for (const name of ["auth.json", "models.json", "models-store.json"]) {
+  const from = join(homedir(), ".pi/agent", name);
+  if (existsSync(from)) cpSync(from, join(agentDir, name));
+}
 writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ extensions: [] }));
 process.env.PI_CODING_AGENT_DIR = agentDir;
 

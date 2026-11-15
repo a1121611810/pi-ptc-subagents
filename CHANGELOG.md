@@ -101,6 +101,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The real-machine smokes now run on DeepSeek**: the `minimax-cn` route is out
+  of Token Plan quota (429 "usage limit reached"), which had kept the live face
+  red since 2026-11-14. The smokes default to
+  `magpie/deepseek/deepseek-flash` (DeepSeek-V4.1-Flash via the local magpie
+  proxy) and can be overridden per script with `PI_SMOKE_MODEL` /
+  `SMOKE_MODEL`. `pnpm run test:live` is green end to end for the first
+  time: five probes, 200.3s.
+- **Three defects the model switch uncovered in the smoke scripts**:
+  `session-model-smoke` built its `assert.ok` message eagerly, so a healthy
+  provider (`providerError === null`) crashed on `null.slice` and masked the
+  real assertion; `knobs-smoke` copied only `auth.json` into its isolated
+  agent directory, so pi could not resolve a custom provider whose definition
+  lives in `models.json` (the child died instantly as "rejected"); and the live
+  probes pass an **empty string** through `process.env.X ?? ""`, so the scripts
+  have to fall back with `||` — `??` does not fire for an empty string and the
+  model name ended up empty.
 - **The OCR tool now delivers the structured result it promises**: the entry
   tool declared an `outputSchema` but returned no `structuredContent`, so the
   machine-readable channel pi exposes to the model stayed empty. Both now

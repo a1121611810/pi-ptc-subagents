@@ -16,6 +16,9 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 EXT="$REPO/packages/entry/dist/index.js"
 OUT="${TMPDIR:-/tmp}/ptc-version-smoke"
 SHIM_ROOT="${SHIM_ROOT:-/tmp}"
+# 真机模型：默认 DeepSeek（minimax-cn 的 Token Plan 配额已尽 ⇒ 429）。floor 版只认 models.json
+# ⇒ 用 magpie provider 形态的 id（models.json 里 magpie provider 有 deepseek 条目 + 凭据）。
+SMOKE_MODEL="${SMOKE_MODEL:-magpie/deepseek/deepseek-flash}"
 mkdir -p "$OUT"; rm -f "$OUT"/*.log
 
 VERSIONS="${SMOKE_VERSIONS:-0.86.0 0.86.1 0.87.0 0.87.1 0.99.0 0.99.1 0.99.2 1.0.0 1.0.1 1.0.2 1.0.3 1.0.4 1.1.0 1.2.0 1.3.0 1.5.0 1.5.1 1.5.2}"
@@ -54,10 +57,10 @@ run() { # $1=version（"PATH" = 当前 PATH 上的现行版）
   local realver=""
   if [ -n "$bindir" ]; then
     realver="$(PATH="$bindir:$PATH" pi --version 2>/dev/null | head -1)"
-    PATH="$bindir:$PATH" timeout 300 pi -ne -e "$EXT" -p "$PROMPT" >"$log" 2>&1
+    PATH="$bindir:$PATH" timeout 300 pi -ne -e "$EXT" --model "$SMOKE_MODEL" -p "$PROMPT" >"$log" 2>&1
   else
     realver="$(pi --version 2>/dev/null | head -1)"
-    timeout 300 pi -ne -e "$EXT" -p "$PROMPT" >"$log" 2>&1
+    timeout 300 pi -ne -e "$EXT" --model "$SMOKE_MODEL" -p "$PROMPT" >"$log" 2>&1
   fi
   local run_ok="FAIL"
   local read_ok="FAIL"
